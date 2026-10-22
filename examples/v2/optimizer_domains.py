@@ -587,6 +587,7 @@ async def run(args):
     try:
         result = await optimizer.optimize(
             target,
+            validation_case_count=None,
             context=RequestContext(
                 actor=ActorRef(
                     principal_id="domain-benchmark",

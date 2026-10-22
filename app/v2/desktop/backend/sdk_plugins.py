@@ -104,6 +104,13 @@ def desktop_registrations(service):
             declared.intersection_update(run.command.config.enabled_tools)
         mcp_catalog = FilteredToolCatalog(environment.mcp, declared)
         providers = [SimpleNamespace(catalog=mcp_catalog, executor=environment.mcp)]
+        from sagents.v2.tool.generated import generated_tool_provider
+        generated = generated_tool_provider((agent.config.get("rsiPackage") or {}).get("files", {}))
+        if generated.definitions:
+            providers.append(SimpleNamespace(
+                catalog=FilteredToolCatalog(generated.catalog, declared),
+                executor=generated.executor,
+            ))
         binding = await service.studio_run_binding(run.run_id, agent, run.command.session_id)
         if binding:
             studio = service.studio_tool_provider(run.run_id, agent.user_id, binding)

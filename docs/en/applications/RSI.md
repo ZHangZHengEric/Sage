@@ -21,27 +21,31 @@ API or launch a background job from Desktop Agent settings.
 1. Supply a package, authorized goal, editable scope, and test suites. A test-design
    Agent can generate suites when they are omitted. Single-turn tasks and bounded
    multi-turn conversations are supported.
-2. Seal the independent final suite before baseline execution. A suite-review
-   Agent audits both suites against the goal in its own Session. Conflicting
-   rubrics, untestable fixtures, or concrete answer leakage can block the run.
-   Advisory coverage gaps remain visible without blocking execution.
+2. Independently generate and fix validation questions (24 by default, configurable),
+   and generate initial training questions. Every round adds training challenges.
+   A suite-review Agent checks goal, rubric, permissions and executable fixtures;
+   it does not judge leakage or memorization.
 3. Run the baseline in fresh target Sessions. A separate evaluation Session judges
    each case using its rubric and the target's actual observations.
 4. A tuning Agent proposes an in-scope patch using training feedback. A separate
-   semantic-review Session checks for memorization, goal drift, and permission
+   semantic-review Session checks for goal drift and permission
    drift before testing the candidate. Original instructions remain preserved;
    editable instruction guidance is an additional section.
-5. Compare the candidate against the retained best version on the fixed training
-   and validation suites. Require improvement on non-saturated splits and no
-   individual-case regression. Retain rejected and no-change rounds in the report.
-6. After the requested rounds, test the selected version and baseline on the
-   sealed final suite. Return complete iteration packages and evidence for the
-   caller to inspect and choose from.
+5. Compare both packages on identical accumulated questions. Retain candidates
+   whose overall score improves enough: training and validation means have equal
+   weight. Individual regressions are recorded and training regressions remain
+   repair targets while subsequent rounds start from the stronger package.
+6. Confirm target success with a fresh full evaluation, or stop for stagnation,
+   round or time limits. Keep the stronger package even without verified success,
+   withhold its recommendation, and never apply it automatically. The default
+   workflow has no final exam.
 
-Each internal Agent invocation uses a fresh Session. Training feedback excludes
-validation/final cases, their grades, and suite-audit findings. Final results do
-not become another tuning round. Model judgments are evidence-based estimates;
-small suites and repeated validation selection do not establish general quality.
+Each internal Agent invocation uses a fresh Session. Tuning receives validation
+aggregates and anonymous per-question scores, never validation inputs, original
+IDs, answers or grading rationale. Repeated validation selection does not establish
+unseen-task quality. Freeze candidates before an external benchmark measurement.
+Explicit `validation_case_count=None` preserves the historical fixed-suite and
+optional final-evaluation path for legacy SDK clients only.
 
 ## Python API and editable scope
 
@@ -113,3 +117,10 @@ Skill/tool final fixtures were reused from a previous study and measure regressi
 only the clarified joint run used newly sealed final fixtures. Keep failed runs and
 audit rejections when assessing these results. They do not certify general RSI
 reliability.
+
+
+## Human-only test observations
+
+Desktop now defaults to 12 independently generated test cases alongside 24 fixed dev cases and expanding training cases. Configure `human_test_count` from 0 (off) to 100, or supply `human_test_suite` with `split=test`. The API defaults to 0 for existing clients.
+
+`HumanTestObserver` consumes baseline and round events, measures the retained package in fresh sessions, and stores results outside the optimizer report and Agent history. No test score reaches proposal, selection, or stopping logic. The dashboard shows train/dev/test curves and selectable per-round dot matrices; missing or failed measurements stay unscored. Both workloads share the configured call-concurrency ceiling. Human steering based on test outcomes makes that test development evidence and must be disclosed.

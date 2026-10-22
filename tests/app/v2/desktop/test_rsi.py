@@ -16,13 +16,14 @@ from app.v2.desktop.backend.rsi import RsiApply, RsiStart, RsiStore, fingerprint
 from app.v2.desktop.backend.service import DesktopV2Service
 from app.v2.desktop.backend.schemas import (
     AgentCreate,
+    DesktopRunRequest,
+    RunMessage,
     AgentSettingsPatch,
     ModelProviderCreate,
 )
 from app.v2.desktop.backend.sidecar_lifecycle import SidecarClientLeases
 from sagents.v2.optimization import (
     OptimizationCase,
-    OptimizationFinalSuite,
     OptimizationSuite,
 )
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
@@ -64,15 +65,28 @@ class RsiModel(ScriptedModelProvider):
             )
         except json.JSONDecodeError:
             properties = {}
-        if "memorization_detected" in properties:
+        if "goal_drift_detected" in properties:
             answer = dict(
                 approved=not self.reject,
-                memorization_detected=self.reject,
-                goal_drift_detected=False,
+                memorization_detected=False,
+                goal_drift_detected=self.reject,
                 permission_drift_detected=False,
                 rationale="Reusable method",
                 findings=[],
             )
+        elif "cases" in properties:
+            data = json.loads(raw)["data"]
+            offset = len(data["excluded_cases"])
+            answer = {
+                "cases": [
+                    {
+                        "id": f"challenge-{offset}",
+                        "input": f"Calculate {offset}+42-{offset}",
+                        "rubric": "42",
+                        "split": "training",
+                    }
+                ]
+            }
         elif "issues" in properties:
             answer = dict(
                 approved=True, rationale="Goal and suites are consistent", issues=[]
@@ -84,7 +98,9 @@ class RsiModel(ScriptedModelProvider):
             )
         elif "score" in properties:
             answer = dict(
-                score=1, passed=True, rationale="Correct response matches rubric"
+                score=0.9,
+                passed=True,
+                rationale="Correct response with room for improvement",
             )
         else:
             if self.load_skill and not any(
@@ -163,13 +179,7 @@ def start_request(request_id="request-1"):
                 ),
             )
         ),
-        final_suite=OptimizationFinalSuite(
-            cases=(
-                OptimizationCase(
-                    id="final", input="84 divided by 2?", rubric="42", split="final"
-                ),
-            )
-        ),
+        validation_case_count=1,
     )
 
 
@@ -206,7 +216,8 @@ async def test_native_background_rounds_versions_confirmation_cas_and_restart(
             )
         ]
         assert targets and all("department" in r.model_dump_json() for r in targets)
-        assert run["result"]["report"]["final_verification"]["passed"]
+        assert run["result"]["report"]["final_verification"] is None
+        assert run["validation_case_count"] == 1
         assert (await service._agent(agent_id, "alice")).config == original.config
         history = await service.rsi_history(agent_id, "alice")
         candidates = [v for v in history["versions"] if v["source"] == "rsi"]
@@ -612,5 +623,255 @@ async def test_snapshot_preserves_external_tools_for_rsi_binding_rejection(
         with pytest.raises(ValueError, match="external MCP tools"):
             await service.start_rsi(agent_id, start_request(), "alice")
         assert not service._rsi_tasks
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"validation_case_count": 0},
+        {"test_case_count": 101},
+        {"max_concurrency": 0},
+        {"max_concurrency": 17},
+    ],
+)
+def test_rsi_rejects_invalid_case_and_parallel_limits(options):
+    with pytest.raises(ValidationError):
+        RsiStart(goal="Improve reliability", request_id="bounded-options", **options)
+
+
+class ToolCreatingRsiModel(RsiModel):
+    async def _stream(self, request):
+        raw = "".join(
+            getattr(b, "text", "")
+            for m in request.messages
+            if m.role == "user"
+            for b in m.content
+        )
+        if "<user_request>" in raw:
+            raw = (
+                raw.split("<user_request>")[-1].rsplit("</user_request>", 1)[0].strip()
+            )
+        try:
+            properties = (
+                json.loads(raw).get("response_schema", {}).get("properties", {})
+            )
+        except ValueError:
+            properties = {}
+        if "instruction_guidance" in properties:
+            # Tuner returns a new implementation, not a pre-existing native tool.
+            answer = {
+                "rationale": "Move arithmetic into a reusable pure calculator",
+                "tools": ["rsi_multiply"],
+                "tool_definitions": {
+                    "rsi_multiply": {
+                        "description": "Multiply two numbers",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "a": {"type": "number"},
+                                "b": {"type": "number"},
+                            },
+                            "required": ["a", "b"],
+                            "additionalProperties": False,
+                        },
+                        "expression": {
+                            "op": "mul",
+                            "args": [{"var": "a"}, {"var": "b"}],
+                        },
+                    }
+                },
+            }
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id="new-tool",
+                    text=json.dumps(answer),
+                    finish_reason="stop",
+                ),
+            )
+            return
+        if any(t.name == "rsi_multiply" for t in request.tools) and not any(
+            m.role == "tool" for m in request.messages
+        ):
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id="invoke-created-tool",
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="multiply",
+                            name="rsi_multiply",
+                            arguments={"a": 6, "b": 7},
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                ),
+            )
+            return
+        async for event in super()._stream(request):
+            yield event
+
+
+@pytest.mark.asyncio
+async def test_rsi_creates_tool_executes_it_and_versions_implementation(
+    tmp_path, monkeypatch
+):
+    model = ToolCreatingRsiModel()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, model)
+    try:
+        request = start_request().model_copy(
+            update={
+                "rounds": 1,
+                "optimization_scope": ("instructions", "tools"),
+            }
+        )
+        started = await service.start_rsi(agent_id, request, "alice")
+        await service._rsi_tasks[started["id"]]
+        run = await service.rsi_run(agent_id, started["id"], "alice")
+        assert run["status"] == "completed", run.get("error")
+        version = await service.rsi_version(agent_id, f"{started['id']}.1", "alice")
+        assert "tools/rsi/rsi_multiply.json" in version["package"]["files"]
+        assert any(
+            m.role == "tool" and m.tool_call_id == "multiply"
+            for r in model.requests
+            for m in r.messages
+        )
+        assert version["ready"]
+        original = await service._agent(agent_id, "alice")
+        assert original.config["availableTools"] == []
+        await service.apply_rsi_version(
+            agent_id,
+            version["id"],
+            RsiApply(confirmed=True, expected_fingerprint=fingerprint(original)),
+            "alice",
+        )
+        updated = await service._agent(agent_id, "alice")
+        assert updated.config["availableTools"] == ["rsi_multiply"]
+        settings = await service.get_settings()
+        await service.save_settings(
+            settings.model_copy(
+                update={
+                    "component_selections": {
+                        **settings.component_selections,
+                        "tool.selection-policy": "sage.tool-selection.direct",
+                        "agent.continuation-policy": "sage.agent.continuation.deterministic",
+                    }
+                }
+            )
+        )
+        frames = [
+            json.loads(frame)
+            async for frame in service.run_events(
+                DesktopRunRequest(
+                    agent_id=agent_id,
+                    messages=[RunMessage(role="user", text="6 times 7?")],
+                    idempotency_key="activated-tool-execution",
+                    run_context={
+                        "model_provider_id": updated.config["llm_provider_id"],
+                        "fast_model_provider_id": updated.config["llm_provider_id"],
+                    },
+                ),
+                "alice",
+            )
+        ]
+        tool_results = [
+            frame.get("data", {}).get("item", {}).get("data", {})
+            for frame in frames
+            if frame.get("data", {}).get("item")
+        ]
+        assert any(
+            item.get("kind") == "tool_result"
+            and item.get("tool_call_id") == "multiply"
+            and item.get("error") is None
+            and any(block.get("text") == "42" for block in item.get("content", []))
+            for item in tool_results
+        ), tool_results
+        # The next RSI snapshot keeps the executable definition as well as its name.
+        package = await service._agent_bundle(updated)
+        assert "tools/rsi/rsi_multiply.json" in package.files
+        await service.start_rsi(agent_id, start_request("next-run"), "alice")
+    finally:
+        await service.close()
+
+
+def test_large_rsi_workload_gets_a_bounded_deadline_scaled_to_parallelism():
+    from app.v2.desktop.backend.rsi import rsi_timeout_seconds
+
+    request = RsiStart(goal="Customer service", request_id="budget", rounds=8)
+    assert 3600 < rsi_timeout_seconds(request) <= 86400
+    assert rsi_timeout_seconds(
+        request.model_copy(update={"max_concurrency": 1})
+    ) >= rsi_timeout_seconds(request)
+    assert (
+        rsi_timeout_seconds(
+            request.model_copy(
+                update={
+                    "rounds": 100,
+                    "validation_case_count": 100,
+                    "max_concurrency": 1,
+                    "evaluation_repeats": 10,
+                }
+            )
+        )
+        == 86400
+    )
+
+
+@pytest.mark.asyncio
+async def test_human_test_checkpoints_are_durable_and_absent_from_optimizer_payloads(tmp_path, monkeypatch):
+    from sagents.v2.optimization.contracts import OptimizationTestSuite
+    model = RsiModel()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, model)
+    try:
+        request = start_request().model_copy(update={"human_test_suite": OptimizationTestSuite(cases=(
+            OptimizationCase(id="sealed-holdout-canary-731", input="Human-only question: 21+21?", rubric="42", split="test"),
+        ))})
+        started = await service.start_rsi(agent_id, request, "alice")
+        await service._rsi_tasks[started['id']]
+        run = await service.rsi_run(agent_id, started['id'], 'alice')
+        assert run['status'] == 'completed', run
+        assert [r['round'] for r in run['test_observations']] == [0, 1, 2, 3]
+        assert all(r['status'] == 'completed' and r['scores']['test'] == .9 for r in run['test_observations'])
+        assert not any(marker in json.dumps(run['result']) for marker in ('sealed-holdout-canary-731',))
+        assert not any(marker in json.dumps(run['events']) for marker in ('Human-only question',))
+        await service.close()
+        restarted = DesktopV2Service(tmp_path)
+        try:
+            restored = await restarted.rsi_run(agent_id, started['id'], 'alice')
+            assert restored['test_observations'] == run['test_observations']
+        finally:
+            await restarted.close()
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_independent_test_generation_uses_requested_count_and_separate_storage(tmp_path, monkeypatch):
+    class TestDesignerModel(RsiModel):
+        async def _stream(self, request):
+            text = request.model_dump_json()
+            if 'Generate ONLY split=test' in text:
+                self.requests.append(request)
+                answer = {'cases': [dict(id=f'holdout-{i}', input=f'Independent sealed probe {i}',
+                    rubric='42', split='test') for i in range(2)]}
+                yield ModelStreamEvent(kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(response_id='sealed', text=json.dumps(answer), finish_reason='stop'))
+                return
+            async for item in super()._stream(request):
+                yield item
+    model = TestDesignerModel()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, model)
+    try:
+        request = start_request().model_copy(update={'human_test_count': 2, 'rounds': 1})
+        started = await service.start_rsi(agent_id, request, 'alice')
+        await service._rsi_tasks[started['id']]
+        run = await service.rsi_run(agent_id, started['id'], 'alice')
+        assert run['status'] == 'completed'
+        assert len(run['human_test_suite']['cases']) == 2
+        assert [r['round'] for r in run['test_observations']] == [0, 1]
+        assert all(len(r['cases']) == 2 and r['status'] == 'completed' for r in run['test_observations'])
+        assert not any(marker in json.dumps(run['result']) for marker in ('Independent sealed probe',))
     finally:
         await service.close()

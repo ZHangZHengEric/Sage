@@ -1,6 +1,10 @@
 """Independent AgentPackage evaluation and tuning API."""
 
 from sagents.v2.optimization.contracts import (
+    OptimizationTestSuite,
+    OptimizationCaseBatch,
+    OptimizationCaseBatchGeneration,
+    OptimizationTrainingAddition,
     OptimizationAgent,
     OptimizationFinalSuite,
     OptimizationFinalVerification,
@@ -19,8 +23,12 @@ from sagents.v2.optimization.contracts import (
     OptimizationObservation,
     OptimizationPatch,
     OptimizationReport,
+    OptimizationStoppingPolicy,
+    OptimizationStabilityCheck,
+    OptimizationTermination,
     OptimizationResult,
     OptimizationRound,
+    OptimizationRegression,
     OptimizationSuite,
     OptimizationSuiteIssue,
     OptimizationSuiteReview,
@@ -37,11 +45,17 @@ from sagents.v2.optimization.runner import (
 )
 
 __all__ = [
+    "OptimizationTestSuite",
+    "HumanTestObserver",
+    "IsolatedTestEvaluator",
     "AgentPackageOptimizer",
     "AgentPackageTestGenerator",
     "OptimizationSuiteGeneration",
     "IsolatedOptimizationRunner",
     "OptimizationRunner",
+    "OptimizationCaseBatch",
+    "OptimizationCaseBatchGeneration",
+    "OptimizationTrainingAddition",
     "OptimizationAgent",
     "OptimizationFinalSuite",
     "OptimizationFinalVerification",
@@ -60,10 +74,16 @@ __all__ = [
     "OptimizationObservation",
     "OptimizationPatch",
     "OptimizationReport",
+    "OptimizationStoppingPolicy",
+    "OptimizationStabilityCheck",
+    "OptimizationTermination",
     "OptimizationResult",
     "OptimizationRound",
+    "OptimizationRegression",
     "OptimizationSuite",
     "OptimizationSuiteIssue",
     "OptimizationSuiteReview",
     "OptimizationSuiteReviewRejected",
 ]
+
+from sagents.v2.optimization.observer import HumanTestObserver, IsolatedTestEvaluator

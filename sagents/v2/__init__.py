@@ -75,7 +75,10 @@ _EXPORTS = {
     "SkillUsageConfig": ("sagents.v2.package.manifest.runtime", "SkillUsageConfig"),
     "default_runtime": ("sagents.v2.composition.defaults", "default_runtime"),
     "LoadedAgent": ("sagents.v2.composition.loaded_agents", "LoadedAgent"),
-    "StartupRecoveryIssue": ("sagents.v2.composition.loaded_agents", "StartupRecoveryIssue"),
+    "StartupRecoveryIssue": (
+        "sagents.v2.composition.loaded_agents",
+        "StartupRecoveryIssue",
+    ),
     "AgentPackageTestGenerator": (
         "sagents.v2.optimization",
         "AgentPackageTestGenerator",
@@ -92,10 +95,17 @@ _EXPORTS = {
     "OptimizationAgent": ("sagents.v2.optimization", "OptimizationAgent"),
     "OptimizationConstraints": ("sagents.v2.optimization", "OptimizationConstraints"),
     "OptimizationCase": ("sagents.v2.optimization", "OptimizationCase"),
+    "OptimizationRegression": ("sagents.v2.optimization", "OptimizationRegression"),
     "OptimizationCaseTrial": ("sagents.v2.optimization", "OptimizationCaseTrial"),
     "OptimizationSuiteIssue": ("sagents.v2.optimization", "OptimizationSuiteIssue"),
     "OptimizationSuiteReview": ("sagents.v2.optimization", "OptimizationSuiteReview"),
-    "OptimizationSuiteReviewRejected": ("sagents.v2.optimization", "OptimizationSuiteReviewRejected"),
+    "OptimizationSuiteReviewRejected": (
+        "sagents.v2.optimization",
+        "OptimizationSuiteReviewRejected",
+    ),
+    "HumanTestObserver": ("sagents.v2.optimization", "HumanTestObserver"),
+    "IsolatedTestEvaluator": ("sagents.v2.optimization", "IsolatedTestEvaluator"),
+    "OptimizationTestSuite": ("sagents.v2.optimization", "OptimizationTestSuite"),
     "OptimizationSuite": ("sagents.v2.optimization", "OptimizationSuite"),
     "OptimizationFinalSuite": ("sagents.v2.optimization", "OptimizationFinalSuite"),
     "OptimizationFinalVerification": (
@@ -112,6 +122,24 @@ _EXPORTS = {
     ),
     "OptimizationIteration": ("sagents.v2.optimization", "OptimizationIteration"),
     "OptimizationResult": ("sagents.v2.optimization", "OptimizationResult"),
+    "OptimizationCaseBatch": ("sagents.v2.optimization", "OptimizationCaseBatch"),
+    "OptimizationCaseBatchGeneration": (
+        "sagents.v2.optimization",
+        "OptimizationCaseBatchGeneration",
+    ),
+    "OptimizationTrainingAddition": (
+        "sagents.v2.optimization",
+        "OptimizationTrainingAddition",
+    ),
+    "OptimizationStabilityCheck": (
+        "sagents.v2.optimization",
+        "OptimizationStabilityCheck",
+    ),
+    "OptimizationStoppingPolicy": (
+        "sagents.v2.optimization",
+        "OptimizationStoppingPolicy",
+    ),
+    "OptimizationTermination": ("sagents.v2.optimization", "OptimizationTermination"),
     "OptimizationReport": ("sagents.v2.optimization", "OptimizationReport"),
     "SelfConfigurationService": (
         "sagents.v2.agent.self_configuration",
@@ -157,7 +185,10 @@ _EXPORTS = {
     "SAgent": ("sagents.v2.sagent", "SAgent"),
     "SAgentApplication": ("sagents.v2.application", "SAgentApplication"),
     "ModelCatalogConfig": ("sagents.v2.model.catalog", "ModelCatalogConfig"),
-    "ApplicationConfiguration": ("sagents.v2.composition.configuration", "ApplicationConfiguration"),
+    "ApplicationConfiguration": (
+        "sagents.v2.composition.configuration",
+        "ApplicationConfiguration",
+    ),
     "SAgentBuilder": ("sagents.v2.builder", "SAgentBuilder"),
     "SAgentRunStream": ("sagents.v2.sagent", "SAgentRunStream"),
     "SessionCommitProposal": ("sagents.v2.contracts", "SessionCommitProposal"),

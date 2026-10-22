@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+
+from app.v2.desktop.backend.runtime_protocol import SIDECAR_REVISION
 from fastapi.testclient import TestClient
 
 from app.v2.desktop.backend import app as app_module
@@ -88,7 +90,7 @@ def test_health_identifies_the_exact_sidecar_build():
     assert response.json()["data"] == {
         "status": "ok",
         "protocol": "sage.runtime/v2",
-        "revision": 12,
+        "revision": SIDECAR_REVISION,
         "build_id": "source-test-build",
     }
 

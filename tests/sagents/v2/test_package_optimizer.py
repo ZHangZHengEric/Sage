@@ -29,7 +29,8 @@ from sagents.v2.package.presets import BuiltinPackageFactory
 
 def bundle(name="target"):
     data = BuiltinPackageFactory.create(
-        "assistant", package_id=f"test.{name}",
+        "assistant",
+        package_id=f"test.{name}",
     ).model_dump(mode="json")
     data["agents"]["assistant"]["instructions"] = {"path": "prompts/base.md"}
     return AgentPackageBundle.model_validate(
@@ -155,6 +156,7 @@ async def test_multiple_rounds_select_best_preserve_input_and_hide_holdout():
     runner = Runner()
     result = await optimizer(runner).optimize(
         target,
+        validation_case_count=None,
         context=context(),
         goal="Accurate conversions",
         rounds=3,
@@ -193,7 +195,12 @@ async def test_generate_suite_once_and_reject_holdout_regression():
         scores={"base": 0.5, "guidance-1": {"training": 0.8, "validation": 0.4}},
     )
     result = await optimizer(runner).optimize(
-        bundle(), context=context(), goal="Accuracy", rounds=1, final_max_cases=0
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accuracy",
+        rounds=1,
+        final_max_cases=0,
     )
     assert not result.report.improved
     assert result.candidate_package == bundle()
@@ -212,6 +219,7 @@ async def test_malformed_and_unauthorized_proposals_consume_rounds_without_runni
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=3,
@@ -242,6 +250,7 @@ async def test_allowed_skill_and_budget_changes_are_copies():
     original = bundle()
     result = await optimizer(runner).optimize(
         original,
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=1,
@@ -271,6 +280,7 @@ async def test_invalid_round_count_before_calls(rounds):
     with pytest.raises(ValueError, match="rounds"):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             rounds=rounds,
@@ -295,6 +305,7 @@ async def test_timeout_and_cancellation_reach_runner():
     with pytest.raises(TimeoutError):
         await optimizer(Blocking()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -307,6 +318,7 @@ async def test_timeout_and_cancellation_reach_runner():
     task = asyncio.create_task(
         optimizer(Blocking()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -331,6 +343,7 @@ async def test_runner_authorization_errors_are_not_retried_as_invalid_patches():
     with pytest.raises(ValueError, match="host denies"):
         await optimizer(Denied()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             rounds=3,
@@ -362,8 +375,25 @@ async def test_native_runner_runs_real_v2_application_and_materializes_files(tmp
         assert (root / "skills/units/SKILL.md").read_text() == package.files[
             "skills/units/SKILL.md"
         ]
-        return (
-            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=ScriptedModelProvider((ScriptedModelStep(events=(ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=ModelResponse(response_id='answer', text='2 km = 2000 m', finish_reason='stop')),)),)))
+        return fixture_configuration(
+            root / "sessions",
+            models=TEST_MODELS,
+            model=ScriptedModelProvider(
+                (
+                    ScriptedModelStep(
+                        events=(
+                            ModelStreamEvent(
+                                kind=ModelEventKind.COMPLETED,
+                                response=ModelResponse(
+                                    response_id="answer",
+                                    text="2 km = 2000 m",
+                                    finish_reason="stop",
+                                ),
+                            ),
+                        )
+                    ),
+                )
+            ),
         )
 
     runner = IsolatedOptimizationRunner(
@@ -401,8 +431,8 @@ async def test_native_runner_cancellation_closes_driver_and_removes_workspace(tm
 
     def factory(package, root, ctx):
         paths.append(root)
-        return (
-            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=WaitingModel(()))
+        return fixture_configuration(
+            root / "sessions", models=TEST_MODELS, model=WaitingModel(())
         )
 
     runner = IsolatedOptimizationRunner(
@@ -430,6 +460,7 @@ async def test_target_failure_cannot_be_selected_and_internal_failure_aborts():
 
     result = await optimizer(FailedTarget()).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -449,6 +480,7 @@ async def test_target_failure_cannot_be_selected_and_internal_failure_aborts():
     with pytest.raises(RuntimeError, match="tuning agent did not complete"):
         await optimizer(FailedTuner()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -468,6 +500,7 @@ async def test_noop_not_selected_despite_possible_stochastic_improvement():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -487,6 +520,7 @@ async def test_grader_nan_is_rejected_and_evaluation_does_not_continue():
     with pytest.raises(ValueError):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -501,7 +535,12 @@ async def test_default_runs_five_rounds_and_overall_timeout_is_bounded():
         proposals=[{"rationale": "try", "instruction_guidance": "guidance-1"}] * 5
     )
     result = await optimizer(runner).optimize(
-        bundle(), context=context(), goal="Accuracy", suite=suite(), final_max_cases=0
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accuracy",
+        suite=suite(),
+        final_max_cases=0,
     )
     assert result.report.requested_rounds == len(result.report.rounds) == 5
 
@@ -512,6 +551,7 @@ async def test_default_runs_five_rounds_and_overall_timeout_is_bounded():
     with pytest.raises(TimeoutError):
         await optimizer(Blocking()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -543,6 +583,7 @@ async def test_suite_validation_and_protected_paths_before_execution():
     with pytest.raises(ValueError, match="base instruction files"):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -556,6 +597,7 @@ async def test_suite_validation_and_protected_paths_before_execution():
 async def test_all_iterations_include_rejected_packages_and_full_evaluations():
     result = await optimizer(Runner()).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=3,
@@ -594,6 +636,7 @@ async def test_evaluation_agent_is_authoritative_and_mechanical_evidence_is_only
 
     result = await optimizer(WithCheck()).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=1,
@@ -620,6 +663,7 @@ async def test_single_json_fence_accepted_without_extracting_arbitrary_prose():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=1,
@@ -640,6 +684,7 @@ async def test_saturated_training_does_not_block_validation_improvement():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=1,
@@ -672,6 +717,7 @@ async def test_tool_and_skill_selection_and_skill_creation_require_host_candidat
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=1,
@@ -710,6 +756,7 @@ async def test_unknown_capabilities_cannot_be_added(patch, policy):
     runner = Runner(proposals=[{"rationale": "Change", **patch}])
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=1,
@@ -726,6 +773,7 @@ async def test_unchanged_iterations_include_reused_test_records_and_one_recommen
     runner = Runner(proposals=[{"rationale": "Already sufficient"}] * 3)
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         rounds=3,
@@ -780,9 +828,9 @@ async def test_tuner_gets_host_principles_in_system_without_changing_callers_pac
     actual = (
         opt.tuner.package.resolved_manifest().agents["assistant"].instructions.inline
     )
-    assert TUNING_PRINCIPLES in cast('str', actual)
-    assert "Never copy test questions" in cast('str', actual)
-    assert "A no-change round is legitimate" in cast('str', actual)
+    assert TUNING_PRINCIPLES in cast("str", actual)
+    assert "Preserve the original agent" in cast("str", actual)
+    assert "A no-change round is legitimate" in cast("str", actual)
     assert configured.model_dump_json() == before
 
 
@@ -806,6 +854,7 @@ async def test_opt_in_latency_improvement_preserves_quality():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Reduce latency",
         rounds=1,
@@ -822,6 +871,7 @@ async def test_opt_in_latency_improvement_preserves_quality():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Reduce latency",
         rounds=1,
@@ -887,8 +937,14 @@ async def test_native_runner_preserves_tool_execution_evidence(tmp_path):
                 for response in responses
             )
         )
-        return (
-            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=model, tools=(provider.catalog, provider.executor,))
+        return fixture_configuration(
+            root / "sessions",
+            models=TEST_MODELS,
+            model=model,
+            tools=(
+                provider.catalog,
+                provider.executor,
+            ),
         )
 
     runner = IsolatedOptimizationRunner(
@@ -925,6 +981,7 @@ async def test_faster_but_still_failing_candidate_cannot_win_on_latency_alone():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Reduce latency",
         rounds=1,
@@ -936,7 +993,10 @@ async def test_faster_but_still_failing_candidate_cannot_win_on_latency_alone():
 
 
 @pytest.mark.asyncio
-async def test_dialogue_user_driver_and_evaluator_preserve_original_goal_and_turn_limit():
+@pytest.mark.parametrize("max_concurrency", [1, 2])
+async def test_dialogue_user_driver_and_evaluator_preserve_original_goal_and_turn_limit(
+    max_concurrency,
+):
     from contextlib import asynccontextmanager
 
     class DialogueRunner(Runner):
@@ -1010,11 +1070,13 @@ async def test_dialogue_user_driver_and_evaluator_preserve_original_goal_and_tur
     runner = DialogueRunner(finish_at=2)
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Original goal",
         rounds=1,
         suite=fixed,
         final_max_cases=0,
+        max_concurrency=max_concurrency,
     )
     assert all(
         case.stop_reason == "goal_achieved" and len(case.dialogue) == 2
@@ -1028,11 +1090,13 @@ async def test_dialogue_user_driver_and_evaluator_preserve_original_goal_and_tur
     runner = DialogueRunner(finish_at=99)
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Original goal",
         rounds=1,
         suite=fixed,
         final_max_cases=0,
+        max_concurrency=max_concurrency,
     )
     assert all(
         case.stop_reason == "turn_limit"
@@ -1080,8 +1144,8 @@ async def test_native_conversation_keeps_target_session_and_prior_messages(tmp_p
             )
             for index, text in enumerate(("Remembered", "42"))
         )
-        return (
-            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=ScriptedModelProvider(steps))
+        return fixture_configuration(
+            root / "sessions", models=TEST_MODELS, model=ScriptedModelProvider(steps)
         )
 
     runner = IsolatedOptimizationRunner(
@@ -1116,6 +1180,7 @@ async def test_journal_keeps_candidate_and_outputs_when_candidate_grading_fails(
     with pytest.raises(ValueError):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -1153,6 +1218,7 @@ async def test_journal_refuses_overwrite_before_model_calls_and_records_complete
     runner = Runner(proposals=[{"rationale": "Sufficient"}])
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1175,6 +1241,7 @@ async def test_journal_refuses_overwrite_before_model_calls_and_records_complete
     with pytest.raises(FileExistsError):
         await optimizer(unused).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -1201,6 +1268,7 @@ async def test_cancelled_journal_marks_inflight_call_unknown_without_replay(tmp_
     task = asyncio.create_task(
         optimizer(Blocked()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -1243,6 +1311,7 @@ async def test_dialogue_setup_obeys_call_deadline_and_cleans_up():
     with pytest.raises(TimeoutError):
         await optimizer(BlockedSetup()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=fixed,
@@ -1279,6 +1348,7 @@ async def test_repeated_trials_reject_lucky_candidate_and_retain_every_model_gra
     runner = Unstable()
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1318,6 +1388,7 @@ async def test_failed_repeat_cannot_be_hidden_by_successful_representative():
 
     result = await optimizer(FailsLater()).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1337,6 +1408,7 @@ async def test_invalid_repeats_fail_before_calls(repeats):
     with pytest.raises(ValueError, match="evaluation_repeats"):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             evaluation_repeats=repeats,
@@ -1389,6 +1461,7 @@ async def test_prompt_and_skill_growth_limits_reject_before_candidate_execution(
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1417,6 +1490,7 @@ async def test_journal_keeps_invalid_designer_response(tmp_path):
     with pytest.raises(ValueError):
         await optimizer(BadDesigner()).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             journal_path=path,
@@ -1468,6 +1542,7 @@ async def test_default_sealed_final_stage_is_after_selection_and_hidden_from_tun
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accurate conversions",
         suite=suite(),
@@ -1523,6 +1598,7 @@ async def test_rejected_semantic_candidates_keep_full_packages_without_execution
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1583,6 +1659,7 @@ async def test_final_failure_or_score_regression_withdraws_recommendation_withou
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1605,6 +1682,7 @@ async def test_final_test_repeats_preserve_every_trial_and_fresh_execution():
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1651,6 +1729,7 @@ async def test_overlapping_final_cases_rejected_before_target_runs():
     with pytest.raises(ValueError, match="distinct"):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -1664,6 +1743,7 @@ async def test_review_is_cumulative_preserves_original_and_excludes_manifest_tes
     runner = FinalRunner()
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1703,6 +1783,7 @@ async def test_malformed_review_fails_closed_and_journal_preserves_proposal(tmp_
     with pytest.raises(ValueError):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -1726,8 +1807,8 @@ def test_inconsistent_semantic_approval_and_invalid_final_splits_rejected():
     with pytest.raises(ValueError, match="cannot approve"):
         OptimizationProposalReview(
             approved=True,
-            memorization_detected=True,
-            goal_drift_detected=False,
+            memorization_detected=False,
+            goal_drift_detected=True,
             permission_drift_detected=False,
             rationale="Bad",
         )
@@ -1799,6 +1880,7 @@ async def test_skill_only_scope_rejects_other_parts_and_keeps_full_skill_candida
     )
     result = await optimizer(runner).optimize(
         original,
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1861,6 +1943,7 @@ async def test_individual_optimization_scopes_allow_only_granted_parts(scope, pa
         Runner(proposals=[{"rationale": "Scoped change", **patch}])
     ).optimize(
         original,
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1899,6 +1982,7 @@ async def test_skill_scope_recognizes_nonstandard_skill_roots_and_cannot_expand_
     )
     result = await optimizer(runner).optimize(
         original,
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -1923,7 +2007,11 @@ async def test_invalid_optimization_scope_before_any_model_call(scope):
     runner = Runner()
     with pytest.raises(ValueError, match="optimization_scope"):
         await optimizer(runner).optimize(
-            bundle(), context=context(), goal="Accuracy", optimization_scope=scope
+            bundle(),
+            validation_case_count=None,
+            context=context(),
+            goal="Accuracy",
+            optimization_scope=scope,
         )
     assert not runner.requests
 
@@ -1963,6 +2051,7 @@ async def test_suite_review_blocks_before_any_target_or_tuner_and_preserves_reco
     with pytest.raises(OptimizationSuiteReviewRejected) as caught:
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Conversions only",
             suite=suite(),
@@ -2033,6 +2122,7 @@ async def test_invalid_suite_review_fails_closed(output):
     with pytest.raises(ValueError):
         await optimizer(runner).optimize(
             bundle(),
+            validation_case_count=None,
             context=context(),
             goal="Accuracy",
             suite=suite(),
@@ -2071,6 +2161,7 @@ async def test_advisory_suite_review_is_retained_and_does_not_leak_final_to_tune
     runner = Advisory()
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -2123,6 +2214,7 @@ async def test_tuner_history_is_bounded_and_omission_is_explicit():
     runner = Runner(proposals=[{"rationale": "No justified change"}] * 7)
     result = await optimizer(runner).optimize(
         bundle(),
+        validation_case_count=None,
         context=context(),
         goal="Accuracy",
         suite=suite(),
@@ -2138,3 +2230,913 @@ async def test_tuner_history_is_bounded_and_omission_is_explicit():
     assert len(requests[-1]["previous_attempts"]) == 4
     assert requests[-1]["previous_attempts_omitted"] == 2
     assert [item["round"] for item in requests[-1]["previous_attempts"]] == [3, 4, 5, 6]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [1, 3])
+async def test_case_concurrency_is_bounded_and_reports_preserve_suite_order(limit):
+    class ConcurrentRunner(Runner):
+        def __init__(self):
+            super().__init__()
+            self.active = self.peak = 0
+            self.entered = asyncio.Event()
+
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id != "test.target":
+                return await super().run(package, agent_id, content, ctx)
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            if self.active == limit:
+                self.entered.set()
+            try:
+                await self.entered.wait()
+                await asyncio.sleep((6 - int(content)) * 0.002)
+                return await super().run(package, agent_id, content, ctx)
+            finally:
+                self.active -= 1
+
+    cases = OptimizationSuite(
+        cases=tuple(
+            OptimizationCase(
+                id=f"case-{i}",
+                input=str(i),
+                rubric="Correct units",
+                split="training" if i < 3 else "validation",
+            )
+            for i in range(6)
+        )
+    )
+    runner = ConcurrentRunner()
+    events = []
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Reliable conversions",
+        suite=cases,
+        rounds=1,
+        final_max_cases=0,
+        max_concurrency=limit,
+        on_event=events.append,
+    )
+    assert runner.peak == limit
+    assert runner.active == 0
+    for iteration in result.iterations:
+        assert [case.case.id for case in iteration.evaluation.cases] == [
+            c.id for c in cases.cases
+        ]
+    completed = [
+        e["data"]["result"]["case"]["id"]
+        for e in events
+        if e["event"] == "case_completed" and e["data"]["round"] == 0
+    ]
+    assert set(completed) == {c.id for c in cases.cases}
+    if limit > 1:
+        assert completed[0] != cases.cases[0].id
+
+
+@pytest.mark.asyncio
+async def test_cancelling_parallel_evaluation_drains_inflight_cases_and_never_starts_queue():
+    class BlockingRunner(Runner):
+        def __init__(self):
+            super().__init__()
+            self.active = self.started = 0
+            self.entered = asyncio.Event()
+
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id != "test.target":
+                return await super().run(package, agent_id, content, ctx)
+            self.active += 1
+            self.started += 1
+            if self.active == 2:
+                self.entered.set()
+            try:
+                await asyncio.Future()
+            finally:
+                self.active -= 1
+
+    runner = BlockingRunner()
+    cases = OptimizationSuite(
+        cases=tuple(
+            OptimizationCase(
+                id=str(i),
+                input=str(i),
+                rubric="Correct",
+                split="training" if i < 2 else "validation",
+            )
+            for i in range(5)
+        )
+    )
+    task = asyncio.create_task(
+        optimizer(runner).optimize(
+            bundle(),
+            validation_case_count=None,
+            context=context(),
+            goal="Reliable conversions",
+            suite=cases,
+            rounds=1,
+            final_max_cases=0,
+            max_concurrency=2,
+        )
+    )
+    await asyncio.wait_for(runner.entered.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert runner.active == 0
+    assert runner.started == 2
+
+
+@pytest.mark.asyncio
+async def test_parallel_case_failure_cancels_other_cases_without_retries():
+    class FailingRunner(Runner):
+        def __init__(self):
+            super().__init__()
+            self.active = self.started = 0
+            self.entered = asyncio.Event()
+
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id != "test.target":
+                return await super().run(package, agent_id, content, ctx)
+            self.active += 1
+            self.started += 1
+            if self.active == 2:
+                self.entered.set()
+            try:
+                await self.entered.wait()
+                if content == suite().cases[0].input:
+                    raise RuntimeError("target failed")
+                await asyncio.Future()
+            finally:
+                self.active -= 1
+
+    runner = FailingRunner()
+    with pytest.raises(RuntimeError, match="target failed"):
+        await optimizer(runner).optimize(
+            bundle(),
+            validation_case_count=None,
+            context=context(),
+            goal="Conversions",
+            suite=suite(),
+            rounds=1,
+            final_max_cases=0,
+            max_concurrency=2,
+        )
+    assert runner.active == 0
+    assert runner.started == 2
+
+
+@pytest.mark.asyncio
+async def test_exact_generated_case_count_rejects_an_incomplete_suite():
+    from sagents.v2.optimization.generator import AgentPackageTestGenerator
+
+    generator = AgentPackageTestGenerator(
+        runner=Runner(),
+        designer=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
+    )
+    with pytest.raises(ValueError, match="case_count"):
+        await generator.generate_with_record(
+            bundle(), context=context(), goal="Conversions", max_cases=3, case_count=3
+        )
+
+
+@pytest.mark.asyncio
+async def test_large_generated_suite_is_prepared_in_bounded_unique_batches():
+    class BatchedDesigner(Runner):
+        def __init__(self):
+            super().__init__()
+            self.batch_sizes = []
+
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.evaluator":
+                request = json.loads(content)
+                if request["task"].startswith("Design"):
+                    data = request["data"]
+                    count = data["case_count"]
+                    offset = len(data["excluded_cases"])
+                    self.batch_sizes.append(count)
+                    designed = OptimizationSuite(
+                        cases=tuple(
+                            OptimizationCase(
+                                id=f"case-{offset + i}",
+                                input=str(offset + i),
+                                rubric="Correct",
+                                split="training" if i < count // 2 else "validation",
+                            )
+                            for i in range(count)
+                        )
+                    )
+                    return OptimizationObservation(
+                        state="completed", output=designed.model_dump_json()
+                    )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = BatchedDesigner()
+    events = []
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Conversions",
+        rounds=1,
+        final_max_cases=0,
+        test_case_count=17,
+        max_concurrency=3,
+        on_event=events.append,
+    )
+    assert runner.batch_sizes == [4, 4, 4, 3, 2]
+    assert len(result.report.suite.cases) == 17
+    assert len({c.id for c in result.report.suite.cases}) == 17
+    assert [
+        e["data"]["prepared"]
+        for e in events
+        if e["event"] == "test_generation_batch_completed"
+    ] == [4, 8, 12, 15, 17]
+    assert len(result.report.baseline.cases) == 17
+
+
+@pytest.mark.asyncio
+async def test_stopping_requires_fresh_stability_then_exits_before_extra_proposals():
+    from sagents.v2.optimization.contracts import OptimizationStoppingPolicy
+
+    runner = Runner(scores={"base": 0.4, "guidance-1": 1.0})
+    events = []
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accurate conversions",
+        rounds=8,
+        suite=suite(),
+        final_max_cases=0,
+        stopping_policy=OptimizationStoppingPolicy(),
+        on_event=events.append,
+    )
+    assert len(result.report.rounds) == 1
+    assert result.report.termination.reason == "target_reached"
+    assert result.report.termination.stability_passes == 2
+    # Baseline + candidate + independent stability pass, each with two cases.
+    assert len(runner.target_hashes) == 6
+    assert len(runner.proposals) == 2
+    assert any(e["event"] == "stability_check_completed" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_stagnation_counts_rejected_no_change_rounds():
+    from sagents.v2.optimization.contracts import OptimizationStoppingPolicy
+
+    runner = Runner(proposals=[{"rationale": "No justified change"}] * 8)
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accurate conversions",
+        rounds=8,
+        suite=suite(),
+        final_max_cases=0,
+        stopping_policy=OptimizationStoppingPolicy(patience=3),
+    )
+    assert result.report.termination.reason == "stagnation"
+    assert len(result.report.rounds) == 3
+    assert not result.report.improved
+    assert len(runner.target_hashes) == 2  # Reuse cannot establish stability.
+
+
+@pytest.mark.asyncio
+async def test_failed_stability_does_not_claim_target_reached():
+    from sagents.v2.optimization.contracts import OptimizationStoppingPolicy
+
+    class Unstable(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.evaluator":
+                request = json.loads(content)
+                if (
+                    request["data"]["observation"]["output"] == "guidance-1"
+                    and len(self.target_hashes) > 4
+                ):
+                    return OptimizationObservation(
+                        state="completed",
+                        output=json.dumps(
+                            {"score": 0.8, "passed": True, "rationale": "Unstable"}
+                        ),
+                    )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = Unstable(scores={"base": 0.4, "guidance-1": 1.0})
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accurate conversions",
+        rounds=1,
+        suite=suite(),
+        final_max_cases=0,
+        stopping_policy=OptimizationStoppingPolicy(),
+    )
+    assert result.report.termination.reason == "round_limit"
+    assert result.report.termination.stability_passes == 0
+
+
+@pytest.mark.asyncio
+async def test_generated_tool_failure_overrides_raw_model_success():
+    class BrokenTool(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            observation = await super().run(package, agent_id, content, ctx)
+            if package.manifest.metadata.id == "test.target":
+                return observation.model_copy(
+                    update={
+                        "evidence": {
+                            "runtime_events_truncated": False,
+                            "runtime_events": [
+                                {
+                                    "data": {
+                                        "kind": "tool",
+                                        "state": "failed",
+                                        "tool_call_id": "broken",
+                                        "tool_name": "rsi_policy",
+                                        "error": {"message": "Invalid expression"},
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                )
+            return observation
+
+    runner = BrokenTool(scores={"base": 1.0, "guidance-1": 1.0})
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accurate conversions",
+        rounds=1,
+        suite=suite(),
+        final_max_cases=0,
+        constraints=OptimizationConstraints(require_clean_generated_tools=True),
+    )
+    item = result.report.baseline.cases[0]
+    assert item.observation.state == "completed"
+    assert item.model_grade.score == 1.0
+    assert item.grade.score == 0 and not item.grade.passed
+    assert result.report.generated_tool_audit_required
+
+
+def test_diversity_cannot_be_established_by_repeated_inputs_or_missing_categories():
+    repeated = suite().model_copy(
+        update={
+            "cases": (
+                suite().cases[0],
+                suite().cases[1].model_copy(update={"input": "  CONVERT 2 km  "}),
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="repeats"):
+        AgentPackageOptimizer._check_diversity(repeated)
+    broad = OptimizationSuite(
+        cases=tuple(
+            OptimizationCase(
+                id=f"case-{i}",
+                input=f"Task {i}",
+                rubric="Correct",
+                split="training" if i < 6 else "validation",
+            )
+            for i in range(12)
+        )
+    )
+    with pytest.raises(ValueError, match="four scenario classes"):
+        AgentPackageOptimizer._check_diversity(broad)
+
+
+@pytest.mark.asyncio
+async def test_fresh_training_failure_reaches_tuner_and_repaired_candidate_is_confirmed():
+    from sagents.v2 import OptimizationStoppingPolicy
+
+    class FreshFailure(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.evaluator":
+                data = json.loads(content).get("data", {})
+                if (
+                    data.get("observation", {}).get("output") == "guidance-1"
+                    and data["case"]["split"] == "training"
+                    and len(self.target_hashes) > 4
+                ):
+                    return OptimizationObservation(
+                        state="completed",
+                        output=json.dumps(
+                            {
+                                "score": 0.7,
+                                "passed": False,
+                                "rationale": "Fresh execution loses original tool input",
+                            }
+                        ),
+                    )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = FreshFailure(scores={"base": 0.4, "guidance-1": 1.0, "guidance-2": 1.0})
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accurate conversions",
+        rounds=8,
+        suite=suite(),
+        final_max_cases=0,
+        stopping_policy=OptimizationStoppingPolicy(),
+    )
+    tuning = [
+        json.loads(content) for name, content in runner.requests if name == "test.tuner"
+    ]
+    assert len(tuning) == 2
+    assert tuning[1]["data"]["training"][0]["grade"]["score"] == 0.7
+    assert "holdout-secret" not in json.dumps(tuning[1])
+    assert [c.passed for c in result.report.stability_checks] == [False, True]
+    assert [c.round for c in result.report.stability_checks] == [1, 2]
+    assert result.report.termination.reason == "target_reached"
+    assert len(result.report.rounds) == 2 and result.report.improved
+
+
+@pytest.mark.asyncio
+async def test_noop_cannot_retry_failed_stability_until_lucky_or_claim_final_success():
+    from sagents.v2 import OptimizationStoppingPolicy
+
+    class Unstable(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.evaluator":
+                data = json.loads(content).get("data", {})
+                if (
+                    data.get("observation", {}).get("output") == "guidance-1"
+                    and data["case"]["split"] != "final"
+                    and len(self.target_hashes) > 4
+                ):
+                    return OptimizationObservation(
+                        state="completed",
+                        output=json.dumps(
+                            {
+                                "score": 0.8,
+                                "passed": True,
+                                "rationale": "Unstable quality below target",
+                            }
+                        ),
+                    )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = Unstable(
+        proposals=[
+            {"rationale": "Improve", "instruction_guidance": "guidance-1"},
+            {"rationale": "No justified change"},
+            {"rationale": "No justified change"},
+        ],
+        scores={"base": 0.4, "guidance-1": 1.0},
+    )
+    result = await optimizer(runner).optimize(
+        bundle(),
+        validation_case_count=None,
+        context=context(),
+        goal="Accurate conversions",
+        rounds=8,
+        suite=suite(),
+        final_suite=final_suite(),
+        stopping_policy=OptimizationStoppingPolicy(patience=2),
+    )
+    assert len(result.report.stability_checks) == 1
+    assert result.report.termination.reason == "stagnation"
+    assert len(result.report.rounds) == 3
+    assert result.report.final_verification.passed  # Real independent cases passed.
+    assert (
+        result.report.goal_verified is False
+    )  # Stability still blocks recommendation.
+    assert not result.report.improved and result.candidate_package == bundle()
+    assert "Stability" in result.report.recommendation_block_reason
+    assert len(runner.target_hashes) == 8
+
+
+class AdaptiveRunner(Runner):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.designs = []
+
+    async def run(self, package, agent_id, content, ctx):
+        request = json.loads(content) if content.startswith("{") else {}
+        if request.get("task", "").startswith("Design"):
+            data = request["data"]
+            split = (
+                "validation"
+                if "ONLY split=validation" in request["task"]
+                else "training"
+            )
+            self.designs.append((split, data))
+            offset = len(data["excluded_cases"])
+            count = data["case_count"] or 2
+            cases = [
+                dict(
+                    id=f"{split}-{offset + i}",
+                    input=f"{split} secret task {offset + i}",
+                    rubric="Correct conversion",
+                    split=split,
+                )
+                for i in range(count)
+            ]
+            return OptimizationObservation(
+                state="completed", output=json.dumps({"cases": cases})
+            )
+        return await super().run(package, agent_id, content, ctx)
+
+
+@pytest.mark.asyncio
+async def test_adaptive_questions_grow_validation_stays_fixed_and_only_aggregate_reaches_tuner():
+    runner = AdaptiveRunner()
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=2,
+        validation_case_count=5,
+    )
+    cases = result.report.suite.cases
+    assert len([c for c in cases if c.split == "validation"]) == 5
+    assert len([c for c in cases if c.split == "training"]) == 6
+    assert [s for s, _ in runner.designs] == [
+        "validation",
+        "validation",
+        "training",
+        "training",
+        "training",
+    ]
+    for split, data in runner.designs:
+        assert all(c["split"] == split for c in data["excluded_cases"])
+        assert "final" not in data["phase"]
+        if split == "validation":
+            assert not data["challenge_feedback"]
+        else:
+            assert "validation secret task" not in json.dumps(data)
+    requests = [
+        json.loads(c)["data"] for name, c in runner.requests if name == "test.tuner"
+    ]
+    assert requests[0]["validation"] == {
+        "score": 0.4,
+        "passed": 0,
+        "total": 5,
+        "items": [{"index": i, "score": 0.4} for i in range(1, 6)],
+    }
+    assert len(requests[1]["validation_history"]) == 1
+    assert "validation secret task" not in json.dumps(requests)
+    assert "validation-0" not in json.dumps(requests)
+    assert result.report.final_verification is None
+    # Every accepted/rejected proposal compares the same questions as its incumbent.
+    assert len(result.report.rounds[0].evaluation.cases) == 9
+    assert len(result.report.rounds[1].evaluation.cases) == 11
+
+
+@pytest.mark.asyncio
+async def test_adaptive_convergence_uses_validation_and_training_without_final_calls():
+    from sagents.v2.optimization.contracts import OptimizationStoppingPolicy
+
+    runner = AdaptiveRunner(scores={"base": 0.4, "guidance-1": 1.0})
+    events = []
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=8,
+        validation_case_count=3,
+        stopping_policy=OptimizationStoppingPolicy(),
+        on_event=events.append,
+    )
+    assert result.report.goal_verified is True
+    assert result.report.termination.reason == "target_reached"
+    assert len(result.report.rounds) == 1
+    assert len(result.report.stability_checks) == 1
+    assert result.report.final_verification is None
+    assert all(c.phase != "final" for c in result.report.agent_calls)
+    assert len([e for e in events if e["event"] == "training_cases_added"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_adaptive_allows_training_improvement_with_flat_validation():
+    runner = AdaptiveRunner(
+        scores={
+            "base": {"training": 0.4, "validation": 0.4},
+            "guidance-1": {"training": 0.8, "validation": 0.4},
+        }
+    )
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=1,
+        validation_case_count=2,
+    )
+    assert result.report.rounds[0].accepted
+
+
+def test_memorization_flag_does_not_block_goal_and_permission_review():
+    from sagents.v2.optimization.contracts import OptimizationProposalReview
+
+    review = OptimizationProposalReview(
+        approved=True,
+        memorization_detected=True,
+        goal_drift_detected=False,
+        permission_drift_detected=False,
+        rationale="Within scope",
+    )
+    assert review.approved
+
+
+@pytest.mark.asyncio
+async def test_adaptive_validation_item_scores_have_stable_anonymous_indexes_without_feedback():
+    class ItemScores(AdaptiveRunner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.evaluator":
+                request = json.loads(content)
+                if not request["task"].startswith("Design"):
+                    case = request["data"]["case"]
+                    if case["split"] == "validation":
+                        second = case["input"].endswith("1")
+                        improved = request["data"]["observation"]["output"] != "base"
+                        score = (
+                            (0.9 if second else 0.6)
+                            if improved
+                            else (0.5 if second else 0.2)
+                        )
+                        return OptimizationObservation(
+                            state="completed",
+                            output=json.dumps(
+                                {
+                                    "score": score,
+                                    "passed": score >= 0.6,
+                                    "rationale": "PRIVATE validation explanation",
+                                }
+                            ),
+                        )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = ItemScores()
+    await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=2,
+        validation_case_count=2,
+    )
+    requests = [
+        json.loads(c)["data"] for name, c in runner.requests if name == "test.tuner"
+    ]
+    assert requests[0]["validation"]["items"] == [
+        {"index": 1, "score": 0.2},
+        {"index": 2, "score": 0.5},
+    ]
+    assert requests[1]["validation"]["items"] == [
+        {"index": 1, "score": 0.6},
+        {"index": 2, "score": 0.9},
+    ]
+    assert (
+        requests[1]["validation_history"][0]["items"]
+        == requests[1]["validation"]["items"]
+    )
+    payload = json.dumps(requests)
+    assert "PRIVATE validation explanation" not in payload
+    assert "validation secret task" not in payload
+    assert "validation.0." not in payload
+
+
+@pytest.mark.asyncio
+async def test_adaptive_ignores_leakage_judgments_but_keeps_business_review():
+    class ObsoleteReview(AdaptiveRunner):
+        async def run(self, package, agent_id, content, ctx):
+            name = package.manifest.metadata.id
+            if name == "test.suite-reviewer":
+                request = json.loads(content)
+                enum = request["response_schema"]["$defs"]["OptimizationSuiteIssue"][
+                    "properties"
+                ]["kind"]["enum"]
+                assert "split_leakage" not in enum
+                return OptimizationObservation(
+                    state="completed",
+                    output=json.dumps(
+                        {
+                            "approved": False,
+                            "rationale": "Legacy leakage opinion",
+                            "issues": [
+                                {
+                                    "kind": "split_leakage",
+                                    "severity": "blocking",
+                                    "rationale": "Same policy",
+                                    "suggested_fix": "Change examples",
+                                }
+                            ],
+                        }
+                    ),
+                )
+            if name == "test.reviewer":
+                request = json.loads(content)
+                assert (
+                    "memorization_detected"
+                    not in request["response_schema"]["properties"]
+                )
+                return OptimizationObservation(
+                    state="completed",
+                    output=json.dumps(
+                        {
+                            "approved": False,
+                            "memorization_detected": True,
+                            "goal_drift_detected": False,
+                            "permission_drift_detected": False,
+                            "rationale": "Legacy memorization opinion",
+                        }
+                    ),
+                )
+            return await super().run(package, agent_id, content, ctx)
+
+    result = await optimizer(ObsoleteReview()).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=1,
+        validation_case_count=2,
+    )
+    assert result.report.rounds[0].accepted
+    assert result.report.suite_review.approved
+    assert result.report.suite_review.issues == ()
+
+
+@pytest.mark.asyncio
+async def test_independent_designers_can_share_raw_ids_and_inputs_without_leakage_gate():
+    class SameIds(AdaptiveRunner):
+        async def run(self, package, agent_id, content, ctx):
+            request = json.loads(content) if content.startswith("{") else {}
+            if request.get("task", "").startswith("Design"):
+                data = request["data"]
+                split = (
+                    "validation"
+                    if "ONLY split=validation" in request["task"]
+                    else "training"
+                )
+                count = data["case_count"] or 1
+                return OptimizationObservation(
+                    state="completed",
+                    output=json.dumps(
+                        {
+                            "cases": [
+                                {
+                                    "id": f"question-{i}",
+                                    "input": "Convert a length",
+                                    "rubric": "Accurate conversion",
+                                    "split": split,
+                                }
+                                for i in range(count)
+                            ]
+                        }
+                    ),
+                )
+            return await super().run(package, agent_id, content, ctx)
+
+    result = await optimizer(SameIds()).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=1,
+        validation_case_count=1,
+    )
+    cases = result.report.suite.cases
+    assert len({c.id for c in cases}) == len(cases)
+    assert len({c.input for c in cases}) == 1
+    assert result.report.rounds[0].accepted
+    assert [a.round for a in result.report.training_additions] == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_new_training_challenges_still_reject_business_conflicts_before_execution():
+    class ConflictingChallenge(AdaptiveRunner):
+        async def run(self, package, agent_id, content, ctx):
+            request = json.loads(content) if content.startswith("{") else {}
+            if request.get("task", "").startswith("Review new training"):
+                return OptimizationObservation(
+                    state="completed",
+                    output=json.dumps(
+                        {
+                            "approved": False,
+                            "rationale": "Business rule contradicted",
+                            "issues": [
+                                {
+                                    "kind": "goal_conflict",
+                                    "severity": "blocking",
+                                    "rationale": "Contradicts conversion goal",
+                                    "suggested_fix": "Follow authorized units",
+                                }
+                            ],
+                        }
+                    ),
+                )
+            return await super().run(package, agent_id, content, ctx)
+
+    from sagents.v2.optimization.optimizer import OptimizationSuiteReviewRejected
+
+    runner = ConflictingChallenge()
+    with pytest.raises(OptimizationSuiteReviewRejected):
+        await optimizer(runner).optimize(
+            bundle(),
+            context=context(),
+            goal="Conversions",
+            rounds=1,
+            validation_case_count=1,
+        )
+    assert not any(name == "test.tuner" for name, _ in runner.requests)
+
+
+@pytest.mark.asyncio
+async def test_adaptive_stagnation_does_not_design_unused_next_round_challenges():
+    from sagents.v2.optimization.contracts import OptimizationStoppingPolicy
+
+    runner = AdaptiveRunner(
+        proposals=[{"rationale": "No supported change"} for _ in range(3)]
+    )
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=8,
+        validation_case_count=2,
+        stopping_policy=OptimizationStoppingPolicy(patience=3),
+    )
+    assert result.report.termination.reason == "stagnation"
+    assert len(result.report.rounds) == 3
+    assert [a.round for a in result.report.training_additions] == [0, 1, 2, 3]
+    assert not result.report.goal_verified
+
+
+@pytest.mark.asyncio
+async def test_adaptive_strong_baseline_finishes_without_forcing_a_patch():
+    runner = AdaptiveRunner(scores={"base": 1.0})
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=8,
+        validation_case_count=2,
+    )
+    assert result.report.goal_verified is True
+    assert not result.report.improved
+    assert result.report.rounds == ()
+    assert result.report.termination.reason == "target_reached"
+    assert len(result.report.stability_checks) == 1
+    assert not any(name == "test.tuner" for name, _ in runner.requests)
+
+
+@pytest.mark.asyncio
+async def test_adaptive_round_limit_is_not_reported_as_goal_success():
+    runner = AdaptiveRunner(scores={"base": 0.4, "guidance-1": 0.8})
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Conversions",
+        rounds=1,
+        validation_case_count=2,
+    )
+    assert result.report.rounds[0].accepted
+    assert result.report.termination.reason == "round_limit"
+    assert result.report.goal_verified is False
+    assert result.candidate_package.content_hash == result.iterations[1].package.content_hash
+    assert result.report.improved
+    assert not any(item.recommended for item in result.iterations)
+    assert result.iterations[1].evaluation.mean_score("validation") == 0.8
+
+
+@pytest.mark.asyncio
+async def test_adaptive_cancel_during_new_challenges_drains_target_calls():
+    class BlockChallenges(AdaptiveRunner):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.active = 0
+
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.target" and content.startswith(
+                "training secret task 2"
+            ):
+                self.active += 1
+                self.entered.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    self.active -= 1
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = BlockChallenges()
+    events = []
+    task = asyncio.create_task(
+        optimizer(runner).optimize(
+            bundle(),
+            context=context(),
+            goal="Conversions",
+            rounds=4,
+            validation_case_count=2,
+            max_concurrency=2,
+            on_event=events.append,
+        )
+    )
+    await asyncio.wait_for(runner.entered.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert runner.active == 0
+    assert not any(e["event"] == "result_completed" for e in events)

@@ -7,6 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.v2.desktop.backend.runtime_protocol import SIDECAR_REVISION
+
 from app.v2.desktop.backend.main import (
     _create_after_writer_release,
     _publish_sidecar,
@@ -15,6 +17,7 @@ from app.v2.desktop.backend.main import (
 )
 from app.v2.desktop.backend.observability import create_desktop_observability
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+from sagents.v2.runtime.observability.plugins import NoopLogSink
 from sagents.v2.runtime.session import StoreInUseError
 
 
@@ -58,7 +61,7 @@ def test_sidecar_registry_is_private_and_removed_only_by_its_owner(
 
     assert json.loads(registry.read_text(encoding="utf-8")) == {
         "protocol": "sage.runtime/v2",
-        "revision": 12,
+        "revision": SIDECAR_REVISION,
         "build_id": "test-build",
         "host": "127.0.0.1",
         "port": 54321,
@@ -180,3 +183,40 @@ def test_sidecar_writer_wait_is_bounded():
             sleep=lambda delay: now.__setitem__(0, now[0] + delay),
         )
     assert now[0] == pytest.approx(0.3)
+
+
+def test_sidecar_startup_logs_selected_observation_provider_before_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Exercise main's startup path, including its first structured log record."""
+    import importlib
+    from types import SimpleNamespace
+
+    entrypoint = importlib.import_module("app.v2.desktop.backend.main")
+    service_module = importlib.import_module("app.v2.desktop.backend.service")
+    listener = SimpleNamespace(
+        setsockopt=lambda *args: None,
+        bind=lambda *args: None,
+        listen=lambda *args: None,
+        getsockname=lambda: ("127.0.0.1", 54321),
+    )
+    monkeypatch.setattr(entrypoint.socket, "socket", lambda *args: listener)
+    monkeypatch.setattr(entrypoint, "install_standard_logging", lambda sink: None)
+    monkeypatch.setattr(
+        entrypoint,
+        "create_desktop_observability",
+        lambda root: SimpleNamespace(
+            plugin_id="sage.observability.noop", logs=NoopLogSink()
+        ),
+    )
+
+    class ServiceReached(Exception):
+        pass
+
+    def service(**kwargs):
+        raise ServiceReached
+
+    monkeypatch.setattr(service_module, "DesktopV2Service", service)
+    with pytest.raises(ServiceReached):
+        entrypoint.main(["--data-root", str(tmp_path), "--build-id", "startup-test"])

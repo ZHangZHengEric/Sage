@@ -1,0 +1,298 @@
+import json
+
+import httpx
+import pytest
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+from app.v2.cli.rsi_mcp import DesktopBridge, create_server
+from app.v2.desktop.backend.runtime_protocol import SIDECAR_PROTOCOL, SIDECAR_REVISION
+
+
+def registry(root, host="127.0.0.1"):
+    folder = root / "runtime"
+    folder.mkdir()
+    (folder / "desktop-v2-sidecar.json").write_text(
+        json.dumps(
+            {
+                "host": host,
+                "port": 43210,
+                "auth_token": "test-only",
+                "protocol": SIDECAR_PROTOCOL,
+                "revision": SIDECAR_REVISION,
+                "build_id": "test",
+            }
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_real_stdio_lists_tools_and_reports_missing_desktop(tmp_path):
+    import sys
+
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[
+            "-m",
+            "app.v2.cli.rsi_mcp",
+            "--data-root",
+            str(tmp_path),
+        ],
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.list_tools()
+            names = {t.name for t in result.tools}
+            assert names == {
+                "rsi_agents",
+                "rsi_start",
+                "rsi_history",
+                "rsi_status",
+                "rsi_questions",
+                "rsi_cancel",
+                "rsi_version",
+                "rsi_apply",
+            }
+            response = await session.call_tool("rsi_agents", {})
+            assert response.isError
+            assert "Start Sage Desktop" in response.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_bridge_tools_route_to_one_authenticated_runtime(tmp_path):
+    registry(tmp_path)
+    requests = []
+    def handler(request):
+        requests.append(request)
+        assert request.headers["authorization"] == "Bearer test-only"
+        path = request.url.path
+        if path == "/health":
+            data = {"protocol": SIDECAR_PROTOCOL, "revision": SIDECAR_REVISION, "build_id": "test"}
+        elif "/runtime/clients/" in path:
+            data = {"lease_ttl_seconds": 30}
+        elif path == "/api/v2/agents":
+            data = [{"id": "a", "name": "Default", "config": {"api_key": "secret"}}]
+        elif path.endswith("/runs/r"):
+            data = {"status": "running", "events": [
+                {"sequence": 1, "event": "suite_fixed", "data": {"suite": {"cases": [
+                    {"id": "t1", "split": "training"}, {"id": "v1", "split": "validation"}]}}},
+                {"sequence": 2, "event": "training_cases_added", "data": {"cases": [{"id": "t2", "split": "training"}]}}
+            ]}
+        else:
+            data = {"id": "r"}
+        return httpx.Response(200, json={"code": 0, "data": data})
+    bridge = DesktopBridge(tmp_path, transport=httpx.MockTransport(handler))
+    server = create_server(tmp_path, bridge=bridge)
+    try:
+        agents = await server.call_tool("rsi_agents", {})
+        assert "secret" not in str(agents)
+        await server.call_tool("rsi_start", {"agent_id": "a", "goal": "Become support", "request_id": "intent-1",
+            "optimization_scope": ["instructions", "tools"], "target_score": .98, "patience": 4, "stability_passes": 3})
+        body = json.loads(next(r for r in requests if r.method == "POST").content)
+        assert body["max_concurrency"] == 3 and body["validation_case_count"] == 24
+        assert body["optimization_scope"] == ["instructions", "tools"]
+        assert body["rounds"] == 8 and body["suite"] is None and body["human_test_count"] == 12
+        assert "final_suite" not in body
+        assert body["stopping_policy"] == {"target_score": .98, "patience": 4, "stability_passes": 3}
+        questions = await server.call_tool("rsi_questions", {"agent_id": "a", "run_id": "r"})
+        assert '"validation"' in str(questions)
+        before = len(requests)
+        with pytest.raises(Exception):
+            await server.call_tool("rsi_apply", {"agent_id": "a", "version_id": "v", "expected_fingerprint": "x" * 64, "confirmed": False})
+        assert len(requests) == before
+    finally:
+        await bridge.close()
+    assert requests[-1].method == "DELETE"
+
+
+@pytest.mark.asyncio
+async def test_registry_cannot_forward_capability_to_remote_host(tmp_path):
+    registry(tmp_path, host="8.8.8.8")
+    bridge = DesktopBridge(tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="loopback"):
+            await bridge.connect()
+    finally:
+        await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_unknown_mutation_outcome_is_never_retried(tmp_path):
+    registry(tmp_path)
+    posts = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(request)
+            raise httpx.ReadError("lost response")
+        if request.url.path == "/health":
+            data = {
+                "protocol": SIDECAR_PROTOCOL,
+                "revision": SIDECAR_REVISION,
+                "build_id": "test",
+            }
+        else:
+            data = {"lease_ttl_seconds": 30}
+        return httpx.Response(200, json={"code": 0, "data": data})
+
+    bridge = DesktopBridge(tmp_path, transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="Do not repeat"):
+            await bridge.request("POST", "/api/v2/agents/a/rsi", json={})
+        assert len(posts) == 1
+    finally:
+        await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_status_pagination_never_skips_events_and_omits_repeated_evidence(
+    tmp_path,
+):
+    registry(tmp_path)
+
+    def handler(request):
+        if request.url.path == "/health":
+            data = {
+                "protocol": SIDECAR_PROTOCOL,
+                "revision": SIDECAR_REVISION,
+                "build_id": "test",
+            }
+        elif "/runtime/clients/" in request.url.path:
+            data = {"lease_ttl_seconds": 30}
+        else:
+            after = int(request.url.params.get("after_sequence", 0))
+            data = {
+                "status": "completed",
+                "sequence": 10,
+                "iterations": [{"large": "snapshot"}],
+                "events": [
+                    {
+                        "sequence": i,
+                        "event": "target_call_completed",
+                        "data": {
+                            "observation": {
+                                "output": "real reply",
+                                "evidence": {"raw": "large transcript"},
+                            }
+                        },
+                    }
+                    for i in range(after + 1, 11)
+                ],
+            }
+        return httpx.Response(200, json={"code": 0, "data": data})
+
+    bridge = DesktopBridge(tmp_path, transport=httpx.MockTransport(handler))
+    server = create_server(tmp_path, bridge=bridge)
+    try:
+        response = await server.call_tool(
+            "rsi_status", {"agent_id": "a", "run_id": "r", "limit": 2}
+        )
+        # Direct FastMCP calls return text blocks; the stdio test covers protocol framing.
+        value = json.loads(response[0].text)
+        assert value["next_sequence"] == 2 and value["sequence"] == 10
+        assert len(value["events"]) == 2
+        assert "iterations" not in value
+        assert "observation" not in value["events"][0]["data"]
+        response = await server.call_tool(
+            "rsi_status",
+            {"agent_id": "a", "run_id": "r", "after_sequence": 2, "limit": 2},
+        )
+        assert [
+            event["sequence"] for event in json.loads(response[0].text)["events"]
+        ] == [3, 4]
+    finally:
+        await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_old_runtime_is_rejected_before_any_api_mutation(tmp_path):
+    registry(tmp_path)
+    path = tmp_path / "runtime/desktop-v2-sidecar.json"
+    value = json.loads(path.read_text())
+    value["revision"] = SIDECAR_REVISION - 1
+    path.write_text(json.dumps(value))
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"code": 0, "data": {}})
+
+    bridge = DesktopBridge(tmp_path, transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="matching Sage Desktop build"):
+            await bridge.request("POST", "/api/v2/agents/a/rsi", json={})
+        assert calls == []
+    finally:
+        await bridge.close()
+
+
+def private_run():
+    train = {'id': 'train', 'split': 'training', 'input': 'TRAIN_VISIBLE', 'rubric': 'TRAIN_RUBRIC'}
+    dev = {'id': 'DEV_ID_SECRET', 'split': 'validation', 'input': 'DEV_QUESTION_SECRET', 'rubric': 'DEV_RUBRIC_SECRET'}
+    test = {'id': 'TEST_ID_SECRET', 'split': 'test', 'input': 'TEST_QUESTION_SECRET', 'rubric': 'TEST_RUBRIC_SECRET'}
+    evaluation = {'package_hash': 'hash', 'cases': [
+        {'case': train, 'grade': {'score': .4, 'passed': False, 'rationale': 'TRAIN_FEEDBACK'}, 'observation': {'output': 'TRAIN_PROCESS'}},
+        {'case': dev, 'grade': {'score': .8, 'passed': False, 'rationale': 'DEV_FEEDBACK_SECRET'}, 'observation': {'output': 'DEV_PROCESS_SECRET'}},
+    ]}
+    report = {'suite': {'cases': [train, dev]}, 'baseline': evaluation, 'selected': evaluation,
+        'agent_calls': [{'request': 'DEV_PROCESS_SECRET TEST_QUESTION_SECRET'}],
+        'suite_review': {'approved': True, 'issues': [], 'rationale': 'DEV_QUESTION_SECRET'}}
+    result = {'report': report}
+    return {'id': 'run', 'status': 'completed', 'result': result,
+        'human_test_suite': {'cases': [test]}, 'test_observations': [{'score': .137}],
+        'human_test_error': 'TEST_ERROR_SECRET',
+        'iterations': [{'evaluation': evaluation, 'reason': 'DEV_ID_SECRET regressed',
+            'regressions': [{'split': 'validation', 'case_id': 'DEV_ID_SECRET', 'previous_score': .9}]}],
+        'events': [
+            {'sequence': 1, 'event': 'suite_fixed', 'data': {'suite': {'cases': [train, dev, test]}}},
+            {'sequence': 2, 'event': 'target_call_started', 'data': {'input': 'DEV_QUESTION_SECRET', 'case_id': 'DEV_ID_SECRET'}},
+            {'sequence': 3, 'event': 'target_call_completed', 'data': {'observation': {'output': 'DEV_PROCESS_SECRET'}}},
+            {'sequence': 4, 'event': 'case_completed', 'data': {'result': evaluation['cases'][0]}},
+            {'sequence': 5, 'event': 'evaluation_completed', 'data': {'evaluation': evaluation}},
+            {'sequence': 6, 'event': 'future_test_event', 'data': {'output': 'TEST_QUESTION_SECRET'}},
+            {'sequence': 7, 'event': 'result_completed', 'data': {'result': result}},
+        ]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tool,arguments', [
+    ('rsi_start', {'agent_id': 'a', 'goal': 'Improve', 'request_id': 'intent'}),
+    ('rsi_history', {'agent_id': 'a'}),
+    ('rsi_status', {'agent_id': 'a', 'run_id': 'r'}),
+    ('rsi_status', {'agent_id': 'a', 'run_id': 'r', 'include_details': True}),
+    ('rsi_questions', {'agent_id': 'a', 'run_id': 'r'}),
+    ('rsi_version', {'agent_id': 'a', 'version_id': 'v'}),
+    ('rsi_cancel', {'agent_id': 'a', 'run_id': 'r'}),
+    ('rsi_apply', {'agent_id': 'a', 'version_id': 'v', 'expected_fingerprint': 'x' * 64, 'confirmed': True}),
+])
+async def test_every_mcp_read_mode_seals_test_and_dev_content(tmp_path, tool, arguments):
+    class Bridge:
+        async def request(self, *args, **kwargs):
+            return private_run()
+        async def close(self):
+            pass
+    response = await create_server(tmp_path, bridge=Bridge()).call_tool(tool, arguments)
+    text = response[0].text
+    assert 'SECRET' not in text
+    assert '0.137' not in text
+    assert 'test_observations' not in text and 'human_test_suite' not in text
+    assert 'TRAIN_VISIBLE' in text
+    if tool == 'rsi_status' and arguments.get('include_details'):
+        value = json.loads(text)
+        assert value['result']['report']['selected']['validation'] == {
+            'score': .8, 'total': 1, 'passed': 0, 'items': [{'index': 1, 'score': .8}]}
+        assert value['events'][3]['data']['result']['observation']['output'] == 'TRAIN_PROCESS'
+        assert value['next_sequence'] == 7
+    if tool == 'rsi_questions':
+        assert json.loads(text)['validation'] == {'total': 1, 'questions_visible': False}
+
+
+@pytest.mark.asyncio
+async def test_mcp_schema_does_not_accept_agent_authored_dev_or_test_suites(tmp_path):
+    server = create_server(tmp_path)
+    tools = await server.list_tools()
+    start = next(t for t in tools if t.name == 'rsi_start')
+    assert 'suite' not in start.inputSchema['properties']
+    assert 'human_test_suite' not in start.inputSchema['properties']
+    assert 'human_test_count' in start.inputSchema['properties']

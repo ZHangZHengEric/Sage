@@ -194,7 +194,15 @@ macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；W
 
 ## RSI 与 Agent 版本
 
-Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏和统一的字段布局；“版本历史”是 Agent 配置层级的独立入口，展示人工保存和确认应用的配置版本，无需启动 RSI。RSI 页面只展示运行历史与各轮候选，未应用的候选不会混入 Agent 版本历史。用户可设置 1–100 轮、内部 Agent 模型和优化范围（指令、Skill、原生工具启用列表、步数预算），也可导入符合 OptimizationSuite 的 JSON 测试集；未提供时由测试设计 Agent 生成。独立最终测试集在基线前封存；测试集与授权目标的一致性由独立 Session 的审查 Agent 先行检查。有阻断问题时不执行目标 Agent 或调优 Agent，页面显示问题与修正建议；覆盖不足等建议保留供查看。候选修改另由独立 Session 的语义审查 Agent 检查。
+Agent 配置中的“进化”入口打开独立 RSI 对话矩阵；“版本历史”单独展示配置和候选。新流程只有训练集和验证集，不再生成或执行独立终测。可设置 1–100 轮上限（默认 8）、1–100 道验证题（默认 24）、1–16 个并行问题（默认 3）、内部 Agent 模型和优化范围。验证集在独立出题 Session 中生成并固定；训练集独立生成，每轮由出题 Agent 根据当前保留版本、已有训练题和训练结果补充新的挑战，不配置固定训练总题量。每次补充最多 6 题，旧题保留，新题先审核业务一致性再执行。
+
+每轮先评测当前版本在新增训练题上的表现，再让候选接受同一套累计训练题和固定验证题评测。调优 Agent 获得训练题的完整反馈，以及验证集的均分、通过数量、稳定匿名序号对应的逐题得分和历史趋势；不获得验证题文本、原始题号、回答、rubric 或逐题评语。训练出题 Agent 不接收验证题或逐题反馈。不做题目泄露、跨集合重复或背题判定；仍审查业务规则一致性、清晰可执行的题目，以及修改是否改变目标、评分标准或权限。
+
+“查看题库”可搜索并筛选训练／验证题。Dashboard 用训练／验证两块点阵展示逐题状态：低分深红、高分深绿、未评估灰色，评测中有边框，悬停查看题号和得分。点阵与所选轮次同步，颜色来自真实成绩。页面显示持续增长的训练题量、固定验证题量和两组成绩；新增训练挑战与候选评测使用独立对话分组。每个窗口由真实事件驱动，区分排队、对话、评估与打分。“进化改动”逐轮展示实际父版本到候选的指令、工具实现、Skills、预算及文件差异；红删绿增，标明采纳、拒绝、未修改或候选未生成。父版本按 parent_hash 解析，不把被拒绝的上一轮当作父版本；版本详情也可点击“查看本轮改动”。新题不会出现在它加入之前的旧轮次里。导入 OptimizationSuite 时，两组由 split 标记，界面自动采用导入的验证题量，训练部分仍继续扩展。
+
+候选在同一套累计题上，以训练均分和验证均分各 50% 计算整体分；整体提升达到最小增益就保留，允许单题或某一分组退步。每轮记录整体前后分数与退步题，后续从更好的候选继续优化，并向调优 Agent 提供待修复训练退步题；验证仍只有匿名分数。默认退出策略：累计训练题和固定验证题均通过且各题评分至少 0.95，再完整复测一次确认稳定（共两次独立通过）；连续 3 轮无有效保留改进则停滞退出，也受轮数与时限约束。到达上限仍保留整体更好的候选；未达稳定目标时不标记推荐、不声明达标，也不退回初始 Agent。MCP 可配置 target_score、patience、stability_passes。权限和目标审查、工具执行完整性检查仍独立生效，原始模型评分另行保留。
+
+整体运行时限按验证题量、训练增长、轮次、重复次数和并行度计算（1–24 小时），单次调用上限 240 秒。并行上限覆盖一道题的完整对话和评估，同题多轮对话依次执行；报告保持题库顺序。取消或失败会等待在途任务清理，不重试外部副作用。
 
 运行设置可收起，优化范围使用 Glass 控件并适配深浅色。RSI 在 sidecar 的后台任务中执行，页面增量读取过程；离开页面或关闭最后一个窗口不会终止正在执行的 RSI。重新打开页面可读取历次任务、每轮版本、测试回答、评测和审查结果。sidecar 退出/崩溃时任务保留为 interrupted，不会自动重放未知结果的模型或工具调用。
 
@@ -204,11 +212,36 @@ Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏
 
 人工保存版本在列表中标为“配置保存”，详情可展开查看名称、描述、模型、运行变量和权限，另有指令、工具、Skills、预算及文件内容。配置从 A 改为 B 再改回 A 会保留三个历史节点；重复读取不会新增节点。功能启用前尚未归档的旧编辑无法恢复，只能从现有配置建立初始快照。
 
-优化完成不修改当前 Agent。用户点击“使用此版本”，再确认替换，才调用独立的应用接口；接口要求 confirmed=true 和当前配置指纹。确认期间配置改变则拒绝覆盖。语义审查拒绝的候选保留用于查看，不能激活；未完成评测的候选不能激活。页面标出各版本是否接受了独立最终测试，用户可明确选择其他完成评测的迭代。完整报告与版本可分别导出。
+优化完成不修改当前 Agent。用户点击“使用此版本”，再确认替换，才调用独立的应用接口；接口要求 confirmed=true 和当前配置指纹。确认期间配置改变则拒绝覆盖。语义审查拒绝的候选保留用于查看，不能激活；未完成评测的候选不能激活。旧实验的终测记录仍可查看，用户可明确选择其他完成评测的迭代。完整报告与版本可分别导出。
 
-第一版支持 simple Agent 和原生工具；原有运行变量被固定带入测试，每次测试使用新 Application/Session 和临时工作区。临时工作区不包含真实项目文件，进程执行禁用，网络使用默认沙箱限制；Shell 尚需测试绑定，MCP 与非 simple Agent 在启动前拒绝。工具范围可以从原生工具集合增减启用项，预算范围目前只开放 max_steps。依赖 Desktop 单 sidecar 进程，不提供分布式任务接管或自动断点续跑。
+第一版支持 simple Agent 和原生工具；原有运行变量被固定带入测试，每次测试使用新 Application/Session 和临时工作区。临时工作区不包含真实项目文件，进程执行禁用，网络使用默认沙箱限制；Shell 尚需测试绑定，MCP 与非 simple Agent 在启动前拒绝。工具范围可以从原生工具集合增减启用项，也可通过 `tool_definitions` 创建或修改 `rsi_` 命名的纯计算工具。实现随 package 存入 `tools/rsi/<name>.json`，包含输入 JSON Schema、说明与有界 JSON 表达式，候选评测、应用及回滚均使用该版本的实现。表达式支持条件、字段读取、逻辑、比较与算术，不执行 Python/Shell 或外部 I/O；每包最多 8 个生成工具。预算范围目前只开放 max_steps。依赖 Desktop 单 sidecar 进程，不提供分布式任务接管或自动断点续跑。
 
 `integration_test/desktop_rsi_live_test.dart` 是显式启用的 macOS 原生验证。需先准备真实模型 provider、独立测试 Agent 和 `setup.json`/`suite.json`，然后运行 `flutter test integration_test/desktop_rsi_live_test.dart -d macos --dart-define=RSI_LIVE_MODEL=true --dart-define=RSI_LIVE_ARTIFACT_DIR=<绝对目录>`。它调用真实后台与模型，通过原生前端检查人工保存、三轮进度、离开/重连、确认/取消、版本恢复和后端重启后的历史；仅系统文件选择器使用固定测试文件替代。默认不运行，避免普通测试产生模型费用。
+
+`integration_test/rsi_evolution_recording_test.dart` 用真实 sidecar 和模型录制原生进化页面，不自动应用候选。显式设置 `RSI_RECORD_LIVE=true`、`RSI_RECORD_DIR=<绝对目录>`（可选 `RSI_RECORD_PROVIDER=<已配置 provider ID>`；省略则保留出厂默认模型） 后以 `flutter test ... -d macos` 运行；可通过 `RSI_RECORD_VALIDATION_COUNT` 和 `RSI_RECORD_CONCURRENCY` 调整题量、并发。需要本机 FFmpeg；输出包含 MP4、逐帧阶段索引和真实运行报告。演示测试要求训练与固定验证集稳定达标、验证均分至少 0.95、真实改进，以及生成工具的实现和成功执行证据；任务仅结束但未达标会使测试失败。也可先启动 Desktop，再用 `flutter test test/rsi_live_recording_test.dart --dart-define=RSI_RECORD_HEADLESS=true` 加上上述显式开关直接录制 Flutter 帧，仍调用真实 sidecar 与模型；`RSI_RECORD_AGENT` 可复用默认 Agent，`RSI_RECORD_RUN` 可接着录制已有任务，避免重复启动模型调用。
+
+
+### RSI stdio MCP
+
+先启动当前源码版 Sage Desktop（运行时 revision 16），再将以下配置接入支持 stdio 的 Agent（路径替换为自己的 checkout；安装包也提供 `sage-rsi-mcp` 命令）：
+
+```json
+{
+  "mcpServers": {
+    "sage-rsi": {
+      "command": "/absolute/path/Sage/.venv/bin/python",
+      "args": ["-m", "app.v2.cli.rsi_mcp", "--data-root", "/absolute/path/sage"],
+      "env": {"PYTHONPATH": "/absolute/path/Sage"}
+    }
+  }
+}
+```
+
+工具包括 `rsi_agents`、`rsi_start`、`rsi_history`、`rsi_status`、`rsi_questions`、`rsi_cancel`、`rsi_version` 和 `rsi_apply`。`rsi_start` 必须提供 `agent_id`、`goal`、`request_id`；默认 8 轮、24 道验证题、12 道只给人看的测试题、并行上限 3，可通过 `validation_case_count` 和 `human_test_count` 设置题数。可显式设置 `optimization_scope=["instructions", "tools"]` 让调优 Agent 生成工具实现。MCP 不接受调用 Agent 提供的 `suite` 或 `human_test_suite`，题目由宿主独立生成；人工预设集合使用 Desktop API。相同意图保留相同 request_id，变更参数需新 ID。
+
+启动立即返回持久 run ID。使用 `rsi_status(after_sequence=0)` 默认读取 50 个精简事件（`limit` 最大 200）；下一次传返回的 `next_sequence`，终态仍需读完积压事件。所有 MCP 返回均遵守相同权限：train 可见问题、完成后的过程和反馈，dev 只提供匿名逐题分数及汇总成绩，test 内容和成绩完全不返回。`include_details=true` 只增加允许查看的训练证据和版本详情，不能扩大 dev/test 权限；无法从单页判断所属集合的原始调用事件只返回进度元数据。`rsi_questions` 返回累计 training 问题与 rubric，以及 validation 数量，不返回验证题。Desktop 人工页面保留三组的独立视图；MCP 断开只释放租约，运行中的 RSI 继续。候选不自动应用，`rsi_apply` 仍要求用户明确确认、`confirmed=true` 和最新配置指纹。
+
+MCP 进程不打开第二个数据库 writer，也不暴露模型密钥。它验证本机 loopback sidecar 的协议和身份，直连并维护租约；Desktop 未运行时返回明确错误。调用结果丢失不自动重发变更，应先按原 request_id 检查历史。外部 MCP 工具作为优化目标仍需要独立测试绑定，这与通过 MCP 控制 RSI 是两条不同的接入路径。
 
 
 ### Streaming presentations / 流式演示文稿
@@ -222,3 +255,8 @@ Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏
 ## 标准运行控制
 
 审批、提交、取消、暂停和恢复使用标准 App/Runtime。受理前失败返回结构化 HTTP 错误，不创建占位 Run；候选结果通过 entrypoint 发布以保留原 Agent 版本和记忆处理。接口与生命周期边界见[控制接口核对](../../../docs/zh/architecture/sagents-v2-host-controls.md)。
+
+
+### Human-only test checkpoints
+
+The RSI configuration includes `human_test_count` (UI default 12; 0 disables it). An API caller can supply `human_test_suite`, using `split=test`, independently of the train/dev `suite`. A one-way observer measures baseline and each retained round, with fresh target/scoring sessions and a shared concurrency ceiling. `test_observations` is persisted on the human-facing run; optimizer reports, tuning payloads and stopping decisions never receive it. Curves and dot matrices select the same retained package and round across train/dev/test. Failures or unfinished measurements display as missing, never zero.

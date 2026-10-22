@@ -80,6 +80,7 @@ Homepage = "https://github.com/ZHangZHengEric/Sage"
 
 [project.scripts]
 sage = "app.clients.cli.main:main"
+sage-rsi-mcp = "app.v2.cli.rsi_mcp:main"
 
 [tool.setuptools]
 include-package-data = true

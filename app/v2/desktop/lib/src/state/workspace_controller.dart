@@ -301,9 +301,13 @@ class WorkspaceController extends ChangeNotifier {
   }) => _api.rsiRun(agentId, runId, afterSequence: afterSequence);
   Future<Map<String, Object?>> rsiVersion(String agentId, String versionId) =>
       _api.rsiVersion(agentId, versionId);
-  Future<void> startRsi(String agentId, Map<String, Object?> request) async {
-    await _api.startRsi(agentId, request);
+  Future<Map<String, Object?>> startRsi(
+    String agentId,
+    Map<String, Object?> request,
+  ) async {
+    final run = await _api.startRsi(agentId, request);
     await refreshAgentStatuses();
+    return run;
   }
 
   Future<void> cancelRsi(String agentId, String runId) async {

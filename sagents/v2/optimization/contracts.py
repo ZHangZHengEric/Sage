@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from sagents.v2.agent.management import AgentPackageBundle
+from sagents.v2.tool.generated import GeneratedTool
 from sagents.v2.contracts.common import StrictModel, VerbatimText, ToolName, SkillName
 
 OptimizationPart = Literal["instructions", "skills", "tools", "budgets", "resources"]
@@ -16,10 +17,11 @@ class OptimizationCase(StrictModel):
     id: str
     input: VerbatimText = Field(min_length=1)
     rubric: VerbatimText = Field(min_length=1)
-    split: Literal["training", "validation", "final"] = "training"
+    split: Literal["training", "validation", "test", "final"] = "training"
     mode: Literal["single_turn", "dialogue"] = "single_turn"
     max_turns: int = Field(default=5, ge=1, le=20)
     user_context: VerbatimText = ""
+    coverage_tags: tuple[str, ...] = ()
 
 
 class OptimizationSuite(StrictModel):
@@ -27,12 +29,26 @@ class OptimizationSuite(StrictModel):
 
     @model_validator(mode="after")
     def check_cases(self):
-        if not 2 <= len(self.cases) <= 100:
-            raise ValueError("suite requires 2 to 100 cases")
+        if not 2 <= len(self.cases) <= 10000:
+            raise ValueError("suite requires 2 to 10000 cases")
         if len({case.id for case in self.cases}) != len(self.cases):
             raise ValueError("case ids must be unique")
         if {case.split for case in self.cases} != {"training", "validation"}:
             raise ValueError("suite requires training and validation cases")
+        return self
+
+
+class OptimizationTestSuite(StrictModel):
+    """Human-only observation tasks; never an optimizer input."""
+
+    cases: tuple[OptimizationCase, ...] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def check_cases(self):
+        if len({case.id for case in self.cases}) != len(self.cases):
+            raise ValueError("test case ids must be unique")
+        if any(case.split != "test" for case in self.cases):
+            raise ValueError("test suite cases must use split=test")
         return self
 
 
@@ -63,6 +79,8 @@ class OptimizationConstraints(StrictModel):
     editable_files: tuple[str, ...] = ()
     creatable_files: tuple[str, ...] = ()
     allow_tool_changes: bool = False
+    allow_tool_creation: bool = False
+    require_clean_generated_tools: bool = False
     allow_skill_changes: bool = False
     tool_candidates: dict[ToolName, str] = Field(default_factory=dict)
     skill_candidates: dict[SkillName, str] = Field(default_factory=dict)
@@ -84,6 +102,7 @@ class OptimizationConstraints(StrictModel):
 
 class OptimizationPatch(StrictModel):
     rationale: str = Field(min_length=1)
+    tool_definitions: dict[ToolName, GeneratedTool] = Field(default_factory=dict)
     instruction_guidance: VerbatimText | None = None
     files: dict[str, VerbatimText] = Field(default_factory=dict)
     budgets: dict[str, Any] = Field(default_factory=dict)
@@ -118,6 +137,7 @@ class OptimizationDialogueTurn(StrictModel):
     input: VerbatimText
     observation: OptimizationObservation
     grade: OptimizationGrade
+    model_grade: OptimizationGrade | None = None
 
 
 class OptimizationCaseTrial(StrictModel):
@@ -140,6 +160,10 @@ class OptimizationEvaluation(StrictModel):
     def mean_score(self, split: str) -> float:
         grades = [item.grade.score for item in self.cases if item.case.split == split]
         return sum(grades) / len(grades)
+
+    def overall_score(self) -> float:
+        """Equal split weights remain stable as training questions accumulate."""
+        return (self.mean_score("training") + self.mean_score("validation")) / 2
 
 
 class OptimizationSuiteIssue(StrictModel):
@@ -171,7 +195,7 @@ class OptimizationSuiteReview(StrictModel):
 
 class OptimizationProposalReview(StrictModel):
     approved: bool
-    memorization_detected: bool
+    memorization_detected: bool = False
     goal_drift_detected: bool
     permission_drift_detected: bool
     rationale: str = Field(min_length=1)
@@ -180,12 +204,19 @@ class OptimizationProposalReview(StrictModel):
     @model_validator(mode="after")
     def check_approval(self):
         if self.approved and (
-            self.memorization_detected
-            or self.goal_drift_detected
-            or self.permission_drift_detected
+            self.goal_drift_detected or self.permission_drift_detected
         ):
             raise ValueError("review cannot approve a detected semantic violation")
         return self
+
+
+class OptimizationRegression(StrictModel):
+    case_id: str
+    split: Literal["training", "validation", "final"]
+    previous_score: float
+    current_score: float
+    previous_passed: bool
+    current_passed: bool
 
 
 class OptimizationRound(StrictModel):
@@ -198,6 +229,9 @@ class OptimizationRound(StrictModel):
     reason: str
     evaluation_reused: bool = False
     review: OptimizationProposalReview | None = None
+    overall_before: float | None = None
+    overall_after: float | None = None
+    regressions: tuple[OptimizationRegression, ...] = ()
 
 
 class OptimizationAgent(StrictModel):
@@ -226,7 +260,7 @@ class OptimizationAgentCall(StrictModel):
     round: int = 0
     case_id: str | None = None
     trial: int = Field(default=1, ge=1)
-    phase: Literal["optimization", "final"] = "optimization"
+    phase: Literal["optimization", "training_challenge", "final"] = "optimization"
 
 
 class OptimizationFinalVerification(StrictModel):
@@ -239,6 +273,32 @@ class OptimizationFinalVerification(StrictModel):
     evaluation_reused: bool = False
 
 
+class OptimizationStoppingPolicy(StrictModel):
+    target_score: float = Field(default=0.95, gt=0, le=1, allow_inf_nan=False)
+    patience: int = Field(default=3, ge=1, le=100)
+    stability_passes: int = Field(default=2, ge=2, le=5)
+
+
+class OptimizationTermination(StrictModel):
+    reason: Literal["target_reached", "stagnation", "round_limit"]
+    completed_rounds: int
+    stability_passes: int = 0
+    final_passed: bool | None = None
+
+
+class OptimizationStabilityCheck(StrictModel):
+    round: int
+    attempt: int
+    confirmation: int
+    passed: bool
+    evaluation: OptimizationEvaluation
+
+
+class OptimizationTrainingAddition(StrictModel):
+    round: int
+    cases: tuple[OptimizationCase, ...]
+
+
 class OptimizationReport(StrictModel):
     goal: VerbatimText
     suite_review: OptimizationSuiteReview | None = None
@@ -249,6 +309,13 @@ class OptimizationReport(StrictModel):
     rounds: tuple[OptimizationRound, ...]
     agent_calls: tuple[OptimizationAgentCall, ...]
     improved: bool
+    generated_tool_audit_required: bool = False
+    goal_verified: bool | None = None
+    recommendation_block_reason: str | None = None
+    stability_checks: tuple[OptimizationStabilityCheck, ...] = ()
+    training_additions: tuple[OptimizationTrainingAddition, ...] = ()
+    stopping_policy: OptimizationStoppingPolicy | None = None
+    termination: OptimizationTermination | None = None
     internal_agents: dict[str, OptimizationAgent] = Field(default_factory=dict)
     evaluation_repeats: int = 1
     final_verification: OptimizationFinalVerification | None = None
@@ -280,5 +347,25 @@ class OptimizationSuiteGeneration(StrictModel):
 
 class OptimizationFinalSuiteGeneration(StrictModel):
     suite: OptimizationFinalSuite
+    designer: OptimizationAgent
+    call: OptimizationAgentCall
+
+
+class OptimizationCaseBatch(StrictModel):
+    """One independently designed split; training accumulates across batches."""
+
+    cases: tuple[OptimizationCase, ...] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def check_cases(self):
+        if len({case.id for case in self.cases}) != len(self.cases):
+            raise ValueError("case ids must be unique")
+        if len({case.split for case in self.cases}) != 1:
+            raise ValueError("a batch must contain one split")
+        return self
+
+
+class OptimizationCaseBatchGeneration(StrictModel):
+    suite: OptimizationCaseBatch
     designer: OptimizationAgent
     call: OptimizationAgentCall
