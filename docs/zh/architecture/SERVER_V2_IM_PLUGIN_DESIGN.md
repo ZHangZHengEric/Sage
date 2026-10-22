@@ -26,24 +26,6 @@ SDK 装配器会补入 native protocol adapter，`SAgentApplication.run_interfac
 
 源码优先于 README 中的部署描述：当前设置已允许 Redis/MySQL SessionStore 与 Redis distributed scheduler 的组合，不能一概称 Server 只支持单进程；也不能据此认为新增 IM 监听天然具备分布式安全性。
 
-## 2. GitHub 项目的设计对照
-
-| 项目 | 从一手资料确认的逻辑 | Sage 的取舍 |
-| --- | --- | --- |
-| [OpenClaw](https://github.com/openclaw/openclaw/blob/main/src/channels/plugins/types.plugin.ts) | ChannelPlugin 组合配置、账号、收发、群、线程和流式能力；[宿主](https://github.com/openclaw/openclaw/blob/main/src/gateway/server-channels.ts)管账号级生命周期；[路由](https://github.com/openclaw/openclaw/blob/main/src/routing/resolve-route.ts)区分 Agent 与 session key | 借鉴能力声明、账号隔离和宿主管理；缩小接口，避免引入整套个人助手配置与默认会话合并 |
-| [nanobot](https://github.com/HKUDS/nanobot/blob/main/nanobot/channels/base.py) | BaseChannel 提供小生命周期与发送契约；[统一消息](https://github.com/HKUDS/nanobot/blob/main/nanobot/bus/events.py)经 bus 进入 Agent；[manager](https://github.com/HKUDS/nanobot/blob/main/nanobot/channels/manager.py)集中编排投递 | 借鉴小契约、统一事件与集中投递；不照搬[无界入站队列](https://github.com/HKUDS/nanobot/blob/main/nanobot/bus/queue.py)或仅 channel/chat 的默认会话键 |
-| [PicoClaw](https://github.com/sipeed/picoclaw/blob/main/pkg/channels/registry.go) | ChannelFactory 注册具体平台；[可选接口](https://github.com/sipeed/picoclaw/blob/main/pkg/channels/interfaces.go)扩展 typing、编辑、流式等能力 | 借鉴工厂与可选能力；Go 编译期注册不能直接等同 Python 第三方插件安装 |
-| [AstrBot](https://github.com/AstrBotDevs/AstrBot/blob/master/astrbot/core/platform/platform.py) | Platform 负责连接、提交事件与按会话主动发送；[MessageSession](https://github.com/AstrBotDevs/AstrBot/blob/master/astrbot/core/platform/message_session.py)包含适配器实例；[唤醒检查](https://github.com/AstrBotDevs/AstrBot/blob/master/astrbot/core/pipeline/waking_check/stage.py)在共享管道 | 借鉴平台类型与实例分离、共享触发规则、可序列化目的地 |
-| [NoneBot2](https://github.com/nonebot/nonebot2/blob/master/nonebot/internal/adapter/adapter.py) | Driver、Adapter、Bot、Event、MessageSegment 与业务 Matcher 分离；[分发](https://github.com/nonebot/nonebot2/blob/master/nonebot/message.py)检查权限与规则 | 借鉴协议适配与业务策略分离；第一版使用固定处理链，无须再实现 Matcher 插件生态 |
-| [LangBot](https://github.com/langbot-app/LangBot/blob/master/ARCHITECTURE.md) | 平台转换、Pipeline、Agent Runner、Plugin Runtime 分层；[Controller](https://github.com/langbot-app/LangBot/blob/master/src/langbot/pkg/pipeline/controller.py)管理全局与会话并发；[SDK](https://github.com/langbot-app/langbot-plugin-sdk/blob/main/src/langbot_plugin/api/definition/abstract/platform/adapter.py)分离 send/reply/stream | 借鉴渠道作为入口和运行实例管理；Sage 已有执行框架，不再引入第二套 Pipeline/Runner |
-| [LangGraph](https://docs.langchain.com/oss/python/langgraph/interrupts) | checkpointer、thread_id 与 interrupt/resume 协调持久人机交互 | 审批映射到 Sage 既有 interaction，不在插件内等待内存 Future |
-| [AutoGen](https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/human-in-the-loop.html) | UserProxyAgent 即时输入会阻塞团队，官方提示等待中的状态不能保存恢复 | 长时间 IM 审批使用持久挂起与回调恢复 |
-
-另有两个影响实现的细节：
-
-- nanobot 当前[官方指南](https://github.com/HKUDS/nanobot/blob/main/docs/channel-package-guide.md)明确采用仓库内 manifest package，移除了外部 channel entry-point 发现。应借鉴职责划分，不能宣称其目前支持任意外部 wheel 即插即用。
-- OpenClaw 当前读取的[交付存储](https://github.com/openclaw/openclaw/blob/main/src/infra/outbound/delivery-queue-storage.ts)与[恢复](https://github.com/openclaw/openclaw/blob/main/src/infra/outbound/delivery-queue-recovery.ts)处理稳定入队和不确定发送结果。持久队列仍不能单独证明外部平台 exactly-once。
-
 ## 3. 用户可见的功能与领域对象
 
 建议提供「IM 接入」能力，用户添加一个连接实例，再绑定本人拥有的 Agent。一个平台可以有多个机器人账号，一个账号可按会话规则路由不同 Agent；同一个 Agent 可以接受多个平台入口。
