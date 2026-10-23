@@ -15,6 +15,40 @@ class _NamedUploadFile extends XFile {
 }
 
 void main() {
+  test('test recovery uses the authenticated existing-run endpoint', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    final requests = <String>[];
+    server.listen((request) async {
+      requests.add('${request.method} ${request.uri.path}');
+      expect(request.method, 'POST');
+      expect(
+        request.uri.path,
+        '/api/v2/agents/sage/rsi/runs/existing-run/resume-tests',
+      );
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        'Bearer test-token',
+      );
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'code': 0,
+          'data': {'id': 'existing-run', 'status': 'queued'},
+        }),
+      );
+      await request.response.close();
+    });
+    final api = V2ApiClient(
+      baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'test-token',
+    );
+    addTearDown(api.close);
+    final run = await api.resumeRsiTests('sage', 'existing-run');
+    expect(run['id'], 'existing-run');
+    expect(run['status'], 'queued');
+    expect(requests, hasLength(1));
+  });
   test('run reconnect sends canonical and preview cursors', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));

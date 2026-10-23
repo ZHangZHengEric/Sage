@@ -302,7 +302,9 @@ class RsiScoreTrend extends StatelessWidget {
         : ['Training', 'Validation', 'Test'];
     String score(Map<String, Object?> record, String split) {
       final value = _map(record['scores'])[split];
-      return value is num && !(split == 'test' && record['valid'] == false)
+      return value is num &&
+              value.isFinite &&
+              !(split == 'test' && record['valid'] == false)
           ? value.toStringAsFixed(3)
           : '—';
     }
@@ -361,13 +363,64 @@ class RsiScoreTrend extends StatelessWidget {
               Expanded(
                 child: SizedBox(
                   height: 110,
-                  child: CustomPaint(
-                    painter: _ScoreLines(
-                      points,
-                      colors,
-                      theme.colorScheme.onSurface.withValues(alpha: .12),
-                      scale: scale,
-                    ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      double x(int index) {
+                        final first = (points.first['round'] as num).toDouble();
+                        final last = (points.last['round'] as num).toDouble();
+                        return 8 +
+                            math.max(0, constraints.maxWidth - 16) *
+                                (first == last
+                                    ? .5
+                                    : ((points[index]['round'] as num) -
+                                              first) /
+                                          (last - first));
+                      }
+
+                      String details(Map<String, Object?> point) => [
+                        round(point['round']),
+                        for (final (index, split) in splits.indexed)
+                          '${names[index]}：${split == 'test' && point['valid'] == false
+                              ? (chinese ? '结果无效' : 'Invalid result')
+                              : score(point, split) == '—'
+                              ? (chinese ? '未评估' : 'Not evaluated')
+                              : score(point, split)}',
+                      ].join('\n');
+                      return Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CustomPaint(
+                            painter: _ScoreLines(
+                              points,
+                              colors,
+                              theme.colorScheme.onSurface.withValues(
+                                alpha: .12,
+                              ),
+                              scale: scale,
+                            ),
+                          ),
+                          for (var i = 0; i < points.length; i++)
+                            Positioned(
+                              left: i == 0 ? 0 : (x(i - 1) + x(i)) / 2,
+                              right: i == points.length - 1
+                                  ? 0
+                                  : constraints.maxWidth -
+                                        (x(i) + x(i + 1)) / 2,
+                              top: 0,
+                              bottom: 0,
+                              child: Tooltip(
+                                key: ValueKey(
+                                  'rsi-trend-column-${points[i]['round']}',
+                                ),
+                                message: details(points[i]),
+                                waitDuration: const Duration(milliseconds: 150),
+                                excludeFromSemantics: true,
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),

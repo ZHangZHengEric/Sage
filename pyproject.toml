@@ -75,6 +75,7 @@ test = [
 ]
 # Optional text-only vendored tau-bench runtime; the base Sage install stays small.
 tau-bench = [
+  "httpx[socks]>=0.24.0",
   "litellm==1.82.6",
   "deepdiff==9.1.0",
   "addict==2.4.0",

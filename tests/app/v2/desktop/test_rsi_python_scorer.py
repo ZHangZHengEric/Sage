@@ -294,7 +294,9 @@ async def test_user_completed_dialogues_score_once_in_native_train_dev_and_human
         run = await service.rsi_run(agent, started['id'], 'alice')
         assert run['status'] == 'completed', run.get('error_type')
         assert len(histories) == 6 and set(histories) == {2}
-        assert run.get('automatic_recoveries', 0) == int(interruption in {'main', 'main_partial'})
+        assert run.get('automatic_recoveries', 0) == 0
+        # main_partial fails a target send after its first successful turn.
+        # Only that disposable case reopens; other cases and saved scores stay intact.
         assert len(target_calls) == (13 if interruption == 'main_partial' else 12)
         if 'artifact' in interruption:
             assert len(evaluation_invocations) == (7 if interruption.endswith(('missing_receipt', 'invalid_json')) else 6)

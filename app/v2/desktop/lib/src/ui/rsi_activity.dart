@@ -27,6 +27,7 @@ String rsiActivityLabel(
       '准备训练题目',
       'Preparing training questions',
     ),
+    'training_growth_deferred' => t('暂缓扩增训练题', 'Training expansion paused'),
     'test_generation_started' => t('准备题目', 'Preparing questions'),
     'suite_review_completed' => t('题目检查完成', 'Questions reviewed'),
     'training_cases_added' ||
@@ -37,6 +38,8 @@ String rsiActivityLabel(
     'scoring_call_started' => t('计算评分', 'Calculating score'),
     'scoring_call_completed' ||
     'dialogue_execution_scored' => t('准备诊断结果', 'Preparing diagnosis'),
+    'call_retry_scheduled' => t('重试当前调用', 'Retrying current call'),
+    'case_call_failed' => t('保留结果，等待恢复', 'Results saved, awaiting recovery'),
     'scoring_call_failed' ||
     'infrastructure_retry' => t('等待恢复', 'Waiting to recover'),
     'evaluation_response_rejected' ||
@@ -90,6 +93,15 @@ String rsiRunningActivity(
       checkingStability = false;
     }
     final value = data(event);
+    if (event['event'] == 'case_call_failed') {
+      active.removeWhere((_, started) {
+        final origin = data(started);
+        return origin['case_id'] == value['case_id'] &&
+            origin['round'] == value['round'] &&
+            origin['trial'] == value['trial'] &&
+            origin['phase'] == value['phase'];
+      });
+    }
     final id = value['call_id']?.toString();
     if (id == null) continue;
     if (event['event'] == 'agent_call_started' ||
@@ -99,7 +111,9 @@ String rsiRunningActivity(
     } else if (event['event'] == 'agent_call_completed' ||
         event['event'] == 'target_call_completed' ||
         event['event'] == 'scoring_call_completed' ||
-        event['event'] == 'scoring_call_failed') {
+        event['event'] == 'scoring_call_failed' ||
+        event['event'] == 'agent_call_failed' ||
+        event['event'] == 'target_call_failed') {
       active.remove(id);
     }
   }

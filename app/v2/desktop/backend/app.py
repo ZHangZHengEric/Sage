@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.v2.desktop.backend.rsi import RsiStart, RsiApply
+from app.v2.desktop.backend.rsi import RsiStart, RsiApply, RsiResumeOptions
 from app.v2.desktop.backend.rsi_evaluation import EvaluationPlan, ScorerImport
 
 import asyncio
@@ -442,8 +442,15 @@ def create_app(
         return _success(await _safe(runtime_service.rsi_run(agent_id, run_id, get_desktop_user_id(request), after_sequence=after_sequence, compact=compact)))
 
     @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/resume")
-    async def rsi_resume(agent_id: str, run_id: str, request: Request):
+    async def rsi_resume(agent_id: str, run_id: str, request: Request, options: RsiResumeOptions | None = None):
+        if options and options.upgrade_call_isolation:
+            return _success(await _safe(runtime_service.resume_rsi(agent_id, run_id,
+                get_desktop_user_id(request), upgrade_call_isolation=True)))
         return _success(await _safe(runtime_service.resume_rsi(agent_id, run_id, get_desktop_user_id(request))))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/resume-tests")
+    async def rsi_resume_tests(agent_id: str, run_id: str, request: Request):
+        return _success(await _safe(runtime_service.resume_rsi_tests(agent_id, run_id, get_desktop_user_id(request))))
 
     @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/cancel")
     async def rsi_cancel(agent_id: str, run_id: str, request: Request):

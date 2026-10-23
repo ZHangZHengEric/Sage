@@ -331,6 +331,11 @@ class WorkspaceController extends ChangeNotifier {
     await refreshAgentStatuses();
   }
 
+  Future<void> resumeRsiTests(String agentId, String runId) async {
+    await _api.resumeRsiTests(agentId, runId);
+    await refreshAgentStatuses();
+  }
+
   Future<void> applyRsiVersion(
     String agentId,
     String versionId,

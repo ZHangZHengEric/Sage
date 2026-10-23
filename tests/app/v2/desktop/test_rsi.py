@@ -955,6 +955,11 @@ async def test_human_test_checkpoints_are_durable_and_absent_from_optimizer_payl
         assert all(r['status'] == 'completed' and r['scores']['test'] == .9 for r in run['test_observations'])
         assert not any(marker in json.dumps(run['result']) for marker in ('sealed-holdout-canary-731',))
         assert not any(marker in json.dumps(run['events']) for marker in ('Human-only question',))
+        history = await service.rsi_history(agent_id, 'alice')
+        assert history['runs'][0]['id'] == started['id']
+        assert 'test_observations' not in history['runs'][0]
+        assert 'human_test_suite' not in history['runs'][0]
+        assert 'Human-only question' not in json.dumps(history)
         await service.close()
         restarted = DesktopV2Service(tmp_path)
         try:
@@ -1119,8 +1124,9 @@ async def test_five_transient_gateway_failures_recover_automatically_without_rep
         await service._rsi_tasks[run['id']]
         final = await service.rsi_run(agent_id, run['id'], 'alice')
         assert final['status'] == 'completed', final
-        assert final['automatic_recoveries'] == 5
-        assert delays == [2, 4, 8, 16, 32]
+        assert final.get('automatic_recoveries', 0) == 0
+        assert len([e for e in final['events'] if e['event'] == 'call_retry_scheduled']) == 5
+        assert delays == []
         assert model.target_calls == 8  # baseline pair + three candidate pairs, no repeated executions
         assert len(final['result']['report']['rounds']) == 3
     finally:
@@ -1166,7 +1172,8 @@ async def test_suspended_file_evaluation_transport_recovers_without_repeating_ta
         final = await service.rsi_run(agent_id, started['id'], 'alice')
         assert interrupted
         assert final['status'] == 'completed', final
-        assert final['automatic_recoveries'] == 1
+        assert final.get('automatic_recoveries', 0) == 0
+        assert len([e for e in final['events'] if e['event'] == 'call_retry_scheduled']) == 1
         assert len(target_inputs) == 4  # baseline and candidate; evaluation alone was retried
     finally:
         await service.close()

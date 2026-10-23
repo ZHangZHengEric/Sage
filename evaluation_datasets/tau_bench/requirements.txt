@@ -1,6 +1,6 @@
 # Tested text-only retail runtime dependencies. Install Sage separately.
 litellm==1.82.6
-mcp==1.27.0
+mcp==1.28.1
 deepdiff==9.1.0
 addict==2.4.0
 pydantic==2.13.3
@@ -14,3 +14,4 @@ rich==15.0.0
 tiktoken==0.14.0
 pydub==0.25.1
 PyYAML==6.0.3
+httpx[socks]>=0.24.0

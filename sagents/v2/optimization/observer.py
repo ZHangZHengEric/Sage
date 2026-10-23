@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 
 from sagents.v2.agent.management import AgentPackageBundle
@@ -22,6 +22,7 @@ from sagents.v2.optimization.diagnostics import execution_configuration
 
 
 _MEASUREMENT_RETRIES = ContextVar('rsi_human_measurement_retries', default=None)
+_MEASUREMENT_IDENTITY = ContextVar('rsi_human_measurement_identity', default=None)
 
 
 class HumanTestExecutionFailure(RuntimeError):
@@ -70,7 +71,11 @@ def _measurement_retry(phase):
 class IsolatedTestEvaluator:
     """Separate scoring/user sessions, with no tuning or selection capability."""
 
-    def __init__(self, *, runner, evaluator, driver, context, goal, timeout=240, require_clean_generated_tools=False, scorer=None, evidence_directory=None, retry_local_evaluations=False, restart_incomplete_dialogues=False, max_transport_retries=2):
+    def __init__(self, *, runner, evaluator, driver, context, goal, timeout=240, require_clean_generated_tools=False, scorer=None, evidence_directory=None, retry_local_evaluations=False, restart_incomplete_dialogues=False, max_transport_retries=2, call_retries=0, checkpoint_binding_id=None):
+        if type(call_retries) is not int or not 0 <= call_retries <= 12:
+            raise ValueError("call_retries must be 0..12")
+        self.call_retries = call_retries
+        self.checkpoint_binding_id = checkpoint_binding_id
         self.runner = runner
         self.evaluator = with_principles(evaluator, EVALUATION_PRINCIPLES)
         self.driver = dialogue_user(driver)
@@ -89,7 +94,7 @@ class IsolatedTestEvaluator:
     async def _run_role(self, agent, prepared, request, phase):
         tools = set(agent.package.manifest.agents[agent.agent_id].tools)
         safe = not tools or (self.retry_local_evaluations and tools <= {'file_read', 'file_write'})
-        for attempt in range(self.max_transport_retries + 1):
+        for attempt in range(max(self.max_transport_retries, self.call_retries) + 1):
             try:
                 async with asyncio.timeout(self.timeout):
                     observation = await self.runner.run(prepared.package.model_copy(deep=True),
@@ -104,7 +109,9 @@ class IsolatedTestEvaluator:
                         and tools <= {'file_read', 'file_write'} and assessment_loop_interrupted(observation)):
                     return observation
                 failure = HumanTestExecutionFailure(phase, observation=observation)
-            if not safe or not failure.retryable or attempt == self.max_transport_retries:
+            from sagents.v2.optimization.call_isolation import retry_allowed
+            may_retry = failure.retryable or self.call_retries and retry_allowed(failure)
+            if not safe or not may_retry or attempt == max(self.max_transport_retries, self.call_retries):
                 raise failure
             _measurement_retry(phase)
             await asyncio.sleep(min(5, .25 * (2 ** attempt)))
@@ -150,20 +157,25 @@ class IsolatedTestEvaluator:
         if self.scorer is not None:
             from sagents.v2.optimization.scoring import ScoringRequest, ScoringResult
             from sagents.v2.optimization.recovery import OptimizationTransientFailure
-            for attempt in range(self.max_transport_retries + 1):
+            for attempt in range(max(self.max_transport_retries, self.call_retries) + 1):
                 try:
                     async with asyncio.timeout(self.timeout):
                         result = ScoringResult.model_validate(await self.scorer.score(ScoringRequest(
                             goal=self.goal, case=case, observation=observation, conversation=tuple(history))))
                     break
                 except (OptimizationTransientFailure, TimeoutError) as error:
-                    if attempt == self.max_transport_retries:
+                    if attempt == max(self.max_transport_retries, self.call_retries):
                         failure = HumanTestExecutionFailure('scoring', timeout=isinstance(error, TimeoutError), code='model.provider_transient')
                         failure.retryable = failure.rsi_failure_metadata['retryable'] = True
                         raise failure from error
                     _measurement_retry('scoring')
                     await asyncio.sleep(min(5, .25 * (2 ** attempt)))
                 except Exception as error:
+                    from sagents.v2.optimization.call_isolation import retry_allowed
+                    if self.call_retries and retry_allowed(error) and attempt < self.call_retries:
+                        _measurement_retry('scoring')
+                        await asyncio.sleep(min(5, .25 * (2 ** attempt)))
+                        continue
                     error.rsi_failure_metadata = _measurement_failure('scoring', error).rsi_failure_metadata
                     raise
             if result.grade is None:
@@ -187,14 +199,16 @@ class IsolatedTestEvaluator:
         token = OPTIMIZATION_CASE.set(case)
         retry_token = _MEASUREMENT_RETRIES.set({})
         try:
-            for attempt in range(self.max_transport_retries + 1):
+            for attempt in range(max(self.max_transport_retries, self.call_retries) + 1):
                 try:
                     result = await self._evaluate_case(package, case)
                     result['infrastructure_retries'] = dict(_MEASUREMENT_RETRIES.get())
                     return result
                 except HumanTestExecutionFailure as error:
-                    if (error.phase != 'execution' or not error.retryable or not self.restart_incomplete_dialogues
-                            or attempt == self.max_transport_retries):
+                    from sagents.v2.optimization.call_isolation import retry_allowed
+                    may_retry = error.retryable or self.call_retries and retry_allowed(error)
+                    if (error.phase != 'execution' or not may_retry or not self.restart_incomplete_dialogues
+                            or attempt == max(self.max_transport_retries, self.call_retries)):
                         raise
                     _measurement_retry('execution')
                     await asyncio.sleep(min(5, .25 * (2 ** attempt)))
@@ -204,17 +218,39 @@ class IsolatedTestEvaluator:
                 retries = dict(_MEASUREMENT_RETRIES.get())
                 error.rsi_failure_metadata = {**metadata, 'infrastructure_retries': retries,
                     'retry_budget_exhausted': bool(metadata.get('retryable')
-                        and retries.get(metadata.get('phase'), 0) >= self.max_transport_retries)}
+                        and retries.get(metadata.get('phase'), 0) >= max(self.max_transport_retries, self.call_retries))}
             raise
         finally:
             _MEASUREMENT_RETRIES.reset(retry_token)
             OPTIMIZATION_CASE.reset(token)
 
+    @asynccontextmanager
+    async def _conversation(self, package, target):
+        entered = False
+        try:
+            async with self.runner.conversation(package.model_copy(deep=True), target, self.context) as session:
+                entered = True
+                yield session
+        except Exception as error:
+            if not entered:
+                raise _measurement_failure('execution', error) from error
+            raise
+
     async def _evaluate_case(self, package, case):
+        checkpoint = self._measurement_checkpoint(package, case)
+        saved = checkpoint.load() if checkpoint is not None else None
+        if saved is not None:
+            from sagents.v2.optimization.contracts import OptimizationObservation
+            history = saved['conversation']
+            observation = OptimizationObservation.model_validate(history[-1]['target'])
+            grade = (OptimizationGrade.model_validate(saved['grade']) if saved['grade'] is not None
+                     else await self._grade_execution(package, case, observation, history))
+            self._save_measurement(package, case, history, grade)
+            return await self._finish_measurement(package, case, observation, history, grade)
         history = []
         target = package.manifest.entrypoint.agent
         async with asyncio.timeout(self.timeout * (case.max_turns * 3 + 1)):
-            async with self.runner.conversation(package.model_copy(deep=True), target, self.context) as session:
+            async with self._conversation(package, target) as session:
                 content = case.input
                 for turn in range(1, (case.max_turns if case.mode == "dialogue" else 1) + 1):
                     try:
@@ -227,6 +263,8 @@ class IsolatedTestEvaluator:
                         raise HumanTestExecutionFailure('execution', observation=observation)
                     grade = None
                     if case.mode != "dialogue" or case.dialogue_completion == "score":
+                        if case.mode != "dialogue" or turn == case.max_turns:
+                            self._save_measurement(package, case, history, None)
                         grade = await self._grade_execution(package, case, observation, history)
                     if self.scorer is None and self.require_clean_generated_tools:
                         audit = generated_tool_audit(observation.evidence)
@@ -245,37 +283,75 @@ class IsolatedTestEvaluator:
                     if not reply.can_continue or not reply.message.strip():
                         break
                     content = reply.message
+                # The target dialogue is complete before session teardown or grading.
+                self._save_measurement(package, case, history, grade)
             if case.mode == "dialogue" and case.dialogue_completion == "user":
+                self._save_measurement(package, case, history, None)
                 grade = await self._grade_execution(package, case, observation, history)
-            if self.scorer is not None:
-                from sagents.v2.optimization.contracts import OptimizationDiagnosis
-                from sagents.v2.optimization.diagnostics import diagnose_scored_execution, execution_entries
-                async def invoke(request):
-                    diagnosis = await self._ask(self.evaluator, request['task'], request['data'], OptimizationDiagnosis)
-                    return diagnosis.model_dump_json()
-                file_backed = {"file_read", "file_write"} <= set(self.evaluator.package.manifest.agents[self.evaluator.agent_id].tools)
-                if file_backed:
-                    from sagents.v2.optimization.execution_records import conversation_messages
-                    entries = conversation_messages(observation, conversation=history, initial_input=case.input)
-                else:
-                    entries = [{'kind': 'case', 'input': case.input, 'reference_answer': case.reference_answer}]
-                    entries.extend(execution_entries(observation, conversation=history))
-                try:
-                    grade = await diagnose_scored_execution(grade=grade, entries=entries,
-                        rubric=case.rubric,
-                        policy=package.resolved_manifest().agents[target].instructions.inline,
-                        file_backed=file_backed,
-                        case_context={"id": case.id, "input": case.input, "reference_answer": case.reference_answer},
-                        agent_configuration=execution_configuration(package, target), invoke=invoke)
-                except Exception as error:
-                    # The authoritative score already exists. Diagnosis still failed;
-                    # preserve both states without retrying execution or scoring.
-                    failure = _measurement_failure('evaluation', error)
-                    error.rsi_completed_measurement = {'grade': grade.model_dump(mode='json'), 'conversation': history}
-                    if not isinstance(getattr(error, 'rsi_failure_metadata', None), dict):
-                        error.rsi_failure_metadata = failure.rsi_failure_metadata
-                    raise
+            self._save_measurement(package, case, history, grade)
+        return await self._finish_measurement(package, case, observation, history, grade)
+
+    async def resume_measurement(self, package, case, saved):
+        """Finish diagnosis of an already authoritative measurement, including zero."""
+        from sagents.v2.optimization.contracts import OptimizationObservation
+        grade = OptimizationGrade.model_validate(saved['grade'])
+        history = saved['conversation']
+        if not history:
+            raise ValueError('completed measurement has no execution')
+        observation = OptimizationObservation.model_validate(history[-1]['target'])
+        return await self._finish_measurement(package, case, observation, history, grade)
+
+    async def _finish_measurement(self, package, case, observation, history, grade):
+        target = package.manifest.entrypoint.agent
+        if self.scorer is not None:
+            from sagents.v2.optimization.contracts import OptimizationDiagnosis
+            from sagents.v2.optimization.diagnostics import diagnose_scored_execution, execution_entries
+            async def invoke(request):
+                diagnosis = await self._ask(self.evaluator, request['task'], request['data'], OptimizationDiagnosis)
+                return diagnosis.model_dump_json()
+            file_backed = {"file_read", "file_write"} <= set(self.evaluator.package.manifest.agents[self.evaluator.agent_id].tools)
+            if file_backed:
+                from sagents.v2.optimization.execution_records import conversation_messages
+                entries = conversation_messages(observation, conversation=history, initial_input=case.input)
+            else:
+                entries = [{'kind': 'case', 'input': case.input, 'reference_answer': case.reference_answer}]
+                entries.extend(execution_entries(observation, conversation=history))
+            try:
+                grade = await diagnose_scored_execution(grade=grade, entries=entries,
+                    rubric=case.rubric,
+                    policy=package.resolved_manifest().agents[target].instructions.inline,
+                    file_backed=file_backed,
+                    case_context={"id": case.id, "input": case.input, "reference_answer": case.reference_answer},
+                    agent_configuration=execution_configuration(package, target), invoke=invoke)
+            except (Exception, asyncio.CancelledError) as error:
+                # The authoritative score already exists. Diagnosis still failed;
+                # preserve both states without retrying execution or scoring.
+                failure = _measurement_failure('evaluation', error)
+                error.rsi_completed_measurement = {'grade': grade.model_dump(mode='json'), 'conversation': history}
+                if not isinstance(getattr(error, 'rsi_failure_metadata', None), dict):
+                    error.rsi_failure_metadata = failure.rsi_failure_metadata
+                raise
         return {"grade": grade.model_dump(mode="json"), "conversation": history}
+
+    def _measurement_checkpoint(self, package, case):
+        identity = _MEASUREMENT_IDENTITY.get()
+        if (not self.call_retries or self.evidence_directory is None or identity is None
+                or not isinstance(self.checkpoint_binding_id, str) or not self.checkpoint_binding_id):
+            return None
+        from sagents.v2.optimization.human_checkpoints import MeasurementCheckpoint
+        return MeasurementCheckpoint(self.evidence_directory, {
+            'checkpoint': identity, 'binding': self.checkpoint_binding_id,
+            'package_hash': package.content_hash,
+            'case': case.model_dump(mode='json'), 'goal': self.goal,
+            'evaluator': self.evaluator.package.content_hash,
+            'driver': self.driver.package.content_hash,
+        })
+
+    def _save_measurement(self, package, case, history, grade):
+        checkpoint = self._measurement_checkpoint(package, case)
+        if checkpoint is not None:
+            checkpoint.save(history, grade)
+
 
 
 class HumanTestObserver:
@@ -380,6 +456,7 @@ class HumanTestObserver:
                         async with semaphore:
                             row["status"] = trial["status"] = "running"
                             self._publish()
+                            identity_token = _MEASUREMENT_IDENTITY.set((record['round'], trial['trial']))
                             try:
                                 result = await self.evaluate(package.model_copy(deep=True), case.model_copy(deep=True))
                                 grade = OptimizationGrade.model_validate(result["grade"])
@@ -388,8 +465,15 @@ class HumanTestObserver:
                                 trial.update(score=grade.score, passed=grade.passed, status="completed",
                                     grade=grade.model_dump(mode="json"), conversation=result.get("conversation", []),
                                     infrastructure_retries=result.get('infrastructure_retries', {}))
-                            except asyncio.CancelledError:
+                            except asyncio.CancelledError as error:
                                 trial["status"] = row["status"] = "cancelled"
+                                saved = getattr(error, 'rsi_completed_measurement', None)
+                                if isinstance(saved, dict):
+                                    grade = OptimizationGrade.model_validate(saved['grade'])
+                                    trial.update(score=grade.score, passed=grade.passed,
+                                        grade=grade.model_dump(mode='json'),
+                                        conversation=saved.get('conversation', []),
+                                        diagnosis_status='cancelled')
                                 raise
                             except Exception as error:
                                 trial.update(status="error", error_type=type(error).__name__)
@@ -404,6 +488,8 @@ class HumanTestObserver:
                                     self.evidence.append({'round': record['round'], 'case_id': case.id,
                                         'trial': trial['trial'], 'package_hash': package.content_hash,
                                         **saved, 'diagnosis_failure': trial['failure']})
+                            finally:
+                                _MEASUREMENT_IDENTITY.reset(identity_token)
                             self._publish()
                     complete = all(t["status"] == "completed" for t in row["trials"])
                     row["status"] = "completed" if complete else "error"

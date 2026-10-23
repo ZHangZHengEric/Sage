@@ -32,7 +32,11 @@ class AgentPackageTestGenerator:
     passing it to AgentPackageOptimizer.optimize(suite=...).
     """
 
-    def __init__(self, *, runner: OptimizationRunner, designer: OptimizationAgent):
+    def __init__(self, *, runner: OptimizationRunner, designer: OptimizationAgent, call_retries=0, on_retry=None):
+        if type(call_retries) is not int or not 0 <= call_retries <= 12:
+            raise ValueError("call_retries must be 0..12")
+        self.on_retry = on_retry
+        self.call_retries = call_retries
         self.runner = runner
         self.designer = with_principles(designer, DESIGN_PRINCIPLES)
 
@@ -169,7 +173,13 @@ class AgentPackageTestGenerator:
         assert isinstance(generation, OptimizationFinalSuiteGeneration)
         return generation
 
-    async def _generate_with_record(
+    async def _generate_with_record(self, package, **kwargs):
+        from sagents.v2.optimization.call_isolation import retry_call
+        tools = self.designer.package.resolved_manifest().agents[self.designer.agent_id].tools
+        return await retry_call(lambda: self._generate_with_record_once(package, **kwargs),
+            retries=self.call_retries if not tools else 0, on_retry=self.on_retry)
+
+    async def _generate_with_record_once(
         self,
         package: AgentPackageBundle,
         *,

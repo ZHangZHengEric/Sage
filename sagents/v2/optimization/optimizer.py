@@ -70,15 +70,23 @@ SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 
 @asynccontextmanager
-async def _bounded_conversation(factory, package, target, context, timeout):
+async def _bounded_conversation(factory, package, target, context, timeout, *, isolate_execution=False):
     async with AsyncExitStack() as stack:
-        async with asyncio.timeout(timeout):
-            session = await stack.enter_async_context(factory(package, target, context))
+        try:
+            async with asyncio.timeout(timeout):
+                session = await stack.enter_async_context(factory(package, target, context))
+        except Exception as error:
+            if isolate_execution:
+                from sagents.v2.optimization.call_isolation import TargetCallFailure
+                raise TargetCallFailure(error) from error
+            raise
         yield session
 
 
 class InvalidOptimizationProposal(ValueError):
     """A malformed patch, distinct from a runner or authorization failure."""
+
+    rsi_requires_feedback = True
 
 
 class OptimizationSuiteReviewRejected(ValueError):
@@ -168,6 +176,8 @@ class AgentPackageOptimizer:
         min_improvement: float = 0.01,
         min_latency_improvement: float | None = None,
         call_timeout_seconds: float = 120,
+        call_retries: int = 0,
+        allow_call_isolation_upgrade: bool = False,
         timeout_seconds: float = 3600,
         evaluation_repeats: int = 1,
         evaluation_aggregation: Literal["minimum", "mean"] = "minimum",
@@ -235,6 +245,12 @@ class AgentPackageOptimizer:
         inputs and no process access. Incomplete local assessment writes may be
         discarded and retried; no target or external tool effects are authorized.
         """
+        if type(allow_call_isolation_upgrade) is not bool:
+            raise ValueError("allow_call_isolation_upgrade must be bool")
+        if type(call_retries) is not int or not 0 <= call_retries <= 12:
+            raise ValueError("call_retries must be 0..12")
+        if call_retries and journal_path is None:
+            raise ValueError("call isolation requires a durable journal")
         if set(restart_readonly_roles) - {"evaluation", "tuning", "semantic_review", "suite_review", "test_dialogue"}:
             raise ValueError("unknown read-only recovery role")
         if scorer is not None and authoritative_grader is not None:
@@ -391,7 +407,7 @@ class AgentPackageOptimizer:
             grow_training=grow_training, refresh_incumbent=refresh_incumbent,
             min_improvement=min_improvement, min_latency_improvement=min_latency_improvement,
             validation_case_count=validation_case_count, test_case_count=test_case_count,
-            max_concurrency=max_concurrency, final_max_cases=final_max_cases,
+            max_concurrency=max_concurrency, call_retries=call_retries, final_max_cases=final_max_cases,
             suite=suite.model_dump(mode="json") if suite else None,
             final_suite=final_suite.model_dump(mode="json") if final_suite else None,
             require_diverse_suite=require_diverse_suite, recovery_binding_id=recovery_binding_id,
@@ -405,14 +421,34 @@ class AgentPackageOptimizer:
             internal_agents={name: agent.model_dump(mode="json") for name, agent in {
                 "evaluator": self.evaluator, "tuner": self.tuner, "test_designer": self.test_designer,
                 "test_driver": self.test_driver, "reviewer": self.reviewer, "suite_reviewer": self.suite_reviewer}.items()})
+        if not call_retries:
+            recovery_config.pop("call_retries")
         recovery_hash = configuration_fingerprint(recovery_config)
         recovery = OptimizationRecovery(resume_from, readonly_roles=restart_readonly_roles,
             local_package_editor=restart_package_editor,
             local_file_evaluator=restart_file_evaluator) if resume_from is not None else None
+        policy_upgrade = None
         if recovery:
             if not recovery_binding_id:
                 raise ValueError("recovery requires a frozen host binding identity")
-            recovery.verify({"recovery_fingerprint": recovery_hash})
+            try:
+                recovery.verify({"recovery_fingerprint": recovery_hash})
+            except ValueError:
+                if not allow_call_isolation_upgrade or not call_retries:
+                    raise
+                old_engine = recovery.operation.get("recovery_engine_id")
+                if (not isinstance(old_engine, str) or not re.fullmatch(r"[0-9a-f]{64}", old_engine)
+                        or old_engine == recovery_config["engine"]
+                        or recovery.operation.get("call_isolation_protocol")):
+                    raise ValueError("unsupported call isolation engine upgrade") from None
+                legacy_config = {**recovery_config, "engine": old_engine}
+                legacy_config.pop("call_retries", None)
+                if configuration_fingerprint(legacy_config) != recovery.operation["recovery_fingerprint"]:
+                    raise ValueError("call isolation upgrade changes frozen experiment configuration") from None
+                policy_upgrade = {"protocol": "sage.rsi.call-isolation/v1",
+                    "from_engine": old_engine, "to_engine": recovery_config["engine"],
+                    "previous_fingerprint": recovery.operation["recovery_fingerprint"],
+                    "current_fingerprint": recovery_hash}
             recovery.require_reconciled(restart_incomplete=restart_incomplete)
             optimization_id = recovery.operation["optimization_id"]
         underlying_runner = self.runner
@@ -446,11 +482,40 @@ class AgentPackageOptimizer:
                 response = await self.runner.run(
                     bundle.model_copy(deep=True), key, content, context
                 )
-            return OptimizationObservation.model_validate(
-                response.model_dump(mode="json")
-            )
+            observed = OptimizationObservation.model_validate(response.model_dump(mode="json"))
+            if call_retries and model_transport_interrupted(observed):
+                raise OptimizationTransientFailure("model transport interrupted")
+            return observed
 
-        async def ask(
+        from sagents.v2.optimization.call_isolation import retry_call, settle_cases, TargetCallFailure
+
+        def retry_event(role, case_id=None, **extra):
+            return lambda attempt, error: journal.emit("call_retry_scheduled", role=role,
+                round=active_round, phase=active_phase, trial=active_trial, case_id=case_id,
+                attempt=attempt, retry_limit=12 if isinstance(error, OptimizationTransientFailure) else call_retries, error_type=type(error).__name__, **extra)
+
+        async def ask(role, agent, task, data, schema, case_id=None, _repair_attempt=0):
+            tools = set(agent.package.resolved_manifest().agents[agent.agent_id].tools)
+            safe = (not tools or role in restart_readonly_roles
+                or role == "evaluation" and restart_file_evaluator
+                or role == "tuning" and restart_package_editor)
+            snapshot = None
+            if call_retries and role == "tuning" and edit_package_files and safe:
+                from sagents.v2.optimization.package_workspace import read_package
+                snapshot = read_package(active_draft / "package").model_dump(mode="json")
+                snapshot_files = {path.relative_to(active_draft / "package"): path.read_bytes()
+                    for path in (active_draft / "package").rglob("*") if path.is_file()}
+            async def reset_editor():
+                if snapshot is not None:
+                    from sagents.v2.optimization.package_workspace import restore_authored_package
+                    restore_authored_package(active_draft, snapshot)
+                    for name, content in snapshot_files.items():
+                        (active_draft / "package" / name).write_bytes(content)
+            return await retry_call(lambda: ask_once(role, agent, task, data, schema,
+                case_id=case_id, _repair_attempt=_repair_attempt), retries=call_retries if safe else 0,
+                on_retry=retry_event(role, case_id), before_retry=reset_editor)
+
+        async def ask_once(
             role: Literal["test_design", "test_dialogue", "evaluation", "tuning", "semantic_review", "suite_review"],
             agent: OptimizationAgent,
             task: str,
@@ -518,7 +583,13 @@ class AgentPackageOptimizer:
                 from sagents.v2.optimization.package_workspace import restore_authored_package
                 restore_authored_package(active_draft, observation.evidence["authored_package"])
             if observation is None:
-                observation = await run(call_agent.package, call_agent.agent_id, content)
+                try:
+                    observation = await run(call_agent.package, call_agent.agent_id, content)
+                except Exception as error:
+                    journal.emit("agent_call_failed", call_id=call_id, role=role,
+                        round=active_round, phase=active_phase, trial=active_trial,
+                        case_id=case_id, error_type=type(error).__name__)
+                    raise
                 if role == "tuning" and edit_package_files and observation.state == "completed":
                     from sagents.v2.optimization.package_workspace import read_package
                     evidence = dict(observation.evidence)
@@ -593,7 +664,7 @@ class AgentPackageOptimizer:
                     journal.emit("agent_response_repair_requested", role=role,
                                  round=active_round, case_id=case_id,
                                  attempt=_repair_attempt + 1, error_type=type(error).__name__)
-                    return await ask(role, agent,
+                    return await ask_once(role, agent,
                         "Repair your previous evaluation response to satisfy the exact JSON schema, "
                         "including every maximum length and evidence requirement. Preserve the substantive "
                         "findings and uncertainty; shorten wording rather than inventing evidence or changing scores. "
@@ -603,6 +674,8 @@ class AgentPackageOptimizer:
                         schema, case_id=case_id, _repair_attempt=_repair_attempt + 1)
                 if role == "tuning":
                     raise InvalidOptimizationProposal(str(error)) from error
+                if call_retries and role == "evaluation" and _repair_attempt >= 2:
+                    error.rsi_local_retries_exhausted = True
                 raise
 
         async def diagnose_execution(bundle, case, observation, history, grade):
@@ -635,15 +708,23 @@ class AgentPackageOptimizer:
                 ), None
             authority = None
             if authoritative_grader is not None or scorer is not None:
-                if scorer is not None:
+                restored_grade = recovery.scored_observation(bundle.content_hash, phase=active_phase,
+                    round=active_round, trial=active_trial, case_id=case.id,
+                    observation=observation, history=history) if recovery else None
+                if restored_grade is not None:
+                    authority = restored_grade
+                elif scorer is not None:
                     from sagents.v2.optimization.scoring import ScoringRequest, ScoringResult
                     scoring_call_id = uuid4().hex
                     journal.emit("scoring_call_started", call_id=scoring_call_id, round=active_round,
                         phase=active_phase, trial=active_trial, case_id=case.id)
                     try:
-                        async with asyncio.timeout(call_timeout_seconds):
-                            scored = ScoringResult.model_validate(await scorer.score(ScoringRequest(
-                                goal=goal, case=case, observation=observation, conversation=tuple(history or ()))))
+                        async def score_once():
+                            async with asyncio.timeout(call_timeout_seconds):
+                                return ScoringResult.model_validate(await scorer.score(ScoringRequest(
+                                    goal=goal, case=case, observation=observation, conversation=tuple(history or ()))))
+                        scored = await retry_call(score_once, retries=call_retries,
+                            on_retry=retry_event("scoring", case.id))
                         authority = scored.authoritative_grade()
                         if authority is None:
                             raise ValueError(f"Custom scorer cannot score case {case.id}: {scored.not_applicable_reason}")
@@ -654,12 +735,20 @@ class AgentPackageOptimizer:
                     journal.emit("scoring_call_completed", call_id=scoring_call_id, round=active_round,
                         phase=active_phase, trial=active_trial, case_id=case.id)
                 else:
-                    authority = authoritative_grader(case, observation)
-                    if inspect.isawaitable(authority):
-                        async with asyncio.timeout(call_timeout_seconds):
-                            authority = await authority
-                    authority = OptimizationGrade.model_validate(authority)
+                    async def legacy_score_once():
+                        scored = authoritative_grader(case, observation)
+                        if inspect.isawaitable(scored):
+                            async with asyncio.timeout(call_timeout_seconds):
+                                scored = await scored
+                        return OptimizationGrade.model_validate(scored)
+                    authority = await retry_call(legacy_score_once, retries=call_retries,
+                        on_retry=retry_event("scoring", case.id))
             if authority is not None:
+                journal.emit("execution_scored", package_hash=bundle.content_hash,
+                    round=active_round, phase=active_phase, trial=active_trial, case_id=case.id,
+                    observation_hash=configuration_fingerprint(observation.model_dump(mode="json")),
+                    history_hash=configuration_fingerprint(history or []),
+                    grade=authority.model_dump(mode="json"))
                 model_grade = await diagnose_execution(bundle, case, observation, history, authority) if analyze else authority
             else:
                 model_grade = await ask(
@@ -725,7 +814,13 @@ class AgentPackageOptimizer:
             from sagents.v2.optimization.runner import OPTIMIZATION_CASE
             token = OPTIMIZATION_CASE.set(case)
             try:
-                return await evaluate_case_in_context(bundle, case, trial)
+                async def execute():
+                    try:
+                        return await evaluate_case_in_context(bundle, case, trial)
+                    except TargetCallFailure:
+                        raise
+                return await retry_call(execute, retries=call_retries if restart_incomplete else 0,
+                    on_retry=retry_event("execution", case.id), only=(TargetCallFailure,))
             finally:
                 OPTIMIZATION_CASE.reset(token)
 
@@ -792,6 +887,7 @@ class AgentPackageOptimizer:
                         target,
                         context,
                         call_timeout_seconds,
+                        isolate_execution=bool(call_retries),
                     ) as session:
                         for turn_index in range(1, case.max_turns + 1):
                             call_id = uuid4().hex
@@ -807,11 +903,24 @@ class AgentPackageOptimizer:
                                 turn=turn_index,
                                 input=content,
                             )
-                            async with asyncio.timeout(call_timeout_seconds):
-                                observation = await session.send(content)
-                            observation = OptimizationObservation.model_validate(
-                                observation.model_dump(mode="json")
-                            )
+                            try:
+                                async with asyncio.timeout(call_timeout_seconds):
+                                    observation = await session.send(content)
+                                observation = OptimizationObservation.model_validate(
+                                    observation.model_dump(mode="json"))
+                            except Exception as error:
+                                journal.emit("target_call_failed", call_id=call_id,
+                                    round=active_round, phase=active_phase, trial=trial,
+                                    case_id=case.id, error_type=type(error).__name__)
+                                if call_retries:
+                                    raise TargetCallFailure(error) from error
+                                raise
+                            if call_retries and model_transport_interrupted(observation):
+                                journal.emit("target_call_failed", call_id=call_id,
+                                    round=active_round, phase=active_phase, trial=trial,
+                                    case_id=case.id, error_type="OptimizationTransientFailure",
+                                    code="model.provider_transient")
+                                raise TargetCallFailure(OptimizationTransientFailure("target model transport interrupted"))
                             observation = audit_observation(observation)
                             journal.emit(
                                 "target_call_completed",
@@ -942,7 +1051,9 @@ class AgentPackageOptimizer:
                     recovered=restored_observation is not None,
                 )
                 observation = audit_observation(restored_observation if restored_observation is not None
-                                                else await run(bundle, target, case.input))
+                                                else await retry_call(lambda: run(bundle, target, case.input),
+                                                    retries=call_retries if restart_incomplete else 0,
+                                                    on_retry=retry_event("execution", case.id)))
                 journal.emit(
                     "target_call_completed",
                     call_id=call_id,
@@ -974,7 +1085,14 @@ class AgentPackageOptimizer:
         async def evaluate_once(bundle, fixed_suite, trial):
             nonlocal active_trial
             active_trial = trial
-            if max_concurrency == 1:
+            if call_retries:
+                results = await settle_cases(fixed_suite.cases,
+                    lambda case: evaluate_case(bundle, case, trial), max_concurrency=max_concurrency,
+                    on_error=lambda case, error: journal.emit("case_call_failed", round=active_round,
+                        phase=active_phase, trial=trial, case_id=case.id,
+                        error_type=type(error).__name__,
+                        retry_budget_exhausted=getattr(error, "rsi_local_retries_exhausted", False)))
+            elif max_concurrency == 1:
                 results = [
                     await evaluate_case(bundle, case, trial)
                     for case in fixed_suite.cases
@@ -1123,6 +1241,7 @@ class AgentPackageOptimizer:
                 optimization_id=optimization_id,
                 recovery_fingerprint=recovery_hash,
                 recovery_engine_id=recovery_config["engine"],
+                call_isolation_protocol="sage.rsi.call-isolation/v1" if call_retries else None,
                 recovery_binding_id=recovery_binding_id,
                 resumed_from=str(Path(resume_from).resolve()) if resume_from else None,
                 goal=goal,
@@ -1152,10 +1271,14 @@ class AgentPackageOptimizer:
                     }.items()
                 },
             )
+            if policy_upgrade is not None:
+                journal.emit("execution_policy_upgraded", **policy_upgrade)
             async with asyncio.timeout(timeout_seconds):
                 designer = AgentPackageTestGenerator(
                     runner=design_runner,
                     designer=self.test_designer,
+                    call_retries=call_retries,
+                    on_retry=retry_event("test_design"),
                 )
                 if adaptive and suite is None:
                     journal.emit("test_generation_started", split="validation")
@@ -1495,7 +1618,7 @@ class AgentPackageOptimizer:
                             and self._at_target(best_evaluation, stopping_policy))
 
                 async def confirm_stability():
-                    nonlocal best_evaluation, active_round
+                    nonlocal best_evaluation, active_round, retained_regressions
                     active_round = selected_round
                     confirmed = 1
                     for confirmation in range(1, stopping_policy.stability_passes):
@@ -1528,6 +1651,9 @@ class AgentPackageOptimizer:
                         # The fresh result becomes the evidence for this same
                         # package. Its training failures reach the tuner; its
                         # validation evidence stays sealed from the tuner.
+                        retained_regressions = self._outstanding_regressions(
+                            retained_regressions, self._regressions(best_evaluation, checked), checked
+                        )
                         best_evaluation = checked
                         if not passed:
                             return 0
@@ -1544,13 +1670,23 @@ class AgentPackageOptimizer:
                         termination_reason = "stagnation"
                         break
                     active_round = index
+                    fresh_retained = False
                     if stopping_policy and retained_at_target():
                         stability_count = await confirm_stability()
+                        fresh_retained = True
                         if stability_count == stopping_policy.stability_passes:
                             termination_reason = "target_reached"
                             break
-                    if adaptive and grow_training and training_cases_per_round:
-                        await add_training_challenges(index)
+                    training_growth = self._training_growth_decision(
+                        best_evaluation, fixed_suite, history[-1] if history else None,
+                        retained_regressions, fresh_retained=fresh_retained,
+                    )
+                    training_growth["enabled"] = bool(adaptive and grow_training and training_cases_per_round)
+                    if training_growth["enabled"]:
+                        if training_growth["allowed"]:
+                            await add_training_challenges(index)
+                        else:
+                            journal.emit("training_growth_deferred", round=index, **training_growth)
                     if (
                         stopping_policy
                         and len(history) - selected_round >= stopping_policy.patience
@@ -1710,6 +1846,7 @@ class AgentPackageOptimizer:
                                                        else "training-evidence/experience.md"}
                                                       if file_evidence else {"document": experience_document(history, max_chars=24000)}),
                                 "training": [] if file_evidence else training,
+                                "training_growth": training_growth,
                                 "unmeasured_training_cases": [c.model_dump(mode="json", exclude={"reference_answer"})
                                     for c in fixed_suite.cases if c.split == "training"
                                     and c.id not in {r.case.id for r in best_evaluation.cases}],
@@ -2337,6 +2474,42 @@ class AgentPackageOptimizer:
         if skill_count > policy.max_skill_count:
             raise OptimizationResourceLimit(f"Package has {skill_count} Skills; bundled roots={sorted(str(root) for root in skill_roots)}, external={sorted(external_skills)}; max_skill_count={policy.max_skill_count}. Consolidate Skills and update the manifest.")
         return candidate
+
+    @staticmethod
+    def _training_growth_decision(retained, suite, previous_round, retained_regressions, *, fresh_retained=False):
+        """Expand only after non-regression, or complete training mastery.
+
+        A rejected attempt still supplies the previous round's performance evidence.
+        Accepted regressions remain relevant until the retained version repairs them.
+        Hidden independent tests are never an input to this decision.
+        """
+        latest = previous_round.evaluation if previous_round is not None else retained
+        if fresh_retained or (latest is not None and latest.package_hash == retained.package_hash):
+            latest = retained
+        measured_round = latest is not None
+        latest = latest if latest is not None else retained
+        expected = {case.id for case in suite.cases if case.split == "training"}
+        training = [case for case in latest.cases if case.case.split == "training"]
+        complete = {case.case.id for case in training} == expected
+        passed = sum(case.grade.passed for case in training)
+        all_passed = bool(expected) and complete and passed == len(training)
+        regressions = (*retained_regressions,
+                       *(previous_round.regressions if previous_round is not None else ()))
+        unique = {(item.split, item.case_id) for item in regressions}
+        if all_passed:
+            allowed, reason = True, "training_passed"
+        elif not measured_round or not complete:
+            allowed, reason = False, "unmeasured_round"
+        elif unique:
+            allowed, reason = False, "regression"
+        else:
+            allowed, reason = True, "no_regression"
+        return {"allowed": allowed, "reason": reason,
+                "previous_round": previous_round.round if previous_round is not None else 0,
+                "training_passed": passed, "training_total": len(expected),
+                "training_measured": len(training),
+                "regressed_training": sum(split == "training" for split, _ in unique),
+                "regressed_validation": sum(split == "validation" for split, _ in unique)}
 
     @staticmethod
     def _outstanding_regressions(retained, added, evaluation):

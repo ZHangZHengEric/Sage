@@ -18,6 +18,13 @@ class RsiApi extends V2ApiClient {
   bool interrupted = false;
   bool externalHost = false;
   int resumes = 0;
+  int testResumes = 0;
+  bool pendingTests = false;
+  bool completedTests = false;
+  bool invalidTests = false;
+  bool scoredDiagnosisError = false;
+  bool phaseRecovery = false;
+  Completer<void>? testResumeGate;
   bool suiteBlocked = false;
   bool manualHistory = false;
   Map<String, Object?>? startOptions;
@@ -65,6 +72,7 @@ class RsiApi extends V2ApiClient {
     'workspace_path': '/tmp/sage-rsi/$runId/workspace',
     'resumable': interrupted,
     'external_host': externalHost,
+    'human_test_phase_recovery': phaseRecovery,
     'status': interrupted
         ? 'interrupted'
         : suiteBlocked
@@ -88,6 +96,36 @@ class RsiApi extends V2ApiClient {
     'iteration': running ? 1 : 3,
     'rounds': 3,
     'stage': 'round_completed',
+    if (pendingTests || completedTests) ...{
+      'human_test_count': 1,
+      'test_observations': [
+        for (final round in [0, 1])
+          {
+            'round': round,
+            'valid': !invalidTests,
+            'status': invalidTests
+                ? 'invalid'
+                : round == 1 && pendingTests
+                ? 'error'
+                : 'completed',
+            'cases': [
+              {
+                'id': 'test',
+                'trials': [
+                  {
+                    'trial': 1,
+                    'status': round == 1 && pendingTests
+                        ? 'error'
+                        : 'completed',
+                    if (round == 0 || completedTests || scoredDiagnosisError)
+                      'grade': {'score': 0, 'passed': false},
+                  },
+                ],
+              },
+            ],
+          },
+      ],
+    },
     'events': afterSequence == 0
         ? [
             {'sequence': 1, 'event': 'round_completed', 'time': '10:10'},
@@ -173,6 +211,18 @@ class RsiApi extends V2ApiClient {
     interrupted = false;
     running = true;
     return {'id': runId, 'status': 'running'};
+  }
+
+  @override
+  Future<Map<String, Object?>> resumeRsiTests(
+    String agentId,
+    String runId,
+  ) async {
+    testResumes++;
+    if (testResumeGate != null) await testResumeGate!.future;
+    pendingTests = false;
+    completedTests = true;
+    return {'id': runId, 'status': 'completed'};
   }
 
   @override
@@ -615,6 +665,157 @@ void main() {
       },
     );
     testWidgets(
+      'RSI ${brightness.name}: continue tests resumes only missing measurements once',
+      (tester) async {
+        final api = RsiApi()
+          ..pendingTests = true
+          ..testResumeGate = Completer<void>();
+        final controller = WorkspaceController(api: api);
+        tester.view.physicalSize = const Size(1800, 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(controller.dispose);
+        addTearDown(api.close);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(
+              brightness: brightness,
+              fontFamily: Platform.environment['RSI_SCREENSHOT_DIR'] == null
+                  ? null
+                  : 'SageScreenshot',
+            ),
+            home: RepaintBoundary(
+              key: const ValueKey('test-recovery-capture'),
+              child: RsiScreen(
+                controller: controller,
+                agentId: 'agent',
+                agentName: 'Sage',
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final resume = find.byKey(const ValueKey('rsi-resume-tests'));
+        expect(resume, findsOneWidget);
+        final screenshotDir = Platform.environment['RSI_SCREENSHOT_DIR'];
+        if (screenshotDir != null) {
+          final boundary = tester.renderObject<RenderRepaintBoundary>(
+            find.byKey(const ValueKey('test-recovery-capture')),
+          );
+          await tester.runAsync(() async {
+            final image = await boundary.toImage();
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File(
+              '$screenshotDir/continue-tests-${brightness.name}.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
+        await tester.tap(resume);
+        await tester.pump();
+        expect(api.testResumes, 1);
+        expect(tester.widget<Semantics>(resume).properties.enabled, isFalse);
+        await tester.tap(resume, warnIfMissed: false);
+        expect(api.testResumes, 1);
+        api.testResumeGate!.complete();
+        await tester.pumpAndSettle();
+        expect(resume, findsNothing);
+        expect(api.resumes, 0);
+        expect(api.startOptions, isNull);
+        expect(api.applications, 0);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+    testWidgets(
+      'RSI ${brightness.name}: diagnosis-only recovery is offered when supported',
+      (tester) async {
+        final api = RsiApi()
+          ..pendingTests = true
+          ..scoredDiagnosisError = true
+          ..phaseRecovery = true;
+        final controller = WorkspaceController(api: api);
+        tester.view.physicalSize = const Size(1800, 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(controller.dispose);
+        addTearDown(api.close);
+        await tester.pumpWidget(MaterialApp(
+          theme: ThemeData(brightness: brightness),
+          home: RsiScreen(controller: controller, agentId: 'agent', agentName: 'Sage'),
+        ));
+        await tester.pumpAndSettle();
+        final resume = find.byKey(const ValueKey('rsi-resume-tests'));
+        expect(resume, findsOneWidget);
+        await tester.tap(resume);
+        await tester.pumpAndSettle();
+        expect(api.testResumes, 1);
+        expect(api.startOptions, isNull);
+        expect(api.applications, 0);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+    testWidgets(
+      'RSI ${brightness.name}: continue tests is hidden for ineligible experiments',
+      (tester) async {
+        tester.view.physicalSize = const Size(1800, 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        for (final state in [
+          'running',
+          'external',
+          'invalid',
+          'diagnosis',
+          'complete',
+          'none',
+        ]) {
+          final api = RsiApi()
+            ..pendingTests = !{'complete', 'none'}.contains(state)
+            ..completedTests = state == 'complete'
+            ..running = state == 'running'
+            ..externalHost = state == 'external'
+            ..invalidTests = state == 'invalid'
+            ..scoredDiagnosisError = state == 'diagnosis';
+          final controller = WorkspaceController(api: api);
+          try {
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: ThemeData(brightness: brightness),
+                home: RsiScreen(
+                  controller: controller,
+                  agentId: 'agent',
+                  agentName: 'Sage',
+                ),
+              ),
+            );
+            if (state == 'running') {
+              await tester.pump();
+              await tester.pump(const Duration(seconds: 1));
+            } else {
+              await tester.pumpAndSettle();
+            }
+            expect(
+              find.byKey(const ValueKey('rsi-resume-tests')),
+              findsNothing,
+              reason: state,
+            );
+            expect(api.testResumes, 0);
+            expect(tester.takeException(), isNull);
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            controller.dispose();
+            api.close();
+          }
+        }
+      },
+    );
+    testWidgets(
       'RSI ${brightness.name} shares glass settings inside a different parent layer',
       (tester) async {
         final api = RsiApi();
@@ -1010,7 +1211,17 @@ void main() {
         expect(cancel, findsOneWidget);
         expect(find.byKey(const ValueKey('rsi-start')), findsNothing);
         await tester.tap(cancel);
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('确认取消优化？'), findsOneWidget);
+        expect(api.cancellations, 0);
+        await tester.tap(find.byKey(const ValueKey('rsi-cancel-dismiss')));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(api.cancellations, 0);
+        expect(cancel, findsOneWidget);
+        await tester.tap(cancel);
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.byKey(const ValueKey('rsi-cancel-confirm')));
+        await tester.pump(const Duration(milliseconds: 300));
         expect(find.text('处理中…'), findsOneWidget);
         expect(tester.widget<Semantics>(cancel).properties.enabled, isFalse);
         await tester.tap(cancel, warnIfMissed: false);

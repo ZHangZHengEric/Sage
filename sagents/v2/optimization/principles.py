@@ -200,6 +200,10 @@ Mandatory package optimization principles:
   response received a high raw model grade; fix the implementation or arguments.
 - Describe the root cause, reusable change, expected benefit and tradeoff in the
   patch rationale. Do not claim improvement before independent evaluation.
+- Training growth is controlled by the host. When training_growth defers expansion,
+  repair the existing regressions and preserve successful paths on the current suite.
+  Overall acceptance does not imply every case recovered. Do not add questions or
+  alter the frozen suite yourself; validation remains score-only and test stays hidden.
 - Follow the host's stated selection metric. When overall improvement permits
   individual regressions, use the retained stronger package as the starting point
   and repair the disclosed training regressions while preserving its gains.

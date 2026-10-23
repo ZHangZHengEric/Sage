@@ -88,6 +88,50 @@ def score(request):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('transient', [False, True])
+async def test_native_scorer_failure_is_bounded_and_never_becomes_a_grade(tmp_path, transient):
+    from sagents.v2.model.plugins._shared.wire import ProviderStreamFailure, provider_error
+    from sagents.v2.optimization.python_scorer import ScorerExecutionError
+    from sagents.v2.optimization.recovery import OptimizationTransientFailure
+    error = provider_error(ProviderStreamFailure(
+        'response stream could not be completed' if transient else 'invalid API key',
+        code='invalid_provider_response' if transient else 'invalid_api_key'))
+
+    class FailingModel(Model):
+        async def stream(self, value):
+            self.error = error
+            async for event in super().stream(value):
+                yield event
+
+    model, audits = FailingModel(), []
+    proxy = gateway(model, audits.append)
+    path = tmp_path / 'scorer.py'
+    path.write_text('''from sagents.v2.optimization.scorer_runtime import get_model_provider
+from sagents.v2.model.contracts import ModelRequest, ModelMessage
+from sagents.v2.contracts.items import TextBlock
+async def score(request):
+    model = get_model_provider()
+    async for event in model.stream(ModelRequest(request_id='score', run_id='scorer',
+            model_binding=model.model_binding,
+            messages=(ModelMessage(role='user', content=(TextBlock(text='Evaluate saved execution'),)),))):
+        pass
+    raise AssertionError('An exhausted model call must not return a score')
+''')
+    try:
+        await proxy.start()
+        scorer = PythonExecutionScorer(path=path, source_hash=hashlib.sha256(path.read_bytes()).hexdigest(),
+            descriptor=ScorerDescriptor(id='fixture', name='Fixture', version='1'), model_api_factory=proxy.bind)
+        with pytest.raises(OptimizationTransientFailure if transient else ScorerExecutionError):
+            await scorer.score(request())
+        assert len(model.requests) == (3 if transient else 1)
+        assert all(row['status'] == 'failed' for row in audits)
+        assert not proxy._leases and proxy.model_budget.active == 0
+    finally:
+        await proxy.close()
+    assert proxy.task.done() and proxy.base_url is None
+
+
+@pytest.mark.asyncio
 async def test_api_auth_scope_expiry_input_budget_and_request_fields_are_enforced():
     proxy = gateway()
     proxy.base_url = 'http://127.0.0.1:1/v1'
@@ -140,12 +184,19 @@ async def test_provider_transient_error_is_exposed_for_sdk_retry_and_secrets_are
             passed = await client.post('/v1/responses', headers=headers, json=value)
             assert passed.status_code == 200
     assert [r['status'] for r in audit] == ['failed', 'completed']
+    assert audit[0]['error_message'] == '502 [redacted] upstream failure'
+    assert audit[0]['retryable'] is True
+    assert 'remote-secret' not in json.dumps(audit)
     assert proxy.model_budget.active == 0
 
 
 @pytest.mark.asyncio
-async def test_scoring_code_receives_a_ready_model_provider_not_credentials(tmp_path):
-    model, audits = Model(), []
+@pytest.mark.parametrize('stream_interrupted', [False, True])
+async def test_scoring_code_receives_a_ready_model_provider_not_credentials(tmp_path, stream_interrupted):
+    from sagents.v2.model.plugins._shared.wire import ProviderStreamFailure, provider_error
+    failure = provider_error(ProviderStreamFailure('response stream could not be completed',
+        code='invalid_provider_response'), response_started=False) if stream_interrupted else None
+    model, audits = Model(failure), []
     proxy = gateway(model, audits.append)
     source = '''import json
 from sagents.v2.optimization.scorer_runtime import get_model_provider
@@ -173,7 +224,13 @@ async def score(request):
             descriptor=ScorerDescriptor(id='proxy', name='Proxy', version='1'), model_api_factory=proxy.bind)
         result = await module.score(request())
         assert result.grade.score == .25
-        assert len(model.requests) == 1
+        assert len(model.requests) == (2 if stream_interrupted else 1)
+        if stream_interrupted:
+            assert [row['status'] for row in audits] == ['failed', 'completed']
+            assert audits[0]['retryable'] is True
+            assert audits[0]['provider_code'] == 'invalid_provider_response'
+            assert audits[0]['response_started'] is False
+            assert model.requests[0].messages == model.requests[1].messages
         native = model.requests[0]
         assert native.response_format == 'json_object' and native.temperature == .2
         assert native.messages[0].content[0].text == 'Exact scorer prompt'

@@ -4,6 +4,101 @@
 
 官方 split：train 74 题、test 40 题。RSI 的 dev 从官方 train 独立划出；官方 test 不进入调优。`vendor/` 是官方代码，`scorer.py`、`mcp_server.py` 与 `runtime.py` 是 Sage 接入代码。
 
+## 换电脑后从零运行（macOS Desktop）
+
+本目录包含运行所需的官方源码和数据，不依赖原机器的 `/tmp` 文件或单独下载的 tau2 仓库。需要 Python 3.12/3.13、Flutter 和 Xcode 的 macOS 构建环境，以及能够调用 GPT-6.1 Sol 的模型网关。仓库不包含模型凭证、已配置的 Desktop Agent 或历史实验数据库。
+
+### 1. 安装并预检
+
+在新电脑克隆仓库，进入仓库根目录；已有 checkout 则先同步最新 `main`。推荐单独的虚拟环境，避免其他项目的 pandas、MCP 等依赖冲突：
+
+```sh
+git clone git@github.com:ZHangZHengEric/Sage.git
+cd Sage
+python3.13 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e '.[desktop,tau-bench,test]' -r evaluation_datasets/tau_bench/requirements.txt
+.venv/bin/python -m pip check
+.venv/bin/python -c 'from evaluation_datasets.tau_bench.runtime import preflight; print(preflight())'
+```
+
+也可将 `python3.13` 换成 `python3.12`。预检应报告 16 个业务工具、114 道任务，官方 train 74 / test 40。依赖中的 MCP 版本与 Sage 主项目统一为 1.28.1。依赖包含 `httpx[socks]`，支持系统环境里的 SOCKS 代理。不要在这个环境中另外安装上游完整 voice/streamlit 开发环境。
+
+离线验收（无需模型密钥，但 stdio / 评分器测试需要本地进程和 loopback 端口）：
+
+```sh
+.venv/bin/python -m pytest -q tests/sagents/v2/test_tau_repository_runtime.py tests/sagents/v2/test_tau_standard_dataset.py tests/sagents/v2/test_tau_mcp_isolation.py tests/sagents/v2/test_tau_standard_scorer.py
+```
+
+### 2. 启动 Desktop，配置模型和业务 MCP
+
+```sh
+cd app/v2/desktop
+flutter pub get
+flutter run -d macos
+```
+
+源码版 Desktop 优先使用仓库根目录的 `.venv/bin/python`。在“模型”中配置自己的网关地址、凭证、协议和模型标识 `gpt-6.1-sol`，先验证普通对话可用；凭证在新电脑本地配置，不放进仓库。
+
+在“MCP”中添加 stdio 连接 `TauRetail`，按下面字段填写。所有 `/absolute/path` 都必须替换为**新电脑**的实际绝对路径；参数中的 `~` 不依赖 shell 展开。
+
+```json
+{
+  "mcpServers": {
+    "TauRetail": {
+      "command": "/absolute/path/Sage/.venv/bin/python",
+      "args": ["-m", "evaluation_datasets.tau_bench.mcp_server", "--state", "/absolute/path/sage/runtime/tau-retail.sqlite3"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/Sage",
+        "SAGE_RSI_CASE_PROTOCOL": "sage.rsi.case/v1"
+      }
+    }
+  }
+}
+```
+
+连接并刷新工具列表，确认出现 16 个 `mcp_TauRetail_*` 业务工具。此连接只提供业务环境；评分器另外导入，不需要 `scorer_mcp` 或 `evaluate_simulation` MCP 工具。
+
+### 3. 先配置列表里的基线 Agent
+
+新建一个用于零售实验的 Agent，主模型选择刚配置的 GPT-6.1 Sol；若配置快速模型，也选择同一模型。system 填入简短角色说明及本目录 `data/tau2/domains/retail/policy.md` 的**完整原文**。在工具选择中启用上述 16 个业务工具，保存后再进入进化页。官方 `calculate` 应保留；没有网络搜索工具要求。
+
+若要复现实验中允许本地辅助能力的基线，同时显式启用 Sage 的 `file_read`、`grep`、`glob`、`list_dir`、`file_write`、`file_update`、`apply_patch`、`execute_shell_command`、`await_shell`、`kill_shell`、`todo_write`、`todo_read`、`turn_status` 和 `load_skill`。这些是 Sage 能力，不属于官方零售工具；必须在基线列表里预先可见，不能靠 RSI 隐式补入。初始 Skills 留空。工具可用性、执行权限和 shell 授权按页面实际配置检查；对比实验需保持一致。
+
+### 4. 在进化页导入并运行
+
+1. “导入数据集”选择本目录 `rsi.dataset.json`。
+2. “导入评分器”选择本目录 `scorer.py`，等待自测通过后选择它。它通过 Python import 使用当前 checkout 的接入模块和 vendor；只拷贝这个文件到没有安装本仓库的机器不够。
+3. 设置优化目标、训练初始题量、每轮增量、轮数、并发和重复次数；内部模型使用目标模型。
+4. 点击“开始进化”。检查运行设置快照与题量，再观察基线轮和后续轮次。运行记录持久化到当前电脑，重新打开 Desktop 可查看。
+
+建议先用小规模验证链路，再运行完整实验：
+
+| 参数 | 快速流程检查 | 效果实验配置 |
+| --- | ---: | ---: |
+| 训练初始题量 | 3 | 24 |
+| 每轮增加训练题 | 1 | 4 |
+| 优化轮数上限 | 1 | 8 |
+| 并行上限 | 3 | 10 |
+| train/dev 每题重复次数 | 1 | 2 |
+| System 字符上限 | 20000 | 20000 |
+| 单个 SKILL.md 字符上限 | 15000 | 15000 |
+| Skill 数量上限 | 2 | 2 |
+
+**导入数据集后，其显式 split 决定实际 dev/test 题数**：当前文件固定 train 池 62、dev 12、test 40；生成题量的默认值不会把它改成 dev 24 / test 12。初始训练数量和增量控制从 train 池取题，旧训练题继续参与后续轮次；退化时暂停扩增。池用完后才由出题流程补充训练题。快速检查若要缩小 dev/test，需另存一个标准数据集并保留各 split；不要覆盖正式文件，也不要将小样本成绩称为完整 test 成绩。
+
+test 只供人观察，不能把题目、对话、分数或诊断交给调优，也不能用它选择候选。最终 0.95 目标应由预先固定的全部 40 题平均分证明；流程测试通过不等于已达到该目标。评分器负责权威分数，诊断仍运行并保存；默认 Agent 评分不能替代已选择的官方评分器。
+
+### 5. 迁移范围与恢复边界
+
+- **从零开始新实验**：克隆代码、安装依赖、重建模型/MCP/基线配置、导入数据集和评分器即可，不需要旧机器运行目录。
+- **保留旧实验历史**：退出所有 Sage Desktop 客户端并确认后台与实验停止后，将整个 `~/sage` 私下备份到新机器。它含模型凭证、catalog、SQLite 数据库、会话、实验目录和 Skills，不能提交 Git；不要只复制 `rsi.sqlite3`，也不要在后台写入时直接拷贝 SQLite 文件。
+- 新电脑重新配置 MCP 的解释器、`PYTHONPATH`、状态路径和其他工作区绝对路径。不迁移 `.venv`、构建缓存、旧 sidecar 注册文件/锁；Python 环境重新安装，运行时注册由新后台生成。
+- **跨机器续跑未完成实验不是已验证的无条件能力**。恢复会校验冻结配置、模型、引擎、资源和执行记录；历史包/检查点可能绑定旧绝对路径。不要批量改写实验 JSON 或绕过摘要校验。能否恢复应以恢复接口实际校验为准；路径或配置不一致时保留旧成果，在新电脑启动新实验。
+- 单次传输故障局部重试，不重跑已完成的执行/评分；错误耗尽预算会保留检查点并明确报告。已完成实验若只缺人工测试，使用页面“继续测试”，不要重新开始调优。
+
+源码版 macOS 是这里的验证范围；其他系统需另外验证 Flutter 构建和本地 MCP 进程启动。本机自动化测试不能替代新电脑实际的网关连通性和凭证验证。
+
 ## 依赖与预检
 
 使用 Python 3.12 或 3.13，安装 Sage 和本目录 `requirements.txt`。业务 MCP 与评分器均需要固定官方源码的文字评测依赖。Voice 二进制资产和语音依赖不参与文字零售评测。

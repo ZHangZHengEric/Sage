@@ -23,6 +23,7 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field
 from .rsi_evaluation import EvaluationPlan, ScorerImport, ScorerSelection, McpExecutionScorer, scorer_binding
+from .rsi_call_recovery import failed_call
 
 from sagents.v2.optimization.dataset import OptimizationDataset
 from sagents.v2.optimization.scoring import ScorerDescriptor
@@ -43,9 +44,10 @@ from sagents.v2.optimization.contracts import (
     OptimizationTestSuite,
     OptimizationStoppingPolicy,
 )
-from sagents.v2.optimization.recovery import OptimizationTransientFailure, engine_fingerprint
+from sagents.v2.optimization.recovery import engine_fingerprint
 from sagents.v2.optimization.generator import AgentPackageTestGenerator
-from sagents.v2.optimization.observer import HumanTestObserver, IsolatedTestEvaluator, SharedCallLimitRunner
+from sagents.v2.optimization.observer import SharedCallLimitRunner
+from .rsi_test_recovery import resumable_human_test_observer, completed_checkpoint_events, RecoveringIsolatedTestEvaluator as IsolatedTestEvaluator
 from sagents.v2.package.manifest.agents import Instructions
 from sagents.v2.skill import FilesystemSkillProvider
 from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
@@ -164,9 +166,21 @@ def builtin_scoring_failure_code(error: BaseException) -> str | None:
     return next(iter(codes)) if len(codes) == 1 else None
 
 
+class RsiResumeOptions(StrictModel):
+    upgrade_call_isolation: bool = False
+
+
 class RsiApply(StrictModel):
     confirmed: Literal[True]
     expected_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+def frozen_rsi_request(frozen, run):
+    request = RsiStart.model_validate(frozen["request"])
+    digest = hashlib.sha256(request.model_dump_json(exclude={"request_id"}).encode()).hexdigest()
+    if digest != run.get("request_hash") or request.request_id != run.get("request_id"):
+        raise ValueError("Frozen RSI request configuration changed since this experiment")
+    return request
 
 
 class RsiStore:
@@ -175,6 +189,9 @@ class RsiStore:
         with self.connect() as db:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, user TEXT, agent TEXT, kind TEXT, body TEXT, summary TEXT)"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS run_test_observations (id TEXT PRIMARY KEY, user TEXT, agent TEXT, body TEXT NOT NULL)"
             )
             columns = {row[1] for row in db.execute("PRAGMA table_info(records)")}
             if "summary" not in columns:
@@ -186,6 +203,13 @@ class RsiStore:
                     "UPDATE records SET summary=? WHERE id=?",
                     (json.dumps(self.metadata(json.loads(body))), identity),
                 )
+            # Older run summaries duplicated all human transcripts. Keep the
+            # history index small; full evidence stays in the record/payload.
+            db.execute(
+                "UPDATE records SET summary=json_remove(summary, '$.test_observations', '$.human_test_suite') "
+                "WHERE kind='run' AND (json_type(summary, '$.test_observations') IS NOT NULL "
+                "OR json_type(summary, '$.human_test_suite') IS NOT NULL)"
+            )
             db.execute(
                 "CREATE INDEX IF NOT EXISTS record_owner ON records(user, agent, kind)"
             )
@@ -232,7 +256,8 @@ class RsiStore:
         return {
             k: v
             for k, v in value.items()
-            if k not in {"config", "package", "assets", "record"}
+            if k not in {"config", "package", "assets", "record", "test_observations",
+                         "human_test_suite", "_test_observations_external"}
         }
 
     @contextmanager
@@ -240,12 +265,35 @@ class RsiStore:
         db = sqlite3.connect(self.path)
         try:
             with db:
+                db.execute("BEGIN")
                 yield db
         finally:
             db.close()
 
-    def put(self, value, user, agent, kind):
+    def put(self, value, user, agent, kind, *, preserve_test_observations=False):
+        # The host explicitly attests that an ordinary progress event has not
+        # changed human measurements. Generic callers always write their value.
+        body = dict(value)
+        body.pop("_test_observations_external", None)
         with self.connect() as db:
+            if kind == "run":
+                existing = preserve_test_observations and db.execute(
+                    "SELECT 1 FROM run_test_observations WHERE id=? AND user=? AND agent=?",
+                    (value["id"], user, agent),
+                ).fetchone()
+                if existing:
+                    body.pop("test_observations", None)
+                    body["_test_observations_external"] = True
+                elif "test_observations" in body:
+                    observations = body.pop("test_observations")
+                    db.execute(
+                        "INSERT OR REPLACE INTO run_test_observations (id, user, agent, body) VALUES (?, ?, ?, ?)",
+                        (value["id"], user, agent, json.dumps(observations, ensure_ascii=False)),
+                    )
+                    body["_test_observations_external"] = True
+                else:
+                    db.execute("DELETE FROM run_test_observations WHERE id=? AND user=? AND agent=?",
+                               (value["id"], user, agent))
             db.execute(
                 "INSERT OR REPLACE INTO records (id, user, agent, kind, body, summary) VALUES (?, ?, ?, ?, ?, ?)",
                 (
@@ -253,15 +301,28 @@ class RsiStore:
                     user,
                     agent,
                     kind,
-                    json.dumps(value, ensure_ascii=False),
+                    json.dumps(body, ensure_ascii=False),
                     json.dumps(self.metadata(value), ensure_ascii=False),
                 ),
             )
 
+    @staticmethod
+    def _decode(db, encoded, user, agent):
+        value = json.loads(encoded)
+        if value.pop("_test_observations_external", False):
+            row = db.execute(
+                "SELECT body FROM run_test_observations WHERE id=? AND user=? AND agent=?",
+                (value["id"], user, agent),
+            ).fetchone()
+            if row is None:
+                raise ValueError("RSI human measurement payload is unavailable")
+            value["test_observations"] = json.loads(row[0])
+        return value
+
     def list(self, user, agent, kind):
         with self.connect() as db:
             return [
-                json.loads(row[0])
+                self._decode(db, row[0], user, agent)
                 for row in db.execute(
                     "SELECT body FROM records WHERE user=? AND agent=? AND kind=? ORDER BY rowid DESC",
                     (user, agent, kind),
@@ -294,9 +355,9 @@ class RsiStore:
                 "SELECT body FROM records WHERE id=? AND user=? AND agent=? AND kind=?",
                 (identity, user, agent, kind),
             ).fetchone()
-        if row is None:
-            raise ValueError("RSI record not found")
-        return json.loads(row[0])
+            if row is None:
+                raise ValueError("RSI record not found")
+            return self._decode(db, row[0], user, agent)
 
 
 class DesktopRsiMixin:
@@ -495,7 +556,7 @@ class DesktopRsiMixin:
         versions = self.rsi_store.summaries(user_id, agent_id, "version")
         return {
             "current_fingerprint": fingerprint(agent),
-            "runs": self.rsi_store.list(user_id, agent_id, "run"),
+            "runs": self.rsi_store.summaries(user_id, agent_id, "run"),
             "versions": [
                 {k: v for k, v in item.items() if k != "record"} for item in versions
             ],
@@ -596,7 +657,7 @@ class DesktopRsiMixin:
             raise ValueError("Goal and distinct optimization parts are required")
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
-            runs = self.rsi_store.list(user_id, agent_id, "run")
+            runs = self.rsi_store.summaries(user_id, agent_id, "run")
             existing = next(
                 (r for r in runs if r["request_id"] == request.request_id), None
             )
@@ -608,7 +669,8 @@ class DesktopRsiMixin:
                     raise ValueError(
                         "Request identity already belongs to different RSI options"
                     )
-                return existing  # HTTP retry never duplicates model calls.
+                # HTTP retry returns the full original record without duplicating calls.
+                return self.rsi_store.get(existing["id"], user_id, agent_id, "run")
             if any(r["status"] in {"queued", "running"} for r in runs):
                 raise ValueError("This Agent already has an active RSI run")
             if agent.config.get("agentMode", "simple") != "simple":
@@ -699,7 +761,7 @@ class DesktopRsiMixin:
             raise ValueError('dataset requires an unavailable MCP server')
         return McpCaseEnvironment(tuple(self._mcp_config(records[name]) for name in binding.mcp_servers))
 
-    async def resume_rsi(self, agent_id, run_id, user_id):
+    async def resume_rsi(self, agent_id, run_id, user_id, *, upgrade_call_isolation=False):
         self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
@@ -708,15 +770,20 @@ class DesktopRsiMixin:
                 raise ValueError("External experiments resume through their owning host")
             if value["status"] not in {"interrupted", "cancelled", "failed"} or not value.get("resumable"):
                 raise ValueError("This RSI run cannot resume")
-            if any(r["status"] in {"queued", "running"} for r in self.rsi_store.list(user_id, agent_id, "run")):
+            if any(r["status"] in {"queued", "running"} for r in self.rsi_store.summaries(user_id, agent_id, "run")):
                 raise ValueError("This Agent already has an active RSI run")
+            upgrade = None
             if value.get("recovery_engine_id") != engine_fingerprint():
-                raise ValueError("RSI engine changed since this experiment; use the original engine to resume")
+                if not upgrade_call_isolation:
+                    raise ValueError("RSI engine changed since this experiment; use the original engine to resume")
+                upgrade = {"state": "requested", "from_engine": value.get("recovery_engine_id"),
+                           "to_engine": engine_fingerprint()}
+
             if fingerprint(agent) != value["base_fingerprint"]:
                 raise ValueError("Agent configuration changed since this experiment")
             root = self.runtime_root / "rsi" / run_id
             frozen = json.loads((root / "resume-context.json").read_text())
-            request = RsiStart.model_validate(frozen["request"])
+            request = frozen_rsi_request(frozen, value)
             await self._rsi_scorer_selection(request, user_id, agent_id)
             provider = await self._provider(agent, user_id)
             internal_provider = provider
@@ -731,7 +798,14 @@ class DesktopRsiMixin:
                 if value.get("sequence", 0):
                     raise ValueError("RSI journal is unavailable for recovery")
                 source = None
-            value.update(status="queued", recovery_journal_name=source.name if source else None, journal_name=f"audit-resume-{new_id('part')}.jsonl",
+            if upgrade is not None:
+                if source is None:
+                    raise ValueError("No recorded calls are available for a call isolation upgrade")
+                baseline_version = self.rsi_store.get(f"{run_id}.0", user_id, agent_id, "version")
+                if frozen["assets"] != baseline_version.get("assets", {}):
+                    raise ValueError("Frozen Agent assets changed since this experiment")
+                value["call_isolation_upgrade"] = upgrade
+            value.update(status="queued", stage="resuming", recovery_journal_name=source.name if source else None, journal_name=f"audit-resume-{new_id('part')}.jsonl",
                          resumed_at=utc_now().isoformat(), resume_count=value.get("resume_count", 0) + 1)
             value.pop("finished_at", None)
             value.pop("error_type", None)
@@ -744,8 +818,56 @@ class DesktopRsiMixin:
             task.add_done_callback(lambda _: self._rsi_tasks.pop(run_id, None))
             return value.copy()
 
+    async def resume_rsi_tests(self, agent_id, run_id, user_id):
+        """Complete predeclared human-only tests without running optimization."""
+        self = cast("DesktopV2Service", self)
+        async with self._agent_update_lock:
+            agent = await self._agent(agent_id, user_id)
+            value = self.rsi_store.get(run_id, user_id, agent_id, "run")
+            if value.get("external_host") or value["status"] != "completed":
+                raise ValueError("Human tests resume only after the native experiment completes")
+            if any(r["status"] in {"queued", "running"}
+                   for r in self.rsi_store.summaries(user_id, agent_id, "run")):
+                raise ValueError("This Agent already has an active RSI run")
+            if value.get("recovery_engine_id") != engine_fingerprint():
+                raise ValueError("RSI engine changed since this experiment")
+            if fingerprint(agent) != value["base_fingerprint"]:
+                raise ValueError("Agent configuration changed since this experiment")
+            root = self.runtime_root / "rsi" / run_id
+            frozen = json.loads((root / "resume-context.json").read_text())
+            request = frozen_rsi_request(frozen, value)
+            if not (request.human_test_suite or request.human_test_count):
+                raise ValueError("Experiment has no predeclared human test suite")
+            await self._rsi_scorer_selection(request, user_id, agent_id)
+            provider = await self._provider(agent, user_id)
+            internal_provider = provider
+            if request.model_provider_id:
+                internal_provider = await self.catalog.get_model_provider(request.model_provider_id, user_id)
+                if internal_provider is None or not internal_provider.api_key:
+                    raise ValueError("RSI model is not configured")
+            if rsi_binding(agent, provider, internal_provider) != value["recovery_binding_id"]:
+                raise ValueError("RSI model configuration changed since this experiment")
+            from sagents.v2.optimization.contracts import OptimizationResult
+            result = OptimizationResult.model_validate_json((root / "result.json").read_text())
+            if result.candidate_package.content_hash != value.get("retained_hash"):
+                raise ValueError("Completed RSI result differs from retained version")
+            snapshot = AgentPackageBundle.model_validate(frozen["package"])
+            manifest = snapshot.manifest.model_dump(mode="json")
+            manifest["runtime"]["capabilities"]["tool.provider"] = {"plugin": OfficialToolPlugin.plugin_id}
+            baseline = AgentPackageBundle(manifest=manifest, files=snapshot.files)
+            completed_checkpoint_events(baseline, result, saved_records=value.get("test_observations", ()))
+            value.update(status="queued", human_test_recovery_status="queued",
+                         human_test_recovery_started_at=utc_now().isoformat(),
+                         human_test_recovery_count=value.get("human_test_recovery_count", 0) + 1)
+            self.rsi_store.put(value, user_id, agent_id, "run")
+            task = asyncio.create_task(self._execute_rsi(agent, snapshot, provider, internal_provider,
+                request, value, frozen["assets"], human_only=True), name=run_id)
+            self._rsi_tasks[run_id] = task
+            task.add_done_callback(lambda _: self._rsi_tasks.pop(run_id, None))
+            return value.copy()
+
     async def _execute_rsi(
-        self, agent, package, provider, internal_provider, request, value, assets, *, resume_from=None
+        self, agent, package, provider, internal_provider, request, value, assets, *, resume_from=None, human_only=False
     ):
         self = cast("DesktopV2Service", self)
         root = self.runtime_root / "rsi" / value["id"]
@@ -753,11 +875,13 @@ class DesktopRsiMixin:
         os.chmod(root, 0o700)
         user, identity = agent.user_id, agent.agent_id
         value = dict(value)
+        original_finished_at = value.get("finished_at")
         test_observer = None
         scorer_gateway = None
 
-        def save():
-            self.rsi_store.put(value, user, identity, "run")
+        def save(*, measurements_changed=False):
+            self.rsi_store.put(value, user, identity, "run",
+                               preserve_test_observations=not measurements_changed)
 
         def version_event(index, bundle_data, record=None):
             bundle = AgentPackageBundle.model_validate(bundle_data)
@@ -796,7 +920,10 @@ class DesktopRsiMixin:
             if event["event"] == "optimization_stopped":
                 value["termination"] = data
             if event["event"] == "operation_started":
+                value["recovery_engine_id"] = data.get("recovery_engine_id", value.get("recovery_engine_id"))
                 version_event(0, data["package"])
+            elif event["event"] == "execution_policy_upgraded":
+                value["call_isolation_upgrade"] = {**data, "state": "verified", "verified_at": event["time"]}
             elif event["event"] == "suite_review_completed":
                 value["suite_review"] = data["review"]
             elif event["event"] == "candidate_created":
@@ -1185,14 +1312,14 @@ class DesktopRsiMixin:
                 test_runner = SharedCallLimitRunner(test_runner, shared_calls)
                 def publish_test(records):
                     value["test_observations"] = records
-                    save()
+                    save(measurements_changed=True)
                 try:
                     test_suite = request.human_test_suite
                     if test_suite is None and value.get("human_test_suite"):
                         test_suite = OptimizationTestSuite.model_validate(value["human_test_suite"])
                     if test_suite is None:
                         generation = await AgentPackageTestGenerator(
-                            runner=test_runner, designer=roles["designer"],
+                            runner=test_runner, designer=roles["designer"], call_retries=3,
                         ).generate_split_with_record(
                             package, context=context, goal=request.goal, split="test",
                             case_count=request.human_test_count, max_cases=request.human_test_count,
@@ -1201,7 +1328,8 @@ class DesktopRsiMixin:
                         test_suite = OptimizationTestSuite(cases=generation.suite.cases)
                     (test_root / "suite.json").write_text(test_suite.model_dump_json())
                     value["human_test_suite"] = test_suite.model_dump(mode="json")
-                    test_observer = HumanTestObserver(
+                    value['human_test_phase_recovery'] = True
+                    test_observer = resumable_human_test_observer(
                         baseline=package, suite=test_suite, publish=publish_test,
                         completed_records=value.get("test_observations", ()),
                         concurrency=request.max_concurrency,
@@ -1209,12 +1337,15 @@ class DesktopRsiMixin:
                         evaluate=IsolatedTestEvaluator(
                             runner=test_runner, evaluator=roles["evaluator"], driver=roles["designer"],
                             evidence_directory=test_root / "evaluations",
+                            checkpoint_binding_id=value['request_hash'] + ':' + value['recovery_binding_id'],
                             retry_local_evaluations=True, restart_incomplete_dialogues=True,
                             context=context, goal=request.goal,
                             scorer=scorer,
+                            call_retries=3,
                             require_clean_generated_tools=constraints.require_clean_generated_tools,
                         ),
                     )
+                    value.pop("human_test_error", None)
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
@@ -1244,6 +1375,8 @@ class DesktopRsiMixin:
                     validation_case_count=request.validation_case_count,
                     max_concurrency=request.max_concurrency,
                     call_timeout_seconds=240,
+                    call_retries=3,
+                    allow_call_isolation_upgrade=value.get("call_isolation_upgrade", {}).get("state") == "requested",
                     timeout_seconds=rsi_timeout_seconds(request),
                     journal_path=rsi_journal(root, value),
                     evidence_directory=root / "workspace" / "iterations",
@@ -1257,19 +1390,44 @@ class DesktopRsiMixin:
                     journal_start_sequence=value.get("sequence", 0) if source else 0,
                     on_event=observe,
                 )
+            if human_only:
+                if test_observer is None:
+                    raise ValueError("Human test observer could not be restored")
+                from sagents.v2.optimization.contracts import OptimizationResult
+                saved = OptimizationResult.model_validate_json((root / "result.json").read_text())
+                if saved.candidate_package.content_hash != value.get("retained_hash"):
+                    raise ValueError("Completed RSI result differs from retained version")
+                events = completed_checkpoint_events(package, saved,
+                    saved_records=value.get("test_observations", ()))
+                value.update(stage="human_test_pending", human_test_recovery_status="running")
+                save()
+                for event in events:
+                    test_observer.observe(event)
+                await test_observer.finish()
+                value.update(status="completed", stage="human_test_recovery_completed",
+                             human_test_recovery_status="completed")
+                return
             source = resume_from
-            for failure in range(13):
+            call_failures = {}
+            while True:
                 try:
                     result = await run_optimizer(source)
                     break
-                except OptimizationTransientFailure:
-                    if failure == 12:
+                except Exception as error:
+                    retry = failed_call(error, rsi_journal(root, value))
+                    if retry is None:
                         raise
+                    key = tuple(retry.get(k) for k in ("role", "round", "trial", "case_id", "phase"))
+                    failure = call_failures.get(key, 0)
+                    if failure >= retry["retry_limit"]:
+                        value["exhausted_call_recovery"] = retry
+                        raise
+                    call_failures[key] = failure + 1
                     source = rsi_journal(root, value)
                     delay = min(60, 2 ** min(failure + 1, 6))
                     value.update(recovery_journal_name=source.name, journal_name=f"audit-retry-{new_id('part')}.jsonl",
                                  stage="infrastructure_retry",
-                                 infrastructure_retry={"attempt": failure + 1, "wait_seconds": delay},
+                                 infrastructure_retry={**retry, "attempt": failure + 1, "wait_seconds": delay},
                                  automatic_recoveries=value.get("automatic_recoveries", 0) + 1)
                     save()
                     await self._rsi_retry_wait(delay)
@@ -1302,17 +1460,25 @@ class DesktopRsiMixin:
                 recommendation_block_reason=result.report.recommendation_block_reason,
             )
         except asyncio.CancelledError:
-            value["status"] = "interrupted"
+            value["status"] = "completed" if human_only else "interrupted"
+            if human_only:
+                value["human_test_recovery_status"] = "cancelled"
             raise
         except Exception as error:
+            if value.get("call_isolation_upgrade", {}).get("state") == "requested":
+                value["call_isolation_upgrade"]["state"] = "rejected"
             # Provider errors can contain secrets. Persist only the exception type.
             if (code := builtin_scoring_failure_code(error)) is not None:
                 value["error_code"] = code
-            value.update(
-                status="failed",
-                error_type=type(error).__name__,
-                exit_reason="timeout" if isinstance(error, TimeoutError) else "error",
-            )
+            if human_only:
+                value.update(status="completed", human_test_error=type(error).__name__,
+                             human_test_recovery_status="failed", stage="human_test_recovery_failed")
+            else:
+                value.update(
+                    status="failed",
+                    error_type=type(error).__name__,
+                    exit_reason="timeout" if isinstance(error, TimeoutError) else "error",
+                )
         finally:
             if test_observer is not None:
                 await test_observer.cancel()
@@ -1321,7 +1487,11 @@ class DesktopRsiMixin:
                 )
             if scorer_gateway is not None:
                 await scorer_gateway.close()
-            value["finished_at"] = utc_now().isoformat()
+            if human_only:
+                value["human_test_recovery_finished_at"] = utc_now().isoformat()
+                value["finished_at"] = original_finished_at
+            else:
+                value["finished_at"] = utc_now().isoformat()
             save()
 
     async def _rsi_retry_wait(self, seconds):
@@ -1336,7 +1506,7 @@ class DesktopRsiMixin:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             value = self.rsi_store.get(run_id, user_id, agent_id, "run")
-            value["status"] = "cancelled"
+            value["status"] = "completed" if value.get("human_test_recovery_status") == "cancelled" else "cancelled"
             self.rsi_store.put(value, user_id, agent_id, "run")
         return value
 

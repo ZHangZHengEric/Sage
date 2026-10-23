@@ -1099,8 +1099,8 @@ async def test_chat_structured_sse_failure_keeps_its_error_code(
 
 
 @pytest.mark.parametrize('started,status,retryable', [(True, None, True), (True, 200, True),
-    (False, None, False), (True, 400, False), (True, 401, False)])
-def test_gateway_invalid_response_only_retries_after_successful_stream_started(started, status, retryable):
+    (False, None, True), (True, 400, False), (True, 401, False)])
+def test_gateway_interrupted_response_retries_even_before_first_content(started, status, retryable):
     from sagents.v2.model.plugins._shared.wire import ProviderStreamFailure, provider_error
     error = ProviderStreamFailure('response stream could not be completed',
         code='invalid_provider_response', status_code=status)

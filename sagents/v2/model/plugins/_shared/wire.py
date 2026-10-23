@@ -238,8 +238,16 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
         )
     )
     interrupted_response = (
-        response_started and status in {None, 200}
+        status in {None, 200}
         and provider_code == "invalid_provider_response"
+        and (
+            response_started
+            or (
+                isinstance(exc, ProviderStreamFailure)
+                and str(exc).strip().rstrip(".").casefold()
+                == "response stream could not be completed"
+            )
+        )
     )
     retryable = (
         interrupted_response

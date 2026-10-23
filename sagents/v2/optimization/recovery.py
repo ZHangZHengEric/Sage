@@ -50,7 +50,7 @@ def engine_fingerprint():
         import importlib.util
         import marshal
         names = [f"sagents.v2.optimization.{name}" for name in ('optimizer', 'contracts', 'feedback',
-                 'principles', 'generator', 'runner', 'recovery', 'observer', 'diagnostics', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'evaluation_files', 'execution_records')]
+                 'principles', 'generator', 'runner', 'recovery', 'observer', 'diagnostics', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints')]
         names.extend(('sagents.v2.tool.generated', 'sagents.v2.tool.plugins.result_file', 'sagents.v2.optimization.builtin_scoring'))
         hashes = {}
         for name in names:
@@ -87,6 +87,7 @@ class OptimizationRecovery:
         self.recovered_agent_calls = []
         self.suite = None
         self.dialogues, self.dialogue_scores = {}, {}
+        self.scored_observations = {}
         rejected_calls = set()
         targets, agents, active_cases = {}, {}, {}
         finished_targets, case_calls = {}, defaultdict(list)
@@ -131,6 +132,15 @@ class OptimizationRecovery:
                 call = OptimizationAgentCall.model_validate(data['call'])
                 if call.observation.state == 'completed':
                     self.designs[call.request].append(call.observation)
+            elif name == 'execution_scored':
+                identity = case_key(data['package_hash'], data.get('phase', 'optimization'),
+                    data['round'], data['trial'], data['case_id'])
+                grade = OptimizationGrade.model_validate(data['grade'])
+                receipt_key = (*identity, data['observation_hash'], data['history_hash'])
+                previous = self.scored_observations.get(receipt_key)
+                if previous is not None and previous != grade:
+                    raise ValueError('completed numeric scoring receipt differs')
+                self.scored_observations[receipt_key] = grade
             elif name in {'dialogue_execution_completed', 'dialogue_execution_scored'}:
                 identity = case_key(data['package_hash'], data.get('phase', 'optimization'),
                     data['round'], data['trial'], data['case_id'])
@@ -237,6 +247,8 @@ class OptimizationRecovery:
                         self._consumed_calls.add(call_id)
                         count += 1
         self.pending_observations.pop(identity, None)
+        self.scored_observations = {key: value for key, value in self.scored_observations.items()
+            if key[:5] != identity}
         return count
 
     def completed_dialogue(self, package_hash, *, phase, round, trial, case):
@@ -272,6 +284,17 @@ class OptimizationRecovery:
         return {'turns': turns, 'stop_reason': record['stop_reason'],
                 'grade': OptimizationGrade.model_validate(score['grade']) if score.get('grade') else turns[-1].grade,
                 'model_grade': OptimizationGrade.model_validate(score['model_grade']) if score.get('model_grade') else turns[-1].model_grade}
+
+    def scored_observation(self, package_hash, *, phase, round, trial, case_id, observation, history):
+        identity = case_key(package_hash, phase, round, trial, case_id)
+        key = (*identity, configuration_fingerprint(observation.model_dump(mode="json")),
+               configuration_fingerprint(history or []))
+        grade = self.scored_observations.pop(key, None)
+        if grade is None:
+            if any(saved[:5] == identity for saved in self.scored_observations):
+                raise ValueError('numeric scoring receipt belongs to a different execution')
+            return None
+        return grade.model_copy(deep=True)
 
     def observation(self, package_hash, *, phase, round, trial, case):
         identity = case_key(package_hash, phase, round, trial, case.id)

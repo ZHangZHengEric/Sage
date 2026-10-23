@@ -61,6 +61,79 @@ void main() {
     expect(empty.minimum, 0);
     expect(empty.maximum, 1);
   });
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'hovering a trend column shows that round metrics ${brightness.name}',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(brightness: brightness),
+            home: const Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 500,
+                  child: RsiScoreTrend(
+                    chinese: true,
+                    records: [
+                      {
+                        'round': 0,
+                        'scores': {'training': .875, 'validation': .625},
+                      },
+                      {
+                        'round': 2,
+                        'scores': {
+                          'training': .938,
+                          'validation': .667,
+                          'test': .8,
+                        },
+                      },
+                      {
+                        'round': 5,
+                        'valid': false,
+                        'scores': {'training': 1, 'test': .9},
+                      },
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        final mouse = await tester.createGesture(
+          kind: ui.PointerDeviceKind.mouse,
+        );
+        await mouse.addPointer(location: Offset.zero);
+        addTearDown(mouse.removePointer);
+        Future<void> hover(int round) async {
+          final rect = tester.getRect(
+            find.byKey(ValueKey('rsi-trend-column-$round')),
+          );
+          // Hover away from the actual dots: the whole column is a target.
+          await mouse.moveTo(Offset(rect.center.dx, rect.bottom - 2));
+          await tester.pump(const Duration(milliseconds: 200));
+          await tester.pump(const Duration(milliseconds: 200));
+        }
+
+        await hover(0);
+        expect(find.text('基线\n训练集：0.875\n验证集：0.625\n测试集：未评估'), findsOneWidget);
+        await hover(2);
+        expect(
+          find.text('第 2 轮\n训练集：0.938\n验证集：0.667\n测试集：0.800'),
+          findsOneWidget,
+        );
+        expect(find.text('基线\n训练集：0.875\n验证集：0.625\n测试集：未评估'), findsNothing);
+        await hover(5);
+        expect(
+          find.text('第 5 轮\n训练集：1.000\n验证集：未评估\n测试集：结果无效'),
+          findsOneWidget,
+        );
+        await mouse.moveTo(Offset.zero);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('第 5 轮\n'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   setUpAll(() async {
     if (Platform.environment['RSI_SCREENSHOT_DIR'] != null) {
       await (FontLoader('SageScreenshot')..addFont(

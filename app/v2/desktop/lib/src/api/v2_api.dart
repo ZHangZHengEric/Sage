@@ -96,6 +96,17 @@ class V2ApiClient {
     );
   }
 
+  Future<Map<String, Object?>> resumeRsiTests(
+    String agentId,
+    String runId,
+  ) async =>
+      (await _json(
+                'POST',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/resume-tests',
+              )
+              as Map)
+          .cast<String, Object?>();
+
   Future<Map<String, Object?>> rsiVersion(
     String agentId,
     String versionId,

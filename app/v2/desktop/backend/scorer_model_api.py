@@ -249,6 +249,9 @@ class ScorerModelGateway:
             message = error.info.message[:2000]
             for value in (*self.redact, token):
                 message = message.replace(value, '[redacted]')
+            record.update(error_message=message, provider_code=error.info.provider_code,
+                retryable=error.info.retryable,
+                response_started=error.info.metadata.get('response_started'))
             status = 503 if error.info.retryable else 400
             return self.error(status, message, error.info.code, error.info.retryable)
         except TimeoutError:

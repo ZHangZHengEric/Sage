@@ -10,7 +10,14 @@ List<Map<String, Object?>> _rows(Object? value) => value is List
     : [];
 
 class RsiChange {
-  const RsiChange(this.kind, this.name, this.before, this.after);
+  const RsiChange(
+    this.kind,
+    this.name,
+    this.before,
+    this.after, {
+    this.binding = false,
+  });
+  final bool binding;
   final String kind, name, before, after;
   bool get added => before.isEmpty;
   bool get removed => after.isEmpty;
@@ -77,6 +84,7 @@ List<RsiChange> _changes(
             name,
             oldNames.contains(name) ? name : '',
             newNames.contains(name) ? name : '',
+            binding: true,
           ),
         );
       }
@@ -373,8 +381,22 @@ class _RsiDiffBrowser extends StatefulWidget {
 class _RsiDiffBrowserState extends State<_RsiDiffBrowser> {
   int selected = 0;
   final _scroll = ScrollController();
-  String title(RsiChange change) =>
-      change.name.isEmpty ? _kind(change.kind, widget.chinese) : change.name;
+  String title(RsiChange change) {
+    final zh = widget.chinese;
+    if (change.binding) {
+      final type = change.kind == 'skills' ? 'Skill' : (zh ? '工具' : 'Tool');
+      return zh ? '$type 绑定：${change.name}' : '$type binding: ${change.name}';
+    }
+    if (change.name.isEmpty) {
+      return change.kind == 'instructions'
+          ? (zh ? '系统指令' : 'System instructions')
+          : _kind(change.kind, zh);
+    }
+    return change.kind == 'skills'
+        ? '${zh ? 'Skill 文件' : 'Skill file'}：${change.name}'
+        : change.name;
+  }
+
   String status(RsiChange change) => change.added
       ? (widget.chinese ? '新增' : 'Added')
       : change.removed
@@ -452,12 +474,28 @@ class _RsiDiffBrowserState extends State<_RsiDiffBrowser> {
               key: ValueKey('rsi-diff-content-$selected'),
               controller: _scroll,
               padding: const EdgeInsets.only(top: 8),
-              child: _LineDiff(
-                key: ValueKey(selected),
-                before: change.before,
-                after: change.after,
-                chinese: widget.chinese,
-              ),
+              child: change.binding
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: SelectableText(
+                        change.added
+                            ? (widget.chinese
+                                  ? '未绑定 → 已绑定'
+                                  : 'Not bound → Bound')
+                            : (widget.chinese
+                                  ? '已绑定 → 未绑定'
+                                  : 'Bound → Not bound'),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleMedium?.copyWith(color: color(change)),
+                      ),
+                    )
+                  : _LineDiff(
+                      key: ValueKey(selected),
+                      before: change.before,
+                      after: change.after,
+                      chinese: widget.chinese,
+                    ),
             ),
           ),
         ),
@@ -487,11 +525,7 @@ class _RsiDiffBrowserState extends State<_RsiDiffBrowser> {
                 vertical: 4,
               ),
               leading: Text(
-                item.added
-                    ? '+'
-                    : item.removed
-                    ? '−'
-                    : 'M',
+                status(item),
                 style: TextStyle(
                   color: color(item),
                   fontWeight: FontWeight.w600,

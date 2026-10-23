@@ -10035,6 +10035,47 @@ void main() {
   }
 
   for (final brightness in Brightness.values) {
+    testWidgets(
+      'agent list evolution icon follows live status ${brightness.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(1440, 1000);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final api = _EvolvingAgentListApi();
+        final controller = await _controller(api: api);
+        addTearDown(() => _disposeController(controller));
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('智能体').first);
+        await tester.pumpAndSettle();
+        final icon = find.byKey(
+          const ValueKey('settings-agent-evolving-agent_main'),
+        );
+        expect(icon, findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('settings-agent-evolving-agent_review')),
+          findsNothing,
+        );
+        final tooltip = tester.widget<Tooltip>(
+          find.ancestor(of: icon, matching: find.byType(Tooltip)).first,
+        );
+        expect(tooltip.message, '进化中');
+        for (final status in ['queued', 'completed', 'failed', 'cancelled']) {
+          api.status = status;
+          await controller.refreshAgentStatuses();
+          await tester.pumpAndSettle();
+          expect(icon, status == 'queued' ? findsOneWidget : findsNothing);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  for (final brightness in Brightness.values) {
     for (final width in [1200.0, 1600.0]) {
       testWidgets(
         'RSI settings header wraps full actions ${brightness.name} width=$width',
@@ -10671,4 +10712,22 @@ class _OverflowRsiApi extends _FakeApi {
     'workspace_path': '/tmp/sage-rsi/layout/workspace',
     'events': [],
   };
+}
+
+class _EvolvingAgentListApi extends _FakeApi {
+  String? status = 'running';
+  @override
+  Future<List<AgentSummary>> listAgents() async => [
+    AgentSummary(
+      id: 'agent_main',
+      name: 'Sage Agent',
+      isDefault: true,
+      rsiStatus: status,
+    ),
+    const AgentSummary(
+      id: 'agent_review',
+      name: 'Review Agent',
+      rsiStatus: 'completed',
+    ),
+  ];
 }

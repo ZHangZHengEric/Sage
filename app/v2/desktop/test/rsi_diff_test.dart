@@ -6,6 +6,7 @@ import 'package:sage_desktop_v2/src/ui/rsi_diff.dart';
 Map<String, Object?> package(
   String instruction, {
   List<String> tools = const [],
+  List<String> skills = const [],
   Map<String, Object?> files = const {},
   int budget = 8,
   String version = '1',
@@ -17,7 +18,7 @@ Map<String, Object?> package(
       'main': {
         'instructions': {'inline': instruction},
         'tools': tools,
-        'skills': [],
+        'skills': skills,
         'budgets': {'max_steps': budget},
       },
     },
@@ -423,6 +424,59 @@ void main() {
     },
   );
   for (final brightness in Brightness.values) {
+    testWidgets(
+      'skill bindings are distinct from file diffs ${brightness.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(1100, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(brightness: brightness),
+            home: Scaffold(
+              body: RsiRoundChanges(
+                run: run([
+                  record(
+                    1,
+                    'base-hash',
+                    'candidate',
+                    true,
+                    package(
+                      'base',
+                      skills: ['rsi-guidance'],
+                      files: {
+                        'skills/rsi-guidance/SKILL.md':
+                            '# Guidance\nVerify the result.',
+                      },
+                    ),
+                  ),
+                ]),
+                events: const [],
+                settings: const LiquidGlassSettings(),
+                chinese: true,
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.byKey(const ValueKey('rsi-round-diff-1')));
+        await tester.pumpAndSettle();
+        expect(find.text('Skill 绑定：rsi-guidance'), findsWidgets);
+        expect(find.text('未绑定 → 已绑定'), findsOneWidget);
+        expect(find.text('+ rsi-guidance'), findsNothing);
+        expect(
+          find.text('Skill 文件：skills/rsi-guidance/SKILL.md'),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const ValueKey('rsi-diff-file-1')));
+        await tester.pumpAndSettle();
+        expect(find.text('+ # Guidance'), findsOneWidget);
+        expect(find.text('未绑定 → 已绑定'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  for (final brightness in Brightness.values) {
     testWidgets('round changes open readable diff in ${brightness.name}', (
       tester,
     ) async {
@@ -474,7 +528,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('+ # Verify'), findsOneWidget);
       expect(find.text('+ new guidance'), findsNothing);
-      expect(find.text('新增'), findsOneWidget);
+      expect(find.text('新增'), findsWidgets);
       tester.view.physicalSize = const Size(500, 900);
       await tester.pumpAndSettle();
       expect(find.text('+ # Verify'), findsOneWidget);

@@ -1159,9 +1159,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             for (final value in widget.controller.agents)
               _SettingsChoice(
                 id: value.id,
-                label: value.rsiStatus == null
-                    ? value.name
-                    : '${value.name} · RSI',
+                label: value.name,
+                evolving:
+                    value.rsiStatus == 'queued' || value.rsiStatus == 'running',
                 marked: _draft.defaultAgentId?.isNotEmpty == true
                     ? value.id == _draft.defaultAgentId
                     : value.isDefault,
@@ -4367,6 +4367,7 @@ class _SettingsChoice {
     this.removable = false,
     this.busy = false,
     this.removeKeyPrefix = 'settings-choice-delete',
+    this.evolving = false,
   });
 
   final String id;
@@ -4376,6 +4377,7 @@ class _SettingsChoice {
   final bool removable;
   final bool busy;
   final String removeKeyPrefix;
+  final bool evolving;
 }
 
 class _SettingsMasterDetail extends StatelessWidget {
@@ -4775,6 +4777,24 @@ class _SettingsChoiceButton extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (item.evolving) ...[
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: context.l10n.languageCode == 'zh'
+                          ? '进化中'
+                          : 'Evolving',
+                      child: Icon(
+                        CupertinoIcons.arrow_2_circlepath,
+                        key: ValueKey('settings-agent-evolving-${item.id}'),
+                        size: 14,
+                        color: colors.primary,
+                        semanticLabel: context.l10n.languageCode == 'zh'
+                            ? '进化中'
+                            : 'Evolving',
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   if (item.marked)
                     Tooltip(
                       message: context.l10n.text('settings.currentDefault'),

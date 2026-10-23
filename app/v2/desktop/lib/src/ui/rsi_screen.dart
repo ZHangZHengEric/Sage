@@ -72,6 +72,7 @@ class _RsiScreenState extends State<RsiScreen> {
   Timer? _poll;
   int? _loadingRevision;
   bool _mutating = false;
+  bool _confirmingCancellation = false;
   bool _showConfiguration = false;
   bool _showRunHistory = false;
   bool _versionMode = false;
@@ -86,6 +87,60 @@ class _RsiScreenState extends State<RsiScreen> {
       ? v.whereType<Map>().map((v) => v.cast<String, Object?>()).toList()
       : [];
   bool active(Object? v) => v == 'queued' || v == 'running';
+
+  bool get _canResumeTests {
+    final run = _run;
+    if (run == null ||
+        run['status'] != 'completed' ||
+        run['external_host'] == true ||
+        ((run['human_test_count'] as num?) ?? 0) == 0 &&
+            rows(map(run['human_test_suite'])['cases']).isEmpty) {
+      return false;
+    }
+    final checkpoints = rows(run['test_observations']);
+    if (checkpoints.any(
+          (record) => record['valid'] == false || record['status'] == 'invalid',
+        ) ||
+        checkpoints.any(
+          (record) => rows(record['cases']).any(
+            (item) => rows(item['trials']).any(
+              (trial) =>
+                  trial['status'] != 'completed' &&
+                  trial['grade'] != null &&
+                  run['human_test_phase_recovery'] != true,
+            ),
+          ),
+        )) {
+      return false;
+    }
+    final expected = <int>{
+      0,
+      ...rows(run['iterations'])
+          .map((record) => record['iteration'])
+          .whereType<num>()
+          .map((number) => number.toInt()),
+    };
+    final measured = checkpoints
+        .map((record) => record['round'])
+        .whereType<num>()
+        .map((number) => number.toInt())
+        .toSet();
+    return !measured.containsAll(expected) ||
+        checkpoints.any(
+          (record) =>
+              {'queued', 'running', 'cancelled'}.contains(record['status']),
+        ) ||
+        checkpoints.any(
+          (record) => rows(record['cases']).any(
+            (item) => rows(item['trials']).any(
+              (trial) =>
+                  trial['status'] != 'completed' &&
+                  (trial['grade'] == null ||
+                      run['human_test_phase_recovery'] == true),
+            ),
+          ),
+        );
+  }
 
   @override
   void initState() {
@@ -171,6 +226,71 @@ class _RsiScreenState extends State<RsiScreen> {
         await _refresh();
       }
     }
+  }
+
+  Future<void> _confirmCancellation() async {
+    if (_mutating || _confirmingCancellation || !active(_run?['status'])) {
+      return;
+    }
+    final runId = _run!['id'].toString();
+    _confirmingCancellation = true;
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: GlassCard(
+              settings: glass,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t('确认取消优化？', 'Cancel this optimization?'),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      action(
+                        t('继续运行', 'Keep running'),
+                        CupertinoIcons.play_arrow_solid,
+                        () => Navigator.pop(dialogContext, false),
+                        key: const ValueKey('rsi-cancel-dismiss'),
+                        width: 124,
+                      ),
+                      action(
+                        t('确认取消', 'Confirm cancellation'),
+                        CupertinoIcons.stop,
+                        () => Navigator.pop(dialogContext, true),
+                        key: const ValueKey('rsi-cancel-confirm'),
+                        width: 144,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _confirmingCancellation = false;
+    }
+    if (confirmed != true ||
+        !mounted ||
+        _run?['id'] != runId ||
+        !active(_run?['status'])) {
+      return;
+    }
+    await _mutate(() => widget.controller.cancelRsi(widget.agentId, runId));
   }
 
   Future<void> _start() async {
@@ -1320,12 +1440,7 @@ class _RsiScreenState extends State<RsiScreen> {
             _mutating
                 ? null
                 : canCancel
-                ? () => _mutate(
-                    () => widget.controller.cancelRsi(
-                      widget.agentId,
-                      _run!['id'].toString(),
-                    ),
-                  )
+                ? _confirmCancellation
                 : busy
                 ? null
                 : _start,
@@ -1367,6 +1482,21 @@ class _RsiScreenState extends State<RsiScreen> {
                     ),
                   ),
             key: const ValueKey('rsi-resume'),
+            width: 120,
+          ),
+        if (!_versions && _canResumeTests)
+          action(
+            t('继续测试', 'Continue tests'),
+            CupertinoIcons.play_arrow_solid,
+            _mutating || busy
+                ? null
+                : () => _mutate(
+                    () => widget.controller.resumeRsiTests(
+                      widget.agentId,
+                      _run!['id'].toString(),
+                    ),
+                  ),
+            key: const ValueKey('rsi-resume-tests'),
             width: 120,
           ),
         IconButton(

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+
 from evaluation_datasets.tau_bench import runtime
 
 
@@ -17,7 +18,7 @@ def test_pinned_source_manifest_covers_every_required_shared_guideline():
 
 
 def test_preflight_loads_official_environment_and_user_prompts_without_model_calls():
-    pytest.importorskip('tau2')
+    pytest.importorskip("litellm")  # Optional extra; do not skip missing vendored tau2.
     status = runtime.preflight()
     assert status['tools'] == 16 and status['tasks'] == 114
     assert status['splits']['train'] == 74 and status['splits']['test'] == 40
