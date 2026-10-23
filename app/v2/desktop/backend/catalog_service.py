@@ -898,10 +898,8 @@ class DesktopCatalogServiceMixin:
             )
         return result
 
-    async def add_mcp_connection(
-        self, request: MCPConnectionRequest, user_id: str
-    ) -> dict[str, Any]:
-        self = cast("DesktopV2Service", self)
+    @staticmethod
+    def _validate_mcp_connection_request(request: MCPConnectionRequest) -> None:
         if request.protocol == "stdio" and not str(request.command or "").strip():
             raise ValueError("stdio connection requires command")
         if request.protocol == "sse" and not str(request.sse_url or "").strip():
@@ -911,6 +909,12 @@ class DesktopCatalogServiceMixin:
             and not str(request.streamable_http_url or "").strip()
         ):
             raise ValueError("streamable HTTP connection requires URL")
+
+    async def add_mcp_connection(
+        self, request: MCPConnectionRequest, user_id: str
+    ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
+        self._validate_mcp_connection_request(request)
         self._invalidate_mcp_plugins(user_id)
         await self.catalog.save_mcp(
             DesktopMcpRecord(
@@ -929,6 +933,30 @@ class DesktopCatalogServiceMixin:
         )
         values = await self.list_mcp_connections(user_id)
         return next(value for value in values if value["name"] == request.name.strip())
+
+    async def update_mcp_connection(
+        self, server_name: str, request: MCPConnectionRequest, user_id: str
+    ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
+        record = next((value for value in await self.catalog.list_mcp(user_id)
+                       if value.name == server_name), None)
+        if record is None:
+            raise ValueError("MCP connection not found")
+        if record.kind != "external":
+            raise ValueError("Built-in MCP connection settings cannot be edited")
+        if request.name.strip() != server_name:
+            raise ValueError("MCP connection name cannot be changed")
+        self._validate_mcp_connection_request(request)
+        settings = request.model_dump(exclude_unset=True, exclude={"name"})
+        # Credentials are write-only. An omitted key retains the saved secret;
+        # an explicitly submitted null or empty key clears it.
+        if "api_key" not in request.model_fields_set:
+            settings.pop("api_key", None)
+        updated = DesktopMcpRecord.model_validate({**record.model_dump(), **settings})
+        await self.catalog.save_mcp(updated)
+        self._invalidate_mcp_plugins(user_id)
+        values = await self.list_mcp_connections(user_id)
+        return next(value for value in values if value["name"] == server_name)
 
     async def set_mcp_connection_enabled(
         self, server_name: str, enabled: bool, user_id: str

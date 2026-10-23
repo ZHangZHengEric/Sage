@@ -2,6 +2,18 @@
 
 每个数据集放在独立目录，保存数据、评分器、环境工具代码、依赖与来源信息。它们分别导入和配置；RSI 核心不枚举特定数据集。
 
+## 可直接接入的题库
+
+| 数据集 | 默认导入文件 | 环境与评分 | 使用说明 |
+| --- | --- | --- | --- |
+| τ-bench / tau2 零售 | `tau_bench/rsi.dataset.json` | 官方零售工具 MCP + 官方 reward | [README](tau_bench/README.md) |
+| BFCL V4 多轮 | `bfcl/rsi.dataset.json`（base 200 题）；`bfcl/rsi.all.dataset.json`（三个类别 600 题） | 官方模拟工具 MCP + 官方逐轮状态／执行结果判定 | [README](bfcl/README.md) |
+| ToolSandbox 离线基础场景 | `toolsandbox/rsi.dataset.json` | 官方工具 MCP + milestone／minefield 相似度 | [README](toolsandbox/README.md) |
+
+三个目录都保留固定版本的官方源码、数据、许可证、来源哈希、依赖、MCP 示例和独立评分器。先安装对应目录的 `requirements.txt` 并运行 `preflight()`，再在页面分别导入数据和 `scorer.py`。MCP 连接名称必须与数据集声明一致，并显式设置 `SAGE_RSI_CASE_PROTOCOL=sage.rsi.case/v1`。
+
+BFCL、ToolSandbox 的内部 split、通用用户驱动和支持范围均在各自 README 中声明；适配器运行通过不等于完整官方榜单复现。默认建议固定训练题池（每轮新增 0），避免自动生成没有官方评分参考的新题。
+
 ## 运行设置
 
 - 初始训练题数：1–100，默认 6。

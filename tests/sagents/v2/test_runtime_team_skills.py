@@ -28,7 +28,7 @@ ATTACHMENT = RuntimeSkillAttachment.from_bundle(EXTRA)
 LOAD = ("load_skill", {"skill_name": EXTRA.descriptor.name})
 
 
-async def open_app(root, plans, *, authorized=True, approval=False, existing=()):
+async def open_app(root, plans, *, authorized=True, approval=False, existing=(), real_workspace=False):
     models = Models(plans)
     bindings = LocalWorkspaceExecutionBindingProvider(root / "workspace", process_enabled=False)
     config = default_runtime(root / "sessions")
@@ -51,7 +51,8 @@ async def open_app(root, plans, *, authorized=True, approval=False, existing=())
         models={**TEST_MODELS, "models": {**TEST_MODELS["models"], **{
             role: TEST_MODELS["models"]["primary"] for role in ("root", "d1", "d2", "maker", "outsider")
         }}}, model_factory=models.factory,
-        skills=(InMemorySkillProvider(existing), InMemorySkillProvider(existing), InMemorySkillWorkspace()),
+        skills=(InMemorySkillProvider(existing), InMemorySkillProvider(existing),
+                None if real_workspace else InMemorySkillWorkspace()),
         providers={"execution.binding": bindings, "agent.tool-policy": Policy(
             approval_strategy=ApprovalStrategy.AUTO_APPROVE)},
     )
@@ -96,12 +97,63 @@ def plans():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("preload", [False, True])
+async def test_team_members_load_extra_skill_in_parallel_on_real_workspace(tmp_path, monkeypatch, preload):
+    from sagents.v2.skill.plugins.workspace import AutoSyncSkillWorkspace
+
+    app, bindings, models = await open_app(tmp_path, {
+        "root": (() if preload else (LOAD,)) + (delegate("maker", "outsider"),),
+        "maker": () if preload else (LOAD,),
+        "outsider": () if preload else (LOAD,),
+    }, real_workspace=True)
+    ready = asyncio.Event()
+    arrived = set()
+    original = AutoSyncSkillWorkspace.materialize
+
+    async def materialize(self, value, *, run_id, destination):
+        command = await app.runtime.session_store.get_start_command(run_id)
+        if command.parent_run_id:
+            arrived.add(command.agent_id)
+            if len(arrived) == 2:
+                ready.set()
+            # Require both members to reach loading before either proceeds.
+            # A sequential execution would time out and fail this regression.
+            await asyncio.wait_for(ready.wait(), timeout=10)
+        path = await original(self, value, run_id=run_id, destination=destination)
+        if not command.parent_run_id:
+            await self._write(path + "/generated.txt", b"shared team work", run_id)
+        return path
+
+    monkeypatch.setattr(AutoSyncSkillWorkspace, "materialize", materialize)
+    try:
+        maker = await app.load_agent(no_skills("maker"))
+        outsider = await app.load_agent(no_skills("outsider"))
+        agent = await app.load_agent(no_skills("root", ("maker", "outsider")),
+                                     subagents={"maker": maker, "outsider": outsider})
+        result, events = await run(app, agent, attachments=(
+            ATTACHMENT.model_copy(update={"preload": preload}),))
+        assert result.state.value == "completed", [
+            (event.type, event.data) for event in events if "failed" in event.type]
+        assert arrived == {"maker", "outsider"}
+        for role in ("root", "maker", "outsider"):
+            requests = [request for name, request in models.seen if name == role]
+            assert requests, role
+            assert any("UNIQUE RUNTIME INSTRUCTIONS" in prompt(request) for request in requests), role
+            assert all("skill.workspace_in_use" not in request.model_dump_json() for request in requests)
+        assert (tmp_path / "workspace/skills/temporary-guide/generated.txt").read_bytes() == b"shared team work"
+    finally:
+        await app.close()
+        await bindings.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("target", [None, "d1"])
-async def test_nested_discovery_load_isolation_and_permissions(tmp_path, target):
+@pytest.mark.parametrize("real_workspace", [False, True])
+async def test_nested_discovery_load_isolation_and_permissions(tmp_path, target, real_workspace):
     plan = plans()
     if target:
         plan.update(root=(delegate("d1", "outsider"),), outsider=())
-    app, bindings, models = await open_app(tmp_path, plan)
+    app, bindings, models = await open_app(tmp_path, plan, real_workspace=real_workspace)
     try:
         agent = await load_tree(app)
         attachment = ATTACHMENT.model_copy(update={"target_agent_id": target})

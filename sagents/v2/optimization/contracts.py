@@ -14,7 +14,7 @@ OptimizationPart = Literal["instructions", "skills", "tools", "budgets", "resour
 
 
 class OptimizationCase(StrictModel):
-    id: str
+    id: str = Field(min_length=1)
     input: VerbatimText = Field(min_length=1)
     rubric: VerbatimText = Field(min_length=1)
     # Evaluator-owned reference; never sent as target input or dialogue context.
@@ -267,6 +267,8 @@ class OptimizationSuiteIssue(StrictModel):
     case_ids: tuple[str, ...] = ()
     rationale: str = Field(min_length=1)
     suggested_fix: str = Field(min_length=1)
+    evidence: tuple[str, ...] = ()
+    impact: str = ""
 
 
 class OptimizationSuiteReview(StrictModel):
@@ -391,6 +393,8 @@ class OptimizationTrainingAddition(StrictModel):
 
 
 class OptimizationReport(StrictModel):
+    dataset_manifest: dict[str, Any] | None = None
+    preflight_policy: dict[str, Any] = Field(default_factory=dict)
     goal: VerbatimText
     suite_review: OptimizationSuiteReview | None = None
     requested_rounds: int

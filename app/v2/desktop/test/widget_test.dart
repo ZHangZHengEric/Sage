@@ -28,6 +28,39 @@ import 'package:sage_desktop_v2/src/ui/shared/desktop_notice.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
 
+class _McpCatalogApi extends _FakeApi {
+  @override
+  Future<List<ToolSummary>> listTools() async => [
+    ...await super.listTools(),
+    for (final record in mcpRecords)
+      if (record.name == 'TauRetail' && !record.disabled)
+        const ToolSummary(
+          name: 'mcp_TauRetail_get_order_details',
+          type: 'mcp',
+          source: 'TauRetail',
+        ),
+  ];
+
+  @override
+  Future<McpConnectionSummary> setMcpConnectionEnabled(
+    String name,
+    bool enabled,
+  ) async {
+    final record = McpConnectionSummary(
+      name: name,
+      protocol: 'stdio',
+      disabled: !enabled,
+      toolCount: enabled ? 1 : 0,
+    );
+    mcpRecords = [
+      for (final old in mcpRecords)
+        if (old.name != name) old,
+      record,
+    ];
+    return record;
+  }
+}
+
 class _ObservationComponentApi extends _FakeApi {
   @override
   Future<List<ComponentSummary>> listComponents() async => [
@@ -601,6 +634,41 @@ Inspect the complete diff before reporting findings.
   Stream<Map<String, Object?>> subscribeSessionTree(String sessionId) {
     sessionTreeSubscriptionCalls += 1;
     return _sessionTreeEvents.stream;
+  }
+
+  String? lastMcpUpdateName;
+  Map<String, Object?>? lastMcpUpdate;
+
+  @override
+  Future<McpConnectionSummary> updateMcpConnection(
+    String name,
+    Map<String, Object?> value,
+  ) async {
+    lastMcpUpdateName = name;
+    lastMcpUpdate = value;
+    final existing = mcpRecords.firstWhere((record) => record.name == name);
+    final record = McpConnectionSummary.fromJson({
+      ...value,
+      'disabled': existing.disabled,
+    });
+    mcpRecords = [
+      for (final old in mcpRecords)
+        if (old.name != name) old,
+      record,
+    ];
+    return record;
+  }
+
+  Map<String, Object?>? lastMcpConnection;
+
+  @override
+  Future<McpConnectionSummary> addMcpConnection(
+    Map<String, Object?> value,
+  ) async {
+    lastMcpConnection = value;
+    final record = McpConnectionSummary.fromJson(value);
+    mcpRecords = [...mcpRecords, record];
+    return record;
   }
 
   @override
@@ -8305,6 +8373,239 @@ void main() {
         _disposeController(controller);
       },
     );
+  }
+
+  testWidgets('MCP stdio validates and submits arguments and environment', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MCP').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-add-mcp')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('mcp-name')), 'TauRetail');
+    await tester.tap(find.text('Streamable HTTP').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('stdio').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('mcp-endpoint')),
+      '/project/.venv/bin/python',
+    );
+    await tester.enterText(find.byKey(const ValueKey('mcp-args')), '[1]');
+    Future<void> connect() async {
+      await tester.ensureVisible(find.text('连接').last);
+      await tester.tap(find.text('连接').last);
+      await tester.pumpAndSettle();
+    }
+
+    await connect();
+    expect(api.lastMcpConnection, isNull);
+    expect(find.text('参数必须是 JSON 字符串数组。'), findsOneWidget);
+    final arguments = [
+      '-m',
+      'evaluation_datasets.tau_bench.mcp_server',
+      '--state',
+      '/path with spaces/state.sqlite3',
+    ];
+    await tester.ensureVisible(find.byKey(const ValueKey('mcp-args')));
+    await tester.enterText(
+      find.byKey(const ValueKey('mcp-args')),
+      jsonEncode(arguments),
+    );
+    await tester.ensureVisible(find.byKey(const ValueKey('mcp-env')));
+    await tester.enterText(
+      find.byKey(const ValueKey('mcp-env')),
+      '{"PYTHONPATH": 1}',
+    );
+    await connect();
+    expect(api.lastMcpConnection, isNull);
+    expect(find.byKey(const ValueKey('mcp-validation-error')), findsOneWidget);
+    final environment = {
+      'PYTHONPATH': '/project',
+      'SAGE_RSI_CASE_PROTOCOL': 'sage.rsi.case/v1',
+    };
+    await tester.ensureVisible(find.byKey(const ValueKey('mcp-env')));
+    await tester.enterText(
+      find.byKey(const ValueKey('mcp-env')),
+      jsonEncode(environment),
+    );
+    await connect();
+    expect(api.lastMcpConnection, {
+      'name': 'TauRetail',
+      'protocol': 'stdio',
+      'command': '/project/.venv/bin/python',
+      'args': arguments,
+      'env': environment,
+    });
+    expect(find.byKey(const ValueKey('mcp-env')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  test(
+    'MCP additions and enable changes refresh the selectable tool catalog',
+    () async {
+      final api = _McpCatalogApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await controller.loadSettingsCatalog();
+      expect(
+        controller.toolCatalog.map((tool) => tool.name),
+        isNot(contains('mcp_TauRetail_get_order_details')),
+      );
+      await controller.addMcpConnection({
+        'name': 'TauRetail',
+        'protocol': 'stdio',
+        'command': 'python',
+      });
+      expect(
+        controller.toolCatalog.map((tool) => tool.name),
+        contains('mcp_TauRetail_get_order_details'),
+      );
+      await controller.setMcpConnectionEnabled('TauRetail', false);
+      expect(
+        controller.toolCatalog.map((tool) => tool.name),
+        isNot(contains('mcp_TauRetail_get_order_details')),
+      );
+      await controller.setMcpConnectionEnabled('TauRetail', true);
+      expect(
+        controller.toolCatalog.map((tool) => tool.name),
+        contains('mcp_TauRetail_get_order_details'),
+      );
+    },
+  );
+
+  for (final section in ['工具', '智能体']) {
+    testWidgets('entering $section refreshes externally connected MCP tools', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _McpCatalogApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      api.mcpRecords = [
+        ...api.mcpRecords,
+        const McpConnectionSummary(
+          name: 'TauRetail',
+          protocol: 'stdio',
+          toolCount: 1,
+        ),
+      ];
+      await tester.tap(find.text(section).first);
+      await tester.pumpAndSettle();
+      expect(
+        controller.toolCatalog.map((tool) => tool.name),
+        contains('mcp_TauRetail_get_order_details'),
+      );
+      if (section == '工具') {
+        expect(find.text('mcp_TauRetail_get_order_details'), findsWidgets);
+      } else {
+        await tester.tap(find.text('编辑').first);
+        await tester.pumpAndSettle();
+        final tool = find.text('mcp_TauRetail_get_order_details');
+        await tester.ensureVisible(tool);
+        await tester.tap(tool);
+        await tester.pumpAndSettle();
+        expect(
+          api.lastAgentPatch?['available_tools'],
+          contains('mcp_TauRetail_get_order_details'),
+        );
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final protocol in ['stdio', 'streamable_http']) {
+    testWidgets('saved $protocol MCP settings can be edited', (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final args = ['-m', 'my_server', '/path with spaces/state.sqlite3'];
+      final env = {
+        'PYTHONPATH': '/project',
+        'SAGE_RSI_CASE_PROTOCOL': 'sage.rsi.case/v1',
+      };
+      final api = _FakeApi();
+      api.mcpRecords = [
+        McpConnectionSummary.fromJson({
+          'name': 'TauRetail',
+          'protocol': protocol,
+          'command': '/python',
+          'streamable_http_url': 'https://example.test/mcp',
+          'args': args,
+          'env': env,
+          'disabled': true,
+          'api_key_configured': true,
+        }),
+      ];
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MCP').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-edit-mcp')));
+      await tester.pumpAndSettle();
+      EditableText field(String key) => tester.widget<EditableText>(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(EditableText),
+        ),
+      );
+      expect(field('mcp-name').controller.text, 'TauRetail');
+      expect(field('mcp-name').readOnly, isTrue);
+      expect(
+        field('mcp-endpoint').controller.text,
+        protocol == 'stdio' ? '/python' : 'https://example.test/mcp',
+      );
+      if (protocol == 'stdio') {
+        expect(jsonDecode(field('mcp-args').controller.text), args);
+        expect(jsonDecode(field('mcp-env').controller.text), env);
+      } else {
+        expect(find.text('已配置密钥；留空保留原密钥。'), findsOneWidget);
+      }
+      await tester.enterText(
+        find.byKey(const ValueKey('mcp-endpoint')),
+        protocol == 'stdio' ? '/new/python' : 'https://new.example.test/mcp',
+      );
+      await tester.ensureVisible(find.text('保存').last);
+      await tester.tap(find.text('保存').last);
+      await tester.pumpAndSettle();
+      expect(api.lastMcpUpdateName, 'TauRetail');
+      expect(api.lastMcpUpdate!.containsKey('api_key'), isFalse);
+      expect(controller.mcpConnections.single.disabled, isTrue);
+      if (protocol == 'stdio') {
+        expect(api.lastMcpUpdate!['command'], '/new/python');
+        expect(api.lastMcpUpdate!['args'], args);
+        expect(api.lastMcpUpdate!['env'], env);
+      } else {
+        expect(
+          api.lastMcpUpdate!['streamable_http_url'],
+          'https://new.example.test/mcp',
+        );
+      }
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets(

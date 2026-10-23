@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'rsi_dataset_revision_test.dart' show sourceVersion;
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
@@ -232,6 +233,94 @@ class RsiApi extends V2ApiClient {
   ) async {
     startOptions = body;
     return {'id': 'new'};
+  }
+}
+
+class DatasetRevisionApi extends RsiApi {
+  Map<String, Object?>? revision;
+  Map<String, Object?>? latestVersion;
+  @override
+  Future<Map<String, Object?>> rsiHistory(String agentId) async => {
+    ...await super.rsiHistory(agentId),
+    'dataset_versions': [
+      {'id': 'source-v1', 'manifest': sourceVersion()['manifest']},
+      if (latestVersion != null)
+        {'id': latestVersion!['id'], 'manifest': latestVersion!['manifest']},
+    ],
+  };
+  @override
+  Future<Map<String, Object?>> rsiDataset(
+    String agentId,
+    String versionId,
+  ) async => versionId == 'source-v1' ? sourceVersion() : latestVersion!;
+  @override
+  Future<Map<String, Object?>> rsiRun(
+    String agentId,
+    String runId, {
+    int afterSequence = 0,
+  }) async => {
+    ...await super.rsiRun(agentId, runId, afterSequence: afterSequence),
+    'dataset_version_id': 'source-v1',
+    'dataset_manifest': sourceVersion()['manifest'],
+    'preflight_policy': {
+      'protocol': 'sage.rsi.preflight/v1',
+      'imported_semantics': 'diagnostic_only',
+    },
+    'suite_review': {
+      'approved': false,
+      'rationale': 'A model suspects a missing fixture fact',
+      'issues': [
+        {
+          'kind': 'untestable',
+          'severity': 'blocking',
+          'case_ids': ['suspected'],
+          'rationale': 'A model suspects a missing fixture fact',
+          'suggested_fix': 'Review the original fixture',
+          'evidence': ['Question with a missing fact'],
+          'impact': 'Authentication might stop',
+        },
+      ],
+    },
+  };
+  @override
+  Future<Map<String, Object?>> rsiRunDataset(
+    String agentId,
+    String runId,
+  ) async => sourceVersion();
+  @override
+  Future<Map<String, Object?>> reviseRsiDataset(
+    String agentId,
+    String versionId,
+    Map<String, Object?> proposal,
+  ) async {
+    revision = proposal;
+    final original = sourceVersion();
+    latestVersion = {
+      ...original,
+      'id': 'revision-v2',
+      'manifest': {
+        ...(original['manifest'] as Map).cast<String, Object?>(),
+        'version_id': 'revision-v2',
+        'parent_version': 'source-v1',
+        'label': 'revised',
+        'excluded_count': 1,
+        'active_count': 3,
+        'exclusions': [
+          {
+            ...(proposal['exclusions'] as List).single as Map,
+            'operator': 'human',
+            'source_version': 'source-v1',
+            'confirmed_at': '2026-10-23T12:00:00Z',
+          },
+        ],
+        'counts': {
+          'training': {'original': 1, 'active': 1},
+          'validation': {'original': 2, 'active': 1},
+          'test': {'original': 1, 'active': 1},
+        },
+      },
+    };
+    return latestVersion!;
   }
 }
 
@@ -744,10 +833,16 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(controller.dispose);
         addTearDown(api.close);
-        await tester.pumpWidget(MaterialApp(
-          theme: ThemeData(brightness: brightness),
-          home: RsiScreen(controller: controller, agentId: 'agent', agentName: 'Sage'),
-        ));
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(brightness: brightness),
+            home: RsiScreen(
+              controller: controller,
+              agentId: 'agent',
+              agentName: 'Sage',
+            ),
+          ),
+        );
         await tester.pumpAndSettle();
         final resume = find.byKey(const ValueKey('rsi-resume-tests'));
         expect(resume, findsOneWidget);
@@ -1325,4 +1420,111 @@ void main() {
     controller.dispose();
     api.close();
   });
+  testWidgets(
+    'human revision prepares a labeled new dataset and keeps the displayed run denominator frozen',
+    (tester) async {
+      final api = DatasetRevisionApi();
+      final controller = WorkspaceController(api: api);
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RsiScreen(
+            controller: controller,
+            agentId: 'agent',
+            agentName: 'Sage',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final review = find.byKey(const ValueKey('rsi-review-case-suspected'));
+      await Scrollable.ensureVisible(tester.element(review), alignment: 0.4);
+      await tester.pumpAndSettle();
+      await tester.tap(review);
+      await tester.pumpAndSettle();
+      expect(api.revision, isNull);
+      await tester.enterText(
+        find.byKey(const ValueKey('dataset-revision-reason')),
+        'I verified the required field is absent',
+      );
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('dataset-revision-confirm')),
+      );
+      await tester.tap(find.byKey(const ValueKey('dataset-revision-confirm')));
+      await tester.pumpAndSettle();
+      final submit = find.byKey(const ValueKey('dataset-revision-submit'));
+      await tester.ensureVisible(submit);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(api.revision?['confirmed'], isTrue);
+      expect(api.startOptions, isNull);
+      final frozen = find.byKey(
+        const ValueKey('rsi-run-dataset-scope'),
+        skipOffstage: false,
+      );
+      final prepared = find.byKey(
+        const ValueKey('rsi-prepared-dataset-scope'),
+        skipOffstage: false,
+      );
+      expect(
+        find.descendant(
+          of: frozen,
+          matching: find.text('原始 / 排除 / 参与: 4 / 0 / 4', skipOffstage: false),
+          skipOffstage: false,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: prepared,
+          matching: find.text('原始 / 排除 / 参与: 4 / 1 / 3', skipOffstage: false),
+          skipOffstage: false,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('本版本成绩属于修订集', skipOffstage: false),
+        findsOneWidget,
+      );
+      final chooser = find.byKey(const ValueKey('rsi-choose-dataset-version'));
+      await Scrollable.ensureVisible(tester.element(chooser), alignment: 0.4);
+      await tester.pumpAndSettle();
+      await tester.tap(chooser);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('rsi-dataset-version-revision-v2')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('rsi-dataset-version-revision-v2')),
+      );
+      await tester.pumpAndSettle();
+      expect(api.startOptions, isNull);
+      for (final scope in ['prepared', 'prepared', 'run']) {
+        final details = find.byKey(ValueKey('rsi-$scope-dataset-details'));
+        await Scrollable.ensureVisible(tester.element(details), alignment: 0.4);
+        await tester.pumpAndSettle();
+        await tester.tap(details);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('rsi-dataset-details-dialog')),
+          findsOneWidget,
+        );
+        expect(
+          find.text('版本: ${scope == 'run' ? 'source-v1' : 'revision-v2'}'),
+          findsOneWidget,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('rsi-dataset-details-close')),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      api.close();
+    },
+  );
 }

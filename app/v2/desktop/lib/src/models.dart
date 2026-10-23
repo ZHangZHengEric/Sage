@@ -392,6 +392,9 @@ class McpConnectionSummary {
     this.apiKeyConfigured = false,
     this.url = '',
     this.command = '',
+    this.args = const [],
+    this.env = const {},
+    this.kind = 'external',
     this.connectionError = '',
   });
 
@@ -402,6 +405,9 @@ class McpConnectionSummary {
   final bool apiKeyConfigured;
   final String url;
   final String command;
+  final List<String> args;
+  final Map<String, String> env;
+  final String kind;
   final String connectionError;
 
   factory McpConnectionSummary.fromJson(Map<String, Object?> json) =>
@@ -416,6 +422,9 @@ class McpConnectionSummary {
             json['sse_url']?.toString() ??
             '',
         command: json['command']?.toString() ?? '',
+        args: (json['args'] as List?)?.cast<String>() ?? const [],
+        env: (json['env'] as Map?)?.cast<String, String>() ?? const {},
+        kind: json['kind']?.toString() ?? 'external',
         connectionError: json['connection_error']?.toString() ?? '',
       );
 }

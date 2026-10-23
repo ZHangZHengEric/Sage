@@ -13,7 +13,13 @@ final dataset = <String, Object?>{
   'format_version': 'sage.rsi.dataset/v1',
   'name': 'Contract dataset',
   'cases': [
-    {'id': 'train', 'input': '6*7?', 'rubric': '42', 'reference_answer': '42'},
+    {
+      'id': 'train',
+      'input': '6*7?',
+      'rubric': '42',
+      'reference_answer': '42',
+      'split': 'training',
+    },
     {
       'id': 'dev',
       'input': '40+2?',
@@ -73,6 +79,30 @@ class PlanFileSelector extends FileSelectorPlatform {
 class PlanApi extends RsiApi {
   final scorers = <Map<String, Object?>>[];
   Map<String, Object?>? imported;
+  @override
+  Future<Map<String, Object?>> importRsiDataset(
+    String agentId,
+    Map<String, Object?> value,
+  ) async => {
+    'id': 'imported-dataset-v1',
+    'dataset': value,
+    'manifest': {
+      'version_id': 'imported-dataset-v1',
+      'label': 'original',
+      'original_count': 3,
+      'excluded_count': 0,
+      'active_count': 3,
+      'counts': {
+        for (final split in ['training', 'validation', 'test'])
+          split: {'original': 1, 'active': 1},
+      },
+    },
+    'validation': {
+      'name': value['name'],
+      'case_count': 3,
+      'split_counts': {'training': 1, 'validation': 1, 'test': 1},
+    },
+  };
   @override
   Future<Map<String, Object?>> rsiHistory(String agentId) async => {
     ...await super.rsiHistory(agentId),
@@ -159,6 +189,22 @@ void main() {
       }
       expect(find.text('accuracy.py'), findsOneWidget);
       await tapVisible(tester, 'rsi-import-suite');
+      for (
+        var i = 0;
+        i < 100 &&
+            find
+                .byKey(const ValueKey('rsi-dataset-details-dialog'))
+                .evaluate()
+                .isEmpty;
+        i++
+      ) {
+        await progress();
+      }
+      expect(
+        find.byKey(const ValueKey('rsi-dataset-details-dialog')),
+        findsOneWidget,
+      );
+      await tapVisible(tester, 'rsi-dataset-details-close');
       await tester.enterText(
         find.byKey(const ValueKey('rsi-goal')),
         'Answer accurately',
@@ -241,9 +287,21 @@ void main() {
       await tapVisible(tester, 'rsi-scorer-picker');
       await tapVisible(tester, 'rsi-scorer-scorer-contract');
       await tapVisible(tester, 'rsi-import-suite');
+      expect(
+        find.byKey(const ValueKey('rsi-dataset-details-dialog')),
+        findsOneWidget,
+      );
+      expect(find.text('数据集校验与总结'), findsOneWidget);
+      await tapVisible(tester, 'rsi-dataset-details-close');
+      await tapVisible(tester, 'rsi-prepared-dataset-details');
+      expect(
+        find.byKey(const ValueKey('rsi-dataset-details-dialog')),
+        findsOneWidget,
+      );
+      await tapVisible(tester, 'rsi-dataset-details-close');
       await tapVisible(tester, 'rsi-start');
       expect(api.startOptions!['scorer_id'], 'scorer-contract');
-      expect(api.startOptions!['dataset'], dataset);
+      expect(api.startOptions!['dataset_version_id'], 'imported-dataset-v1');
       expect(api.startOptions!['validation_case_count'], 1);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());

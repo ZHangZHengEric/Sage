@@ -313,6 +313,38 @@ async def test_independent_sandboxes_do_not_share_workspace_leases(targets):
 
 
 @pytest.mark.asyncio
+async def test_shared_skill_reuses_agent_work_until_other_users_release(targets):
+    first = await targets(disk=True)
+    second = await targets(disk=True, run_id="run2")
+    third = await targets(disk=True, run_id="run3")
+    path = "/workspace/skills/demo"
+    await first.materialize(bundle(), run_id="run1", destination=path)
+    await first._write(path + "/SKILL.md", b"team edit", "run1")
+    await first._write(path + "/result.txt", b"team result", "run1")
+    await asyncio.gather(
+        second.materialize(bundle(), run_id="run2", destination=path),
+        third.materialize(bundle(), run_id="run3", destination=path),
+    )
+    # Reloading the original member must also preserve the shared work.
+    await first.materialize(bundle(), run_id="run1", destination=path)
+    assert await second._read(path + "/SKILL.md", "run2") == b"team edit"
+    assert await third._read(path + "/result.txt", "run3") == b"team result"
+    with pytest.raises(SageV2Error, match="Another active Run"):
+        await second.materialize(bundle("v2"), run_id="run2", destination=path)
+    await first.close()
+    # One member closing must not release another member's claim.
+    with pytest.raises(SageV2Error, match="Another active Run"):
+        await second.materialize(bundle("v2"), run_id="run2", destination=path)
+    await third.close()
+    await second.materialize(bundle(), run_id="run2", destination=path)
+    assert (await second._tree(path, "run2"))[0] == bundle().files
+    archive, _ = await second._tree(
+        "/workspace/skills/.catalog/demo/agent-edits", "run2"
+    )
+    assert any(value == b"team result" for value in archive.values())
+
+
+@pytest.mark.asyncio
 async def test_file_directory_transitions_remove_obsolete_directories(targets):
     target = await targets(disk=True)
     path = "/workspace/skills/demo"

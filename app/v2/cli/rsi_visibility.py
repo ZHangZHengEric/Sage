@@ -8,7 +8,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 _PRIVATE = {'test_observations', 'benchmark_measurement', 'agent_calls', 'internal_agents', 'call', 'tuner_call',
-            'recommendation_block_reason', 'assets', 'config', 'reference_answer'}
+            'recommendation_block_reason', 'assets', 'config', 'reference_answer',
+            'dataset_manifest', 'generated_dataset_manifest', 'dataset_diagnostics', 'dataset_version', 'dataset_versions', 'dataset_validation',
+            'exclusions', 'active_case_ids'}
 _EVENT_FIELDS = {
     'operation_started': {'goal', 'agent_id', 'rounds', 'evaluation_repeats', 'max_concurrency', 'package', 'constraints', 'optimization_scope', 'builtin_scoring'},
     'suite_fixed': {'suite'},

@@ -1,5 +1,6 @@
 """Independent AgentPackage evaluation and tuning API."""
 from sagents.v2.optimization.dataset import OptimizationDataset
+from sagents.v2.optimization.dataset_versions import DatasetVersion, DatasetRevisionRequest, CaseExclusionProposal, SuitePreflightPolicy
 from sagents.v2.optimization.builtin_scoring import BuiltinScoring
 from sagents.v2.optimization.scoring import ExecutionScorer, ScorerDescriptor, ScoringRequest, ScoringResult
 
@@ -55,6 +56,10 @@ from sagents.v2.optimization.runner import (
 __all__ = [
     "BuiltinScoring",
     "OptimizationDataset",
+    "DatasetVersion",
+    "DatasetRevisionRequest",
+    "CaseExclusionProposal",
+    "SuitePreflightPolicy",
     "ExecutionScorer",
     "ScorerDescriptor",
     "ScoringRequest",

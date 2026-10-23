@@ -1,5 +1,6 @@
 """Portable data-only RSI dataset format, independent of runners and scorers."""
 from typing import Literal
+from collections import Counter
 
 from pydantic import Field, model_validator
 
@@ -26,8 +27,15 @@ class OptimizationDataset(StrictModel):
 
     @model_validator(mode='after')
     def validate_splits(self):
+        if not self.name.strip():
+            raise ValueError('dataset.name must not be blank')
         if len({case.id for case in self.cases}) != len(self.cases):
-            raise ValueError('dataset case IDs must be unique across splits')
+            raise ValueError(f'duplicate dataset case IDs: {sorted(k for k, n in Counter(case.id for case in self.cases).items() if n > 1)}')
+        if any(not case.id.strip() for case in self.cases):
+            raise ValueError('dataset contains an empty case ID')
+        invalid = [case.id for case in self.cases if case.split not in {'training', 'validation', 'test'}]
+        if invalid:
+            raise ValueError(f'dataset cases have invalid splits: {invalid}')
         splits = {case.split for case in self.cases}
         if not {'training', 'validation'} <= splits or not splits <= {'training', 'validation', 'test'}:
             raise ValueError('dataset requires training and validation; test is optional')
@@ -39,3 +47,18 @@ class OptimizationDataset(StrictModel):
     def human_test_suite(self):
         cases = tuple(c for c in self.cases if c.split == 'test')
         return OptimizationTestSuite(cases=cases) if cases else None
+
+
+def validate_imported_dataset(value):
+    """Require explicit wire fields; Python constructors retain ergonomic defaults."""
+    if not isinstance(value, dict):
+        raise ValueError('dataset: expected an object')
+    if value.get('format_version') != 'sage.rsi.dataset/v1':
+        raise ValueError('dataset.format_version: expected sage.rsi.dataset/v1')
+    if isinstance(value.get('cases'), list):
+        for index, case in enumerate(value['cases']):
+            if isinstance(case, dict):
+                missing = {'id', 'input', 'rubric', 'split'} - case.keys()
+                if missing:
+                    raise ValueError(f'dataset.cases[{index}] ({case.get("id", "unknown")}): missing {sorted(missing)}')
+    return OptimizationDataset.model_validate(value)

@@ -1,0 +1,21 @@
+# Minimal runtime for vendored official scenarios/tools/evaluator, not upstream model clients.
+# Keep in a dedicated Python 3.12 environment; do not install vendor/ as a package.
+attrs>=23.2.0
+decorator==5.1.1
+polars==0.20.31
+dill==0.3.8
+StrEnum==0.4.15
+networkx==3.2.1
+rouge-score==0.1.2
+scipy==1.13.1
+rapidfuzz==3.9.3
+langchain-core==0.3.79
+phonenumbers==8.13.39
+pint==0.23
+geopy==2.4.1
+holidays==0.51
+# Upstream ccy 1.3.1 excludes Python 3.12; 1.5.0 preserves the required currency API.
+ccy==1.5.0
+# Pint 0.23 and this upstream runtime predate NumPy 2.
+numpy==1.26.4
+tqdm>=4.66

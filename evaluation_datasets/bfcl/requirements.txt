@@ -1,0 +1,2 @@
+# Sage supplies MCP and the scorer protocol. No model-vendor SDK is needed by BFCL backends.
+mpmath==1.3.0

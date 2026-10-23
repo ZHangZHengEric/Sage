@@ -75,6 +75,7 @@ class _StableSkillWorkspace(SandboxSkillWorkspaceBase, ABC):
             )
         _users.setdefault(self._key(destination), {})[self._identity] = content_hash
         self._leased.add(self._key(destination))
+        return any(owner is not self._identity for owner in owners)
 
     async def close(self):
         for key in self._leased:
@@ -299,9 +300,21 @@ class AutoSyncSkillWorkspace(_StableSkillWorkspace):
             current = _hashes(actual)
             desired = _hashes(bundle.files)
             state = await self._state(destination, run_id)
-            self._claim(
-                destination, files_digest(bundle.files), changing=current != desired
+            # A completed copy of this version can be shared even after Agents
+            # create working files or edit it. Joining Runs must not reset a
+            # directory that other members are still using. Interrupted syncs
+            # and version replacements still require exclusive access.
+            reusable = (
+                state is not None
+                and state.get("content_hash") == bundle.content_hash
+                and "pending_files" not in state
             )
+            shared = self._claim(
+                destination, files_digest(bundle.files),
+                changing=current != desired and not reusable,
+            )
+            if shared and reusable:
+                return destination
             baseline = state["files"] if state is not None else desired
             pending = state.get("pending_files") if state else None
             # A prior interrupted synchronization can contain both old and new

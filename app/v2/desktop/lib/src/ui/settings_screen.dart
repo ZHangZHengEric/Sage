@@ -1696,14 +1696,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
     values: widget.controller.skillCatalog,
   );
 
-  Widget _mcp() =>
-      _McpSettings(controller: widget.controller, onAdd: _showAddMcpDialog);
+  Widget _mcp() => _McpSettings(
+    controller: widget.controller,
+    onAdd: () => _showAddMcpDialog(),
+    onEdit: (value) => _showAddMcpDialog(existing: value),
+  );
 
-  Future<void> _showAddMcpDialog() async {
-    final name = TextEditingController();
-    final endpoint = TextEditingController();
+  Future<void> _showAddMcpDialog({McpConnectionSummary? existing}) async {
+    final name = TextEditingController(text: existing?.name ?? '');
+    final endpoint = TextEditingController(
+      text: existing == null
+          ? ''
+          : existing.protocol == 'stdio'
+          ? existing.command
+          : existing.url,
+    );
     final apiKey = TextEditingController();
-    var protocol = 'streamable_http';
+    final args = TextEditingController(
+      text: existing == null
+          ? ''
+          : const JsonEncoder.withIndent('  ').convert(existing.args),
+    );
+    final env = TextEditingController(
+      text: existing == null
+          ? ''
+          : const JsonEncoder.withIndent('  ').convert(existing.env),
+    );
+    String? validationError;
+    var protocol = existing?.protocol ?? 'streamable_http';
     final value = await showDialog<Map<String, Object?>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -1717,73 +1737,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
               shape: const LiquidRoundedSuperellipse(borderRadius: 20),
               useOwnLayer: true,
               settings: _glass(dialogContext),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    context.l10n.text('mcp.connect'),
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.text(
+                        existing == null ? 'mcp.connect' : 'common.edit',
+                      ),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  _SettingsRowGroup(
-                    children: [
-                      _SettingsRow(
-                        label: context.l10n.text('common.name'),
-                        control: SizedBox(
-                          width: 290,
-                          child: GlassTextField(
-                            controller: name,
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 11),
-                            useOwnLayer: true,
-                            settings: _glass(context),
-                          ),
-                        ),
-                      ),
-                      _SettingsRow(
-                        label: context.l10n.text('common.protocol'),
-                        control: _SettingsPicker<String>(
-                          value: protocol,
-                          width: 290,
-                          options: const [
-                            _PickerOption(
-                              value: 'streamable_http',
-                              label: 'Streamable HTTP',
-                            ),
-                            _PickerOption(value: 'sse', label: 'SSE'),
-                            _PickerOption(value: 'stdio', label: 'stdio'),
-                          ],
-                          onChanged: (value) =>
-                              setDialogState(() => protocol = value),
-                        ),
-                      ),
-                      _SettingsRow(
-                        label: protocol == 'stdio'
-                            ? context.l10n.text('mcp.command')
-                            : 'URL',
-                        control: SizedBox(
-                          width: 290,
-                          child: GlassTextField(
-                            controller: endpoint,
-                            height: 36,
-                            padding: const EdgeInsets.symmetric(horizontal: 11),
-                            useOwnLayer: true,
-                            settings: _glass(context),
-                          ),
-                        ),
-                      ),
-                      if (protocol != 'stdio')
+                    const SizedBox(height: 18),
+                    _SettingsRowGroup(
+                      children: [
                         _SettingsRow(
-                          label: context.l10n.text('mcp.apiKey'),
+                          label: context.l10n.text('common.name'),
                           control: SizedBox(
                             width: 290,
                             child: GlassTextField(
-                              controller: apiKey,
+                              key: const ValueKey('mcp-name'),
+                              controller: name,
+                              readOnly: existing != null,
                               height: 36,
-                              obscureText: true,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 11,
                               ),
@@ -1792,42 +1770,199 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        child: Text(context.l10n.text('common.cancel')),
-                      ),
-                      const SizedBox(width: 8),
-                      GlassButton.custom(
-                        width: 76,
-                        height: 36,
-                        label: context.l10n.text('common.connect'),
-                        onTap: () => Navigator.pop(dialogContext, {
-                          'name': name.text.trim(),
-                          'protocol': protocol,
-                          if (protocol == 'streamable_http')
-                            'streamable_http_url': endpoint.text.trim(),
-                          if (protocol == 'sse')
-                            'sse_url': endpoint.text.trim(),
-                          if (protocol == 'stdio')
-                            'command': endpoint.text.trim(),
-                          if (apiKey.text.trim().isNotEmpty)
-                            'api_key': apiKey.text.trim(),
-                        }),
-                        shape: const LiquidRoundedRectangle(borderRadius: 10),
-                        settings: _glass(context),
-                        child: Center(
-                          child: Text(context.l10n.text('common.connect')),
+                        _SettingsRow(
+                          label: context.l10n.text('common.protocol'),
+                          control: _SettingsPicker<String>(
+                            value: protocol,
+                            width: 290,
+                            options: const [
+                              _PickerOption(
+                                value: 'streamable_http',
+                                label: 'Streamable HTTP',
+                              ),
+                              _PickerOption(value: 'sse', label: 'SSE'),
+                              _PickerOption(value: 'stdio', label: 'stdio'),
+                            ],
+                            onChanged: (value) =>
+                                setDialogState(() => protocol = value),
+                          ),
+                        ),
+                        _SettingsRow(
+                          label: protocol == 'stdio'
+                              ? context.l10n.text('mcp.command')
+                              : 'URL',
+                          control: SizedBox(
+                            width: 290,
+                            child: GlassTextField(
+                              key: const ValueKey('mcp-endpoint'),
+                              controller: endpoint,
+                              height: 36,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 11,
+                              ),
+                              useOwnLayer: true,
+                              settings: _glass(context),
+                            ),
+                          ),
+                        ),
+                        if (protocol == 'stdio') ...[
+                          _SettingsRow(
+                            label: context.l10n.text('mcp.args'),
+                            description: context.l10n.text('mcp.argsHelp'),
+                            control: GlassTextField(
+                              key: const ValueKey('mcp-args'),
+                              controller: args,
+                              minLines: 2,
+                              maxLines: 5,
+                              minHeight: 64,
+                              maxHeight: 140,
+                              placeholder:
+                                  '["-m", "my_server", "--state", "/path/state.sqlite3"]',
+                              padding: const EdgeInsets.all(11),
+                              useOwnLayer: true,
+                              settings: _glass(context),
+                            ),
+                          ),
+                          _SettingsRow(
+                            label: context.l10n.text('mcp.env'),
+                            description: context.l10n.text('mcp.envHelp'),
+                            control: GlassTextField(
+                              key: const ValueKey('mcp-env'),
+                              controller: env,
+                              minLines: 2,
+                              maxLines: 5,
+                              minHeight: 64,
+                              maxHeight: 140,
+                              placeholder: '{"PYTHONPATH": "/path/to/project"}',
+                              padding: const EdgeInsets.all(11),
+                              useOwnLayer: true,
+                              settings: _glass(context),
+                            ),
+                          ),
+                        ],
+                        if (protocol != 'stdio')
+                          _SettingsRow(
+                            label: context.l10n.text('mcp.apiKey'),
+                            description: existing?.apiKeyConfigured == true
+                                ? context.l10n.text('mcp.keepApiKey')
+                                : null,
+                            control: SizedBox(
+                              width: 290,
+                              child: GlassTextField(
+                                controller: apiKey,
+                                height: 36,
+                                obscureText: true,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 11,
+                                ),
+                                useOwnLayer: true,
+                                settings: _glass(context),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (validationError != null)
+                      Text(
+                        validationError!,
+                        key: const ValueKey('mcp-validation-error'),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
                         ),
                       ),
-                    ],
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          child: Text(context.l10n.text('common.cancel')),
+                        ),
+                        const SizedBox(width: 8),
+                        GlassButton.custom(
+                          width: 76,
+                          height: 36,
+                          label: context.l10n.text(
+                            existing == null ? 'common.connect' : 'common.save',
+                          ),
+                          onTap: () {
+                            List<String> parsedArgs = [];
+                            Map<String, String> parsedEnv = {};
+                            String? error;
+                            if (name.text.trim().isEmpty ||
+                                endpoint.text.trim().isEmpty) {
+                              error = context.l10n.text('mcp.required');
+                            } else if (protocol == 'stdio') {
+                              try {
+                                final decodedArgs = args.text.trim().isEmpty
+                                    ? <Object?>[]
+                                    : jsonDecode(args.text);
+                                if (decodedArgs is! List ||
+                                    decodedArgs.any(
+                                      (value) => value is! String,
+                                    )) {
+                                  throw const FormatException();
+                                }
+                                parsedArgs = decodedArgs.cast<String>();
+                              } on FormatException {
+                                error = context.l10n.text('mcp.invalidArgs');
+                              }
+                              try {
+                                final decodedEnv = env.text.trim().isEmpty
+                                    ? <String, Object?>{}
+                                    : jsonDecode(env.text);
+                                if (decodedEnv is! Map ||
+                                    decodedEnv.entries.any(
+                                      (entry) =>
+                                          entry.key is! String ||
+                                          (entry.key as String).isEmpty ||
+                                          (entry.key as String).contains('=') ||
+                                          entry.value is! String,
+                                    )) {
+                                  throw const FormatException();
+                                }
+                                parsedEnv = decodedEnv.cast<String, String>();
+                              } on FormatException {
+                                error ??= context.l10n.text('mcp.invalidEnv');
+                              }
+                            }
+                            if (error != null) {
+                              setDialogState(() => validationError = error);
+                              return;
+                            }
+                            Navigator.pop(dialogContext, {
+                              'name': name.text.trim(),
+                              'protocol': protocol,
+                              if (protocol == 'streamable_http')
+                                'streamable_http_url': endpoint.text.trim(),
+                              if (protocol == 'sse')
+                                'sse_url': endpoint.text.trim(),
+                              if (protocol == 'stdio') ...{
+                                'command': endpoint.text.trim(),
+                                'args': parsedArgs,
+                                'env': parsedEnv,
+                              },
+                              if (protocol != 'stdio' &&
+                                  apiKey.text.trim().isNotEmpty)
+                                'api_key': apiKey.text.trim(),
+                            });
+                          },
+                          shape: const LiquidRoundedRectangle(borderRadius: 10),
+                          settings: _glass(context),
+                          child: Center(
+                            child: Text(
+                              context.l10n.text(
+                                existing == null
+                                    ? 'common.connect'
+                                    : 'common.save',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1837,17 +1972,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     name.dispose();
     endpoint.dispose();
     apiKey.dispose();
+    args.dispose();
+    env.dispose();
     if (value == null || (value['name']?.toString().isEmpty ?? true)) return;
     setState(() => _saving = true);
     try {
-      await widget.controller.addMcpConnection(value);
+      if (existing == null) {
+        await widget.controller.addMcpConnection(value);
+      } else {
+        await widget.controller.updateMcpConnection(existing.name, value);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   void _selectSection(int value) {
-    if (value == 6) {
+    if (value == 2 || value == 4 || value == 6) {
       unawaited(widget.controller.refreshMcpConnections());
     }
     if (value == _navItems(context).length - 1) {
@@ -8101,10 +8242,15 @@ String _schemaValue(Object? value) {
 }
 
 class _McpSettings extends StatefulWidget {
-  const _McpSettings({required this.controller, required this.onAdd});
+  const _McpSettings({
+    required this.controller,
+    required this.onAdd,
+    required this.onEdit,
+  });
 
   final WorkspaceController controller;
   final VoidCallback onAdd;
+  final ValueChanged<McpConnectionSummary> onEdit;
 
   @override
   State<_McpSettings> createState() => _McpSettingsState();
@@ -8130,11 +8276,23 @@ class _McpSettingsState extends State<_McpSettings> {
       title: 'MCP',
       status: _saving,
       fillRemaining: true,
-      action: IconButton(
-        key: const ValueKey('settings-add-mcp'),
-        tooltip: context.l10n.text('mcp.connect'),
-        onPressed: widget.onAdd,
-        icon: const Icon(CupertinoIcons.add, size: 18),
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (selected != null && selected.kind == 'external')
+            IconButton(
+              key: const ValueKey('settings-edit-mcp'),
+              tooltip: context.l10n.text('common.edit'),
+              onPressed: () => widget.onEdit(selected),
+              icon: const Icon(CupertinoIcons.pencil, size: 18),
+            ),
+          IconButton(
+            key: const ValueKey('settings-add-mcp'),
+            tooltip: context.l10n.text('mcp.connect'),
+            onPressed: widget.onAdd,
+            icon: const Icon(CupertinoIcons.add, size: 18),
+          ),
+        ],
       ),
       children: [
         if (selected != null)

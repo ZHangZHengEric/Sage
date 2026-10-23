@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "ToolSandbox": {
+      "command": "/absolute/path/Sage/.venv/bin/python",
+      "args": [
+        "-m",
+        "evaluation_datasets.toolsandbox.mcp_server",
+        "--state",
+        "/absolute/path/sage/runtime/toolsandbox.sqlite3"
+      ],
+      "env": {
+        "PYTHONPATH": "/absolute/path/Sage",
+        "SAGE_RSI_CASE_PROTOCOL": "sage.rsi.case/v1"
+      }
+    }
+  }
+}

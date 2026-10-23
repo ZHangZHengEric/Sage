@@ -50,7 +50,7 @@ def engine_fingerprint():
         import importlib.util
         import marshal
         names = [f"sagents.v2.optimization.{name}" for name in ('optimizer', 'contracts', 'feedback',
-                 'principles', 'generator', 'runner', 'recovery', 'observer', 'diagnostics', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints')]
+                 'principles', 'generator', 'runner', 'recovery', 'observer', 'diagnostics', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'dataset_versions', 'dataset_summary', 'preflight', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints')]
         names.extend(('sagents.v2.tool.generated', 'sagents.v2.tool.plugins.result_file', 'sagents.v2.optimization.builtin_scoring'))
         hashes = {}
         for name in names:

@@ -629,10 +629,14 @@ async def run(args):
         }
         (output / "preflight-rejected.json").write_text(json.dumps(rejected, indent=2))
         print(
-            "Independent suite review blocked execution before target calls", flush=True
+            "Generated drafts were not admitted after bounded repair", flush=True
         )
         return
     (output / "result.json").write_text(result.model_dump_json(indent=2))
+    if args.preflight_probe:
+        diagnostics = [json.loads(line) for line in (output / "audit.jsonl").read_text().splitlines()
+            if json.loads(line)["event"] in {"suite_review_completed", "final_suite_review_completed"}]
+        (output / "preflight-diagnostics.json").write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2))
     versions = output / "iterations"
     versions.mkdir()
     for iteration in result.iterations:

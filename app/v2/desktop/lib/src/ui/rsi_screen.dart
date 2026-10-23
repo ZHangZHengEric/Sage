@@ -8,6 +8,9 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import '../localization/app_localizations.dart';
 import 'rsi_observatory.dart';
+import 'rsi_dataset_revision.dart';
+import 'rsi_dataset_summary.dart';
+import 'rsi_dataset_details.dart';
 import 'rsi_activity.dart';
 import 'rsi_diff.dart';
 import 'rsi_scorer_guide.dart';
@@ -54,6 +57,7 @@ class _RsiScreenState extends State<RsiScreen> {
   final _cases = TextEditingController();
   final _parts = <String>{'instructions', 'skills'};
   Map<String, Object?> _history = {};
+  Map<String, Object?>? _datasetVersion;
   Map<String, Object?>? _run;
   Map<String, Object?>? _version;
   String? _selectedVersionId;
@@ -358,6 +362,7 @@ class _RsiScreenState extends State<RsiScreen> {
       }
       final suite = _cases.text.trim().isEmpty ? null : jsonDecode(_cases.text);
       final options = jsonEncode([
+        _datasetVersion?['id'],
         _goal.text.trim(),
         count,
         initialTrainingCount,
@@ -401,10 +406,13 @@ class _RsiScreenState extends State<RsiScreen> {
         'request_id': _requestId,
         'scorer_id': ?_scorerId,
         'builtin_scoring': {'mode': _builtinScoring},
-        (suite is Map && suite['format_version'] == 'sage.rsi.dataset/v1'
-                ? 'dataset'
-                : 'suite'):
-            ?suite,
+        if (_datasetVersion != null)
+          'dataset_version_id': _datasetVersion!['id']
+        else
+          (suite is Map && suite['format_version'] == 'sage.rsi.dataset/v1'
+                  ? 'dataset'
+                  : 'suite'):
+              ?suite,
       });
       _requestId = null;
       _requestOptions = null;
@@ -694,20 +702,185 @@ class _RsiScreenState extends State<RsiScreen> {
       ],
     );
     if (file == null) return;
-    final value = jsonDecode(await file.readAsString());
-    _cases.text = jsonEncode(value is List ? {'cases': value} : value);
-    _testCount.text = rows(
-      map(jsonDecode(_cases.text))['cases'],
-    ).where((c) => c['split'] == 'validation').length.toString();
-    final dataset = map(jsonDecode(_cases.text));
-    if (dataset['format_version'] == 'sage.rsi.dataset/v1') {
-      _humanTestCount.text = rows(
-        dataset['cases'],
-      ).where((c) => c['split'] == 'test').length.toString();
-    }
+    final decoded = jsonDecode(await file.readAsString());
+    final value = map(decoded is List ? {'cases': decoded} : decoded);
+    final registered = await widget.controller.importRsiDataset(
+      widget.agentId,
+      value,
+    );
+    _datasetVersion = registered;
+    final counts = map(map(registered['manifest'])['counts']);
+    _testCount.text = map(counts['validation'])['active'].toString();
+    _humanTestCount.text = map(counts['test'])['active'].toString();
+    _cases.text = jsonEncode(registered['dataset']);
     _caseFilename = file.name;
     _requestId = null;
+    if (mounted) {
+      setState(() {});
+      await showDatasetDetails(registered);
+    }
   });
+
+  Future<void> reviewDatasetIssue([
+    Map<String, Object?> issue = const {},
+    bool prepared = false,
+  ]) => _mutate(() async {
+    final version = prepared || _run == null
+        ? _datasetVersion
+        : await widget.controller.rsiRunDataset(
+            widget.agentId,
+            _run!['id'].toString(),
+          );
+    if (version == null || !mounted) return;
+    final proposal = await showDialog<Map<String, Object?>>(
+      context: context,
+      builder: (_) => RsiDatasetRevisionDialog(
+        version: version,
+        issue: issue,
+        chinese: context.l10n.locale.languageCode == 'zh',
+      ),
+    );
+    if (proposal == null) return;
+    final revised = await widget.controller.reviseRsiDataset(
+      widget.agentId,
+      version['id'].toString(),
+      proposal,
+    );
+    if (!mounted) return;
+    setState(() {
+      _datasetVersion = revised;
+      _cases.text = jsonEncode(revised['dataset']);
+      _caseFilename =
+          '${map(revised['manifest'])['name']} · ${t('修订集', 'Revised dataset')}';
+      final counts = map(map(revised['manifest'])['counts']);
+      _testCount.text = map(counts['validation'])['active'].toString();
+      _humanTestCount.text = map(counts['test'])['active'].toString();
+      _requestId = null;
+      _showConfiguration = true;
+    });
+  });
+
+  Future<void> chooseDatasetVersion() => _mutate(() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(t('选择数据集版本', 'Choose dataset version')),
+        children: [
+          for (final version in rows(_history['dataset_versions']))
+            ListTile(
+              key: ValueKey('rsi-dataset-version-${version['id']}'),
+              title: Text(
+                '${map(version['manifest'])['name']} · ${map(version['manifest'])['label'] == 'revised' ? t('修订集', 'Revised dataset') : t('原始集', 'Original dataset')}',
+              ),
+              subtitle: Text(
+                '${version['id']}\n${t('原始 / 排除 / 参与', 'Original / excluded / active')}: '
+                '${map(version['manifest'])['original_count']} / ${map(version['manifest'])['excluded_count']} / ${map(version['manifest'])['active_count']}',
+              ),
+              onTap: () => Navigator.pop(context, version['id'].toString()),
+            ),
+        ],
+      ),
+    );
+    if (selected == null) return;
+    final version = await widget.controller.rsiDataset(
+      widget.agentId,
+      selected,
+    );
+    if (!mounted) return;
+    setState(() {
+      _datasetVersion = version;
+      _cases.text = jsonEncode(version['dataset']);
+      final manifest = map(version['manifest']);
+      _caseFilename =
+          '${manifest['name']} · ${manifest['label'] == 'revised' ? t('修订集', 'Revised dataset') : t('原始集', 'Original dataset')}';
+      _testCount.text = map(
+        map(manifest['counts'])['validation'],
+      )['active'].toString();
+      _humanTestCount.text = map(
+        map(manifest['counts'])['test'],
+      )['active'].toString();
+      _requestId = null;
+    });
+  });
+
+  Future<void> showDatasetDetails(Map<String, Object?> version) =>
+      showDialog<void>(
+        context: context,
+        builder: (_) => RsiDatasetDetailsDialog(
+          version: version,
+          chinese: context.l10n.locale.languageCode == 'zh',
+        ),
+      );
+
+  Widget datasetScope(
+    Map<String, Object?> manifest, {
+    required bool prepared,
+  }) => card(
+    Column(
+      key: ValueKey(
+        prepared ? 'rsi-prepared-dataset-scope' : 'rsi-run-dataset-scope',
+      ),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              prepared
+                  ? t('待启动版本', 'Prepared version')
+                  : t('本实验冻结口径', 'Frozen run scope'),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            RsiDatasetBadge(
+              label: manifest['label'] == 'revised'
+                  ? t('修订集', 'Revised dataset')
+                  : t('原始集', 'Original dataset'),
+              icon: manifest['label'] == 'revised'
+                  ? Icons.edit_note_rounded
+                  : Icons.lock_outline_rounded,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${t('原始 / 排除 / 参与', 'Original / excluded / active')}: '
+          '${manifest['original_count']} / ${manifest['excluded_count']} / ${manifest['active_count']}',
+        ),
+        if (manifest['label'] == 'revised')
+          Text(
+            t(
+              '本版本成绩属于修订集，不代表完整官方集成绩。原实验保留；需开始新实验应用此版本。',
+              'Scores belong to a revised dataset, not the complete official benchmark. Existing runs are retained; start a new run to use this version.',
+            ),
+          ),
+        const SizedBox(height: 8),
+        TextButton.icon(
+          key: ValueKey(
+            prepared
+                ? 'rsi-prepared-dataset-details'
+                : 'rsi-run-dataset-details',
+          ),
+          icon: const Icon(Icons.dataset_outlined, size: 18),
+          label: Text(t('查看详情', 'View details')),
+          onPressed: _mutating
+              ? null
+              : () => _mutate(() async {
+                  final version = prepared
+                      ? _datasetVersion
+                      : await widget.controller.rsiRunDataset(
+                          widget.agentId,
+                          _run!['id'].toString(),
+                        );
+                  if (version != null && mounted) {
+                    await showDatasetDetails(version);
+                  }
+                }),
+        ),
+      ],
+    ),
+  );
 
   void selectScorer(Map<String, Object?>? plan) {
     setState(() {
@@ -1199,6 +1372,22 @@ class _RsiScreenState extends State<RsiScreen> {
               key: const ValueKey('rsi-import-suite'),
               width: 126,
             ),
+            if (rows(_history['dataset_versions']).isNotEmpty)
+              action(
+                t('选择版本', 'Choose version'),
+                CupertinoIcons.square_stack,
+                enabled ? chooseDatasetVersion : null,
+                key: const ValueKey('rsi-choose-dataset-version'),
+                width: 130,
+              ),
+            if (_datasetVersion != null)
+              action(
+                t('审核 / 修订', 'Review / revise'),
+                CupertinoIcons.doc_text_search,
+                enabled ? () => reviewDatasetIssue(const {}, true) : null,
+                key: const ValueKey('rsi-review-dataset'),
+                width: 130,
+              ),
             if (_caseFilename != null)
               IconButton(
                 tooltip: t('清除', 'Clear'),
@@ -1207,6 +1396,7 @@ class _RsiScreenState extends State<RsiScreen> {
                     ? null
                     : () => setState(() {
                         _cases.clear();
+                        _datasetVersion = null;
                         _caseFilename = null;
                         _requestId = null;
                       }),
@@ -1537,6 +1727,21 @@ class _RsiScreenState extends State<RsiScreen> {
                 ),
               ),
             ),
+          if (!_versions && _datasetVersion != null && _showConfiguration)
+            datasetScope(map(_datasetVersion!['manifest']), prepared: true),
+          if (!_versions &&
+              _run != null &&
+              map(
+                _run!['dataset_manifest'] ??
+                    _run!['generated_dataset_manifest'],
+              ).isNotEmpty)
+            datasetScope(
+              map(
+                _run!['dataset_manifest'] ??
+                    _run!['generated_dataset_manifest'],
+              ),
+              prepared: false,
+            ),
           if (!_versions &&
               _run == null &&
               _selectedRun != null &&
@@ -1664,9 +1869,13 @@ class _RsiScreenState extends State<RsiScreen> {
           ? Theme.of(context).colorScheme.primary
           : Theme.of(context).colorScheme.error,
     ),
-    title: Text(t('目标与测试集审查', 'Goal and test review')),
+    title: Text(
+      t('数据集语义诊断（模型意见）', 'Dataset semantic diagnosis (model opinion)'),
+    ),
     trailing: Text(
-      value['approved'] == true ? t('通过', 'Passed') : t('需修正', 'Needs changes'),
+      value['approved'] == true
+          ? t('未发现疑点', 'No concerns')
+          : t('有疑点，待人工核实', 'Concerns; human review needed'),
       style: Theme.of(context).textTheme.bodySmall?.copyWith(
         color: value['approved'] == true
             ? Theme.of(context).colorScheme.primary
@@ -1685,7 +1894,7 @@ class _RsiScreenState extends State<RsiScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${issue['severity'] == 'blocking' ? t('阻断', 'Blocking') : t('建议', 'Advisory')} · ${(issue['case_ids'] as List? ?? []).join(', ')}',
+                '${issue['severity'] == 'blocking' ? t('模型判断：高风险', 'Model opinion: high risk') : t('模型建议', 'Model advice')} · ${(issue['case_ids'] as List? ?? []).join(', ')}',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
@@ -1694,6 +1903,24 @@ class _RsiScreenState extends State<RsiScreen> {
               text(issue['rationale']?.toString() ?? ''),
               const SizedBox(height: 4),
               text(issue['suggested_fix']?.toString() ?? ''),
+              if ((issue['evidence'] as List? ?? []).isNotEmpty)
+                SelectableText(
+                  '${t('证据', 'Evidence')}: ${(issue['evidence'] as List).join('\n')}',
+                ),
+              if ((issue['impact']?.toString() ?? '').isNotEmpty)
+                text('${t('影响', 'Impact')}: ${issue['impact']}'),
+              TextButton(
+                key: ValueKey(
+                  'rsi-review-case-${(issue['case_ids'] as List? ?? []).join('-')}',
+                ),
+                onPressed: _mutating ? null : () => reviewDatasetIssue(issue),
+                child: Text(
+                  t(
+                    '人工审核并决定是否创建排除版本',
+                    'Review evidence and decide on an exclusion version',
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1740,7 +1967,22 @@ class _RsiScreenState extends State<RsiScreen> {
             ),
           ),
           if (suiteCheck.isNotEmpty) suiteReview(suiteCheck),
-          if (run['error_type'] != null && suiteCheck['approved'] != false)
+          for (final diagnostic in rows(
+            run['dataset_diagnostics'],
+          ).where((item) => item['event'] != 'suite_review_completed'))
+            ExpansionTile(
+              title: Text(
+                '${t('题目诊断记录', 'Case diagnosis record')} · ${diagnostic['event']}',
+              ),
+              children: [
+                text(const JsonEncoder.withIndent('  ').convert(diagnostic)),
+                TextButton(
+                  onPressed: _mutating ? null : () => reviewDatasetIssue(),
+                  child: Text(t('人工审核数据集', 'Review dataset')),
+                ),
+              ],
+            ),
+          if (run['error_type'] != null)
             Text(switch (run['error_code']) {
               'rsi.cost_unavailable' => t(
                 '当前模型未提供费用数据，请选择其他评分器。',

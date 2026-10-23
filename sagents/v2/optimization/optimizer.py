@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.optimization.dataset_versions import SuitePreflightPolicy, optimization_dataset_manifest
+
 import asyncio
 import inspect
 import json
@@ -172,6 +174,8 @@ class AgentPackageOptimizer:
         stopping_policy: OptimizationStoppingPolicy | None = None,
         require_diverse_suite: bool = False,
         suite: OptimizationSuite | None = None,
+        preflight_policy: SuitePreflightPolicy | None = None,
+        dataset_manifest: dict | None = None,
         constraints: OptimizationConstraints | None = None,
         min_improvement: float = 0.01,
         min_latency_improvement: float | None = None,
@@ -396,9 +400,15 @@ class AgentPackageOptimizer:
             raise ValueError("evaluation_aggregation must be minimum or mean")
         if not isinstance(grow_training, bool) or not isinstance(refresh_incumbent, bool):
             raise ValueError("training growth and incumbent refresh must be bool")
+        preflight_policy = SuitePreflightPolicy.model_validate(
+            preflight_policy.model_dump() if preflight_policy else {})
+        dataset_manifest = optimization_dataset_manifest(dataset_manifest)
+        imported_suite = suite is not None
+        imported_final_suite = final_suite is not None
         optimization_id = resume_optimization_id or uuid4().hex
         recovery_config = dict(protocol=1, engine=engine_fingerprint(), actor=context.actor.model_dump(mode="json"), package_hash=original.content_hash, goal=goal, agent_id=target,
             rounds=rounds, constraints=policy.model_dump(mode="json"), optimization_scope=optimization_scope,
+            preflight_policy=preflight_policy.model_dump(mode="json"), dataset_manifest=dataset_manifest,
             stopping_policy=stopping_policy.model_dump(mode="json") if stopping_policy else None,
             evaluation_repeats=evaluation_repeats, evaluation_aggregation=evaluation_aggregation,
             initial_training_case_count=initial_training_case_count,
@@ -633,15 +643,6 @@ class AgentPackageOptimizer:
                 if fenced and not file_mode:
                     response_text = fenced.group(1)
                 parsed = json.loads(response_text)
-                if adaptive and schema is OptimizationSuiteReview:
-                    parsed["issues"] = [
-                        i
-                        for i in parsed.get("issues", [])
-                        if i.get("kind") != "split_leakage"
-                    ]
-                    parsed["approved"] = not any(
-                        i["severity"] == "blocking" for i in parsed["issues"]
-                    )
                 if adaptive and schema is OptimizationProposalReview:
                     if parsed.pop("memorization_detected", False) and not (
                         parsed.get("goal_drift_detected")
@@ -1235,10 +1236,44 @@ class AgentPackageOptimizer:
                 package_hash=bundle.content_hash, cases=tuple(cases)
             )
 
+        async def review_cases(cases, *, generated, schema, event_name="suite_review_completed"):
+            from sagents.v2.optimization.preflight import admit_cases, GeneratedCasesRejected
+            review_package = original.model_dump(mode="json")
+            review_package["manifest"]["tests"] = {"scenarios": [], "gates": {}}
+            async def diagnose(current):
+                return await ask("suite_review", self.suite_reviewer,
+                    "Diagnose the supplied cases against the original policy and scorer contract. "
+                    "Quote concrete evidence, explain uncertainty and impact; model suspicions are not "
+                    "deterministic data errors. Scores, failures or inability to solve are not exclusion reasons. "
+                    "Do not change cases, scoring or participation. Do not demand exact reference traces.",
+                    {"goal": goal, "package": review_package,
+                     "original_instructions": original.resolved_manifest().agents[target].instructions.inline,
+                     "constraints": policy.model_dump(mode="json"),
+                     "external_scorer": scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
+                     "suite": current.model_dump(mode="json"), "require_diverse_suite": require_diverse_suite,
+                     "source": "generated" if generated else "imported",
+                     "preflight_policy": preflight_policy.model_dump(mode="json")}, OptimizationSuiteReview)
+            async def repair(current, review):
+                return await ask("test_design", self.test_designer,
+                        "Repair these generated draft questions using the review evidence. Keep each case ID "
+                        "and split unchanged. Supply valid fixtures without weakening the original policy or "
+                        "scorer. These drafts are not admitted to training. Return the complete repaired cases.",
+                        {"goal": goal, "package": review_package, "suite": current.model_dump(mode="json"),
+                         "review": review.model_dump(mode="json"),
+                         "original_instructions": original.resolved_manifest().agents[target].instructions.inline}, schema)
+            try:
+                return await admit_cases(cases, generated=generated, schema=schema, policy=preflight_policy,
+                    review_case_set=diagnose, repair=repair, emit=journal.emit, round=active_round,
+                    event_name=event_name)
+            except GeneratedCasesRejected as error:
+                raise OptimizationSuiteReviewRejected(error.review, calls[-1]) from error
+
         with journal:
             journal.emit(
                 "operation_started",
                 optimization_id=optimization_id,
+                preflight_policy=preflight_policy.model_dump(mode="json"),
+                dataset_manifest=dataset_manifest,
                 recovery_fingerprint=recovery_hash,
                 recovery_engine_id=recovery_config["engine"],
                 call_isolation_protocol="sage.rsi.call-isolation/v1" if call_retries else None,
@@ -1418,7 +1453,6 @@ class AgentPackageOptimizer:
                         raise ValueError(
                             "imported validation count does not match validation_case_count"
                         )
-                journal.emit("suite_fixed", suite=fixed_suite.model_dump(mode="json"))
                 if final_suite is None and final_max_cases:
                     journal.emit("final_test_generation_started")
                     generation = await AgentPackageTestGenerator(
@@ -1455,53 +1489,20 @@ class AgentPackageOptimizer:
                     journal.emit(
                         "final_suite_sealed", suite=sealed_final.model_dump(mode="json")
                     )
-                suite_package_view = original.model_dump(mode="json")
-                suite_package_view["manifest"]["tests"] = {"scenarios": [], "gates": {}}
+                if sealed_final is not None:
+                    sealed_final, final_diagnosis = await review_cases(sealed_final.cases,
+                        generated=not imported_final_suite, schema=OptimizationFinalSuite,
+                        event_name="final_suite_review_completed")
+                    if sealed_final is None:
+                        raise OptimizationSuiteReviewRejected(final_diagnosis, calls[-1])
                 journal.emit("suite_review_started")
-                suite_review = await ask(
-                    "suite_review",
-                    self.suite_reviewer,
-                    "Audit goal and fixed test-suite consistency before any target execution. "
-                    "Identify conflicting or ambiguous pass/fail requirements and fixture defects; "
-                    "do not change tests or disclose hidden cases to other agents. "
-                    "When external_scorer is present, its contract defines numerical scoring. "
-                    "Do not reimplement or second-guess that scoring or block merely because a rubric "
-                    "delegates to it. Distinguish concrete invalid input or policy contradictions "
-                    "from stricter benchmark outcome criteria and hypothetical alternative choices.",
-                    {
-                        "goal": goal,
-                        "agent_id": target,
-                        "original_instructions": original.resolved_manifest()
-                        .agents[target]
-                        .instructions.inline,
-                        "package": suite_package_view,
-                        "constraints": policy.model_dump(mode="json"),
-                        "require_diverse_suite": require_diverse_suite,
-                        "external_scorer": scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
-                        "suite": fixed_suite.model_dump(mode="json"),
-                        "final_suite": sealed_final.model_dump(mode="json")
-                        if sealed_final
-                        else None,
-                    },
-                    OptimizationSuiteReview,
-                )
-                known_ids = {
-                    c.id
-                    for c in (
-                        *fixed_suite.cases,
-                        *(sealed_final.cases if sealed_final else ()),
-                    )
-                }
-                if any(
-                    set(issue.case_ids) - known_ids for issue in suite_review.issues
-                ):
-                    raise ValueError("suite review references unknown case IDs")
-                journal.emit(
-                    "suite_review_completed",
-                    review=suite_review.model_dump(mode="json"),
-                )
-                if not suite_review.approved:
-                    raise OptimizationSuiteReviewRejected(suite_review, calls[-1])
+                fixed_suite, suite_review = await review_cases(fixed_suite.cases,
+                    generated=not imported_suite, schema=OptimizationSuite)
+                if sealed_final is not None:
+                    self._check_final_suite(fixed_suite, sealed_final)
+                if require_diverse_suite and not adaptive:
+                    self._check_diversity(fixed_suite)
+                journal.emit("suite_fixed", suite=fixed_suite.model_dump(mode="json"))
                 baseline = await evaluate(original, fixed_suite)
                 journal.emit(
                     "evaluation_completed",
@@ -1552,7 +1553,7 @@ class AgentPackageOptimizer:
                     used_ids = {c.id for c in fixed_suite.cases}
                     pool_cases = tuple(c for c in training_pool if c.id not in used_ids)[:training_cases_per_round]
                     added_cases = list(pool_cases)
-                    remaining = training_cases_per_round - len(pool_cases)
+                    remaining = 0 if imported_suite else training_cases_per_round - len(pool_cases)
                     if remaining:
                         generation = await designer.generate_split_with_record(
                             best,
@@ -1575,30 +1576,22 @@ class AgentPackageOptimizer:
                         )
                         calls.append(generation.call)
                         added_cases.extend(generation.suite.cases)
-                    added = OptimizationCaseBatch(cases=tuple(added_cases))
-                    review = await ask(
-                        "suite_review",
-                        self.suite_reviewer,
-                        "Review new training challenges for business-policy consistency, "
-                        "clear rubrics and executable fixtures. Do not assess question leakage or overlap.",
-                        {
-                            "goal": goal,
-                            "original_instructions": original.resolved_manifest()
-                            .agents[target]
-                            .instructions.inline,
-                            "suite": added.model_dump(mode="json"),
-                            "constraints": policy.model_dump(mode="json"),
-                            "require_diverse_suite": False,
-                        },
-                        OptimizationSuiteReview,
-                    )
-                    journal.emit(
-                        "training_suite_review_completed",
-                        round=index,
-                        review=review.model_dump(mode="json"),
-                    )
-                    if not review.approved:
-                        raise OptimizationSuiteReviewRejected(review, calls[-1])
+                    if not added_cases:
+                        journal.emit("training_pool_exhausted", round=index)
+                        return
+                    admitted = list(pool_cases)
+                    if pool_cases:
+                        await review_cases(pool_cases, generated=False, schema=OptimizationCaseBatch,
+                            event_name="training_suite_review_completed")
+                    generated_cases = tuple(added_cases[len(pool_cases):])
+                    if generated_cases:
+                        checked, review = await review_cases(generated_cases, generated=True,
+                            schema=OptimizationCaseBatch, event_name="training_suite_review_completed")
+                        if checked is not None:
+                            admitted.extend(checked.cases)
+                    if not admitted:
+                        return
+                    added = OptimizationCaseBatch(cases=tuple(admitted))
                     fixed_suite = OptimizationSuite(
                         cases=(*fixed_suite.cases, *added.cases)
                     )
@@ -2191,6 +2184,8 @@ class AgentPackageOptimizer:
                         ),
                     ),
                     report=OptimizationReport(
+                        dataset_manifest=dataset_manifest,
+                        preflight_policy=preflight_policy.model_dump(mode="json"),
                         goal=goal,
                         suite_review=suite_review,
                         requested_rounds=rounds,

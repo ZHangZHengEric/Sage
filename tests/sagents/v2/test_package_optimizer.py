@@ -2020,12 +2020,11 @@ async def test_invalid_optimization_scope_before_any_model_call(scope):
 
 
 @pytest.mark.asyncio
-async def test_suite_review_blocks_before_any_target_or_tuner_and_preserves_record(
+async def test_imported_suite_review_rejection_is_diagnostic_and_preserves_record(
     tmp_path,
 ):
-    from sagents.v2 import OptimizationSuiteReviewRejected
 
-    class Reject(Runner):
+    class Reject(FinalRunner):
         async def run(self, package, agent_id, content, ctx):
             if package.manifest.metadata.id == "test.suite-reviewer":
                 self.requests.append((package.manifest.metadata.id, content))
@@ -2039,7 +2038,7 @@ async def test_suite_review_blocks_before_any_target_or_tuner_and_preserves_reco
                                 {
                                     "kind": "goal_conflict",
                                     "severity": "blocking",
-                                    "case_ids": ["untouched-final"],
+                                    "case_ids": [json.loads(content)["data"]["suite"]["cases"][0]["id"]],
                                     "rationale": "Requires an unauthorized action",
                                     "suggested_fix": "Align the rubric with authorized conversions",
                                 }
@@ -2051,30 +2050,17 @@ async def test_suite_review_blocks_before_any_target_or_tuner_and_preserves_reco
 
     runner = Reject()
     path = tmp_path / "audit.jsonl"
-    with pytest.raises(OptimizationSuiteReviewRejected) as caught:
-        await optimizer(runner).optimize(
-            bundle(),
-            validation_case_count=None,
-            context=context(),
-            goal="Conversions only",
-            suite=suite(),
-            final_suite=final_suite(),
-            rounds=2,
-            journal_path=path,
-        )
-    assert not runner.target_hashes
-    assert all(name == "test.suite-reviewer" for name, _ in runner.requests)
-    assert caught.value.review.issues[0].case_ids == ("untouched-final",)
-    assert caught.value.call.role == "suite_review"
-    request = json.loads(caught.value.call.request)
-    assert request["data"]["final_suite"]["cases"][0]["id"] == "untouched-final"
-    events = [json.loads(line) for line in path.read_text().splitlines()]
-    assert any(
-        e["event"] == "suite_review_completed" and not e["data"]["review"]["approved"]
-        for e in events
+    result = await optimizer(runner).optimize(
+        bundle(), validation_case_count=None, context=context(), goal="Conversions only",
+        suite=suite(), final_suite=final_suite(), rounds=2, journal_path=path,
     )
-    assert not any(e["event"] == "target_call_started" for e in events)
-    assert events[-1]["data"]["status"] == "failed"
+    assert runner.target_hashes
+    assert result.report.suite_review.approved is False
+    assert len(result.report.baseline.cases) == 2
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert any(e["event"] == "suite_review_completed"
+        and not e["data"]["review"]["approved"] and e["data"]["disposition"] == "diagnostic_only" for e in events)
+    assert events[-1]["data"]["status"] == "completed"
 
 
 @pytest.mark.parametrize(
@@ -2096,21 +2082,6 @@ async def test_suite_review_blocks_before_any_target_or_tuner_and_preserves_reco
             }
         ),
         json.dumps({"approved": False, "rationale": "Bad", "issues": []}),
-        json.dumps(
-            {
-                "approved": False,
-                "rationale": "Bad",
-                "issues": [
-                    {
-                        "kind": "goal_conflict",
-                        "severity": "blocking",
-                        "case_ids": ["invented-case"],
-                        "rationale": "Conflict",
-                        "suggested_fix": "Fix",
-                    }
-                ],
-            }
-        ),
     ],
 )
 @pytest.mark.asyncio
@@ -2927,7 +2898,7 @@ async def test_adaptive_validation_item_scores_have_stable_anonymous_indexes_wit
 
 
 @pytest.mark.asyncio
-async def test_adaptive_ignores_leakage_judgments_but_keeps_business_review():
+async def test_adaptive_retains_imported_preflight_opinion_without_rewriting_approval():
     class ObsoleteReview(AdaptiveRunner):
         async def run(self, package, agent_id, content, ctx):
             name = package.manifest.metadata.id
@@ -2980,10 +2951,13 @@ async def test_adaptive_ignores_leakage_judgments_but_keeps_business_review():
         goal="Conversions",
         rounds=1,
         validation_case_count=2,
+        suite=OptimizationSuite(cases=(*suite().cases,
+            suite().cases[1].model_copy(update={"id": "second-dev", "input": "Convert 9 cm"}))),
+        training_cases_per_round=0,
     )
     assert result.report.rounds[0].accepted
-    assert result.report.suite_review.approved
-    assert result.report.suite_review.issues == ()
+    assert result.report.suite_review.approved is False
+    assert result.report.suite_review.issues[0].kind == "split_leakage"
 
 
 @pytest.mark.asyncio
@@ -3032,42 +3006,29 @@ async def test_independent_designers_can_share_raw_ids_and_inputs_without_leakag
 
 
 @pytest.mark.asyncio
-async def test_new_training_challenges_still_reject_business_conflicts_before_execution():
+async def test_new_training_challenges_are_repaired_then_quarantined_before_admission(tmp_path):
     class ConflictingChallenge(AdaptiveRunner):
+        repairs = 0
         async def run(self, package, agent_id, content, ctx):
             request = json.loads(content) if content.startswith("{") else {}
-            if request.get("task", "").startswith("Review new training"):
-                return OptimizationObservation(
-                    state="completed",
-                    output=json.dumps(
-                        {
-                            "approved": False,
-                            "rationale": "Business rule contradicted",
-                            "issues": [
-                                {
-                                    "kind": "goal_conflict",
-                                    "severity": "blocking",
-                                    "rationale": "Contradicts conversion goal",
-                                    "suggested_fix": "Follow authorized units",
-                                }
-                            ],
-                        }
-                    ),
-                )
+            if request.get("task", "").startswith("Repair"):
+                self.repairs += 1
+                return OptimizationObservation(state="completed", output=json.dumps(request["data"]["suite"]))
+            reviewed = request.get("data", {}).get("suite", {}).get("cases", [])
+            if package.manifest.metadata.id == "test.suite-reviewer" and reviewed and all(c["split"] == "training" for c in reviewed):
+                return OptimizationObservation(state="completed", output=json.dumps({
+                    "approved": False, "rationale": "Business rule contradicted", "issues": [{
+                        "kind": "goal_conflict", "severity": "blocking",
+                        "rationale": "Contradicts conversion goal", "suggested_fix": "Follow authorized units"}]}))
             return await super().run(package, agent_id, content, ctx)
-
-    from sagents.v2.optimization.optimizer import OptimizationSuiteReviewRejected
-
     runner = ConflictingChallenge()
-    with pytest.raises(OptimizationSuiteReviewRejected):
-        await optimizer(runner).optimize(
-            bundle(),
-            context=context(),
-            goal="Conversions",
-            rounds=1,
-            validation_case_count=1,
-        )
-    assert not any(name == "test.tuner" for name, _ in runner.requests)
+    path = tmp_path / "audit.jsonl"
+    result = await optimizer(runner).optimize(bundle(), context=context(), goal="Conversions",
+        rounds=1, validation_case_count=1, journal_path=path)
+    assert runner.repairs == 2
+    assert len(result.report.training_additions) == 1
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert any(e["event"] == "generated_cases_quarantined" for e in events)
 
 
 @pytest.mark.asyncio

@@ -173,6 +173,48 @@ class AgentPackageTestGenerator:
         assert isinstance(generation, OptimizationFinalSuiteGeneration)
         return generation
 
+    async def review_drafts(self, package, cases, *, reviewer, context, goal, schema,
+                            generated, policy, scorer_contract=None, emit, timeout_seconds=120):
+        """Use the shared admission policy for human-only test generation too."""
+        from sagents.v2.optimization.preflight import admit_cases, GeneratedCasesRejected
+        from sagents.v2.optimization.contracts import OptimizationSuiteReview
+        from sagents.v2.optimization.principles import SUITE_REVIEW_PRINCIPLES
+        from sagents.v2.optimization.call_isolation import retry_call
+        reviewer = with_principles(reviewer, SUITE_REVIEW_PRINCIPLES)
+        async def invoke(agent, role, task, data, response_type):
+            content = json.dumps({"task": task, "data": data,
+                "response_schema": response_type.model_json_schema()}, ensure_ascii=False)
+            async def execute():
+                async with asyncio.timeout(timeout_seconds):
+                    observation = await self.runner.run(agent.package.model_copy(deep=True), agent.agent_id, content, context)
+                emit('human_test_preflight_call_completed', role=role, request=content,
+                     observation=observation.model_dump(mode='json'))
+                if observation.state != 'completed':
+                    raise RuntimeError(f'{role} agent did not complete: {observation.state}')
+                raw = observation.output.strip()
+                fenced = re.fullmatch(r'```(?:json)?\s*\n(.*?)\n```', raw, re.DOTALL)
+                return response_type.model_validate_json(fenced.group(1) if fenced else raw)
+            tools = agent.package.resolved_manifest().agents[agent.agent_id].tools
+            return await retry_call(execute, retries=self.call_retries if not tools else 0)
+        original_policy = package.resolved_manifest().agents[package.manifest.entrypoint.agent].instructions.inline
+        async def diagnose(current):
+            return await invoke(reviewer, 'suite_review',
+                'Diagnose test fixtures using quoted evidence and explicit uncertainty. A model opinion is not a data error. '
+                'Never exclude cases based on score, failure or model inability. Never change the scoring contract.',
+                {'goal': goal, 'suite': current.model_dump(mode='json'), 'original_instructions': original_policy,
+                 'external_scorer': scorer_contract}, OptimizationSuiteReview)
+        async def repair(current, review):
+            return await invoke(self.designer, 'test_design',
+                'Repair these generated drafts. Keep case IDs and splits unchanged, preserve business policy '
+                'and scoring, and return all repaired cases. Drafts are not yet admitted.',
+                {'goal': goal, 'suite': current.model_dump(mode='json'), 'review': review.model_dump(mode='json'),
+                 'original_instructions': original_policy}, schema)
+        admitted, review = await admit_cases(cases, generated=generated, schema=schema, policy=policy,
+            review_case_set=diagnose, repair=repair, emit=emit, event_name='human_test_suite_review_completed')
+        if admitted is None:
+            raise GeneratedCasesRejected(review)
+        return admitted
+
     async def _generate_with_record(self, package, **kwargs):
         from sagents.v2.optimization.call_isolation import retry_call
         tools = self.designer.package.resolved_manifest().agents[self.designer.agent_id].tools

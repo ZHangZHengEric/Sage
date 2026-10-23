@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.v2.desktop.backend.rsi import RsiStart, RsiApply, RsiResumeOptions
+from sagents.v2.optimization.dataset import validate_imported_dataset
+from sagents.v2.optimization.dataset_versions import DatasetRevisionRequest
 from app.v2.desktop.backend.rsi_evaluation import EvaluationPlan, ScorerImport
 
 import asyncio
@@ -421,6 +423,20 @@ def create_app(
             )
         )
 
+    @app.post("/api/v2/agents/{agent_id}/rsi/datasets")
+    async def import_rsi_dataset(agent_id: str, value: dict, request: Request):
+        async def validate_and_import():
+            return await runtime_service.import_rsi_dataset(agent_id, validate_imported_dataset(value), get_desktop_user_id(request))
+        return _success(await _safe(validate_and_import()))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/datasets/{version_id}")
+    async def rsi_dataset(agent_id: str, version_id: str, request: Request):
+        return _success(await _safe(runtime_service.rsi_dataset(agent_id, version_id, get_desktop_user_id(request))))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/datasets/{version_id}/revisions")
+    async def revise_rsi_dataset(agent_id: str, version_id: str, value: DatasetRevisionRequest, request: Request):
+        return _success(await _safe(runtime_service.revise_rsi_dataset(agent_id, version_id, value, get_desktop_user_id(request))))
+
     @app.get("/api/v2/agents/{agent_id}/rsi")
     async def rsi_history(agent_id: str, request: Request):
         return _success(await _safe(runtime_service.rsi_history(agent_id, get_desktop_user_id(request))))
@@ -436,6 +452,10 @@ def create_app(
     @app.post("/api/v2/agents/{agent_id}/rsi/evaluation-plans")
     async def import_rsi_evaluation_plan(agent_id: str, value: EvaluationPlan, request: Request):
         return _success(await _safe(runtime_service.import_rsi_evaluation_plan(agent_id, value, get_desktop_user_id(request))))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/dataset")
+    async def rsi_run_dataset(agent_id: str, run_id: str, request: Request):
+        return _success(await _safe(runtime_service.rsi_run_dataset(agent_id, run_id, get_desktop_user_id(request))))
 
     @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}")
     async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0, compact: bool = False):
@@ -649,6 +669,18 @@ def create_app(
         return _success(
             await _safe(
                 runtime_service.add_mcp_connection(value, get_desktop_user_id(request))
+            )
+        )
+
+    @app.put("/api/v2/mcp-connections/{server_name}")
+    async def update_mcp_connection(
+        server_name: str, value: MCPConnectionRequest, request: Request
+    ):
+        return _success(
+            await _safe(
+                runtime_service.update_mcp_connection(
+                    server_name, value, get_desktop_user_id(request)
+                )
             )
         )
 

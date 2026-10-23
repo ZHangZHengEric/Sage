@@ -67,11 +67,33 @@ batch (1..100), and `training_cases_per_round` sets each round's additions (0..1
 0 freezes the training set). Desktop defaults to 6 and 6. Accumulated questions
 remain in every subsequent round. Imported training cases form an ordered pool:
 consume its initial batch, then append the next batch each round; only when that
-pool runs out does the designer generate the remaining additions. Historical
+pool runs out, a generated experiment may design further additions. Imported fixed suites never extend beyond their frozen training pool. Historical
 rounds are not rerun on new questions. SDK callers omitting the initial count
 retain their supplied suite as the initial set. Imported
 `OptimizationSuite` supplies training and fixed validation; the configured
 validation count must match its validation split. Case IDs must be unique.
+
+Deterministic import validation is separate from semantic preflight. Malformed
+protocols/fields, duplicate IDs, invalid splits, unavailable environment bindings
+and failed scorer self-tests prevent execution. A model review is an evidence-
+bearing opinion, not proof of a dataset defect. Supplied fixed suites keep their
+original cases and scorer even when `suite_review.approved` is false; the opinion
+is retained verbatim. Generated drafts are repaired by the designer up to
+`SuitePreflightPolicy.generated_repairs` times (default 2) before admission.
+Unrepaired drafts are quarantined with the rejected opinions and repair history;
+an experiment without its required valid seed/dev set still fails explicitly.
+Invalid model responses and transport/runtime errors remain separate failures.
+
+Human dataset management uses immutable `DatasetVersion` artifacts and confirmed
+`DatasetRevisionRequest` exclusions. Original cases are preserved. Each mark
+records its case ID, reason, evidence, authenticated operator, timestamp and
+source version. Low scores, failures, variance and model inability are not defect
+types. A revision is always labeled **revised dataset**, including in reports;
+complete-source test targets retain their original denominator. Revisions apply
+only to new runs and never change an active run's membership or denominator.
+The frozen membership, exclusions and `SuitePreflightPolicy` are recovery-bound.
+The optimizer receives version counts and a digest, not hidden test IDs or
+exclusion evidence. Dataset management is absent from model-facing MCP tools.
 
 The validation designer sees the original package and previously generated
 validation questions only. The training designer sees current capabilities and
@@ -668,7 +690,9 @@ calculation precision and rounding stages and supplies mixed-validity, multiline
 and missing-supplier final cases. Reusing a revision's previously evaluated final
 fixtures is a workflow regression check, not a fresh independent benchmark.
 Add `--preflight-probe` to deliberately introduce a contradictory final rubric;
-the expected outcome is a retained `preflight-rejected.json` and zero target calls.
+for an explicitly supplied fixed suite, the opinion is retained and the original
+questions are still evaluated. The probe writes `preflight-diagnostics.json`;
+it does not relabel a model refusal as an invalid dataset or alter the rubric.
 
 In the 2026-10-12 real-model experiments, Skill-only tuning changed only SKILL.md,
 and tool-only tuning removed draft_order and enabled normalize_order. Both reached

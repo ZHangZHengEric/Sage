@@ -57,6 +57,8 @@ flutter run -d macos
 }
 ```
 
+Desktop 弹窗中选择 `stdio`：名称填 `TauRetail`，命令只填 Python 解释器的绝对路径；“参数（JSON）”粘贴上述 `args` 数组，“环境变量（JSON）”粘贴上述 `env` 对象。参数、环境变量留空分别表示 `[]`、`{}`。不要将整条 shell 命令填进“命令”字段，也不要把整个 `mcpServers` 对象粘贴进参数框。点击“连接”后，Desktop 自动启动 stdio 子进程，无需手动常驻启动服务器。 已保存的外部 MCP 可选中后点击右上角“编辑”，修改命令、参数或环境变量并保存；连接名称保持不变，保存后重新发现工具，原启停状态保留。
+
 连接并刷新工具列表，确认出现 16 个 `mcp_TauRetail_*` 业务工具。此连接只提供业务环境；评分器另外导入，不需要 `scorer_mcp` 或 `evaluate_simulation` MCP 工具。
 
 ### 3. 先配置列表里的基线 Agent

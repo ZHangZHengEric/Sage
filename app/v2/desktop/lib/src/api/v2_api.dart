@@ -54,6 +54,49 @@ class V2ApiClient {
   ) async => (await _json('POST', _rsiPath(agentId), body: body) as Map)
       .cast<String, Object?>();
 
+  Future<Map<String, Object?>> importRsiDataset(
+    String agentId,
+    Map<String, Object?> dataset,
+  ) async =>
+      (await _json('POST', '${_rsiPath(agentId)}/datasets', body: dataset)
+              as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> rsiDataset(
+    String agentId,
+    String versionId,
+  ) async =>
+      (await _json(
+                'GET',
+                '${_rsiPath(agentId)}/datasets/${Uri.encodeComponent(versionId)}',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> rsiRunDataset(
+    String agentId,
+    String runId,
+  ) async =>
+      (await _json(
+                'GET',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/dataset',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> reviseRsiDataset(
+    String agentId,
+    String versionId,
+    Map<String, Object?> revision,
+  ) async =>
+      (await _json(
+                'POST',
+                '${_rsiPath(agentId)}/datasets/${Uri.encodeComponent(versionId)}/revisions',
+                body: revision,
+              )
+              as Map)
+          .cast<String, Object?>();
+
   Future<Map<String, Object?>> importRsiScorer(
     String agentId,
     Map<String, Object?> scorer,
@@ -429,6 +472,19 @@ class V2ApiClient {
     Map<String, Object?> value,
   ) async => McpConnectionSummary.fromJson(
     (await _json('POST', '/api/v2/mcp-connections', body: value) as Map)
+        .cast<String, Object?>(),
+  );
+
+  Future<McpConnectionSummary> updateMcpConnection(
+    String name,
+    Map<String, Object?> value,
+  ) async => McpConnectionSummary.fromJson(
+    (await _json(
+              'PUT',
+              '/api/v2/mcp-connections/${Uri.encodeComponent(name)}',
+              body: value,
+            )
+            as Map)
         .cast<String, Object?>(),
   );
 

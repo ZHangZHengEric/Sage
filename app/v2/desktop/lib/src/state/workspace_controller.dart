@@ -296,6 +296,20 @@ class WorkspaceController extends ChangeNotifier {
 
   Future<Map<String, Object?>> rsiHistory(String agentId) =>
       _api.rsiHistory(agentId);
+  Future<Map<String, Object?>> importRsiDataset(
+    String agentId,
+    Map<String, Object?> dataset,
+  ) => _api.importRsiDataset(agentId, dataset);
+  Future<Map<String, Object?>> rsiDataset(String agentId, String versionId) =>
+      _api.rsiDataset(agentId, versionId);
+  Future<Map<String, Object?>> rsiRunDataset(String agentId, String runId) =>
+      _api.rsiRunDataset(agentId, runId);
+  Future<Map<String, Object?>> reviseRsiDataset(
+    String agentId,
+    String versionId,
+    Map<String, Object?> revision,
+  ) => _api.reviseRsiDataset(agentId, versionId, revision);
+
   Future<Map<String, Object?>> importRsiScorer(
     String agentId,
     Map<String, Object?> scorer,
@@ -1052,7 +1066,9 @@ class WorkspaceController extends ChangeNotifier {
       if (agentRevision == _settingsAgentRevision) {
         _adoptAgentRead(values[0] as AgentConfiguration, writeRevision);
       }
-      toolCatalog = values[1] as List<ToolSummary>;
+      if (mcpRevision == _mcpCatalogRevision) {
+        toolCatalog = values[1] as List<ToolSummary>;
+      }
       skillCatalog = values[2] as List<SkillSummary>;
       modelProviders = values[3] as List<ModelProviderSummary>;
       if (mcpRevision == _mcpCatalogRevision) {
@@ -1526,7 +1542,7 @@ class WorkspaceController extends ChangeNotifier {
         for (final value in mcpConnections)
           value.name == name ? updated : value,
       ];
-      notifyListeners();
+      await refreshMcpConnections();
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();
@@ -1626,9 +1642,14 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> refreshMcpConnections() async {
     final revision = ++_mcpCatalogRevision;
     try {
-      final values = await _api.listMcpConnections();
+      _syncToolCatalogLanguage();
+      final values = await Future.wait<Object>([
+        _api.listMcpConnections(),
+        _api.listTools(),
+      ]);
       if (_disposed || revision != _mcpCatalogRevision) return;
-      mcpConnections = values;
+      mcpConnections = values[0] as List<McpConnectionSummary>;
+      toolCatalog = values[1] as List<ToolSummary>;
       notifyListeners();
     } on Object catch (exception) {
       if (_disposed || revision != _mcpCatalogRevision) return;
@@ -1648,7 +1669,23 @@ class WorkspaceController extends ChangeNotifier {
         created,
       ];
       components = await _api.listComponents();
+      await refreshMcpConnections();
+    } on Object catch (exception) {
+      error = exception.toString();
       notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> updateMcpConnection(
+    String name,
+    Map<String, Object?> value,
+  ) async {
+    ++_mcpCatalogRevision;
+    try {
+      await _api.updateMcpConnection(name, value);
+      components = await _api.listComponents();
+      await refreshMcpConnections();
     } on Object catch (exception) {
       error = exception.toString();
       notifyListeners();

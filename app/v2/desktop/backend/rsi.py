@@ -21,11 +21,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from .rsi_evaluation import EvaluationPlan, ScorerImport, ScorerSelection, McpExecutionScorer, scorer_binding
 from .rsi_call_recovery import failed_call
 
-from sagents.v2.optimization.dataset import OptimizationDataset
+from sagents.v2.optimization.dataset import OptimizationDataset, validate_imported_dataset
+from sagents.v2.optimization.dataset_summary import summarize_dataset
+from sagents.v2.optimization.dataset_versions import DatasetVersion, DatasetRevisionRequest, SuitePreflightPolicy
+from sagents.v2.optimization.recovery import configuration_fingerprint
 from sagents.v2.optimization.scoring import ScorerDescriptor
 from sagents.v2.optimization.builtin_scoring import BuiltinScoring, BuiltinScoringUnavailable
 from sagents.v2.optimization.python_scorer import PythonExecutionScorer
@@ -110,6 +113,8 @@ class RsiStart(StrictModel):
     scorer_id: str | None = None
     builtin_scoring: BuiltinScoring = Field(default_factory=BuiltinScoring)
     dataset: OptimizationDataset | None = None
+    dataset_version_id: str | None = None
+    preflight_policy: SuitePreflightPolicy = Field(default_factory=SuitePreflightPolicy)
     human_test_count: int = Field(default=0, ge=0, le=100)
     human_test_suite: OptimizationTestSuite | None = None
     evaluation_repeats: int = Field(default=1, ge=1, le=10)
@@ -134,6 +139,11 @@ class RsiStart(StrictModel):
         default_factory=OptimizationStoppingPolicy
     )
     request_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator('dataset', mode='before')
+    @classmethod
+    def imported_dataset_wire_fields(cls, value):
+        return validate_imported_dataset(value) if isinstance(value, dict) else value
 
 
 def rsi_timeout_seconds(request: RsiStart) -> int:
@@ -180,6 +190,16 @@ def frozen_rsi_request(frozen, run):
     digest = hashlib.sha256(request.model_dump_json(exclude={"request_id"}).encode()).hexdigest()
     if digest != run.get("request_hash") or request.request_id != run.get("request_id"):
         raise ValueError("Frozen RSI request configuration changed since this experiment")
+    if "dataset_binding" in run:
+        manifest = frozen.get("dataset_manifest")
+        binding = configuration_fingerprint({"manifest": manifest,
+            "preflight_policy": request.preflight_policy.model_dump(mode="json")})
+        if binding != run["dataset_binding"] or manifest != run.get("dataset_manifest"):
+            raise ValueError("Frozen dataset membership, exclusions or preflight policy changed")
+        if manifest is not None:
+            ids = [case.id for case in request.dataset.cases] if request.dataset else []
+            if ids != manifest["active_case_ids"] or request.dataset_version_id != manifest["version_id"]:
+                raise ValueError("Frozen dataset membership differs from the selected version")
     return request
 
 
@@ -253,12 +273,17 @@ class RsiStore:
 
     @staticmethod
     def metadata(value):
-        return {
-            k: v
-            for k, v in value.items()
+        metadata = {k: v for k, v in value.items()
             if k not in {"config", "package", "assets", "record", "test_observations",
-                         "human_test_suite", "_test_observations_external"}
-        }
+                         "human_test_suite", "_test_observations_external", "dataset_version", "dataset_diagnostics"}}
+        # Full case IDs and exclusion evidence belong in explicit human detail
+        # reads, not every history summary. The durable body remains lossless.
+        for key in ("dataset_manifest", "generated_dataset_manifest", "manifest"):
+            if isinstance(metadata.get(key), dict):
+                metadata[key] = {k: v for k, v in metadata[key].items() if k not in {"active_case_ids", "exclusions"}}
+        if "dataset_version" in value:
+            metadata.pop("validation", None)
+        return metadata
 
     @contextmanager
     def connect(self):
@@ -361,6 +386,71 @@ class RsiStore:
 
 
 class DesktopRsiMixin:
+    def _dataset_record_id(self, agent_id, version_id, user_id):
+        return "rsi_dataset_" + configuration_fingerprint([user_id, agent_id, version_id])
+
+    def _store_dataset_version(self, agent_id, version, user_id, *, validation=None):
+        identity = self._dataset_record_id(agent_id, version.id, user_id)
+        value = {"id": identity, "version_id": version.id,
+            "created_at": utc_now().isoformat(), "dataset_version": version.model_dump(mode="json"),
+            "manifest": version.manifest(),
+            "validation": validation or summarize_dataset(version.active_dataset()),
+            "validated_at": utc_now().isoformat()}
+        try:
+            existing = self.rsi_store.get(identity, user_id, agent_id, "dataset")
+        except ValueError:
+            self.rsi_store.put(value, user_id, agent_id, "dataset")
+        else:
+            if existing["dataset_version"] != value["dataset_version"]:
+                raise ValueError("immutable dataset version content changed")
+            value = existing
+        return {"id": version.id, "dataset": version.dataset.model_dump(mode="json"),
+                "manifest": version.manifest(), "validation": value.get("validation") or summarize_dataset(version.active_dataset()),
+                "validated_at": value.get("validated_at")}
+
+    def _dataset_version(self, agent_id, version_id, user_id):
+        stored = self.rsi_store.get(self._dataset_record_id(agent_id, version_id, user_id),
+            user_id, agent_id, "dataset")
+        return DatasetVersion.model_validate(stored["dataset_version"])
+
+    async def import_rsi_dataset(self, agent_id, dataset: OptimizationDataset, user_id):
+        await self._agent(agent_id, user_id)
+        request = RsiStart(goal="Dataset validation", request_id="dataset-validation", dataset=dataset)
+        environment = await self._rsi_case_environment(request, user_id)
+        definitions = await environment.definitions() if environment is not None else None
+        validation = summarize_dataset(dataset, environment_checked=environment is not None,
+            environment_tool_count=len(definitions) if definitions is not None else None)
+        return self._store_dataset_version(agent_id, DatasetVersion.imported(dataset), user_id, validation=validation)
+
+    async def rsi_dataset(self, agent_id, version_id, user_id):
+        await self._agent(agent_id, user_id)
+        version = self._dataset_version(agent_id, version_id, user_id)
+        stored = self.rsi_store.get(self._dataset_record_id(agent_id, version_id, user_id), user_id, agent_id, "dataset")
+        return {"id": version.id, "dataset": version.dataset.model_dump(mode="json"), "manifest": version.manifest(),
+                "validation": stored.get("validation") or summarize_dataset(version.active_dataset()),
+                "validated_at": stored.get("validated_at")}
+
+    async def rsi_run_dataset(self, agent_id, run_id, user_id):
+        await self._agent(agent_id, user_id)
+        run = self.rsi_store.get(run_id, user_id, agent_id, "run")
+        if run.get("dataset_version_id"):
+            return await self.rsi_dataset(agent_id, run["dataset_version_id"], user_id)
+        frozen = json.loads((self.runtime_root / "rsi" / run_id / "resume-context.json").read_text())
+        request = RsiStart.model_validate(frozen["request"])
+        dataset = request.dataset
+        if dataset is None and request.suite is not None:
+            dataset = OptimizationDataset(name=run["goal"][:255], cases=(
+                *request.suite.cases, *(request.human_test_suite.cases if request.human_test_suite else ())))
+        if dataset is None:
+            raise ValueError("This experiment has no admitted dataset snapshot yet")
+        return self._store_dataset_version(agent_id, DatasetVersion.imported(dataset), user_id)
+
+    async def revise_rsi_dataset(self, agent_id, version_id, request: DatasetRevisionRequest, user_id):
+        await self._agent(agent_id, user_id)
+        version = self._dataset_version(agent_id, version_id, user_id)
+        revised = version.revise(request, operator=user_id)
+        return self._store_dataset_version(agent_id, revised, user_id)
+
     async def import_rsi_scorer(self, agent_id, scorer: ScorerImport, user_id):
         await self._agent(agent_id, user_id)
         source_hash = hashlib.sha256(scorer.source.encode()).hexdigest()
@@ -557,6 +647,8 @@ class DesktopRsiMixin:
         return {
             "current_fingerprint": fingerprint(agent),
             "runs": self.rsi_store.summaries(user_id, agent_id, "run"),
+            "dataset_versions": [{"id": item["version_id"], "manifest": item["manifest"], "created_at": item["created_at"]}
+                for item in self.rsi_store.summaries(user_id, agent_id, "dataset")],
             "versions": [
                 {k: v for k, v in item.items() if k != "record"} for item in versions
             ],
@@ -623,6 +715,17 @@ class DesktopRsiMixin:
 
     async def start_rsi(self, agent_id, request: RsiStart, user_id):
         self = cast("DesktopV2Service", self)
+        dataset_manifest = None
+        if request.dataset_version_id is not None:
+            if request.dataset is not None or request.suite is not None or request.evaluation_plan_id is not None or request.human_test_suite is not None:
+                raise ValueError("dataset version is the single source of cases")
+            version = self._dataset_version(agent_id, request.dataset_version_id, user_id)
+            dataset_manifest = version.manifest()
+            request = request.model_copy(update={"dataset": version.active_dataset()})
+        elif request.dataset is not None:
+            registered = await self.import_rsi_dataset(agent_id, request.dataset, user_id)
+            dataset_manifest = registered["manifest"]
+            request = request.model_copy(update={"dataset_version_id": registered["id"]})
         if request.evaluation_plan_id:
             stored = self.rsi_store.get(request.evaluation_plan_id, user_id, agent_id, "evaluation_plan")
             plan = EvaluationPlan.model_validate(stored["plan"])
@@ -640,6 +743,12 @@ class DesktopRsiMixin:
             request = request.model_copy(update={"suite": training_suite, "human_test_suite": test_suite,
                 "validation_case_count": sum(c.split == "validation" for c in training_suite.cases),
                 "human_test_count": len(test_suite.cases) if test_suite else 0})
+        if dataset_manifest is None and request.suite is not None:
+            dataset = OptimizationDataset(name=request.goal[:255], cases=(
+                *request.suite.cases, *(request.human_test_suite.cases if request.human_test_suite else ())))
+            registered = await self.import_rsi_dataset(agent_id, dataset, user_id)
+            dataset_manifest = registered["manifest"]
+            request = request.model_copy(update={"dataset": dataset, "dataset_version_id": registered["id"]})
         if request.scorer_id is not None:
             if request.scorer is not None:
                 raise ValueError("select one scorer")
@@ -708,6 +817,11 @@ class DesktopRsiMixin:
                 "scorer_id": request.scorer_id,
                 "builtin_scoring": request.builtin_scoring.model_dump(mode="json"),
                 "environment_fingerprint": environment.fingerprint if environment else None,
+                "dataset_version_id": request.dataset_version_id,
+                "dataset_manifest": dataset_manifest,
+                "preflight_policy": request.preflight_policy.model_dump(mode="json"),
+                "dataset_binding": configuration_fingerprint({"manifest": dataset_manifest,
+                    "preflight_policy": request.preflight_policy.model_dump(mode="json")}),
                 "initial_training_case_count": request.initial_training_case_count,
                 "training_cases_per_round": request.training_cases_per_round,
                 "max_system_prompt_chars": request.max_system_prompt_chars,
@@ -739,6 +853,7 @@ class DesktopRsiMixin:
             from .rsi_artifacts import write_directory_index
             write_directory_index(root)
             private_json(root / "resume-context.json", {"request": request.model_dump(mode="json"),
+                "dataset_manifest": dataset_manifest,
                 "package": package.model_dump(mode="json"), "assets": assets})
             self.rsi_store.put(value, user_id, agent_id, "run")
             task = asyncio.create_task(
@@ -758,7 +873,7 @@ class DesktopRsiMixin:
             return None
         records = {r.name: r for r in await self.catalog.list_mcp(user_id) if not r.disabled}
         if any(name not in records for name in binding.mcp_servers):
-            raise ValueError('dataset requires an unavailable MCP server')
+            raise ValueError(f'dataset.environment.mcp_servers unavailable: {sorted(set(binding.mcp_servers) - set(records))}')
         return McpCaseEnvironment(tuple(self._mcp_config(records[name]) for name in binding.mcp_servers))
 
     async def resume_rsi(self, agent_id, run_id, user_id, *, upgrade_call_isolation=False):
@@ -924,8 +1039,27 @@ class DesktopRsiMixin:
                 version_event(0, data["package"])
             elif event["event"] == "execution_policy_upgraded":
                 value["call_isolation_upgrade"] = {**data, "state": "verified", "verified_at": event["time"]}
-            elif event["event"] == "suite_review_completed":
-                value["suite_review"] = data["review"]
+            elif event["event"] == "suite_fixed" and value.get("dataset_manifest") is None:
+                cases = data["suite"]["cases"]
+                tests = value.get("human_test_suite", {}).get("cases", [])
+                dataset = OptimizationDataset.model_validate({"name": value["goal"][:255], "cases": [*cases, *tests]})
+                registered = self._store_dataset_version(identity, DatasetVersion.imported(dataset), user)
+                value["dataset_version_id"] = registered["id"]
+                value["generated_dataset_manifest"] = registered["manifest"]
+            elif event["event"] == "training_cases_added" and value.get("generated_dataset_manifest"):
+                version = self._dataset_version(identity, value["dataset_version_id"], user)
+                known = {case.id for case in version.dataset.cases}
+                added = [case for case in data["cases"] if case["id"] not in known]
+                if added:
+                    dataset = OptimizationDataset.model_validate({**version.dataset.model_dump(mode="json"),
+                        "cases": [*(case.model_dump(mode="json") for case in version.dataset.cases), *added]})
+                    registered = self._store_dataset_version(identity, DatasetVersion.imported(dataset), user)
+                    value["dataset_version_id"] = registered["id"]
+                    value["generated_dataset_manifest"] = registered["manifest"]
+            elif event["event"] in {"suite_review_completed", "training_suite_review_completed", "final_suite_review_completed", "generated_cases_quarantined"}:
+                value.setdefault("dataset_diagnostics", []).append({"event": event["event"], "time": event["time"], **data})
+                if event["event"] == "suite_review_completed":
+                    value["suite_review"] = data["review"]
             elif event["event"] == "candidate_created":
                 version_event(data["round"], data["package"])
             elif event["event"] in {
@@ -1317,6 +1451,7 @@ class DesktopRsiMixin:
                     test_suite = request.human_test_suite
                     if test_suite is None and value.get("human_test_suite"):
                         test_suite = OptimizationTestSuite.model_validate(value["human_test_suite"])
+                    generated_test_suite = test_suite is None
                     if test_suite is None:
                         generation = await AgentPackageTestGenerator(
                             runner=test_runner, designer=roles["designer"], call_retries=3,
@@ -1326,6 +1461,22 @@ class DesktopRsiMixin:
                             timeout_seconds=240,
                         )
                         test_suite = OptimizationTestSuite(cases=generation.suite.cases)
+                    if not value.get("human_test_preflight_completed"):
+                        def audit_test_preflight(event, **data):
+                            path = test_root / "preflight.jsonl"
+                            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                                stream.write(json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n")
+                            if event != "human_test_preflight_call_completed":
+                                value.setdefault("dataset_diagnostics", []).append({"event": event, "phase": "test", **data})
+                                save()
+                        test_suite = await AgentPackageTestGenerator(runner=test_runner, designer=roles["designer"], call_retries=3).review_drafts(
+                            package, test_suite.cases, reviewer=roles["suite_reviewer"], context=context,
+                            goal=request.goal, schema=OptimizationTestSuite, generated=generated_test_suite,
+                            policy=request.preflight_policy,
+                            scorer_contract=scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
+                            emit=audit_test_preflight, timeout_seconds=240)
+                        value["human_test_preflight_completed"] = True
                     (test_root / "suite.json").write_text(test_suite.model_dump_json())
                     value["human_test_suite"] = test_suite.model_dump(mode="json")
                     value['human_test_phase_recovery'] = True
@@ -1364,6 +1515,8 @@ class DesktopRsiMixin:
                     optimization_scope=request.optimization_scope,
                     builtin_scoring=request.builtin_scoring,
                     suite=request.suite,
+                    preflight_policy=request.preflight_policy,
+                    dataset_manifest=value.get("dataset_manifest"),
                     final_max_cases=0,
                     evaluation_repeats=request.evaluation_repeats,
                     evaluation_aggregation=request.evaluation_aggregation,

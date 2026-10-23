@@ -309,3 +309,23 @@ async def test_mcp_schema_does_not_accept_agent_authored_dev_or_test_suites(tmp_
     assert 'suite' not in start.inputSchema['properties']
     assert 'human_test_suite' not in start.inputSchema['properties']
     assert 'human_test_count' in start.inputSchema['properties']
+
+
+def test_model_views_hide_dataset_exclusion_and_preflight_provenance_even_in_details():
+    from app.v2.cli.rsi_visibility import model_view
+    secret = 'HIDDEN_DEV_TEST_DIAGNOSIS'
+    human = {
+        'dataset_manifest': {'active_case_ids': [secret], 'exclusions': [{'case_id': secret, 'evidence': [secret]}]},
+        'generated_dataset_manifest': {'active_case_ids': [secret]},
+        'dataset_versions': [{'manifest': {'exclusions': [secret]}}],
+        'dataset_diagnostics': [{'review': {'approved': False, 'rationale': secret, 'issues': []}}],
+        'dataset_version': {'dataset': {'cases': [{'id': secret, 'split': 'test'}]}},
+        'events': [
+            {'event': 'generated_cases_quarantined', 'sequence': 1, 'data': {'cases': [{'id': secret}], 'review': secret}},
+            {'event': 'generated_cases_repaired', 'sequence': 2, 'data': {'before': secret, 'after': secret}},
+        ],
+        'suite_review': {'approved': False, 'rationale': secret, 'issues': []},
+    }
+    visible = model_view(human)
+    assert secret not in json.dumps(visible)
+    assert visible['suite_review']['approved'] is False
