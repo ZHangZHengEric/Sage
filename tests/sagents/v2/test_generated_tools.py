@@ -37,6 +37,44 @@ def spec(boundary=7):
     )
 
 
+def test_collection_helpers_compute_from_supplied_data_and_are_bounded():
+    expression = {"op": "sort", "args": [
+        {"op": "filter", "args": [{"var": "items"}, {"var": "item.available"}]},
+        {"var": "item.price"},
+    ]}
+    model = GeneratedTool(description="Rank eligible supplied options", input_schema={"type": "object"}, expression=expression)
+    items = [{"available": True, "price": 7}, {"available": False, "price": 1}, {"available": True, "price": 3}]
+    assert evaluate(model.expression, {"items": items}) == [items[2], items[0]]
+    assert evaluate({"op": "sum", "args": [{"op": "map", "args": [{"var": "items"}, {"var": "item.price"}]}]}, {"items": items}) == 11
+    with pytest.raises(ValueError, match="256"):
+        evaluate(expression, {"items": items * 100})
+    nested = {"op": "map", "args": [{"var": "items"}, {"op": "map", "args": [{"var": "items"}, {"var": "item"}]}]}
+    with pytest.raises(ValueError, match="step bound"):
+        evaluate(nested, {"items": list(range(256))})
+
+
+def test_new_skills_are_versioned_and_scoped_without_predeclared_names(tmp_path):
+    from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+    original = bundle()
+    patch = OptimizationPatch(rationale="Reusable workflow", skills=("workflow-check",),
+        skill_definitions={"workflow-check": "---\nname: workflow-check\ndescription: Check complete inputs before action\n---\nReconcile every requested item before acting."})
+    policy = OptimizationConstraints(allow_skill_changes=True, allow_skill_creation=True)
+    candidate = AgentPackageOptimizer._apply(original, original, "assistant", patch, policy, "2")
+    restored = AgentPackageBundle.model_validate_json(candidate.model_dump_json())
+    for path, content in restored.files.items():
+        destination = tmp_path / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content)
+    assert "workflow-check" in FilesystemSkillProvider((tmp_path / "skills",)).descriptors()
+    assert "skills/workflow-check/SKILL.md" not in original.files
+    scoped = AgentPackageOptimizer._scope_constraints(original, policy, ("instructions",))
+    with pytest.raises(ValueError, match="skill creation"):
+        AgentPackageOptimizer._apply(original, original, "assistant", patch, scoped, "2")
+    with pytest.raises((ValueError, ValidationError)):
+        AgentPackageOptimizer._apply(original, original, "assistant",
+            OptimizationPatch(rationale="invalid", skill_definitions={"../escape": "bad"}), policy, "2")
+
+
 @pytest.mark.asyncio
 async def test_create_revise_reload_and_execute_real_tool():
     original = bundle()

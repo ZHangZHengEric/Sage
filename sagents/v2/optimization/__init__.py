@@ -1,4 +1,7 @@
 """Independent AgentPackage evaluation and tuning API."""
+from sagents.v2.optimization.dataset import OptimizationDataset
+from sagents.v2.optimization.builtin_scoring import BuiltinScoring
+from sagents.v2.optimization.scoring import ExecutionScorer, ScorerDescriptor, ScoringRequest, ScoringResult
 
 from sagents.v2.optimization.contracts import (
     OptimizationTestSuite,
@@ -19,6 +22,10 @@ from sagents.v2.optimization.contracts import (
     OptimizationConstraints,
     OptimizationEvaluation,
     OptimizationGrade,
+    OptimizationDiagnosis,
+    OptimizationFinding,
+    OptimizationDiagnosisSummary,
+    OptimizationPriority,
     OptimizationIteration,
     OptimizationObservation,
     OptimizationPatch,
@@ -34,6 +41,7 @@ from sagents.v2.optimization.contracts import (
     OptimizationSuiteReview,
     OptimizationSuiteGeneration,
 )
+from sagents.v2.optimization.recovery import OptimizationRecoveryRequired, OptimizationTransientFailure
 from sagents.v2.optimization.generator import AgentPackageTestGenerator
 from sagents.v2.optimization.optimizer import (
     AgentPackageOptimizer,
@@ -45,6 +53,14 @@ from sagents.v2.optimization.runner import (
 )
 
 __all__ = [
+    "BuiltinScoring",
+    "OptimizationDataset",
+    "ExecutionScorer",
+    "ScorerDescriptor",
+    "ScoringRequest",
+    "ScoringResult",
+    "OptimizationRecoveryRequired",
+    "OptimizationTransientFailure",
     "OptimizationTestSuite",
     "HumanTestObserver",
     "IsolatedTestEvaluator",
@@ -70,6 +86,10 @@ __all__ = [
     "OptimizationConstraints",
     "OptimizationEvaluation",
     "OptimizationGrade",
+    "OptimizationDiagnosis",
+    "OptimizationFinding",
+    "OptimizationDiagnosisSummary",
+    "OptimizationPriority",
     "OptimizationIteration",
     "OptimizationObservation",
     "OptimizationPatch",

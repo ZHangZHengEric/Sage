@@ -73,6 +73,29 @@ test = [
   "fakeredis>=2.38.0,<3",
   "aiosqlite>=0.21.0",
 ]
+# Optional text-only vendored tau-bench runtime; the base Sage install stays small.
+tau-bench = [
+  "litellm==1.82.6",
+  "deepdiff==9.1.0",
+  "addict==2.4.0",
+  "numpy>=1.24.0",
+  "pandas>=2.2.3",
+  "tenacity>=9.0.0",
+  "docstring-parser>=0.16",
+  "rich>=13.0.0",
+  "tiktoken>=0.8.0",
+  "pydub>=0.25.1",
+  "audioop-lts>=0.2.2; python_version >= '3.13'",
+  "toml>=0.10.2",
+  "typer>=0.12.5",
+  "tabulate>=0.9.0",
+  "requests>=2.31.0",
+  "fastapi>=0.115.11",
+  "uvicorn>=0.34.0",
+  "psutil>=7.0.0",
+  "loguru>=0.7.3",
+  "PyYAML>=6.0.2",
+]
 dev = ["build>=1.0", "ruff==0.15.14"]
 
 [project.urls]
@@ -86,14 +109,15 @@ sage-rsi-mcp = "app.v2.cli.rsi_mcp:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "app.clients*", "mcp_servers.anytool*"]
-exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
+include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "app.clients*", "mcp_servers.anytool*", "evaluation_datasets*"]
+exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*", "evaluation_datasets.*.vendor*", "evaluation_datasets.*.data*"]
 
 [tool.setuptools.data-files]
 "share/sage/docs/en" = ["docs/en/*.md"]
 "share/sage/docs/zh" = ["docs/zh/*.md"]
 
 [tool.setuptools.package-data]
+"evaluation_datasets" = ["**/*.json", "**/*.md", "**/*.txt", "**/*.py", "**/*.toml", "**/LICENSE"]
 "app.v1" = ["requirements*.txt"]
 "app.clients.terminal" = [
   "bin/*/run-sage-terminal.sh",

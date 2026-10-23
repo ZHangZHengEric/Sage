@@ -162,3 +162,184 @@ async def test_restored_checkpoints_preserve_errors_without_remeasuring_and_foll
     with pytest.raises(ValueError, match='terminal'):
         HumanTestObserver(baseline=original, suite=suite(), evaluate=evaluate,
             publish=lambda _: None, completed_records=[{**old, 'status': 'running'}])
+
+
+@pytest.mark.asyncio
+async def test_independent_test_repeats_preserve_trials_and_average_only_complete_measurements():
+    snapshots = []
+    calls = []
+    async def evaluate(package, case):
+        index = len(calls)
+        calls.append(package.content_hash)
+        return {'grade': {'score': index / 2, 'passed': index == 2, 'rationale': f'trial-{index + 1}'},
+                'conversation': [{'user': f'question-{index + 1}', 'target': {'output': f'answer-{index + 1}'}}]}
+    observer = HumanTestObserver(baseline=bundle(), suite=suite(), evaluate=evaluate,
+        repeats=3, concurrency=1, publish=snapshots.append)
+    observer.observe(event('evaluation_completed', round=0, evaluation={'cases': []}))
+    await observer.finish()
+    record = observer.records[0]
+    row = record['cases'][0]
+    assert len(calls) == 3
+    assert record['repeats'] == 3
+    assert record['scores']['test'] == row['score'] == .5
+    assert row['passed'] is False
+    assert [t['trial'] for t in row['trials']] == [1, 2, 3]
+    assert [t['score'] for t in row['trials']] == [0, .5, 1]
+    assert row['trials'][1]['conversation'][0]['target']['output'] == 'answer-2'
+    assert [e['trial'] for e in observer.evidence] == [1, 2, 3]
+    assert all(r[0]['scores']['test'] is None for r in snapshots if r[0]['status'] == 'running')
+
+
+@pytest.mark.asyncio
+async def test_repeat_failure_keeps_successes_and_does_not_fabricate_aggregate_score():
+    calls = 0
+    async def evaluate(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError('measurement failed')
+        return {'grade': {'score': 1, 'passed': True, 'rationale': 'ok'}}
+    observer = HumanTestObserver(baseline=bundle(), suite=suite(), evaluate=evaluate,
+        repeats=3, publish=lambda _: None)
+    observer.observe(event('evaluation_completed', round=0, evaluation={'cases': []}))
+    await observer.finish()
+    record = observer.records[0]
+    assert record['status'] == 'error'
+    assert record['scores']['test'] is None
+    assert record['cases'][0]['score'] is None
+    assert [t['status'] for t in record['cases'][0]['trials']] == ['completed', 'error', 'completed']
+
+
+@pytest.mark.parametrize('repeats', [0, 11])
+def test_test_repeat_limits(repeats):
+    with pytest.raises(ValueError, match='repeats'):
+        HumanTestObserver(baseline=bundle(), suite=suite(), evaluate=None, publish=None, repeats=repeats)
+
+
+@pytest.mark.asyncio
+async def test_different_dialogue_scenarios_can_share_a_greeting_without_invalidating_test():
+    held = suite().cases[0].model_copy(update={'input': 'Hello.', 'mode': 'dialogue',
+        'user_context': 'Private observation scenario'})
+    async def evaluate(package, case):
+        return {'grade': {'score': .5, 'passed': False, 'rationale': 'Observed'}}
+    observer = HumanTestObserver(baseline=bundle(), suite=OptimizationTestSuite(cases=(held,)),
+        evaluate=evaluate, publish=lambda _: None)
+    observer.observe(event('suite_fixed', suite={'cases': [{'id': 'train', 'input': 'Hello.',
+        'mode': 'dialogue', 'user_context': 'Different training scenario'}]}))
+    observer.observe(event('evaluation_completed', round=0, evaluation={'cases': []}))
+    await observer.finish()
+    assert observer.records[0]['status'] == 'completed'
+    assert observer.records[0]['scores']['test'] == .5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('safe_role', [False, True])
+async def test_measurement_diagnosis_transport_retry_preserves_execution_and_score(safe_role):
+    from sagents.v2.optimization import OptimizationAgent
+    from sagents.v2.optimization.contracts import OptimizationObservation
+    from sagents.v2.optimization.observer import IsolatedTestEvaluator
+    from tests.sagents.v2.test_dialogue_diagnosis_timing import Runner, Scorer
+    class InterruptedDiagnosis(Runner):
+        failed = 0
+        async def run(self, package, agent_id, content, ctx):
+            if json.loads(content).get('response_schema', {}).get('title') == 'OptimizationDiagnosis' and not self.failed:
+                self.failed += 1
+                return OptimizationObservation(state='suspended', evidence={'runtime_events': [
+                    {'type': 'interaction.requested', 'data': {'payload': {'error': {
+                        'code': 'model.stream_incomplete', 'category': 'provider_transient', 'retryable': True}}}}]})
+            return await super().run(package, agent_id, content, ctx)
+    runner, scorer = InterruptedDiagnosis(), Scorer()
+    evaluator = OptimizationAgent(package=bundle('evaluator'), agent_id='assistant')
+    if safe_role:
+        data = evaluator.model_dump(mode='json')
+        data['package']['manifest']['agents']['assistant']['tools'] = []
+        evaluator = OptimizationAgent.model_validate(data)
+    measure = IsolatedTestEvaluator(runner=runner, evaluator=evaluator, driver=evaluator,
+        context=context(), goal='Accuracy', scorer=scorer)
+    case = suite().cases[0].model_copy(update={'mode': 'dialogue', 'dialogue_completion': 'user', 'max_turns': 1})
+    if not safe_role:
+        from sagents.v2.optimization.observer import HumanTestExecutionFailure
+        with pytest.raises(HumanTestExecutionFailure):
+            await measure(bundle(), case)
+        assert runner.failed == 1 and len(scorer.histories) == 1
+        return
+    result = await measure(bundle(), case)
+    assert runner.failed == 1 and len(runner.diagnoses) == 1
+    assert len(scorer.histories) == 1 and len(result['conversation']) == 1
+    assert result['infrastructure_retries'] == {'evaluation': 1}
+    assert result['grade']['score'] == pytest.approx(.2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('disposable', [False, True])
+async def test_measurement_target_restart_requires_explicit_disposable_grant(disposable):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from sagents.v2.optimization import OptimizationAgent
+    from sagents.v2.optimization.contracts import OptimizationObservation
+    from sagents.v2.optimization.observer import IsolatedTestEvaluator, HumanTestExecutionFailure
+    from tests.sagents.v2.test_dialogue_diagnosis_timing import Runner, Scorer
+    class InterruptedTarget(Runner):
+        sends = 0
+        @asynccontextmanager
+        async def conversation(self, *args):
+            async def send(content):
+                self.sends += 1
+                if self.sends == 1:
+                    return OptimizationObservation(state='failed', evidence={'error': {
+                        'code': 'model.provider_transient', 'category': 'provider_transient', 'retryable': True}})
+                return OptimizationObservation(state='completed', output='Valid completed reply')
+            yield SimpleNamespace(send=send)
+    runner, scorer = InterruptedTarget(), Scorer()
+    evaluator = OptimizationAgent(package=bundle('evaluator'), agent_id='assistant')
+    measure = IsolatedTestEvaluator(runner=runner, evaluator=evaluator, driver=evaluator,
+        context=context(), goal='Accuracy', scorer=scorer, restart_incomplete_dialogues=disposable)
+    case = suite().cases[0].model_copy(update={'mode': 'dialogue', 'dialogue_completion': 'user', 'max_turns': 1})
+    if disposable:
+        result = await measure(bundle(), case)
+        assert runner.sends == 2 and len(scorer.histories) == 1
+        assert result['infrastructure_retries'] == {'execution': 1}
+    else:
+        with pytest.raises(HumanTestExecutionFailure) as error:
+            await measure(bundle(), case)
+        assert error.value.rsi_failure_metadata == {'phase': 'execution', 'code': 'model.provider_transient',
+            'state': 'failed', 'retryable': True, 'suspension_reason': None,
+            'infrastructure_retries': {}, 'retry_budget_exhausted': False}
+        assert runner.sends == 1 and not scorer.histories
+
+
+@pytest.mark.asyncio
+async def test_measurement_phase_metadata_contains_no_hidden_content():
+    from sagents.v2.optimization.observer import HumanTestExecutionFailure
+    async def evaluate(package, case):
+        raise HumanTestExecutionFailure('evaluation', code='model.provider_permanent')
+    observer = HumanTestObserver(baseline=bundle(), suite=suite(), evaluate=evaluate, publish=lambda _: None)
+    observer.observe(event('evaluation_completed', round=0, evaluation={'cases': []}))
+    await observer.finish()
+    trial = observer.records[0]['cases'][0]['trials'][0]
+    assert trial['status'] == 'error'
+    assert trial['failure']['phase'] == 'evaluation'
+    assert trial['failure']['retryable'] is False
+    assert observer.records[0]['scores']['test'] is None
+    assert 'HIDDEN' not in json.dumps(trial['failure'])
+
+
+@pytest.mark.asyncio
+async def test_valid_zero_measurement_is_not_retried_or_resampled():
+    from sagents.v2.optimization import OptimizationAgent
+    from sagents.v2.optimization.contracts import OptimizationGrade
+    from sagents.v2.optimization.observer import IsolatedTestEvaluator
+    from sagents.v2.optimization.scoring import ScoringResult
+    from tests.sagents.v2.test_dialogue_diagnosis_timing import Runner, Scorer
+    class FailedTask(Scorer):
+        async def score(self, request):
+            self.histories.append(request.conversation)
+            return ScoringResult(grade=OptimizationGrade(score=0, passed=False, rationale='Valid task failure'))
+    runner, scorer = Runner(), FailedTask()
+    evaluator = OptimizationAgent(package=bundle('evaluator'), agent_id='assistant')
+    measure = IsolatedTestEvaluator(runner=runner, evaluator=evaluator, driver=evaluator,
+        context=context(), goal='Accuracy', scorer=scorer, restart_incomplete_dialogues=True)
+    case = suite().cases[0].model_copy(update={'mode': 'dialogue', 'dialogue_completion': 'user', 'max_turns': 1})
+    result = await measure(bundle(), case)
+    assert result['grade']['score'] == 0 and not result['grade']['passed']
+    assert len(scorer.histories) == 1 and result['infrastructure_retries'] == {}

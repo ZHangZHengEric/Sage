@@ -1,3 +1,15 @@
+---
+layout: default
+title: Server V2 IM 插件设计
+parent: 架构
+nav_order: 30
+nav_exclude: true
+lang: zh
+ref: v2-architecture-SERVER_V2_IM_PLUGIN_DESIGN
+---
+
+{% include lang_switcher.html %}
+
 # Sage Server V2 IM 插件功能设计
 
 状态：设计提案，尚未实现。调研日期：2026-10-22。

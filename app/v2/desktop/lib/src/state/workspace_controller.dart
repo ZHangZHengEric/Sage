@@ -96,6 +96,7 @@ class WorkspaceController extends ChangeNotifier {
   DesktopSettings? _settingsIntent;
   int _settingsAgentRevision = 0;
   int _settingsCatalogRevision = 0;
+  int _mcpCatalogRevision = 0;
   int _usageOverviewRevision = 0;
   bool _disposed = false;
 
@@ -104,6 +105,7 @@ class WorkspaceController extends ChangeNotifier {
   final List<Studio> studios = [];
   Timer? _studioPollTimer;
   final Set<String> _studioRefreshing = {};
+  final Set<String> _studioAccessDenied = {};
   final Set<String> _studioRecovering = {};
   final Map<String, Future<void>> _studioSyncs = {};
   final Set<String> _hostStudios = {};
@@ -294,6 +296,15 @@ class WorkspaceController extends ChangeNotifier {
 
   Future<Map<String, Object?>> rsiHistory(String agentId) =>
       _api.rsiHistory(agentId);
+  Future<Map<String, Object?>> importRsiScorer(
+    String agentId,
+    Map<String, Object?> scorer,
+  ) => _api.importRsiScorer(agentId, scorer);
+
+  Future<Map<String, Object?>> importRsiEvaluationPlan(
+    String agentId,
+    Map<String, Object?> plan,
+  ) => _api.importRsiEvaluationPlan(agentId, plan);
   Future<Map<String, Object?>> rsiRun(
     String agentId,
     String runId, {
@@ -308,6 +319,11 @@ class WorkspaceController extends ChangeNotifier {
     final run = await _api.startRsi(agentId, request);
     await refreshAgentStatuses();
     return run;
+  }
+
+  Future<void> resumeRsi(String agentId, String runId) async {
+    await _api.resumeRsi(agentId, runId);
+    await refreshAgentStatuses();
   }
 
   Future<void> cancelRsi(String agentId, String runId) async {
@@ -1011,6 +1027,7 @@ class WorkspaceController extends ChangeNotifier {
     final targetAgentId = agentId ?? selectedAgentId;
     if (_disposed || targetAgentId.isEmpty) return;
     final catalogRevision = ++_settingsCatalogRevision;
+    final mcpRevision = ++_mcpCatalogRevision;
     final agentRevision = ++_settingsAgentRevision;
     final writeRevision = _agentWriteVersions[targetAgentId] ?? 0;
     settingsCatalogLoading = true;
@@ -1033,7 +1050,9 @@ class WorkspaceController extends ChangeNotifier {
       toolCatalog = values[1] as List<ToolSummary>;
       skillCatalog = values[2] as List<SkillSummary>;
       modelProviders = values[3] as List<ModelProviderSummary>;
-      mcpConnections = values[4] as List<McpConnectionSummary>;
+      if (mcpRevision == _mcpCatalogRevision) {
+        mcpConnections = values[4] as List<McpConnectionSummary>;
+      }
       components = values[5] as List<ComponentSummary>;
     } on Object catch (exception) {
       if (!_disposed &&
@@ -1494,8 +1513,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> setMcpConnectionEnabled(String name, bool enabled) async {
+    ++_mcpCatalogRevision;
     try {
       final updated = await _api.setMcpConnectionEnabled(name, enabled);
+      ++_mcpCatalogRevision;
       mcpConnections = [
         for (final value in mcpConnections)
           value.name == name ? updated : value,
@@ -1597,10 +1618,30 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshMcpConnections() async {
+    final revision = ++_mcpCatalogRevision;
+    try {
+      final values = await _api.listMcpConnections();
+      if (_disposed || revision != _mcpCatalogRevision) return;
+      mcpConnections = values;
+      notifyListeners();
+    } on Object catch (exception) {
+      if (_disposed || revision != _mcpCatalogRevision) return;
+      error = exception.toString();
+      notifyListeners();
+    }
+  }
+
   Future<void> addMcpConnection(Map<String, Object?> value) async {
+    ++_mcpCatalogRevision;
     try {
       final created = await _api.addMcpConnection(value);
-      mcpConnections = [...mcpConnections, created];
+      ++_mcpCatalogRevision;
+      mcpConnections = [
+        for (final connection in mcpConnections)
+          if (connection.name != created.name) connection,
+        created,
+      ];
       components = await _api.listComponents();
       notifyListeners();
     } on Object catch (exception) {
@@ -1964,8 +2005,7 @@ class WorkspaceController extends ChangeNotifier {
       if (old['draft_values'] != null) {
         surface['draft_values'] = old['draft_values'];
       }
-      if (surface['tree'] == null &&
-          surface['complete'] != true) {
+      if (surface['tree'] == null && surface['complete'] != true) {
         surface['tree'] = old['tree'];
       }
       message.openUiSurfaces[index] = surface;

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class AssemblyState:
+    runtime_skill_authorizations: tuple = ()
     session_root: Path | None = None
     execution_binding_provider: Any = None
     tool_policy: Any = None

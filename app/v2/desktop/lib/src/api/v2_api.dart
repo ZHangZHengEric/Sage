@@ -54,6 +54,21 @@ class V2ApiClient {
   ) async => (await _json('POST', _rsiPath(agentId), body: body) as Map)
       .cast<String, Object?>();
 
+  Future<Map<String, Object?>> importRsiScorer(
+    String agentId,
+    Map<String, Object?> scorer,
+  ) async =>
+      (await _json('POST', '${_rsiPath(agentId)}/scorers', body: scorer) as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> importRsiEvaluationPlan(
+    String agentId,
+    Map<String, Object?> plan,
+  ) async =>
+      (await _json('POST', '${_rsiPath(agentId)}/evaluation-plans', body: plan)
+              as Map)
+          .cast<String, Object?>();
+
   Future<Map<String, Object?>> rsiRun(
     String agentId,
     String runId, {
@@ -61,7 +76,15 @@ class V2ApiClient {
   }) async =>
       (await _json(
                 'GET',
-                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}?after_sequence=$afterSequence',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}?after_sequence=$afterSequence&compact=true',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> resumeRsi(String agentId, String runId) async =>
+      (await _json(
+                'POST',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/resume',
               )
               as Map)
           .cast<String, Object?>();
@@ -613,15 +636,17 @@ class V2ApiClient {
     String? previewEpoch,
   }) => _ndjson(
     'GET',
-    Uri.parse('/api/v2/runs/${Uri.encodeComponent(runId)}/events').replace(
-      queryParameters: {
-        'after_sequence': '$afterSequence',
-        if (previewEpoch != null) ...{
-          'preview_sequence': '$previewSequence',
-          'preview_epoch': previewEpoch,
-        },
-      },
-    ).toString(),
+    Uri.parse('/api/v2/runs/${Uri.encodeComponent(runId)}/events')
+        .replace(
+          queryParameters: {
+            'after_sequence': '$afterSequence',
+            if (previewEpoch != null) ...{
+              'preview_sequence': '$previewSequence',
+              'preview_epoch': previewEpoch,
+            },
+          },
+        )
+        .toString(),
   );
 
   Future<Map<String, Object?>> getRun(String runId) async =>

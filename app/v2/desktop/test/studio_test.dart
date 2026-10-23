@@ -104,6 +104,21 @@ class StudioApi extends V2ApiClient {
   }
 }
 
+class PollingStudioApi extends StudioApi {
+  SageApiException? pollingError;
+  int polls = 0;
+
+  @override
+  Future<Map<String, Object?>> studioMessages(
+    String studioId, {
+    int afterSequence = 0,
+  }) async {
+    polls++;
+    if (pollingError case final SageApiException exception) throw exception;
+    return {'messages': [], 'has_more': false};
+  }
+}
+
 class HoldingStudioApi extends StudioApi {
   final cancelled = <String>[];
   bool rejectCancel = false;
@@ -184,6 +199,46 @@ class LostHandleStudioApi extends StudioApi {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  for (final denied in [true, false]) {
+    test(
+      'Studio polling pauses only for permanent access denial: $denied',
+      () async {
+        final api = PollingStudioApi()
+          ..pollingError = SageApiException(
+            denied
+                ? 'actor does not own the target Session'
+                : 'Temporarily unavailable',
+            statusCode: denied ? 403 : 503,
+            code: denied ? 'session.actor_not_authorized' : 'unavailable',
+            category: denied ? 'authorization' : 'network',
+          );
+        final controller = WorkspaceController(api: api);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        final studio = await controller.createStudio('old Studio', [
+          'sage',
+        ], coordinatorAgentId: 'sage');
+        await controller.syncStudio(studio);
+        expect(api.polls, 1);
+        expect(controller.studioAccessDenied(studio), denied);
+        expect(
+          controller.error,
+          denied ? isNull : contains('Temporarily unavailable'),
+        );
+        controller.clearError();
+        await controller.recoverStudio(studio, background: true);
+        expect(api.polls, denied ? 1 : 2);
+        expect(api.bodies, isEmpty);
+        api.pollingError = null;
+        await controller.recoverStudio(studio);
+        expect(controller.studioAccessDenied(studio), isFalse);
+        final polls = api.polls;
+        await controller.recoverStudio(studio, background: true);
+        expect(api.polls, polls + 1);
+      },
+    );
+  }
 
   test('failed Studio sync preserves draft and does not dispatch', () async {
     final api = StudioApi()..rejectSync = true;

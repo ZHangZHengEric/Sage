@@ -258,6 +258,11 @@ filter tools using the Run's accepted product authorization. Otherwise the Agent
 and command's static tool grants apply. A catalog registration alone is not a
 grant to expose every tool.
 
+Team Runs can attach extra Skills through `RunConfig.skill_attachments`, under
+explicit host `RuntimeConfig.runtime_skill_authorizations`. Availability follows
+the delegation subtree without changing execution permissions. See
+[runtime Skill scope, authorization and recovery](skill/RUNTIME_SKILLS.md).
+
 Register one `skill.provider` for discovery and bundle reads, with an optional
 workspace capability. Standard
 loading, preloading, activation budget and recovery remain SDK-owned. Configure

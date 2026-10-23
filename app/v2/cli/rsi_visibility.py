@@ -7,14 +7,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-_PRIVATE = {'test_observations', 'agent_calls', 'internal_agents', 'call', 'tuner_call',
-            'recommendation_block_reason', 'assets', 'config'}
+_PRIVATE = {'test_observations', 'benchmark_measurement', 'agent_calls', 'internal_agents', 'call', 'tuner_call',
+            'recommendation_block_reason', 'assets', 'config', 'reference_answer'}
 _EVENT_FIELDS = {
-    'operation_started': {'goal', 'agent_id', 'rounds', 'evaluation_repeats', 'max_concurrency', 'package', 'constraints', 'optimization_scope'},
+    'operation_started': {'goal', 'agent_id', 'rounds', 'evaluation_repeats', 'max_concurrency', 'package', 'constraints', 'optimization_scope', 'builtin_scoring'},
     'suite_fixed': {'suite'},
     'test_generation_batch_completed': {'cases'},
     'training_cases_added': {'round', 'cases'},
     'training_challenge_completed': {'round', 'evaluation'},
+    'training_diagnosis_completed': {'round', 'summary'},
     'case_completed': {'round', 'phase', 'trial', 'result'},
     'evaluation_completed': {'round', 'evaluation'},
     'round_completed': {'record'},
@@ -34,7 +35,9 @@ def validation_scores(cases):
     valid = all(isinstance(s, (int, float)) for s in scores)
     return {'score': sum(scores) / len(scores) if scores and valid else None,
             'total': len(rows), 'passed': sum(r.get('grade', {}).get('passed') is True for r in rows),
-            'items': [{'index': i, 'score': r.get('grade', {}).get('score')} for i, r in enumerate(rows, 1)]}
+            'items': [{'index': i, 'score': r.get('grade', {}).get('score'),
+                       **({'objective_score': r['objective_score']} if r.get('objective_score') is not None else {})}
+                      for i, r in enumerate(rows, 1)]}
 
 
 def model_view(value):
@@ -52,9 +55,17 @@ def model_view(value):
         return {**{k: value[k] for k in ('sequence', 'event', 'timestamp') if k in value}, 'data': safe}
     case = value.get('case')
     if isinstance(case, dict) and 'split' in case:
-        return deepcopy(value) if case['split'] == 'training' else None
+        if case['split'] != 'training':
+            return None
+        training = deepcopy(value)
+        training['case'].pop('reference_answer', None)
+        return training
     if 'split' in value:
-        return deepcopy(value) if value['split'] == 'training' else None
+        if value['split'] != 'training':
+            return None
+        training = deepcopy(value)
+        training.pop('reference_answer', None)
+        return training
     if 'issues' in value and 'approved' in value:
         # A suite-review rationale can quote hidden validation questions.
         return {'approved': value['approved']}

@@ -402,6 +402,9 @@ async def test_native_runner_runs_real_v2_application_and_materializes_files(tmp
     first = await runner.run(bundle(), "assistant", "Convert 2 km", context())
     second = await runner.run(bundle(), "assistant", "Convert 2 km", context())
     assert first.state == second.state == "completed"
+    event_types = {event["type"] for event in first.evidence["runtime_events"]}
+    assert "run.completed" in event_types
+    assert first.evidence["runtime_lifecycle_events_omitted"] > 0
     assert first.output == "2 km = 2000 m"
     assert first.evidence["session_id"] != second.evidence["session_id"]
     assert len(grants) == 2
@@ -955,9 +958,8 @@ async def test_native_runner_preserves_tool_execution_evidence(tmp_path):
     events = observation.evidence["runtime_events"]
     assert any(event["type"] == "tool.call.succeeded" for event in events)
     assert any(
-        event["data"]["kind"] == "item"
-        and event["data"]["item"]["data"]["kind"] == "tool_result"
-        for event in events
+        item["data"]["kind"] == "tool_result"
+        for item in observation.evidence["final_items"]
     )
     assert not observation.evidence["runtime_events_truncated"]
 
@@ -1466,6 +1468,7 @@ async def test_prompt_and_skill_growth_limits_reject_before_candidate_execution(
         goal="Accuracy",
         suite=suite(),
         rounds=2,
+        max_edit_repairs=0,
         constraints=OptimizationConstraints(
             max_guidance_chars=5,
             max_file_bytes=5,
@@ -2209,6 +2212,30 @@ async def test_model_training_feedback_is_bounded_but_report_stays_lossless():
     assert feedback["observation"]["evidence"]["tool_events"][0]["truncated"]
 
 
+def test_repeated_suite_feedback_budget_preserves_every_trial_score():
+    from sagents.v2.optimization.feedback import training_feedback_batch
+    from sagents.v2.optimization.contracts import OptimizationCaseResult, OptimizationCaseTrial, OptimizationGrade
+
+    results = []
+    for index in range(50):
+        grade = OptimizationGrade(score=index % 2, passed=bool(index % 2), rationale="start" + "x" * 50000 + "unmet final assertion")
+        observation = OptimizationObservation(state="completed", output="answer" * 5000,
+            evidence={"training_trace": "trace" * 20000})
+        results.append(OptimizationCaseResult(case=suite().cases[0].model_copy(update={"id": f"case-{index}"}),
+            grade=grade, observation=observation,
+            trials=tuple(OptimizationCaseTrial(grade=grade, observation=observation) for _ in range(3))))
+    before = results[0].model_dump_json()
+    feedback = training_feedback_batch(results)
+    assert len(json.dumps(feedback, ensure_ascii=False)) <= 120000
+    assert [item["case"]["id"] for item in feedback] == [f"case-{i}" for i in range(50)]
+    for index, item in enumerate(feedback):
+        assert item["grade"]["score"] == index % 2
+        assert [trial["grade"]["score"] for trial in item["trials"]] == [index % 2] * 3
+        assert item["feedback_truncated"]
+        assert "unmet final assertion" in item["grade"]["rationale"]
+    assert results[0].model_dump_json() == before
+
+
 @pytest.mark.asyncio
 async def test_tuner_history_is_bounded_and_omission_is_explicit():
     runner = Runner(proposals=[{"rationale": "No justified change"}] * 7)
@@ -2808,7 +2835,7 @@ async def test_adaptive_convergence_uses_validation_and_training_without_final_c
     assert len(result.report.stability_checks) == 1
     assert result.report.final_verification is None
     assert all(c.phase != "final" for c in result.report.agent_calls)
-    assert len([e for e in events if e["event"] == "training_cases_added"]) == 3
+    assert len([e for e in events if e["event"] == "training_cases_added"]) == 2
 
 
 @pytest.mark.asyncio
@@ -3140,3 +3167,43 @@ async def test_adaptive_cancel_during_new_challenges_drains_target_calls():
         await task
     assert runner.active == 0
     assert not any(e["event"] == "result_completed" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_mean_trials_full_training_refresh_and_hidden_reference_answers():
+    from sagents.v2.optimization.runner import OPTIMIZATION_TRIAL
+
+    class Paired(Runner):
+        def __init__(self):
+            super().__init__(proposals=[{"rationale": "Compute reliably", "instruction_guidance": "guidance-1"}],
+                scores={"base-1": .4, "base-2": .4, "base-3": .4,
+                        "guidance-1-1": .9, "guidance-1-2": .2, "guidance-1-3": .9})
+            self.trials = []
+
+        async def run(self, package, agent_id, content, ctx):
+            observed = await super().run(package, agent_id, content, ctx)
+            if package.manifest.metadata.id == "test.target":
+                trial = OPTIMIZATION_TRIAL.get()
+                self.trials.append((package.content_hash, trial, content))
+                return observed.model_copy(update={"output": f"{observed.output}-{trial}"})
+            return observed
+
+    fixed = OptimizationSuite(cases=(
+        OptimizationCase(id="train", input="Convert 2 km", rubric="Exact conversion", reference_answer="2000 m"),
+        OptimizationCase(id="dev", input="Convert 7 cm", rubric="Exact conversion", reference_answer="PRIVATE-DEV-REFERENCE", split="validation")))
+    runner = Paired()
+    result = await optimizer(runner).optimize(bundle(), context=context(), goal="Accuracy", suite=fixed,
+        rounds=1, validation_case_count=1, grow_training=False, refresh_incumbent=True,
+        evaluation_repeats=3, evaluation_aggregation="mean", final_max_cases=0)
+    assert result.report.rounds[0].accepted
+    assert len(runner.trials) == 18  # baseline + fresh parent + candidate, 2 cases x 3
+    assert [n for _, n, _ in runner.trials] == [1, 1, 2, 2, 3, 3] * 3
+    assert result.report.selected.mean_score("training") == pytest.approx(2 / 3)
+    assert not result.report.selected.cases[0].grade.passed  # reliability still requires every trial
+    assert all("REFERENCE" not in text and "2000 m" not in text for _, _, text in runner.trials)
+    tuning = next(text for name, text in runner.requests if name == "test.tuner")
+    assert "PRIVATE-DEV-REFERENCE" not in tuning
+    grading = [json.loads(text) for name, text in runner.requests if name == "test.evaluator"]
+    assert any(x["data"]["case"].get("reference_answer") == "PRIVATE-DEV-REFERENCE" for x in grading)
+    assert result.report.grow_training is False and result.report.refresh_incumbent is True
+    assert result.report.evaluation_aggregation == "mean"

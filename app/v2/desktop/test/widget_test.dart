@@ -186,6 +186,9 @@ class _DelayedUsageApi extends _FakeApi {
 }
 
 class _FakeApi extends V2ApiClient {
+  List<McpConnectionSummary> mcpRecords = const [
+    McpConnectionSummary(name: 'filesystem', protocol: 'stdio', toolCount: 2),
+  ];
   final _sessionTreeEvents = StreamController<Map<String, Object?>>.broadcast();
   Map<String, Object?>? lastAgentPatch;
   String? lastCreatedAgentName;
@@ -601,9 +604,7 @@ Inspect the complete diff before reporting findings.
   }
 
   @override
-  Future<List<McpConnectionSummary>> listMcpConnections() async => const [
-    McpConnectionSummary(name: 'filesystem', protocol: 'stdio', toolCount: 2),
-  ];
+  Future<List<McpConnectionSummary>> listMcpConnections() async => mcpRecords;
 
   @override
   Future<List<ComponentSummary>> listComponents() async => const [
@@ -8306,6 +8307,43 @@ void main() {
     );
   }
 
+  testWidgets(
+    'entering MCP settings refreshes connections added outside this window',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MCP').first);
+      await tester.pumpAndSettle();
+      expect(find.text('TauRetail'), findsNothing);
+      await tester.tap(find.text('通用').first);
+      await tester.pumpAndSettle();
+      api.mcpRecords = [
+        ...api.mcpRecords,
+        const McpConnectionSummary(
+          name: 'TauRetail',
+          protocol: 'stdio',
+          toolCount: 16,
+        ),
+      ];
+      await tester.tap(find.text('MCP').first);
+      await tester.pumpAndSettle();
+      expect(find.text('TauRetail'), findsOneWidget);
+      await tester.tap(find.text('TauRetail'));
+      await tester.pumpAndSettle();
+      expect(find.text('16'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('settings uses the two-pane shell', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -9996,6 +10034,55 @@ void main() {
     });
   }
 
+  for (final brightness in Brightness.values) {
+    for (final width in [1200.0, 1600.0]) {
+      testWidgets(
+        'RSI settings header wraps full actions ${brightness.name} width=$width',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 1000);
+          tester.view.devicePixelRatio = 1;
+          tester.platformDispatcher.platformBrightnessTestValue = brightness;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          final controller = await _controller(api: _OverflowRsiApi());
+          addTearDown(() => _disposeController(controller));
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('settings-button')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('智能体').first);
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('settings-agent-rsi')));
+          await tester.pumpAndSettle();
+          final title = find.byKey(const ValueKey('settings-content-title'));
+          expect(tester.getSize(title).height, lessThan(100));
+          for (final key in [
+            'rsi-toggle-history',
+            'rsi-toggle-setup',
+            'rsi-start',
+            'rsi-open-folder',
+            'rsi-resume',
+            'rsi-back-agent',
+          ]) {
+            final button = find.byKey(ValueKey(key));
+            expect(button, findsOneWidget);
+            expect(
+              tester.getTopLeft(button).dy,
+              greaterThanOrEqualTo(tester.getBottomRight(title).dy),
+            );
+            expect(
+              tester.getBottomRight(button).dx,
+              lessThanOrEqualTo(tester.getBottomRight(title).dx + 1),
+            );
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
   testWidgets('settings title and selector stay fixed while detail scrolls', (
     tester,
   ) async {
@@ -10551,4 +10638,37 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+}
+
+class _OverflowRsiApi extends _FakeApi {
+  @override
+  Future<AgentConfiguration> getAgentConfiguration(String agentId) async =>
+      (await super.getAgentConfiguration(
+        agentId,
+      )).applyPatch({'name': 'τ-bench 6.1 · 很长的流程调试智能体名称'});
+  @override
+  Future<Map<String, Object?>> rsiHistory(String agentId) async => {
+    'runs': [
+      {
+        'id': 'overflow-run',
+        'status': 'failed',
+        'goal': 'Layout regression',
+        'rounds': 4,
+      },
+    ],
+    'versions': [],
+  };
+  @override
+  Future<Map<String, Object?>> rsiRun(
+    String agentId,
+    String runId, {
+    int afterSequence = 0,
+  }) async => {
+    'id': runId,
+    'status': 'failed',
+    'resumable': true,
+    'goal': 'Layout regression',
+    'workspace_path': '/tmp/sage-rsi/layout/workspace',
+    'events': [],
+  };
 }

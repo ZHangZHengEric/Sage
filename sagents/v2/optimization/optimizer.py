@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 from uuid import uuid4
@@ -16,7 +17,9 @@ from typing import TypeVar, Literal
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.optimization.contracts import (
+    case_prompt_identity,
     OptimizationTrainingAddition,
+    OptimizationCaseBatch,
     OptimizationAgent,
     OptimizationAgentCall,
     OptimizationCaseResult,
@@ -26,9 +29,12 @@ from sagents.v2.optimization.contracts import (
     OptimizationConstraints,
     OptimizationEvaluation,
     OptimizationGrade,
+    OptimizationDiagnosis,
+    OptimizationDiagnosisSummary,
     OptimizationIteration,
     OptimizationObservation,
     OptimizationPatch,
+    OptimizationEditSummary,
     OptimizationReport,
     OptimizationResult,
     OptimizationRound,
@@ -53,8 +59,12 @@ from sagents.v2.optimization.principles import (
     with_principles,
 )
 from sagents.v2.optimization.journal import OptimizationJournal
-from sagents.v2.optimization.feedback import training_feedback
+from sagents.v2.optimization.feedback import training_feedback_batch, training_feedback_summary
+from sagents.v2.optimization.recovery import OptimizationRecovery, OptimizationRecoveryRequired, OptimizationTransientFailure, configuration_fingerprint, case_key, engine_fingerprint, model_transport_interrupted
 from sagents.v2.optimization.audit import generated_tool_audit
+from sagents.v2.optimization.diagnostics import diagnose_scored_execution, execution_entries, synthesis_evidence, execution_configuration
+from sagents.v2.optimization.experience import experience_document
+from sagents.v2.optimization.builtin_scoring import BuiltinScoring
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -82,6 +92,10 @@ class OptimizationSuiteReviewRejected(ValueError):
         self.call = call.model_copy(deep=True)
 
 
+class OptimizationResourceLimit(ValueError):
+    """A repairable size/count violation in an otherwise permitted draft."""
+
+
 class NoOptimizationChange(ValueError):
     """Valid proposal that preserves the current package."""
 
@@ -91,8 +105,8 @@ class AgentPackageOptimizer:
 
     Internal agents use caller-supplied packages and the same host-bound runner.
     Their JSON contracts are included in each request. Evaluator/designer agents
-    should have no mutation tools; tuners return patches rather than editing the
-    workspace. Per-call and whole-operation deadlines bound work. No save,
+    should have no mutation tools; tuners author bounded round-local package files
+    or use the legacy patch contract. Per-call and whole-operation deadlines bound work. No save,
     activation or publication is performed by this class.
     """
 
@@ -115,20 +129,8 @@ class AgentPackageOptimizer:
             suite_reviewer or evaluator, SUITE_REVIEW_PRINCIPLES
         )
         self.test_designer = (test_designer or evaluator).model_copy(deep=True)
-        self.test_driver = (test_driver or self.test_designer).model_copy(deep=True)
-        driver_data = self.test_driver.model_dump(mode="json")
-        driver_data["package"]["manifest"]["agents"][self.test_driver.agent_id][
-            "instructions"
-        ] = {
-            "inline": "Act as the user in a bounded target-agent test dialogue. Follow the current "
-            "test_dialogue task and JSON schema. Stay with the original user goal. Reveal "
-            "only facts explicitly supplied in user_context; do not invent preferences, "
-            "facts, credentials or expected answers. Respond naturally to clarifying "
-            "questions. Do not solve the target task, give it the rubric/answer, or "
-            "change the goal to make it pass. If required facts are unavailable, "
-            "return can_continue=false and explain. Never execute real external actions."
-        }
-        self.test_driver = OptimizationAgent.model_validate(driver_data)
+        from sagents.v2.optimization.principles import dialogue_user
+        self.test_driver = dialogue_user(test_driver or self.test_designer)
 
     async def generate_test_suite(
         self,
@@ -168,15 +170,34 @@ class AgentPackageOptimizer:
         call_timeout_seconds: float = 120,
         timeout_seconds: float = 3600,
         evaluation_repeats: int = 1,
+        evaluation_aggregation: Literal["minimum", "mean"] = "minimum",
+        initial_training_case_count: int | None = None,
+        training_cases_per_round: int = 6,
+        max_edit_repairs: int = 3,
+        grow_training: bool = True,
+        refresh_incumbent: bool = False,
         test_case_count: int | None = None,
         validation_case_count: int | None = 24,
         max_concurrency: int = 1,
         journal_path: str | Path | None = None,
+        evidence_directory: str | Path | None = None,
+        tuner_workspace: str | Path | None = None,
+        edit_package_files: bool = False,
         on_event=None,
         final_suite: OptimizationFinalSuite | None = None,
         final_max_cases: int = 4,
         optimization_scope: tuple[OptimizationPart, ...] | None = None,
         resume_optimization_id: str | None = None,
+        authoritative_grader=None,
+        scorer=None,
+        builtin_scoring: BuiltinScoring | None = None,
+        resume_from: str | Path | None = None,
+        recovery_binding_id: str | None = None,
+        restart_incomplete: bool = False,
+        restart_readonly_roles: tuple[str, ...] = (),
+        restart_package_editor: bool = False,
+        restart_file_evaluator: bool = False,
+        journal_start_sequence: int = 0,
     ) -> OptimizationResult:
         """Optimize with independent fixed validation and growing training challenges.
 
@@ -190,12 +211,52 @@ class AgentPackageOptimizer:
         equally weighted split means by ``min_improvement``, allowing recorded
         per-case regressions that later rounds repair. Legacy fixed suites keep
         their historical per-case/latency selection policy.
-        Invalid patches count as rejected rounds; runtime/agent failures abort
+        Resource limit failures are repaired in the same round up to max_edit_repairs;
+        exhausted or unauthorized proposals count as rejected rounds. Runtime/agent failures abort
         without retrying external effects. Cancellation propagates to the runner.
         resume_optimization_id only preserves candidate version identity for a
         host that separately reconciles and replays completed evidence. It does
         not resume executions or authorize retrying any effects.
+        authoritative_grader is an optional trusted host callable (case, observation).
+        With it, the evaluator independently diagnoses the execution while host
+        scores remain fixed; without it, the evaluator decides scores and diagnosis.
+        restart_readonly_roles is a trusted host attestation: its frozen bindings
+        must enforce only read-only operations for these roles. It grants no tools.
+        evidence_directory selects a host-owned persistent archive of training
+        files and anonymous validation scores. It does not expose the audit log.
+        tuner_workspace stages training files outside the bounded Agent package.
+        The trusted host must bind the tuner's read-only file tools to this root.
+        edit_package_files uses round-local editor/package and read-only evidence;
+        the host must bind only bounded file tools there, with process access off.
+        restart_package_editor attests this isolation: incomplete local edits are
+        reset from the retained parent before retry, while completed authored
+        snapshots are recovered from the journal. It never authorizes target replay.
+        restart_file_evaluator attests per-call private evaluation files, protected
+        inputs and no process access. Incomplete local assessment writes may be
+        discarded and retried; no target or external tool effects are authorized.
         """
+        if set(restart_readonly_roles) - {"evaluation", "tuning", "semantic_review", "suite_review", "test_dialogue"}:
+            raise ValueError("unknown read-only recovery role")
+        if scorer is not None and authoritative_grader is not None:
+            raise ValueError("choose scorer or legacy authoritative_grader, not both")
+        builtin_scoring = BuiltinScoring.model_validate(builtin_scoring or {})
+        if restart_readonly_roles and not recovery_binding_id:
+            raise ValueError("read-only recovery roles require a frozen host binding identity")
+        if edit_package_files and tuner_workspace is None:
+            raise ValueError("package file editing requires a persistent tuner workspace")
+        if edit_package_files and "tuning" in restart_readonly_roles:
+            raise ValueError("a package editor is not a read-only recovery role")
+        if restart_package_editor and (not edit_package_files or not recovery_binding_id):
+            raise ValueError("editor recovery requires file editing and a frozen host binding")
+        if restart_file_evaluator:
+            tools = set(self.evaluator.package.resolved_manifest().agents[self.evaluator.agent_id].tools)
+            if not recovery_binding_id or not tools or not tools <= {"file_read", "file_write"}:
+                raise ValueError("file evaluator recovery requires bounded file tools and a frozen host binding")
+        if edit_package_files:
+            from sagents.v2.optimization.package_workspace import EDITOR_TOOLS
+            tools = self.tuner.package.resolved_manifest().agents[self.tuner.agent_id].tools
+            if not {"file_read", "file_write"} <= set(tools) <= set(EDITOR_TOOLS):
+                raise ValueError("package editor requires only bounded file tools")
         if resume_optimization_id is not None and (
             not isinstance(resume_optimization_id, str)
             or len(resume_optimization_id) != 32
@@ -241,6 +302,19 @@ class AgentPackageOptimizer:
             or not 2 <= test_case_count <= 100
         ):
             raise ValueError("test_case_count must be an integer between 2 and 100")
+        if initial_training_case_count is not None and (
+            isinstance(initial_training_case_count, bool)
+            or not isinstance(initial_training_case_count, int)
+            or not 1 <= initial_training_case_count <= 100
+        ):
+            raise ValueError("initial_training_case_count must be between 1 and 100")
+        if (isinstance(training_cases_per_round, bool)
+                or not isinstance(training_cases_per_round, int)
+                or not 0 <= training_cases_per_round <= 100):
+            raise ValueError("training_cases_per_round must be between 0 and 100")
+        if isinstance(max_edit_repairs, bool) or not isinstance(max_edit_repairs, int) or not 0 <= max_edit_repairs <= 10:
+            raise ValueError("max_edit_repairs must be between 0 and 10")
+        training_pool = tuple(c for c in suite.cases if c.split == "training") if suite else ()
         adaptive = validation_case_count is not None
         if adaptive and (
             isinstance(validation_case_count, bool)
@@ -287,7 +361,7 @@ class AgentPackageOptimizer:
                 for agent in original.manifest.agents.values()
             ):
                 raise ValueError(
-                    "base instruction files cannot be edited; use instruction guidance"
+                    "base instruction files cannot be edited through files; use system_prompt or the package editor"
                 )
         for path in policy.creatable_files:
             resource = PurePosixPath(path)
@@ -302,11 +376,70 @@ class AgentPackageOptimizer:
                 raise ValueError(f"invalid creatable resource: {path}")
             if path in original.files:
                 raise ValueError("creatable resources must not already exist")
+        if evaluation_aggregation not in {"minimum", "mean"}:
+            raise ValueError("evaluation_aggregation must be minimum or mean")
+        if not isinstance(grow_training, bool) or not isinstance(refresh_incumbent, bool):
+            raise ValueError("training growth and incumbent refresh must be bool")
+        optimization_id = resume_optimization_id or uuid4().hex
+        recovery_config = dict(protocol=1, engine=engine_fingerprint(), actor=context.actor.model_dump(mode="json"), package_hash=original.content_hash, goal=goal, agent_id=target,
+            rounds=rounds, constraints=policy.model_dump(mode="json"), optimization_scope=optimization_scope,
+            stopping_policy=stopping_policy.model_dump(mode="json") if stopping_policy else None,
+            evaluation_repeats=evaluation_repeats, evaluation_aggregation=evaluation_aggregation,
+            initial_training_case_count=initial_training_case_count,
+            training_cases_per_round=training_cases_per_round,
+            max_edit_repairs=max_edit_repairs,
+            grow_training=grow_training, refresh_incumbent=refresh_incumbent,
+            min_improvement=min_improvement, min_latency_improvement=min_latency_improvement,
+            validation_case_count=validation_case_count, test_case_count=test_case_count,
+            max_concurrency=max_concurrency, final_max_cases=final_max_cases,
+            suite=suite.model_dump(mode="json") if suite else None,
+            final_suite=final_suite.model_dump(mode="json") if final_suite else None,
+            require_diverse_suite=require_diverse_suite, recovery_binding_id=recovery_binding_id,
+            restart_readonly_roles=tuple(sorted(restart_readonly_roles)),
+            authoritative_grader=authoritative_grader is not None,
+            scorer=scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
+            builtin_scoring=builtin_scoring.model_dump(mode="json"),
+            edit_package_files=edit_package_files,
+            restart_package_editor=restart_package_editor,
+            restart_file_evaluator=restart_file_evaluator,
+            internal_agents={name: agent.model_dump(mode="json") for name, agent in {
+                "evaluator": self.evaluator, "tuner": self.tuner, "test_designer": self.test_designer,
+                "test_driver": self.test_driver, "reviewer": self.reviewer, "suite_reviewer": self.suite_reviewer}.items()})
+        recovery_hash = configuration_fingerprint(recovery_config)
+        recovery = OptimizationRecovery(resume_from, readonly_roles=restart_readonly_roles,
+            local_package_editor=restart_package_editor,
+            local_file_evaluator=restart_file_evaluator) if resume_from is not None else None
+        if recovery:
+            if not recovery_binding_id:
+                raise ValueError("recovery requires a frozen host binding identity")
+            recovery.verify({"recovery_fingerprint": recovery_hash})
+            recovery.require_reconciled(restart_incomplete=restart_incomplete)
+            optimization_id = recovery.operation["optimization_id"]
+        underlying_runner = self.runner
+        class RecoveryDesignRunner:
+            async def run(inner, bundle, key, content, ctx):
+                restored = recovery.design(content) if recovery else None
+                return restored if restored is not None else await underlying_runner.run(bundle, key, content, ctx)
+        design_runner = RecoveryDesignRunner() if recovery else self.runner
+        if isinstance(journal_start_sequence, bool) or not isinstance(journal_start_sequence, int) or journal_start_sequence < 0:
+            raise ValueError("journal_start_sequence must be a nonnegative integer")
         calls: list[OptimizationAgentCall] = []
+        active_draft = None
         active_round = 0
         active_trial = 1
         active_phase: Literal["optimization", "final"] = "optimization"
-        journal = OptimizationJournal(journal_path, on_event=on_event)
+        from sagents.v2.optimization.evidence import IterationEvidenceStore
+        archive_root = Path(evidence_directory) if evidence_directory is not None else (
+            Path(journal_path).parent / "iterations" if journal_path else None)
+        iteration_store = IterationEvidenceStore(archive_root) if archive_root is not None else None
+
+        def publish_event(event):
+            if iteration_store is not None:
+                iteration_store.observe(event)
+            if on_event is not None:
+                on_event(event)
+
+        journal = OptimizationJournal(journal_path, on_event=publish_event, start_sequence=journal_start_sequence)
 
         async def run(bundle, key, content):
             async with asyncio.timeout(call_timeout_seconds):
@@ -324,6 +457,7 @@ class AgentPackageOptimizer:
             data: dict,
             schema: type[SchemaT],
             case_id: str | None = None,
+            _repair_attempt: int = 0,
         ) -> SchemaT:
             response_schema = schema.model_json_schema()
             if adaptive and schema is OptimizationProposalReview:
@@ -333,6 +467,23 @@ class AgentPackageOptimizer:
                     "properties"
                 ]["kind"]["enum"]
                 kinds.remove("split_leakage")
+            call_agent = agent
+            source_data = data
+            evaluation_directory = None
+            if role == "evaluation":
+                from sagents.v2.optimization.evaluation_files import evaluation_file_call
+                import hashlib
+                case_label = re.sub(r"[^A-Za-z0-9_.-]+", "-", case_id or "summary").strip(".-")[:48] or "case"
+                case_key_name = case_label + "-" + hashlib.sha256((case_id or "summary").encode()).hexdigest()[:16]
+                evaluation_directory = (journal.path.parent / "evaluations" / f"round-{active_round:03d}"
+                    / case_key_name / f"trial-{active_trial:03d}" if journal.path else None)
+                if {"file_read", "file_write"} <= set(agent.package.manifest.agents[agent.agent_id].tools):
+                    data = {**data, "evaluation_context": {"case_id": case_id, "round": active_round,
+                            "trial": active_trial, "schema": schema.__name__}}
+                    source_data = data
+                call_agent, data = evaluation_file_call(agent, task, data, response_schema,
+                    directory=evaluation_directory)
+            file_mode = call_agent is not agent
             content = json.dumps(
                 {
                     "task": task,
@@ -344,17 +495,38 @@ class AgentPackageOptimizer:
                 ensure_ascii=False,
             )
             call_id = uuid4().hex
+            activity = (
+                "scoring" if schema is OptimizationGrade else
+                "diagnosis_summary" if schema is OptimizationDiagnosisSummary else
+                "trial_comparison" if schema is OptimizationDiagnosis and task.startswith("Compare repeated") else role
+            )
             journal.emit(
                 "agent_call_started",
                 call_id=call_id,
                 role=role,
+                activity=activity,
                 round=active_round,
                 case_id=case_id,
                 trial=active_trial,
                 phase=active_phase,
                 request=content,
             )
-            observation = await run(agent.package, agent.agent_id, content)
+            observation = recovery.completed_call(role=role, phase=active_phase, round=active_round,
+                trial=active_trial, case_id=case_id, request=content) if recovery else None
+            if (observation is not None and role == "tuning" and edit_package_files
+                    and "authored_package" in observation.evidence):
+                from sagents.v2.optimization.package_workspace import restore_authored_package
+                restore_authored_package(active_draft, observation.evidence["authored_package"])
+            if observation is None:
+                observation = await run(call_agent.package, call_agent.agent_id, content)
+                if role == "tuning" and edit_package_files and observation.state == "completed":
+                    from sagents.v2.optimization.package_workspace import read_package
+                    evidence = dict(observation.evidence)
+                    try:
+                        evidence["authored_package"] = read_package(active_draft / "package").model_dump(mode="json")
+                    except (ValueError, OSError, KeyError) as error:
+                        evidence["package_edit_error"] = str(error)
+                    observation = observation.model_copy(update={"evidence": evidence})
             journal.emit(
                 "agent_call_completed",
                 call_id=call_id,
@@ -371,16 +543,23 @@ class AgentPackageOptimizer:
                     phase=active_phase,
                 )
             )
-            if observation.state != "completed":
+            from sagents.v2.optimization.evaluation_files import assessment_loop_interrupted
+            repair_loop = (role == "evaluation" and file_mode and restart_file_evaluator
+                and set(agent.package.manifest.agents[agent.agent_id].tools) <= {"file_read", "file_write"}
+                and assessment_loop_interrupted(observation))
+            if observation.state != "completed" and not repair_loop:
+                if model_transport_interrupted(observation):
+                    raise OptimizationTransientFailure(f"{role} model transport interrupted")
                 raise RuntimeError(
                     f"{role} agent did not complete: {observation.state}"
                 )
+            from sagents.v2.optimization.evaluation_files import evaluation_response, persist_assessment
             try:
-                response_text = observation.output.strip()
+                response_text = evaluation_response(observation, file_mode)
                 fenced = re.fullmatch(
                     r"```(?:json)?\s*\n(.*?)\n```", response_text, re.DOTALL
                 )
-                if fenced:
+                if fenced and not file_mode:
                     response_text = fenced.group(1)
                 parsed = json.loads(response_text)
                 if adaptive and schema is OptimizationSuiteReview:
@@ -398,35 +577,120 @@ class AgentPackageOptimizer:
                         or parsed.get("permission_drift_detected")
                     ):
                         parsed["approved"] = True
-                return schema.model_validate(parsed)
+                validated = schema.model_validate(parsed)
+                from sagents.v2.optimization.evaluation_files import validate_assessment_evidence
+                validate_assessment_evidence(validated, source_data, file_mode=file_mode)
+                if file_mode:
+                    persist_assessment(evaluation_directory, data, observation)
+                return validated
             except ValueError as error:
+                if role == "evaluation":
+                    journal.emit("evaluation_response_rejected", call_id=call_id, round=active_round,
+                        case_id=case_id, trial=active_trial, reason=str(error)[:6000])
+                if file_mode:
+                    persist_assessment(evaluation_directory, data, observation, error)
+                if role == "evaluation" and (schema in (OptimizationDiagnosis, OptimizationDiagnosisSummary) or file_mode and schema is OptimizationGrade) and _repair_attempt < 2:
+                    journal.emit("agent_response_repair_requested", role=role,
+                                 round=active_round, case_id=case_id,
+                                 attempt=_repair_attempt + 1, error_type=type(error).__name__)
+                    return await ask(role, agent,
+                        "Repair your previous evaluation response to satisfy the exact JSON schema, "
+                        "including every maximum length and evidence requirement. Preserve the substantive "
+                        "findings and uncertainty; shorten wording rather than inventing evidence or changing scores. "
+                        + ("Read the supplied evidence files and write the corrected assessment JSON to the specified output file." if file_mode else "Do not execute tools. Return only valid schema JSON."),
+                        {"original_task": task, "original_data": source_data,
+                         "invalid_response": observation.evidence.get("evaluation_record", observation.output), "validation_error": str(error)[:6000]},
+                        schema, case_id=case_id, _repair_attempt=_repair_attempt + 1)
                 if role == "tuning":
                     raise InvalidOptimizationProposal(str(error)) from error
                 raise
 
-        async def grade_observation(case, observation, history=None):
-            if observation.state != "completed":
+        async def diagnose_execution(bundle, case, observation, history, grade):
+            async def invoke(request):
+                diagnosis = await ask("evaluation", self.evaluator, request["task"],
+                                      request["data"], OptimizationDiagnosis, case_id=case.id)
+                return diagnosis.model_dump_json()
+            file_backed = {"file_read", "file_write"} <= set(self.evaluator.package.manifest.agents[self.evaluator.agent_id].tools)
+            if file_backed:
+                from sagents.v2.optimization.execution_records import conversation_messages
+                entries = conversation_messages(observation, conversation=history or (), initial_input=case.input)
+            else:
+                entries = [{"kind": "case", "input": case.input, "reference_answer": case.reference_answer}]
+                entries.extend(execution_entries(observation, conversation=history or ()))
+            return await diagnose_scored_execution(
+                grade=grade, entries=entries, rubric=case.rubric,
+                policy=bundle.resolved_manifest().agents[target].instructions.inline,
+                constraints=policy.model_dump(mode="json"),
+                file_backed=file_backed,
+                case_context={"id": case.id, "input": case.input, "reference_answer": case.reference_answer, "user_context": case.user_context},
+                original_policy=original.resolved_manifest().agents[target].instructions.inline,
+                agent_configuration=execution_configuration(bundle, target), invoke=invoke)
+
+        async def grade_observation(bundle, case, observation, history=None, *, analyze=True):
+            if model_transport_interrupted(observation):
+                raise OptimizationTransientFailure("target model transport interrupted")
+            if observation.state != "completed" and scorer is None:
                 return OptimizationGrade(
                     score=0, passed=False, rationale=f"Target run {observation.state}"
                 ), None
-            model_grade = await ask(
-                "evaluation",
-                self.evaluator,
-                "Grade whether the ORIGINAL task goal has been achieved using the fixed rubric. "
-                "Use 0..1; partial progress is not completed success. A correct abstention or "
-                "clarification is success only when the fixed rubric explicitly requires it. "
-                "Use the full conversation when provided; do not redefine success mid-dialogue.",
-                {
-                    "goal": goal,
-                    "case": case.model_dump(mode="json"),
-                    "observation": observation.model_dump(mode="json"),
-                    "conversation": history or [],
-                },
-                OptimizationGrade,
-                case_id=case.id,
-            )
+            authority = None
+            if authoritative_grader is not None or scorer is not None:
+                if scorer is not None:
+                    from sagents.v2.optimization.scoring import ScoringRequest, ScoringResult
+                    scoring_call_id = uuid4().hex
+                    journal.emit("scoring_call_started", call_id=scoring_call_id, round=active_round,
+                        phase=active_phase, trial=active_trial, case_id=case.id)
+                    try:
+                        async with asyncio.timeout(call_timeout_seconds):
+                            scored = ScoringResult.model_validate(await scorer.score(ScoringRequest(
+                                goal=goal, case=case, observation=observation, conversation=tuple(history or ()))))
+                        authority = scored.authoritative_grade()
+                        if authority is None:
+                            raise ValueError(f"Custom scorer cannot score case {case.id}: {scored.not_applicable_reason}")
+                    except BaseException as error:
+                        journal.emit("scoring_call_failed", call_id=scoring_call_id, round=active_round,
+                            phase=active_phase, trial=active_trial, case_id=case.id, error_type=type(error).__name__)
+                        raise
+                    journal.emit("scoring_call_completed", call_id=scoring_call_id, round=active_round,
+                        phase=active_phase, trial=active_trial, case_id=case.id)
+                else:
+                    authority = authoritative_grader(case, observation)
+                    if inspect.isawaitable(authority):
+                        async with asyncio.timeout(call_timeout_seconds):
+                            authority = await authority
+                    authority = OptimizationGrade.model_validate(authority)
+            if authority is not None:
+                model_grade = await diagnose_execution(bundle, case, observation, history, authority) if analyze else authority
+            else:
+                model_grade = await ask(
+                    "evaluation",
+                    self.evaluator,
+                    "Grade whether the ORIGINAL task goal has been achieved using the fixed rubric. "
+                    "Use 0..1; partial progress is not completed success. A correct abstention or "
+                    "clarification is success only when the fixed rubric explicitly requires it. "
+                    "Use the full conversation when provided; do not redefine success mid-dialogue. "
+                    "When reference_answer is supplied, use it with the fixed rubric as evaluator-only "
+                    "ground truth; never forward it to the target or dialogue driver. "
+                    "Also provide diagnosis: explain concrete root causes and recommendations for "
+                    "instructions, Skills, tools or procedure, cite evidence indexes in execution, "
+                    "distinguish confirmed facts from hypotheses, and describe evidence coverage. "
+                    "Do not invent flaws in a successful execution.",
+                    {
+                        "goal": goal,
+                        "case": case.model_dump(mode="json"),
+                        "observation": observation.model_dump(mode="json"),
+                        "conversation": history or [],
+                        "execution": execution_entries(observation, conversation=history or ()),
+                        "policy": bundle.resolved_manifest().agents[target].instructions.inline,
+                        "original_policy": original.resolved_manifest().agents[target].instructions.inline
+                            if bundle.resolved_manifest().agents[target].instructions.inline != original.resolved_manifest().agents[target].instructions.inline else None,
+                        "agent_configuration": execution_configuration(bundle, target),
+                    },
+                    OptimizationGrade,
+                    case_id=case.id,
+                )
             audit = observation.evidence.get("generated_tool_audit")
-            if policy.require_clean_generated_tools and audit and not audit["passed"]:
+            if scorer is None and policy.require_clean_generated_tools and audit and not audit["passed"]:
                 detail = (
                     "incomplete execution evidence"
                     if not audit["complete"]
@@ -438,7 +702,8 @@ class AgentPackageOptimizer:
                 return OptimizationGrade(
                     score=0,
                     passed=False,
-                    rationale=f"Generated-tool execution audit failed: {detail}. Raw model grade: {model_grade.score}.",
+                    rationale=f"Generated-tool execution audit failed: {detail}. Raw model grade: {model_grade.score}.\n\n{model_grade.rationale}",
+                    diagnosis=model_grade.diagnosis,
                 ), model_grade
             return model_grade, model_grade
 
@@ -457,99 +722,184 @@ class AgentPackageOptimizer:
             )
 
         async def evaluate_case(bundle, case, trial):
+            from sagents.v2.optimization.runner import OPTIMIZATION_CASE
+            token = OPTIMIZATION_CASE.set(case)
+            try:
+                return await evaluate_case_in_context(bundle, case, trial)
+            finally:
+                OPTIMIZATION_CASE.reset(token)
+
+        async def evaluate_case_in_context(bundle, case, trial):
+            call_offset = len(calls)
+            restored_dialogue = None
+            if recovery:
+                restored = recovery.completed_case(bundle.content_hash, phase=active_phase,
+                    round=active_round, trial=trial, case_id=case.id)
+                if restored is not None:
+                    if restored.case != case:
+                        raise ValueError("recovery case definition differs")
+                    calls.extend(recovery.recovered_agent_calls)
+                    journal.emit("case_completed", round=active_round, phase=active_phase,
+                        trial=trial, result=restored.model_dump(mode="json"),
+                        package_hash=bundle.content_hash, recovered=True,
+                        agent_calls=[call.model_dump(mode="json") for call in recovery.recovered_agent_calls])
+                    return restored
+                identity = case_key(bundle.content_hash, active_phase, active_round, trial, case.id)
+                if case.mode == "dialogue":
+                    restored_dialogue = recovery.completed_dialogue(bundle.content_hash, phase=active_phase,
+                        round=active_round, trial=trial, case=case)
+                if case.mode == "dialogue" and restored_dialogue is None and identity in recovery.pending_case_keys and not restart_incomplete:
+                    raise OptimizationRecoveryRequired("partial dialogue requires a host disposable restart grant")
+                if case.mode == "dialogue" and restored_dialogue is None and identity in recovery.pending_case_keys:
+                    discarded = recovery.discard_partial_dialogue_decisions(identity)
+                    journal.emit("partial_dialogue_restarted", round=active_round, phase=active_phase,
+                        trial=trial, case_id=case.id, discarded_decisions=discarded)
             turns = []
             stop_reason = None
             if case.mode == "dialogue":
-                conversation_factory = getattr(self.runner, "conversation", None)
-                if conversation_factory is None:
-                    raise ValueError("dialogue cases require runner.conversation()")
-                content = case.input
-                history = []
-                async with _bounded_conversation(
-                    conversation_factory,
-                    bundle.model_copy(deep=True),
-                    target,
-                    context,
-                    call_timeout_seconds,
-                ) as session:
-                    for turn_index in range(1, case.max_turns + 1):
+                if restored_dialogue is not None:
+                    turns = restored_dialogue['turns']
+                    stop_reason = restored_dialogue['stop_reason']
+                    grade, model_grade = restored_dialogue['grade'], restored_dialogue['model_grade']
+                    history = [{'user': turn.input, 'target': turn.observation.model_dump(mode="json")} for turn in turns]
+                    observation = turns[-1].observation
+                    target_calls = []
+                    for turn in turns:
                         call_id = uuid4().hex
-                        journal.emit(
-                            "target_call_started",
-                            call_id=call_id,
-                            package_hash=bundle.content_hash,
-                            round=active_round,
-                            phase=active_phase,
-                            case_id=case.id,
-                            trial=trial,
-                            turn=turn_index,
-                            input=content,
-                        )
-                        async with asyncio.timeout(call_timeout_seconds):
-                            observation = await session.send(content)
-                        observation = OptimizationObservation.model_validate(
-                            observation.model_dump(mode="json")
-                        )
-                        observation = audit_observation(observation)
-                        journal.emit(
-                            "target_call_completed",
-                            call_id=call_id,
-                            observation=observation.model_dump(mode="json"),
-                        )
-                        history.append(
-                            {
-                                "user": content,
-                                "target": observation.model_dump(mode="json"),
-                            }
-                        )
-                        grade, model_grade = await grade_observation(
-                            case, observation, history
-                        )
-                        turns.append(
-                            OptimizationDialogueTurn(
+                        target_calls.append(call_id)
+                        journal.emit("target_call_started", call_id=call_id, package_hash=bundle.content_hash,
+                            round=active_round, phase=active_phase, case_id=case.id, trial=trial,
+                            turn=turn.turn, input=turn.input, recovered=True)
+                        journal.emit("target_call_completed", call_id=call_id,
+                            observation=turn.observation.model_dump(mode="json"), recovered=True)
+                    for call in recovery.recovered_agent_calls:
+                        calls.append(call)
+                        call_id = uuid4().hex
+                        journal.emit("agent_call_started", call_id=call_id, role=call.role, round=call.round,
+                            phase=call.phase, trial=call.trial, case_id=call.case_id, request=call.request, recovered=True)
+                        journal.emit("agent_call_completed", call_id=call_id,
+                            observation=call.observation.model_dump(mode="json"), recovered=True)
+                else:
+                    conversation_factory = getattr(self.runner, "conversation", None)
+                    if conversation_factory is None:
+                        raise ValueError("dialogue cases require runner.conversation()")
+                    content = case.input
+                    target_calls = []
+                    history = []
+                    async with _bounded_conversation(
+                        conversation_factory,
+                        bundle.model_copy(deep=True),
+                        target,
+                        context,
+                        call_timeout_seconds,
+                    ) as session:
+                        for turn_index in range(1, case.max_turns + 1):
+                            call_id = uuid4().hex
+                            target_calls.append(call_id)
+                            journal.emit(
+                                "target_call_started",
+                                call_id=call_id,
+                                package_hash=bundle.content_hash,
+                                round=active_round,
+                                phase=active_phase,
+                                case_id=case.id,
+                                trial=trial,
                                 turn=turn_index,
                                 input=content,
-                                observation=observation,
-                                grade=grade,
-                                model_grade=model_grade,
                             )
-                        )
-                        if (
-                            policy.require_clean_generated_tools
-                            and not observation.evidence["generated_tool_audit"][
-                                "passed"
-                            ]
-                        ):
-                            stop_reason = "tool_execution_audit_failed"
-                            break
-                        if grade.passed:
-                            stop_reason = "goal_achieved"
-                            break
-                        if observation.state != "completed":
-                            stop_reason = f"target_{observation.state}"
-                            break
-                        if turn_index == case.max_turns:
-                            stop_reason = "turn_limit"
-                            break
-                        reply = await ask(
-                            "test_dialogue",
-                            self.test_driver,
-                            "Continue this test as the user. Answer the target's questions "
-                            "using only user_context. Preserve the original goal. Never "
-                            "provide the target with a rubric or expected answer.",
-                            {
-                                "original_input": case.input,
-                                "user_context": case.user_context,
-                                "conversation": history,
-                                "turns_remaining": case.max_turns - turn_index,
-                            },
-                            OptimizationDialogueReply,
-                            case_id=case.id,
-                        )
-                        if not reply.can_continue or not reply.message.strip():
-                            stop_reason = "driver_blocked"
-                            break
-                        content = reply.message
+                            async with asyncio.timeout(call_timeout_seconds):
+                                observation = await session.send(content)
+                            observation = OptimizationObservation.model_validate(
+                                observation.model_dump(mode="json")
+                            )
+                            observation = audit_observation(observation)
+                            journal.emit(
+                                "target_call_completed",
+                                call_id=call_id,
+                                observation=observation.model_dump(mode="json"),
+                            )
+                            history.append(
+                                {
+                                    "user": content,
+                                    "target": observation.model_dump(mode="json"),
+                                }
+                            )
+                            grade, model_grade = (None, None)
+                            if case.dialogue_completion == "score":
+                                grade, model_grade = await grade_observation(
+                                    bundle, case, observation, history, analyze=False
+                                )
+                            elif model_transport_interrupted(observation):
+                                raise OptimizationTransientFailure("target model transport interrupted")
+                            turns.append(
+                                OptimizationDialogueTurn(
+                                    turn=turn_index,
+                                    input=content,
+                                    observation=observation,
+                                    grade=grade,
+                                    model_grade=model_grade,
+                                )
+                            )
+                            if (
+                                policy.require_clean_generated_tools
+                                and not observation.evidence["generated_tool_audit"][
+                                    "passed"
+                                ]
+                            ):
+                                stop_reason = "tool_execution_audit_failed"
+                                break
+                            if grade is not None and grade.passed and case.dialogue_completion == "score":
+                                stop_reason = "goal_achieved"
+                                break
+                            if observation.state != "completed":
+                                stop_reason = f"target_{observation.state}"
+                                break
+                            if turn_index == case.max_turns:
+                                stop_reason = "turn_limit"
+                                break
+                            from sagents.v2.optimization.execution_records import visible_dialogue
+                            reply = await ask(
+                                "test_dialogue",
+                                self.test_driver,
+                                "Continue this test as the user. Answer the target's questions "
+                                "using only user_context. Preserve the original goal. Never "
+                                "provide the target with a rubric or expected answer.",
+                                {
+                                    "original_input": case.input,
+                                    "user_context": case.user_context,
+                                    "conversation": visible_dialogue(observation, history),
+                                    "turns_remaining": case.max_turns - turn_index,
+                                },
+                                OptimizationDialogueReply,
+                                case_id=case.id,
+                            )
+                            if not reply.can_continue or not reply.message.strip():
+                                stop_reason = "user_finished" if case.dialogue_completion == "user" else "driver_blocked"
+                                break
+                            content = reply.message
+                journal.emit("dialogue_execution_completed", package_hash=bundle.content_hash,
+                    round=active_round, phase=active_phase, trial=trial, case_id=case.id, stop_reason=stop_reason,
+                    turns=[{"turn": turn.turn, "call_id": call_id,
+                            "grade": turn.grade.model_dump(mode="json") if turn.grade else None,
+                            "model_grade": turn.model_grade.model_dump(mode="json") if turn.model_grade else None}
+                           for turn, call_id in zip(turns, target_calls, strict=True)])
+                if case.dialogue_completion == "user":
+                    if grade is None:
+                        grade, model_grade = await grade_observation(
+                            bundle, case, observation, history, analyze=False)
+                    turns[-1] = turns[-1].model_copy(update={"grade": grade, "model_grade": model_grade})
+                journal.emit("dialogue_execution_scored", package_hash=bundle.content_hash,
+                    round=active_round, phase=active_phase, trial=trial, case_id=case.id,
+                    grade=grade.model_dump(mode="json"),
+                    model_grade=model_grade.model_dump(mode="json") if model_grade else None)
+                if (scorer is not None or authoritative_grader is not None) and observation.state == "completed":
+                    diagnosed = await diagnose_execution(bundle, case, observation, history, model_grade or grade)
+                    if model_grade is not None and grade != model_grade:
+                        grade = grade.model_copy(update={"diagnosis": diagnosed.diagnosis})
+                    else:
+                        grade = diagnosed
+                    model_grade = diagnosed
+                    turns[-1] = turns[-1].model_copy(update={"grade": grade, "model_grade": model_grade})
                 costs = [turn.observation.cost for turn in turns]
                 observation = observation.model_copy(
                     update={
@@ -562,6 +912,10 @@ class AgentPackageOptimizer:
                         "output_tokens": sum(
                             turn.observation.output_tokens for turn in turns
                         ),
+                        "cached_input_tokens": sum(turn.observation.cached_input_tokens for turn in turns),
+                        "reasoning_tokens": sum(turn.observation.reasoning_tokens for turn in turns),
+                        "usage_reported": (False if any(t.observation.usage_reported is False for t in turns)
+                            else True if all(t.observation.usage_reported is True for t in turns) else None),
                         "cost": sum(costs)
                         if all(cost is not None for cost in costs)
                         else None,
@@ -572,6 +926,8 @@ class AgentPackageOptimizer:
                     }
                 )
             else:
+                restored_observation = recovery.observation(bundle.content_hash, phase=active_phase,
+                    round=active_round, trial=trial, case=case) if recovery else None
                 call_id = uuid4().hex
                 journal.emit(
                     "target_call_started",
@@ -583,14 +939,17 @@ class AgentPackageOptimizer:
                     trial=trial,
                     turn=1,
                     input=case.input,
+                    recovered=restored_observation is not None,
                 )
-                observation = audit_observation(await run(bundle, target, case.input))
+                observation = audit_observation(restored_observation if restored_observation is not None
+                                                else await run(bundle, target, case.input))
                 journal.emit(
                     "target_call_completed",
                     call_id=call_id,
                     observation=observation.model_dump(mode="json"),
+                    recovered=restored_observation is not None,
                 )
-                grade, model_grade = await grade_observation(case, observation)
+                grade, model_grade = await grade_observation(bundle, case, observation)
             result = OptimizationCaseResult(
                 case=case,
                 observation=observation,
@@ -599,12 +958,16 @@ class AgentPackageOptimizer:
                 dialogue=tuple(turns),
                 stop_reason=stop_reason,
             )
+            result = builtin_scoring.apply(result)
             journal.emit(
                 "case_completed",
                 round=active_round,
                 phase=active_phase,
                 trial=trial,
                 result=result.model_dump(mode="json"),
+                package_hash=bundle.content_hash,
+                agent_calls=[call.model_dump(mode="json") for call in calls[call_offset:]
+                             if call.case_id == case.id and call.trial == trial],
             )
             return result
 
@@ -641,10 +1004,14 @@ class AgentPackageOptimizer:
             )
 
         async def evaluate(bundle, fixed_suite):
-            evaluations = [
-                await evaluate_once(bundle, fixed_suite, index)
-                for index in range(1, evaluation_repeats + 1)
-            ]
+            from sagents.v2.optimization.runner import OPTIMIZATION_TRIAL
+            evaluations = []
+            for index in range(1, evaluation_repeats + 1):
+                token = OPTIMIZATION_TRIAL.set(index)
+                try:
+                    evaluations.append(await evaluate_once(bundle, fixed_suite, index))
+                finally:
+                    OPTIMIZATION_TRIAL.reset(token)
             if evaluation_repeats == 1:
                 return evaluations[0]
             cases = []
@@ -659,10 +1026,11 @@ class AgentPackageOptimizer:
                     ),
                 )
                 grade = OptimizationGrade(
-                    score=min(item.grade.score for item in samples),
+                    score=(sum(item.grade.score for item in samples) / len(samples)
+                           if evaluation_aggregation == "mean" else min(item.grade.score for item in samples)),
                     passed=all(item.grade.passed for item in samples),
-                    rationale=f"Conservative aggregation of {evaluation_repeats} independent "
-                    "target trials: minimum evaluator score; all trials must pass. "
+                    rationale=f"Aggregation of {evaluation_repeats} independent "
+                    f"target trials: {evaluation_aggregation} evaluator score; all trials must pass. "
                     "See trials for individual evaluation Agent judgments.",
                 )
                 observation = worst.observation.model_copy(
@@ -677,6 +1045,10 @@ class AgentPackageOptimizer:
                         "output_tokens": sum(
                             item.observation.output_tokens for item in samples
                         ),
+                        "cached_input_tokens": sum(item.observation.cached_input_tokens for item in samples),
+                        "reasoning_tokens": sum(item.observation.reasoning_tokens for item in samples),
+                        "usage_reported": (False if any(s.observation.usage_reported is False for s in samples)
+                            else True if all(s.observation.usage_reported is True for s in samples) else None),
                         "cost": sum(cost for item in samples if (cost := item.observation.cost) is not None)
                         if all(item.observation.cost is not None for item in samples)
                         else None,
@@ -687,14 +1059,60 @@ class AgentPackageOptimizer:
                         case=case,
                         observation=observation,
                         grade=grade,
+                        objective_score=(None if builtin_scoring.mode == "quality" else
+                            sum(item.objective_score for item in samples) / len(samples)
+                            if evaluation_aggregation == "mean" else min(item.objective_score for item in samples)),
+                        score_metrics=({} if builtin_scoring.mode == "quality" else {
+                            key: grade.score if key == "quality" else sum(item.score_metrics[key] for item in samples) / len(samples)
+                            for key in samples[0].score_metrics}),
                         trials=tuple(
                             OptimizationCaseTrial.model_validate(
-                                item.model_dump(mode="json", exclude={"case", "trials"})
+                                item.model_dump(mode="json", exclude={"case", "trials", "contrast"})
                             )
                             for item in samples
                         ),
                     )
                 )
+            async def contrast_case(result):
+                if result.case.split != "training" or not any(t.grade.diagnosis for t in result.trials):
+                    return result
+                if len({(t.grade.score, t.grade.passed) for t in result.trials}) < 2:
+                    return result
+                entries = []
+                for index, trial in enumerate(result.trials, 1):
+                    entries.append({"trial": index, "score": trial.grade.score,
+                                    "passed": trial.grade.passed, "diagnosis": trial.grade.diagnosis.model_dump(mode="json") if trial.grade.diagnosis else None})
+                    if {"file_read", "file_write"} <= set(self.evaluator.package.manifest.agents[self.evaluator.agent_id].tools):
+                        from sagents.v2.optimization.execution_records import trial_conversation
+                        records = trial_conversation(result.case, trial)
+                    else:
+                        records = execution_entries(trial.observation)
+                    entries.extend({"trial": index, "record": entry} for entry in records)
+                async def invoke(request):
+                    diagnosis = await ask("evaluation", self.evaluator,
+                        "Compare repeated executions of the SAME case under the same package. "
+                        "Identify the earliest causal divergence between successful and failed trials, "
+                        "the concrete steps enabling success, and a reusable intervention to reproduce "
+                        "the valid path. Check compliance; a success score alone does not prove every "
+                        "action was necessary or compliant. Distinguish causal hypotheses from facts. "
+                        + request["task"], request["data"], OptimizationDiagnosis, case_id=result.case.id)
+                    return diagnosis.model_dump_json()
+                compared = await diagnose_scored_execution(grade=result.grade, entries=entries,
+                    rubric=result.case.rubric, policy=bundle.resolved_manifest().agents[target].instructions.inline,
+                    constraints=policy.model_dump(mode="json"),
+                    original_policy=original.resolved_manifest().agents[target].instructions.inline,
+                    case_context={"id": result.case.id, "input": result.case.input,
+                        "reference_answer": result.case.reference_answer, "user_context": result.case.user_context},
+                    file_backed={"file_read", "file_write"} <= set(self.evaluator.package.manifest.agents[self.evaluator.agent_id].tools),
+                    agent_configuration=execution_configuration(bundle, target), invoke=invoke)
+                return result.model_copy(update={"contrast": compared.diagnosis, "grade": compared})
+            contrast_slots = asyncio.Semaphore(max_concurrency)
+            async def bounded_contrast(case):
+                async with contrast_slots:
+                    return await contrast_case(case)
+            # Contrasts are independent; preserve suite order while respecting
+            # the same model-call ceiling as case evaluation.
+            cases = list(await asyncio.gather(*(bounded_contrast(case) for case in cases)))
             return OptimizationEvaluation(
                 package_hash=bundle.content_hash, cases=tuple(cases)
             )
@@ -702,10 +1120,21 @@ class AgentPackageOptimizer:
         with journal:
             journal.emit(
                 "operation_started",
+                optimization_id=optimization_id,
+                recovery_fingerprint=recovery_hash,
+                recovery_engine_id=recovery_config["engine"],
+                recovery_binding_id=recovery_binding_id,
+                resumed_from=str(Path(resume_from).resolve()) if resume_from else None,
                 goal=goal,
                 agent_id=target,
                 rounds=rounds,
                 evaluation_repeats=evaluation_repeats,
+                evaluation_aggregation=evaluation_aggregation,
+                initial_training_case_count=initial_training_case_count,
+                training_cases_per_round=training_cases_per_round,
+                grow_training=grow_training,
+                refresh_incumbent=refresh_incumbent,
+                builtin_scoring=builtin_scoring.model_dump(mode="json"),
                 test_case_count=test_case_count,
                 max_concurrency=max_concurrency,
                 package=original.model_dump(mode="json"),
@@ -725,7 +1154,7 @@ class AgentPackageOptimizer:
             )
             async with asyncio.timeout(timeout_seconds):
                 designer = AgentPackageTestGenerator(
-                    runner=self.runner,
+                    runner=design_runner,
                     designer=self.test_designer,
                 )
                 if adaptive and suite is None:
@@ -778,7 +1207,8 @@ class AgentPackageOptimizer:
                             "test_design_call_completed",
                             call=call.model_dump(mode="json"),
                         ),
-                        max_cases=6,
+                        max_cases=initial_training_case_count or 6,
+                        case_count=initial_training_case_count,
                         timeout_seconds=call_timeout_seconds,
                     )
                     calls.append(generation.call)
@@ -797,7 +1227,7 @@ class AgentPackageOptimizer:
                     if suite is None:
                         journal.emit("test_generation_started")
                         designer = AgentPackageTestGenerator(
-                            runner=self.runner,
+                            runner=design_runner,
                             designer=self.test_designer,
                         )
                         generated_cases = []
@@ -843,6 +1273,11 @@ class AgentPackageOptimizer:
                                 update={"suite": suite}
                             ).model_dump(mode="json"),
                         )
+                if adaptive and training_pool and initial_training_case_count is not None:
+                    initial_ids = {c.id for c in training_pool[:initial_training_case_count]}
+                    suite = OptimizationSuite(cases=tuple(
+                        c for c in suite.cases if c.split != "training" or c.id in initial_ids
+                    ))
                 fixed_suite = OptimizationSuite.model_validate(
                     suite.model_dump(mode="json")
                 )
@@ -864,7 +1299,7 @@ class AgentPackageOptimizer:
                 if final_suite is None and final_max_cases:
                     journal.emit("final_test_generation_started")
                     generation = await AgentPackageTestGenerator(
-                        runner=self.runner,
+                        runner=design_runner,
                         designer=self.test_designer,
                     ).generate_final_with_record(
                         original,
@@ -905,7 +1340,11 @@ class AgentPackageOptimizer:
                     self.suite_reviewer,
                     "Audit goal and fixed test-suite consistency before any target execution. "
                     "Identify conflicting or ambiguous pass/fail requirements and fixture defects; "
-                    "do not change tests or disclose hidden cases to other agents.",
+                    "do not change tests or disclose hidden cases to other agents. "
+                    "When external_scorer is present, its contract defines numerical scoring. "
+                    "Do not reimplement or second-guess that scoring or block merely because a rubric "
+                    "delegates to it. Distinguish concrete invalid input or policy contradictions "
+                    "from stricter benchmark outcome criteria and hypothetical alternative choices.",
                     {
                         "goal": goal,
                         "agent_id": target,
@@ -915,6 +1354,7 @@ class AgentPackageOptimizer:
                         "package": suite_package_view,
                         "constraints": policy.model_dump(mode="json"),
                         "require_diverse_suite": require_diverse_suite,
+                        "external_scorer": scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
                         "suite": fixed_suite.model_dump(mode="json"),
                         "final_suite": sealed_final.model_dump(mode="json")
                         if sealed_final
@@ -949,7 +1389,6 @@ class AgentPackageOptimizer:
                 selected_round = 0
                 history: list[OptimizationRound] = []
                 retained_regressions: tuple[OptimizationRegression, ...] = ()
-                optimization_id = resume_optimization_id or uuid4().hex
                 termination_reason = "round_limit"
                 stability_count = 0
                 stability_checks = []
@@ -975,39 +1414,45 @@ class AgentPackageOptimizer:
                         "passed": sum(r.grade.passed for r in results),
                         "total": len(results),
                         "items": [
-                            {"index": i, "score": r.grade.score}
+                            {"index": i, "score": r.grade.score,
+                             **({"objective_score": r.objective_score} if r.objective_score is not None else {})}
                             for i, r in enumerate(results, 1)
                         ],
                     }
 
                 async def add_training_challenges(index):
-                    nonlocal fixed_suite, best_evaluation, active_phase
+                    nonlocal fixed_suite
                     journal.emit("training_generation_started", round=index)
-                    evidence = tuple(
-                        training_feedback(r)
-                        for r in best_evaluation.cases
-                        if r.case.split == "training"
-                    )
-                    generation = await designer.generate_split_with_record(
-                        best,
-                        context=context,
-                        agent_id=target,
-                        goal=goal,
-                        split="training",
-                        on_call=lambda call: journal.emit(
-                            "test_design_call_completed",
-                            call=call.model_dump(mode="json"),
-                        ),
-                        max_cases=6,
-                        round=index,
-                        excluded_cases=tuple(
-                            c for c in fixed_suite.cases if c.split == "training"
-                        ),
-                        challenge_feedback=evidence,
-                        timeout_seconds=call_timeout_seconds,
-                    )
-                    calls.append(generation.call)
-                    added = generation.suite
+                    evidence = tuple(training_feedback_batch(
+                        r for r in best_evaluation.cases if r.case.split == "training"
+                    ))
+                    used_ids = {c.id for c in fixed_suite.cases}
+                    pool_cases = tuple(c for c in training_pool if c.id not in used_ids)[:training_cases_per_round]
+                    added_cases = list(pool_cases)
+                    remaining = training_cases_per_round - len(pool_cases)
+                    if remaining:
+                        generation = await designer.generate_split_with_record(
+                            best,
+                            context=context,
+                            agent_id=target,
+                            goal=goal,
+                            split="training",
+                            on_call=lambda call: journal.emit(
+                                "test_design_call_completed",
+                                call=call.model_dump(mode="json"),
+                            ),
+                            max_cases=remaining,
+                            case_count=remaining if initial_training_case_count is not None else None,
+                            round=index,
+                            excluded_cases=tuple(
+                                c for c in (*fixed_suite.cases, *pool_cases) if c.split == "training"
+                            ),
+                            challenge_feedback=evidence,
+                            timeout_seconds=call_timeout_seconds,
+                        )
+                        calls.append(generation.call)
+                        added_cases.extend(generation.suite.cases)
+                    added = OptimizationCaseBatch(cases=tuple(added_cases))
                     review = await ask(
                         "suite_review",
                         self.suite_reviewer,
@@ -1043,20 +1488,11 @@ class AgentPackageOptimizer:
                         cases=[c.model_dump(mode="json") for c in added.cases],
                         total=sum(c.split == "training" for c in fixed_suite.cases),
                     )
-                    # Establish the incumbent's performance on newly added questions
-                    # before comparing a proposal. Existing cases retain their evidence.
-                    active_phase = "training_challenge"
-                    checked = await evaluate(best, added)
-                    active_phase = "optimization"
-                    best_evaluation = OptimizationEvaluation(
-                        package_hash=best.content_hash,
-                        cases=(*best_evaluation.cases, *checked.cases),
-                    )
-                    journal.emit(
-                        "training_challenge_completed",
-                        round=index,
-                        evaluation=best_evaluation.model_dump(mode="json"),
-                    )
+
+                def retained_at_target():
+                    return ({r.case.id for r in best_evaluation.cases}
+                            == {c.id for c in fixed_suite.cases}
+                            and self._at_target(best_evaluation, stopping_policy))
 
                 async def confirm_stability():
                     nonlocal best_evaluation, active_round
@@ -1108,15 +1544,13 @@ class AgentPackageOptimizer:
                         termination_reason = "stagnation"
                         break
                     active_round = index
-                    if adaptive:
-                        await add_training_challenges(index)
-                    if stopping_policy and self._at_target(
-                        best_evaluation, stopping_policy
-                    ):
+                    if stopping_policy and retained_at_target():
                         stability_count = await confirm_stability()
                         if stability_count == stopping_policy.stability_passes:
                             termination_reason = "target_reached"
                             break
+                    if adaptive and grow_training and training_cases_per_round:
+                        await add_training_challenges(index)
                     if (
                         stopping_policy
                         and len(history) - selected_round >= stopping_policy.patience
@@ -1130,16 +1564,16 @@ class AgentPackageOptimizer:
                     evaluation = None
                     # Exclude hidden case details and free-text selection reasons.
                     # Adaptive mode may disclose selection outcomes and scores.
-                    training = [
-                        training_feedback(item)
-                        for item in best_evaluation.cases
-                        if item.case.split == "training"
-                    ]
+                    file_evidence = "file_read" in self.tuner.package.resolved_manifest().agents[self.tuner.agent_id].tools
+                    training_cases = [item for item in best_evaluation.cases if item.case.split == "training"]
+                    training = ([training_feedback_summary(item) for item in training_cases]
+                                if file_evidence else training_feedback_batch(training_cases))
+                    regression_feedback = {item["case"]["id"]: item for item in training}
                     regression_by_id = {r.case_id: r for r in retained_regressions if r.split == "training"}
                     training_regressions = [
                         {"previous_score": regression_by_id[item.case.id].previous_score,
                          "previous_passed": regression_by_id[item.case.id].previous_passed,
-                         "current": training_feedback(item)}
+                         "current": regression_feedback[item.case.id]}
                         for item in best_evaluation.cases
                         if item.case.id in regression_by_id
                         and (item.grade.score < regression_by_id[item.case.id].previous_score
@@ -1152,15 +1586,19 @@ class AgentPackageOptimizer:
                                 "accepted": item.accepted,
                                 "overall_before": item.overall_before,
                                 "overall_after": item.overall_after,
+                                "objective_before": item.objective_before,
+                                "objective_after": item.objective_after,
                             } if adaptive else {}),
                             "patch": item.patch.model_dump(mode="json")
                             if item.patch
                             else None,
-                            "training": [
-                                training_feedback(case)
-                                for case in item.evaluation.cases
-                                if case.case.split == "training"
-                            ]
+                            "training": [training_feedback_summary(c) for c in item.evaluation.cases
+                                         if c.case.split == "training" and not c.grade.passed][:16]
+                            if item.evaluation and file_evidence else training_feedback_batch(
+                                [c for c in item.evaluation.cases
+                                 if c.case.split == "training" and not c.grade.passed][:16],
+                                max_chars=12000,
+                            )
                             if item.evaluation
                             else [],
                             "patch_error": item.reason
@@ -1172,15 +1610,70 @@ class AgentPackageOptimizer:
                         }
                         for item in history[-4:]
                     ]
+                    diagnostic_evidence = synthesis_evidence(best_evaluation.cases)
+                    diagnostic_summary = None
+                    if diagnostic_evidence:
+                        diagnostic_summary = await ask("evaluation", self.evaluator,
+                            "Synthesize independent TRAINING execution diagnoses into prioritized, actionable "
+                            "optimization work. Compare successful and failed trials; identify reusable success "
+                            "procedures and failure branches. Each priority must cite supplied training case IDs, "
+                            "name a concrete change in instructions/Skills/tools/procedure and explain why it should "
+                            "help. Preserve uncertainty; no hidden validation/test information is available. "
+                            "Only prioritize changes permitted by constraints and optimization_scope; immutable "
+                            "environment/tool defects belong in uncertainties, not requests to rewrite protected tools. "
+                            "Do not restate scores or case counts in prose; host metrics are authoritative. "
+                            "Do not make the tuner rediscover root causes by reading every raw case. Return concise Chinese.",
+                            {"training_diagnoses": diagnostic_evidence,
+                             "policy": best.resolved_manifest().agents[target].instructions.inline,
+                             "original_policy": original.resolved_manifest().agents[target].instructions.inline
+                                 if best.resolved_manifest().agents[target].instructions.inline != original.resolved_manifest().agents[target].instructions.inline else None,
+                             "agent_configuration": execution_configuration(best, target),
+                             "constraints": policy.model_dump(mode="json"),
+                             "optimization_scope": optimization_scope}, OptimizationDiagnosisSummary)
+                        training_ids = {item["case_id"] for item in diagnostic_evidence}
+                        if any(not set(item.supporting_case_ids) <= training_ids for item in diagnostic_summary.priorities):
+                            raise ValueError("training diagnosis synthesis cites unknown cases")
+                        journal.emit("training_diagnosis_completed", round=index,
+                                     summary=diagnostic_summary.model_dump(mode="json"))
+                    from sagents.v2.optimization.evidence import training_evidence_files
+                    evidence_files, evidence_index = training_evidence_files(best_evaluation.cases, diagnostic_summary,
+                                                                             attempts=history[-4:], experience=history)
+                    if iteration_store is not None:
+                        iteration_store.input(index, evidence_files)
+                    tuning_agent = self.tuner
+                    prompt_path = None
+                    if edit_package_files:
+                        from sagents.v2.optimization.package_workspace import EDIT_CONTEXT, PACKAGE_EDIT_TASK, stage_package
+                        active_draft, prompt_path = stage_package(tuner_workspace, index, best, target, evidence_files)
+                        tuning_agent = self.tuner.model_copy(update={"package": self.tuner.package.model_copy(
+                            update={"files": {**self.tuner.package.files, EDIT_CONTEXT: json.dumps({"round": index})}})})
+                    if file_evidence and not edit_package_files:
+                        if tuner_workspace is not None:
+                            from sagents.v2.optimization.evidence import materialize_tuner_workspace
+                            materialize_tuner_workspace(tuner_workspace, evidence_files)
+                        else:
+                            tuning_agent = self.tuner.model_copy(update={"package": self.tuner.package.model_copy(
+                                update={"files": {**self.tuner.package.files, **evidence_files}})})
                     package_view = best.model_dump(mode="json")
                     package_view["manifest"]["tests"] = {"scenarios": [], "gates": {}}
                     try:
                         patch = await ask(
                             "tuning",
-                            self.tuner,
-                            "Propose a small evidence-based improvement within constraints. "
-                            "instruction_guidance replaces previous optimization guidance, while "
-                            "original instructions stay unchanged. files maps allowed bundled paths "
+                            tuning_agent,
+                            PACKAGE_EDIT_TASK if edit_package_files else (
+                            "Propose an evidence-based improvement within constraints. "
+                            "Read accumulated tuning_experience FIRST, then training_diagnosis priorities and successful-vs-failed trial contrasts. "
+                            "Return new reusable lessons and uncertainties in experience_notes, outside production files. "
+                            "then inspect individual cases only where necessary. Convert successful procedures "
+                            "When training_evidence is available, prioritize mixed and failed groups, read their analysis files "
+                            "and recent rejected_attempts, compare regressed traces with their retained-parent links, "
+                            "and use file_read on trial execution files linked by each case index only as needed. Successful cases are safeguards. "
+                            "into reproducible capabilities, not case-specific scripts. "
+                            "system_prompt supplies the COMPLETE replacement production system prompt, "
+                            "not an appendix. Consolidate the retained candidate's useful behavior, "
+                            "remove redundancy and resolve conflicts while preserving original responsibilities, "
+                            "business policy and permissions in meaning. The baseline snapshot stays immutable. "
+                            "Do not use deprecated instruction_guidance for new proposals. files maps allowed bundled paths "
                             "to replacement content (explicit creatable paths can add new files); "
                             "budgets maps allowed budget fields to values. tools/skills, when "
                             "enabled, replace the full target allowlist; only add host candidate names. "
@@ -1189,9 +1682,15 @@ class AgentPackageOptimizer:
                             "and expression. Expressions are JSON literals/objects/arrays, {var: 'field.path'} "
                             "or {op: name, args: [...]}. Ops: if (lazy, three args), and/or/not, "
                             "eq/ne, lt/lte/gt/gte, add/sub/mul/div, in, concat, coalesce. "
+                            "Collection ops: filter/map/sort take [array, expression] with var item or item.field "
+                            "for the current element; sort is ascending. length/sum take [array]; at takes [array,index]. "
+                            "Arrays are limited to 256 elements and execution to 20000 expression steps. "
                             "concat accepts strings only; construct arrays with literals and lazy if branches. "
                             "No code, IO or external side effects. Include new names in tools to enable them. "
-                            "Never change goals, permissions or evaluation standards.",
+                            "When allow_skill_creation is enabled, skill_definitions maps new lowercase-hyphen "
+                            "names to complete reusable SKILL.md content; include names in skills to enable them. "
+                            "Use short discoverable descriptions and instructions explaining when to load the skill. "
+                            "Never change goals, permissions or evaluation standards."),
                             {
                                 "goal": goal,
                                 "min_latency_improvement": min_latency_improvement,
@@ -1199,9 +1698,21 @@ class AgentPackageOptimizer:
                                 "rounds": rounds,
                                 "agent_id": target,
                                 "package": package_view,
+                                "candidate_workspace": {"package": "package/", "evidence": "evidence/",
+                                    "system_prompt": f"package/files/{prompt_path}"} if edit_package_files else None,
+                                "original_instructions": original.resolved_manifest()
+                                .agents[target].instructions.inline,
                                 "constraints": policy.model_dump(mode="json"),
                                 "optimization_scope": optimization_scope,
-                                "training": training,
+                                "training_diagnosis": diagnostic_summary.model_dump(mode="json") if diagnostic_summary else None,
+                                "training_evidence": evidence_index if file_evidence else None,
+                                "tuning_experience": ({"path": "evidence/training-evidence/experience.md" if edit_package_files
+                                                       else "training-evidence/experience.md"}
+                                                      if file_evidence else {"document": experience_document(history, max_chars=24000)}),
+                                "training": [] if file_evidence else training,
+                                "unmeasured_training_cases": [c.model_dump(mode="json", exclude={"reference_answer"})
+                                    for c in fixed_suite.cases if c.split == "training"
+                                    and c.id not in {r.case.id for r in best_evaluation.cases}],
                                 **(
                                     {
                                         "selected_round": selected_round,
@@ -1209,10 +1720,9 @@ class AgentPackageOptimizer:
                                             best_evaluation
                                         ),
                                         "selection_policy": {
-                                            "metric": "0.5 * training_mean + 0.5 * validation_mean",
+                                            **builtin_scoring.selection_policy(),
                                             "min_improvement": min_improvement,
                                             "individual_regressions_allowed": True,
-                                            "instruction": "Improve overall quality. Repair retained training regressions without discarding gains. Validation remains anonymous scores only; do not infer hidden questions.",
                                         },
                                         "training_regressions": training_regressions[:16],
                                         "training_regressions_omitted": max(0, len(training_regressions) - 16),
@@ -1234,37 +1744,86 @@ class AgentPackageOptimizer:
                                 + (" The package is the retained parent identified by selected_round (0 means the original). Previous attempts marked accepted=false are not part of that parent. Semantic review approval checks constraints, not performance. Do not describe a rejected patch as retained; if retrying any part of it, explain the new training evidence and treat its benefit as unverified."
                                    if adaptive else ""),
                             },
-                            OptimizationPatch,
+                            OptimizationEditSummary
+                            if edit_package_files else OptimizationPatch,
                         )
-                        try:
-                            candidate = self._apply(
-                                original,
-                                best,
-                                target,
-                                patch,
-                                policy,
-                                f"{original.manifest.metadata.version}.opt.{optimization_id}.{index}",
-                            )
-                        except NoOptimizationChange:
-                            history.append(
-                                OptimizationRound(
-                                    round=index,
-                                    parent_hash=best.content_hash,
-                                    candidate_package=best.model_copy(deep=True),
-                                    patch=patch,
-                                    evaluation=best_evaluation,
-                                    accepted=False,
-                                    reason="No changes proposed; previous evaluation reused",
-                                    evaluation_reused=True,
+                        for repair_attempt in range(max_edit_repairs + 1):
+                            try:
+                                proposed = None
+                                if edit_package_files:
+                                    from sagents.v2.optimization.package_workspace import import_package
+                                    if patch.model_dump(exclude_defaults=True).keys() - {"rationale", "experience_notes"}:
+                                        raise ValueError("file editor must return rationale and experience_notes only; edit package files")
+                                    edited = calls[-1].observation.evidence
+                                    if "package_edit_error" in edited:
+                                        raise ValueError(edited["package_edit_error"])
+                                    experience_notes = patch.experience_notes
+                                    patch, proposed = import_package(active_draft, best, target, patch.rationale,
+                                        prompt_path, snapshot=edited["authored_package"])
+                                    patch = patch.model_copy(update={"experience_notes": experience_notes})
+                                    if any(len(text.encode("utf-8")) > policy.max_file_bytes
+                                           for name, text in proposed.files.items()
+                                           if name != prompt_path and best.files.get(name) != text):
+                                        raise OptimizationResourceLimit("edited file exceeds max_file_bytes")
+                                candidate = self._apply(
+                                    original,
+                                    best,
+                                    target,
+                                    patch,
+                                    policy,
+                                    f"{original.manifest.metadata.version}.opt.{optimization_id}.{index}",
                                 )
+                                if proposed is not None:
+                                    from sagents.v2.optimization.package_workspace import freeze_package
+                                    candidate = freeze_package(active_draft, candidate, proposed, prompt_path, target)
+                                break
+                            except NoOptimizationChange:
+                                has_unmeasured_cases = {c.id for c in fixed_suite.cases} != {r.case.id for r in best_evaluation.cases}
+                                if has_unmeasured_cases:
+                                    best_evaluation = await evaluate(best, fixed_suite)
+                                    journal.emit("evaluation_completed", round=index, evaluation=best_evaluation.model_dump(mode="json"))
+                                raise
+                            except ValueError as error:
+                                if not isinstance(error, OptimizationResourceLimit):
+                                    raise InvalidOptimizationProposal(str(error)) from error
+                                journal.emit("package_validation_failed", round=index, repair=repair_attempt,
+                                    error=str(error), max_edit_repairs=max_edit_repairs)
+                                if repair_attempt >= max_edit_repairs:
+                                    raise InvalidOptimizationProposal(
+                                        f"Validation still failed after {repair_attempt} repairs: {error}") from error
+                                active_trial = repair_attempt + 2
+                                patch = await ask("tuning", tuning_agent,
+                                    (PACKAGE_EDIT_TASK + "\nRepair the existing draft in the SAME candidate workspace. "
+                                     "Do not reset it to the parent. Return rationale and experience_notes only.") if edit_package_files else
+                                    "Repair your previous complete proposal to satisfy the host constraints. Return the corrected complete proposal.",
+                                    {"goal": goal, "round": index, "agent_id": target,
+                                     "repair": repair_attempt + 1, "max_edit_repairs": max_edit_repairs,
+                                     "validation_error": str(error), "constraints": policy.model_dump(mode="json"),
+                                     "optimization_scope": optimization_scope,
+                                     "previous_proposal": patch.model_dump(mode="json"),
+                                     "package": package_view,
+                                     "candidate_workspace": {"package": "package/", "evidence": "evidence/",
+                                         "system_prompt": f"package/files/{prompt_path}"} if edit_package_files else None,
+                                     "instruction": "Fix the reported validation failure without removing essential responsibilities, permissions or successful behavior. The host will validate again before executing any test."},
+                                    OptimizationEditSummary if edit_package_files else OptimizationPatch)
+                    except NoOptimizationChange:
+                        history.append(
+                            OptimizationRound(
+                                round=index,
+                                parent_hash=best.content_hash,
+                                candidate_package=best.model_copy(deep=True),
+                                patch=patch,
+                                evaluation=best_evaluation,
+                                accepted=False,
+                                reason="No changes proposed; current suite measured" if has_unmeasured_cases else "No changes proposed; previous evaluation reused",
+                                evaluation_reused=not has_unmeasured_cases,
                             )
-                            journal.emit(
-                                "round_completed",
-                                record=history[-1].model_dump(mode="json"),
-                            )
-                            continue
-                        except ValueError as error:
-                            raise InvalidOptimizationProposal(str(error)) from error
+                        )
+                        journal.emit(
+                            "round_completed",
+                            record=history[-1].model_dump(mode="json"),
+                        )
+                        continue
                     except InvalidOptimizationProposal as error:
                         history.append(
                             OptimizationRound(
@@ -1310,7 +1869,7 @@ class AgentPackageOptimizer:
                             "patch": patch.model_dump(mode="json"),
                             "constraints": policy.model_dump(mode="json"),
                             "optimization_scope": optimization_scope,
-                            "training": training,
+                            "training": training_feedback_batch(training_cases, include_reference_answer=True),
                         },
                         OptimizationProposalReview,
                     )
@@ -1336,6 +1895,14 @@ class AgentPackageOptimizer:
                             record=history[-1].model_dump(mode="json"),
                         )
                         continue
+                    if refresh_incumbent:
+                        # Same questions and trial indexes, fresh executions on both sides.
+                        measured_ids = {r.case.id for r in best_evaluation.cases}
+                        previous_suite = OptimizationSuite(cases=tuple(
+                            c for c in fixed_suite.cases if c.id in measured_ids))
+                        best_evaluation = await evaluate(best, previous_suite)
+                        journal.emit("incumbent_evaluation_completed", round=index,
+                                     evaluation=best_evaluation.model_dump(mode="json"))
                     evaluation = await evaluate(candidate, fixed_suite)
                     journal.emit(
                         "evaluation_completed",
@@ -1361,7 +1928,9 @@ class AgentPackageOptimizer:
                             reason=reason,
                             review=review,
                             overall_before=best_evaluation.overall_score() if adaptive else None,
-                            overall_after=evaluation.overall_score() if adaptive else None,
+                            overall_after=self._paired_evaluations(best_evaluation, evaluation)[1].overall_score() if adaptive else None,
+                            objective_before=best_evaluation.objective_score() if builtin_scoring.mode != "quality" else None,
+                            objective_after=self._paired_evaluations(best_evaluation, evaluation)[1].objective_score() if builtin_scoring.mode != "quality" else None,
                             regressions=self._regressions(best_evaluation, evaluation) if adaptive else (),
                         )
                     )
@@ -1377,7 +1946,7 @@ class AgentPackageOptimizer:
                 if (
                     stopping_policy
                     and termination_reason == "round_limit"
-                    and self._at_target(best_evaluation, stopping_policy)
+                    and retained_at_target()
                 ):
                     stability_count = await confirm_stability()
                     if stability_count == stopping_policy.stability_passes:
@@ -1450,6 +2019,8 @@ class AgentPackageOptimizer:
                         else None
                     )
                 )
+                if recovery:
+                    recovery.assert_consumed()
                 result = OptimizationResult(
                     candidate_package=best.model_copy(deep=True),
                     iterations=(
@@ -1487,8 +2058,13 @@ class AgentPackageOptimizer:
                         suite_review=suite_review,
                         requested_rounds=rounds,
                         evaluation_repeats=evaluation_repeats,
+                        evaluation_aggregation=evaluation_aggregation,
+                        grow_training=grow_training,
+                        refresh_incumbent=refresh_incumbent,
                         final_verification=final_verification,
                         optimization_scope=optimization_scope,
+                        builtin_scoring=builtin_scoring.model_dump(mode="json"),
+                        tuning_experience=experience_document(history),
                         suite=fixed_suite,
                         baseline=baseline,
                         selected=best_evaluation,
@@ -1544,7 +2120,7 @@ class AgentPackageOptimizer:
 
         def allowed_file(path):
             resource = PurePosixPath(path)
-            if path.startswith("tools/rsi/"):
+            if path.startswith(("tools/rsi/", "mcp/")):
                 return "tools" in selected and policy.allow_tool_changes
             is_skill = "skills" in resource.parts or any(
                 resource == root or root in resource.parents for root in skill_roots
@@ -1553,11 +2129,13 @@ class AgentPackageOptimizer:
 
         data = policy.model_dump(mode="json")
         data.update(
+            allow_system_prompt=policy.allow_system_prompt and "instructions" in selected,
             allow_instruction_guidance=policy.allow_instruction_guidance
             and "instructions" in selected,
             allow_tool_changes=policy.allow_tool_changes and "tools" in selected,
             allow_tool_creation=policy.allow_tool_creation and "tools" in selected,
             allow_skill_changes=policy.allow_skill_changes and "skills" in selected,
+            allow_skill_creation=policy.allow_skill_creation and "skills" in selected,
             editable_budget_fields=policy.editable_budget_fields
             if "budgets" in selected
             else (),
@@ -1588,7 +2166,7 @@ class AgentPackageOptimizer:
 
     @staticmethod
     def _check_diversity(suite):
-        inputs = [" ".join(case.input.casefold().split()) for case in suite.cases]
+        inputs = [case_prompt_identity(case) for case in suite.cases]
         if len(set(inputs)) != len(inputs):
             raise ValueError("suite repeats normalized test inputs")
         if len(suite.cases) >= 12:
@@ -1616,6 +2194,11 @@ class AgentPackageOptimizer:
 
     @staticmethod
     def _apply(original, current, target, patch, policy, version):
+        if patch.system_prompt is not None:
+            if not policy.allow_system_prompt:
+                raise ValueError("system prompt is not editable")
+            if len(patch.system_prompt) > policy.max_system_prompt_chars:
+                raise OptimizationResourceLimit(f"System prompt has {len(patch.system_prompt)} characters; max_system_prompt_chars={policy.max_system_prompt_chars}. Rewrite concisely while preserving responsibilities and policy.")
         if (
             patch.instruction_guidance is not None
             and len(patch.instruction_guidance) > policy.max_guidance_chars
@@ -1625,16 +2208,27 @@ class AgentPackageOptimizer:
             len(content.encode("utf-8")) > policy.max_file_bytes
             for content in patch.files.values()
         ):
-            raise ValueError("edited file exceeds max_file_bytes")
+            raise OptimizationResourceLimit("edited file exceeds max_file_bytes")
         if (
             patch.instruction_guidance is not None
             and not policy.allow_instruction_guidance
         ):
             raise ValueError("instruction guidance is not editable")
+        skill_resources = {name for name in patch.files if name.startswith("skills/")
+                           and len(name.split("/")) >= 3 and policy.allow_skill_changes
+                           and policy.allow_skill_creation
+                           and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name.split("/")[1])}
         if not set(patch.files) <= set(policy.editable_files) | set(
             policy.creatable_files
-        ):
+        ) | skill_resources:
             raise ValueError("proposal edits files outside the allowlist")
+        for name in patch.deleted_files:
+            permitted = name in policy.editable_files or (
+                name.startswith("skills/") and name.endswith("/SKILL.md")
+                and policy.allow_skill_changes and policy.allow_skill_creation
+            ) or (name.startswith("tools/rsi/") and policy.allow_tool_changes and policy.allow_tool_creation)
+            if name not in current.files or not permitted:
+                raise ValueError("proposal deletes files outside the allowlist")
         if not set(patch.budgets) <= set(policy.editable_budget_fields):
             raise ValueError("proposal edits budgets outside the allowlist")
         from sagents.v2.tool.generated import PREFIX, generated_tools
@@ -1651,10 +2245,22 @@ class AgentPackageOptimizer:
             len(content.encode("utf-8")) > policy.max_file_bytes
             for content in generated_files.values()
         ):
-            raise ValueError("generated tool exceeds max_file_bytes")
+            raise OptimizationResourceLimit("generated tool exceeds max_file_bytes")
         if any(path.startswith(PREFIX) for path in patch.files):
             raise ValueError("generated tools must be revised through tool_definitions")
-        created = generated_tools({**current.files, **generated_files})
+        if patch.skill_definitions and not (policy.allow_skill_creation and policy.allow_skill_changes):
+            raise ValueError("skill creation is not enabled")
+        skill_files = {}
+        for name, content in patch.skill_definitions.items():
+            if not name.isascii() or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or len(name) > 64:
+                raise ValueError("generated skill names must use lowercase ASCII words and hyphens")
+            if not content.strip() or len(content.encode()) > policy.max_file_bytes:
+                raise ValueError("generated skill is empty or exceeds max_file_bytes")
+            skill_files[f"skills/{name}/SKILL.md"] = content
+        if set(skill_files) & set(patch.files):
+            raise ValueError("skill content must have one source")
+        created = generated_tools({k: v for k, v in {**current.files, **generated_files}.items()
+                                   if k not in patch.deleted_files})
         for field, enabled, candidates in (
             ("tools", policy.allow_tool_changes, policy.tool_candidates),
             ("skills", policy.allow_skill_changes, policy.skill_candidates),
@@ -1668,20 +2274,30 @@ class AgentPackageOptimizer:
                 )
                 if field == "tools" and policy.allow_tool_creation:
                     allowed.update(created)
+                if field == "skills" and policy.allow_skill_creation:
+                    allowed.update(path.split("/")[1] for path in (*current.files, *skill_files)
+                                   if path.startswith("skills/") and path.endswith("/SKILL.md"))
                 if not set(selected) <= allowed:
                     raise ValueError(f"proposal adds {field} outside host candidates")
                 if len(selected) != len(set(selected)):
                     raise ValueError(f"duplicate {field} names")
         if (
-            patch.instruction_guidance is None
+            patch.system_prompt is None
+            and patch.instruction_guidance is None
             and not patch.files
+            and not patch.deleted_files
             and not patch.tool_definitions
+            and not patch.skill_definitions
             and not patch.budgets
             and patch.tools is None
             and patch.skills is None
         ):
             raise NoOptimizationChange("proposal contains no changes")
         data = current.model_dump(mode="json")
+        if patch.system_prompt is not None:
+            data["manifest"]["agents"][target]["instructions"] = {
+                "inline": patch.system_prompt
+            }
         if patch.instruction_guidance is not None:
             base = original.resolved_manifest().agents[target].instructions.inline
             # Always derive the immutable prefix from the original, not the last candidate.
@@ -1696,13 +2312,30 @@ class AgentPackageOptimizer:
                 data["manifest"]["agents"][target][field] = list(selected)
         data["files"].update(patch.files)
         data["files"].update(generated_files)
+        data["files"].update(skill_files)
+        for name in patch.deleted_files:
+            data["files"].pop(name)
         data["manifest"]["agents"][target]["budgets"].update(patch.budgets)
         # A no-op must not win because of stochastic scoring or a version-only change.
-        if data == current.model_dump(mode="json"):
+        if AgentPackageBundle.model_validate(data).model_dump(mode="json") == current.model_dump(mode="json"):
             raise NoOptimizationChange("proposal does not change package content")
         data["manifest"]["metadata"]["version"] = version
         candidate = AgentPackageBundle.model_validate(data)
-        candidate.resolved_manifest()
+        manifest = candidate.resolved_manifest()
+        instructions = manifest.agents[target].instructions
+        prompt = instructions.inline if instructions.inline is not None else candidate.files.get(instructions.path, "")
+        if len(prompt) > policy.max_system_prompt_chars:
+            raise OptimizationResourceLimit(f"System prompt has {len(prompt)} characters; max_system_prompt_chars={policy.max_system_prompt_chars}.")
+        skill_files = {path: text for path, text in candidate.files.items()
+                       if PurePosixPath(path).name == "SKILL.md"}
+        oversized = {path: len(text) for path, text in skill_files.items() if len(text) > policy.max_skill_chars}
+        if oversized:
+            raise OptimizationResourceLimit(f"SKILL.md character counts {oversized}; max_skill_chars={policy.max_skill_chars}. Condense these files while preserving reusable procedures.")
+        skill_roots = {PurePosixPath(path).parent for path in skill_files}
+        external_skills = set(manifest.agents[target].skills) - {root.name for root in skill_roots}
+        skill_count = len(skill_roots) + len(external_skills)
+        if skill_count > policy.max_skill_count:
+            raise OptimizationResourceLimit(f"Package has {skill_count} Skills; bundled roots={sorted(str(root) for root in skill_roots)}, external={sorted(external_skills)}; max_skill_count={policy.max_skill_count}. Consolidate Skills and update the manifest.")
         return candidate
 
     @staticmethod
@@ -1722,7 +2355,25 @@ class AgentPackageOptimizer:
                      or (r.previous_passed and not current[r.case_id].grade.passed))
 
     @staticmethod
+    def _paired_evaluations(previous, candidate):
+        """Compare measured common cases; new training questions have no old score."""
+        current = {r.case.id: r for r in candidate.cases}
+        old_ids = {r.case.id for r in previous.cases}
+        if len(current) != len(candidate.cases) or len(old_ids) != len(previous.cases):
+            raise ValueError("evaluation contains duplicate cases")
+        aligned = []
+        for old in previous.cases:
+            new = current.get(old.case.id)
+            if new is None or new.case != old.case:
+                raise ValueError("candidate is missing or changed a previously measured case")
+            aligned.append(new)
+        if any(r.case.split != "training" for r in candidate.cases if r.case.id not in old_ids):
+            raise ValueError("only training cases may be added between evaluations")
+        return previous, OptimizationEvaluation(package_hash=candidate.package_hash, cases=tuple(aligned))
+
+    @staticmethod
     def _regressions(previous, candidate):
+        previous, candidate = AgentPackageOptimizer._paired_evaluations(previous, candidate)
         changes = []
         for old, new in zip(previous.cases, candidate.cases, strict=True):
             if (old.case.id, old.case.split) != (new.case.id, new.case.split):
@@ -1735,24 +2386,27 @@ class AgentPackageOptimizer:
 
     @staticmethod
     def _select_adaptive(previous, candidate, minimum, minimum_latency=None):
-        # Both packages are evaluated on exactly the same accumulated questions.
-        for old, new in zip(previous.cases, candidate.cases, strict=True):
-            if (old.case.id, old.case.split) != (new.case.id, new.case.split):
-                raise ValueError("candidate and incumbent case ordering differs")
+        # Check every new execution, but compute improvement only on shared cases.
+        for new in candidate.cases:
             if new.observation.state != "completed":
                 return False, "Target execution did not complete"
             audit = new.observation.evidence.get("generated_tool_audit")
             if audit and not audit["passed"]:
                 return False, "Generated-tool execution audit failed"
-        before, after = previous.overall_score(), candidate.overall_score()
+        previous, paired = AgentPackageOptimizer._paired_evaluations(previous, candidate)
+        before, after = previous.objective_score(), paired.objective_score()
         if after - before >= minimum - 1e-12:
             count = len(AgentPackageOptimizer._regressions(previous, candidate))
-            return True, (f"Overall quality improved {before:.4f} -> {after:.4f}; "
+            metric = "Selection score" if any(c.objective_score is not None for c in paired.cases) else "Overall quality"
+            return True, (f"{metric} improved {before:.4f} -> {after:.4f}; "
+                          f"on {len(previous.cases)} common cases; {len(candidate.cases) - len(previous.cases)} new training cases not backtested; "
                           f"{count} case regressions retained for follow-up")
         return False, "Insufficient overall quality improvement"
 
     @staticmethod
     def _select(previous, candidate, minimum, minimum_latency=None):
+        if any(c.objective_score is not None for c in candidate.cases):
+            return AgentPackageOptimizer._select_adaptive(previous, candidate, minimum)
         for old, new in zip(previous.cases, candidate.cases, strict=True):
             if new.observation.state != "completed":
                 return False, f"Target execution did not complete: {new.case.id}"

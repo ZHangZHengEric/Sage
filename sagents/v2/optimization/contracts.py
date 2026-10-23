@@ -17,11 +17,25 @@ class OptimizationCase(StrictModel):
     id: str
     input: VerbatimText = Field(min_length=1)
     rubric: VerbatimText = Field(min_length=1)
+    # Evaluator-owned reference; never sent as target input or dialogue context.
+    reference_answer: VerbatimText | None = None
     split: Literal["training", "validation", "test", "final"] = "training"
     mode: Literal["single_turn", "dialogue"] = "single_turn"
     max_turns: int = Field(default=5, ge=1, le=20)
+    # Some scorers measure final state but cannot establish that the user is done.
+    dialogue_completion: Literal["score", "user"] = "score"
     user_context: VerbatimText = ""
+    # Opaque environment initialization, distinct from hidden grading references.
+    environment_context: dict[str, Any] = Field(default_factory=dict)
     coverage_tags: tuple[str, ...] = ()
+
+
+def case_prompt_identity(case):
+    """A shared greeting is not a duplicate of a different dialogue scenario."""
+    data = case.model_dump(mode="json") if isinstance(case, OptimizationCase) else case
+    opening = " ".join(data["input"].casefold().split())
+    context = " ".join(data.get("user_context", "").casefold().split())
+    return (opening, context if data.get("mode") == "dialogue" else "")
 
 
 class OptimizationSuite(StrictModel):
@@ -67,14 +81,19 @@ class OptimizationFinalSuite(StrictModel):
 
     def assert_disjoint(self, cases):
         known_ids = {case.id for case in cases}
-        known_inputs = {" ".join(case.input.split()) for case in cases}
+        known_inputs = {case_prompt_identity(case) for case in cases}
         for case in self.cases:
-            if case.id in known_ids or " ".join(case.input.split()) in known_inputs:
+            if case.id in known_ids or case_prompt_identity(case) in known_inputs:
                 raise ValueError("final cases must be distinct from optimization cases")
 
 
 class OptimizationConstraints(StrictModel):
-    # Original instructions are preserved; only a separate guidance overlay changes.
+    # A candidate can replace its whole prompt; the baseline bundle stays immutable.
+    allow_system_prompt: bool = True
+    max_system_prompt_chars: int = Field(default=64000, ge=1, le=1000000)
+    max_skill_chars: int = Field(default=32000, ge=1, le=1000000)
+    max_skill_count: int = Field(default=16, ge=0, le=256)
+    # Compatibility for historical clients; new hosts disable overlay proposals.
     allow_instruction_guidance: bool = True
     editable_files: tuple[str, ...] = ()
     creatable_files: tuple[str, ...] = ()
@@ -82,6 +101,7 @@ class OptimizationConstraints(StrictModel):
     allow_tool_creation: bool = False
     require_clean_generated_tools: bool = False
     allow_skill_changes: bool = False
+    allow_skill_creation: bool = False
     tool_candidates: dict[ToolName, str] = Field(default_factory=dict)
     skill_candidates: dict[SkillName, str] = Field(default_factory=dict)
     max_guidance_chars: int = Field(default=16000, ge=1, le=1000000)
@@ -100,14 +120,36 @@ class OptimizationConstraints(StrictModel):
     ] = ()
 
 
+class OptimizationEditSummary(StrictModel):
+    """File authors return an explanation; files are the sole change source."""
+    rationale: str = Field(min_length=1)
+    experience_notes: str = Field(default="", max_length=16000)
+
+
 class OptimizationPatch(StrictModel):
     rationale: str = Field(min_length=1)
+    experience_notes: str = Field(default="", max_length=16000)
+    system_prompt: VerbatimText | None = Field(
+        default=None, description="Complete production system prompt replacing the current target prompt."
+    )
     tool_definitions: dict[ToolName, GeneratedTool] = Field(default_factory=dict)
-    instruction_guidance: VerbatimText | None = None
+    skill_definitions: dict[SkillName, VerbatimText] = Field(default_factory=dict)
+    instruction_guidance: VerbatimText | None = Field(
+        default=None, description="Deprecated legacy overlay; use system_prompt for whole-prompt optimization."
+    )
     files: dict[str, VerbatimText] = Field(default_factory=dict)
+    deleted_files: tuple[str, ...] = ()
     budgets: dict[str, Any] = Field(default_factory=dict)
     tools: tuple[ToolName, ...] | None = None
     skills: tuple[SkillName, ...] | None = None
+
+    @model_validator(mode="after")
+    def one_instruction_source(self):
+        if self.system_prompt is not None and self.instruction_guidance is not None:
+            raise ValueError("system_prompt and instruction_guidance are mutually exclusive")
+        if self.system_prompt is not None and not self.system_prompt.strip():
+            raise ValueError("system_prompt must not be empty")
+        return self
 
 
 class OptimizationObservation(StrictModel):
@@ -117,13 +159,50 @@ class OptimizationObservation(StrictModel):
     elapsed_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
+    cached_input_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+    usage_reported: bool | None = None
     cost: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+class OptimizationFinding(StrictModel):
+    category: str = Field(min_length=1, max_length=80)
+    cause: str = Field(min_length=1, max_length=2000)
+    evidence_indexes: tuple[int, ...] = Field(min_length=1, max_length=12)
+    recommendation: str = Field(min_length=1, max_length=2000)
+    scope: Literal["instructions", "skills", "tools", "procedure"]
+    confidence: Literal["confirmed", "hypothesis"]
+
+
+class OptimizationDiagnosis(StrictModel):
+    summary: str = Field(min_length=1, max_length=2000)
+    findings: tuple[OptimizationFinding, ...] = Field(default=(), max_length=8)
+    strengths: tuple[str, ...] = Field(default=(), max_length=4)
+    uncertainties: tuple[str, ...] = Field(default=(), max_length=4)
+    coverage: str = Field(min_length=1, max_length=1000)
+
+
+class OptimizationPriority(StrictModel):
+    title: str = Field(min_length=1, max_length=160)
+    cause: str = Field(min_length=1, max_length=2000)
+    recommendation: str = Field(min_length=1, max_length=2000)
+    scope: Literal["instructions", "skills", "tools", "procedure"]
+    supporting_case_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+
+
+class OptimizationDiagnosisSummary(StrictModel):
+    summary: str = Field(min_length=1, max_length=2000,
+        description="Brief synthesis, preferably under 600 characters. Put detailed actions in priorities, not a repeated numbered plan in summary.")
+    priorities: tuple[OptimizationPriority, ...] = Field(default=(), max_length=8)
+    uncertainties: tuple[str, ...] = Field(default=(), max_length=8)
 
 
 class OptimizationGrade(StrictModel):
     score: float = Field(ge=0, le=1, allow_inf_nan=False)
     passed: bool
     rationale: str = Field(min_length=1)
+    diagnosis: OptimizationDiagnosis | None = None
+    scorer_details: dict[str, Any] = Field(default_factory=dict)
 
 
 class OptimizationDialogueReply(StrictModel):
@@ -136,7 +215,7 @@ class OptimizationDialogueTurn(StrictModel):
     turn: int
     input: VerbatimText
     observation: OptimizationObservation
-    grade: OptimizationGrade
+    grade: OptimizationGrade | None = None
     model_grade: OptimizationGrade | None = None
 
 
@@ -146,11 +225,14 @@ class OptimizationCaseTrial(StrictModel):
     model_grade: OptimizationGrade | None = None
     dialogue: tuple[OptimizationDialogueTurn, ...] = ()
     stop_reason: str | None = None
+    objective_score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    score_metrics: dict[str, float] = Field(default_factory=dict)
 
 
 class OptimizationCaseResult(OptimizationCaseTrial):
     case: OptimizationCase
     trials: tuple[OptimizationCaseTrial, ...] = ()
+    contrast: OptimizationDiagnosis | None = None
 
 
 class OptimizationEvaluation(StrictModel):
@@ -164,6 +246,13 @@ class OptimizationEvaluation(StrictModel):
     def overall_score(self) -> float:
         """Equal split weights remain stable as training questions accumulate."""
         return (self.mean_score("training") + self.mean_score("validation")) / 2
+
+    def objective_score(self) -> float:
+        def mean(split):
+            values = [c.grade.score if c.objective_score is None else c.objective_score
+                      for c in self.cases if c.case.split == split]
+            return sum(values) / len(values)
+        return (mean("training") + mean("validation")) / 2
 
 
 class OptimizationSuiteIssue(StrictModel):
@@ -231,6 +320,8 @@ class OptimizationRound(StrictModel):
     review: OptimizationProposalReview | None = None
     overall_before: float | None = None
     overall_after: float | None = None
+    objective_before: float | None = None
+    objective_after: float | None = None
     regressions: tuple[OptimizationRegression, ...] = ()
 
 
@@ -318,8 +409,13 @@ class OptimizationReport(StrictModel):
     termination: OptimizationTermination | None = None
     internal_agents: dict[str, OptimizationAgent] = Field(default_factory=dict)
     evaluation_repeats: int = 1
+    evaluation_aggregation: Literal["minimum", "mean"] = "minimum"
+    grow_training: bool = True
+    refresh_incumbent: bool = False
     final_verification: OptimizationFinalVerification | None = None
     optimization_scope: tuple[OptimizationPart, ...] | None = None
+    builtin_scoring: dict[str, Any] = Field(default_factory=lambda: {"mode": "quality"})
+    tuning_experience: str = ""
 
 
 class OptimizationIteration(StrictModel):

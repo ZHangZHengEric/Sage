@@ -476,12 +476,14 @@ class ApplicationAssembler:
             job_runtime=services["execution.job-runtime"],
             execution_binding_provider=self.state.execution_binding_provider,
             derived_state_store=derived_state,
+            runtime_skill_authorizations=self.state.runtime_skill_authorizations,
         )
         driver_runtime = HarnessRuntime(
             driver_session_store,
             job_runtime=services["execution.job-runtime"],
             execution_binding_provider=self.state.execution_binding_provider,
             derived_state_store=derived_state,
+            runtime_skill_authorizations=self.state.runtime_skill_authorizations,
         )
 
         # Selection/scope ownership belongs to the application; the Agent graph
@@ -649,6 +651,12 @@ class ApplicationAssembler:
 
                 active_context = await session_store.get_run_context(run_id)
                 active_command = await session_store.get_start_command(run_id)
+                from sagents.v2.skill.runtime import active_runtime_skills
+                runtime_skills = await active_runtime_skills(
+                    active_command, session_store, self.state.runtime_skill_authorizations,
+                )
+                if runtime_skills and not standard_skills:
+                    raise ValueError("runtime Skills require skill.provider and a Skill workspace")
                 active_tenant = tenant_id or active_context.actor.tenant_id
                 run_models = dict(models_by_agent)
                 if entry_descriptor.agent_id not in run_models:
@@ -845,6 +853,7 @@ class ApplicationAssembler:
                     )
                     if (active_skills is not None) and (
                         definition.skills
+                        or runtime_skills
                         or "load_skill" in definition.tools
                         or self_configuration is not None
                     ):
@@ -872,6 +881,7 @@ class ApplicationAssembler:
                             source=skill_source,
                             workspace=skill_workspace,
                             skill_loading=member_components.skill_loading,
+                            runtime_skills=runtime_skills,
                             activations=SessionDerivedSkillActivationRepository(
                                 derived_state,
                                 resolve_session_id,
@@ -887,6 +897,9 @@ class ApplicationAssembler:
                     return member_components.factory.create_loop(
                         effective_resolved,
                         definition_id,
+                        additional_preload_skills=tuple(
+                            value.descriptor.name for value in runtime_skills if value.preload
+                        ),
                         expected_resolved_spec_hash=(
                             None
                         ),

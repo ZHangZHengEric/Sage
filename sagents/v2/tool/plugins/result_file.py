@@ -61,13 +61,38 @@ class FileToolResultProcessor:
             "The preview above may end inside a value.\n"
         )
         preview = text[:self.max_inline_characters] + "\n\n" + notice
+        # Keep file reads machine-readable, with receipt bounds describing only
+        # COMPLETE lines actually delivered to the model. A cut JSON preview
+        # hides its line metadata and makes verified incremental reads impossible.
+        structured = None
+        if call.tool_name == "file_read" and len(result.content) == 1 and isinstance(result.content[0], JsonBlock):
+            value = result.content[0].value
+            if (isinstance(value, dict) and value.get("status") == "success"
+                    and isinstance(value.get("content"), str)
+                    and type(value.get("start_line")) is int and type(value.get("end_line")) is int):
+                lines = value["content"].splitlines()
+                first, low, high = value["start_line"], 0, len(lines)
+                def page(count):
+                    return {**value, "content": "\n".join(lines[:count]),
+                            "end_line": first + count - 1, "requested_end_line": value["end_line"],
+                            "remaining_start_line": first + count, "truncated": True,
+                            "full_result": path,
+                            "reading": "Read remaining_start_line through requested_end_line in smaller ranges."}
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if len(json.dumps(page(middle), ensure_ascii=False)) <= self.max_inline_characters:
+                        low = middle
+                    else:
+                        high = middle - 1
+                if low:
+                    structured = JsonBlock(value=page(low))
         media = tuple(b for b in result.content if not isinstance(b, (TextBlock, JsonBlock)))
         logger.info("tool.result.offloaded", "Saved oversized Tool result",
                     attributes={"original_characters": len(text), "inline_characters": len(preview),
                                 "preview_characters": min(len(text), self.max_inline_characters),
                                 "max_inline_characters": self.max_inline_characters})
         return result.model_copy(update={
-            "content": (TextBlock(text=preview), *media),
+            "content": (structured or TextBlock(text=preview), *media),
             "metadata": {**result.metadata, "result_offloaded": True,
                          "context_reference": {"path": path, "original_characters": len(text)}},
         })
