@@ -11,6 +11,8 @@ from typing import Protocol
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from uuid import uuid4
+from contextvars import ContextVar
+
 
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.agent.management.service import BuilderFactory, PackageAuthorizer
@@ -19,6 +21,48 @@ from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.optimization.contracts import OptimizationObservation
+
+
+# Hosts may use this to pair simulator seeds across independently run packages.
+OPTIMIZATION_TRIAL: ContextVar[int] = ContextVar("optimization_trial", default=1)
+OPTIMIZATION_CASE: ContextVar[object | None] = ContextVar("optimization_case", default=None)
+
+
+async def execution_usage(store, run_id, *, after_sequence, last_sequence):
+    """Read usage for this send boundary independently of bounded trace capture.
+
+    A resumed Run's terminal result includes earlier segments. Durable usage
+    events let each send report only its new consumption, including suspensions.
+    Partial/missing provider usage is explicitly incomplete; cost is never guessed.
+    """
+    totals = dict(input_tokens=0, output_tokens=0, cached_input_tokens=0, reasoning_tokens=0)
+    cursor, count, reported, cost, cost_complete = after_sequence, 0, True, 0.0, True
+    while cursor < last_sequence:
+        page = await store.read_events(run_id, after_sequence=cursor, limit=200)
+        if not page:
+            reported = False
+            cost_complete = False
+            break
+        previous = cursor
+        for event in page:
+            if event.run_sequence > last_sequence:
+                break
+            cursor = event.run_sequence
+            if event.data.kind != "usage":
+                continue
+            usage = event.data.usage
+            count += 1
+            reported = reported and usage.reported
+            for key in totals:
+                totals[key] += getattr(usage, key)
+            if usage.cost is None:
+                cost_complete = False
+            else:
+                cost += usage.cost
+        if cursor <= previous:
+            raise RuntimeError("usage event cursor did not advance")
+    return {**totals, "reported": bool(count and reported),
+            "cost": cost if count and reported and cost_complete else None}
 
 
 class OptimizationRunner(Protocol):
@@ -69,7 +113,10 @@ class IsolatedOptimizationRunner:
 
     async def run(self, package, agent_id, content, context):
         async with self.conversation(package, agent_id, context) as session:
-            return await session.send(content)
+            observation = await session.send(content)
+            from sagents.v2.optimization.evaluation_files import collect_evaluation_output, compact_evaluation_receipts
+            collected = collect_evaluation_output(session.workspace, package, observation)
+            return observation.model_copy(update={"evidence": {**(compact_evaluation_receipts(observation.evidence) if collected else observation.evidence), **collected}})
 
     @asynccontextmanager
     async def conversation(
@@ -107,7 +154,7 @@ class IsolatedOptimizationRunner:
                 raise
             try:
                 yield _NativeConversation(
-                    self, app, package, agent_id, context, started
+                    self, app, package, agent_id, context, started, root
                 )
             finally:
                 await app.close()
@@ -174,6 +221,7 @@ class IsolatedOptimizationRunner:
             size = 0
             truncated = False
             boundary_messages = []
+            omitted_events = 0
             while (
                 cursor < snapshot.last_run_sequence
                 and scanned < self.max_evidence_events
@@ -193,13 +241,19 @@ class IsolatedOptimizationRunner:
                         item = data.item.data
                         if item.kind == 'message' and item.role == 'assistant' and data.item.visibility == 'public':
                             boundary_messages.append(''.join(b.text for b in item.content if b.kind == 'text'))
-                    if data.kind not in {"tool", "flow", "artifact"} and not (
+                    if data.kind in {"run", "step"} and data.error is not None:
+                        payload["error"] = data.error.model_dump(mode="json")
+                    if data.kind not in {"tool", "flow", "artifact", "run", "step", "continuation", "interaction", "checkpoint"} and not (
                         data.kind == "item"
                         and data.item is not None
                         and data.item.data.kind in {"tool_call", "tool_result"}
                     ):
                         continue
-                    value = event.model_dump(mode="json")
+                    from sagents.v2.optimization.execution_records import compact_execution_event
+                    value = compact_execution_event(event.model_dump(mode="json"), payload.get("final_items", []))
+                    if value is None:
+                        omitted_events += 1
+                        continue
                     length = len(json.dumps(value, ensure_ascii=False).encode())
                     if size + length > self.max_evidence_bytes:
                         truncated = True
@@ -207,9 +261,13 @@ class IsolatedOptimizationRunner:
                     size += length
                     events.append(value)
             payload["runtime_events"] = events
+            payload["runtime_lifecycle_events_omitted"] = omitted_events
             payload["runtime_events_truncated"] = (
                 truncated or cursor < snapshot.last_run_sequence
             )
+            if snapshot.state == RunState.SUSPENDED:
+                suspension = await agent.runtime.session_store.get_suspension(snapshot.suspension_id)
+                payload["suspension"] = suspension.model_dump(mode="json")
             messages = []
             for item in payload.get("final_items", []):
                 data = item["data"]
@@ -232,7 +290,11 @@ class IsolatedOptimizationRunner:
                             messages = [interaction.payload['prompt']]
             elif resume_observation is not None:
                 messages = boundary_messages
-            usage = payload.get("usage", {})
+            usage = await execution_usage(agent.runtime.session_store, snapshot.run_id,
+                after_sequence=after_sequence, last_sequence=snapshot.last_run_sequence)
+            payload["execution_usage"] = usage
+            payload["execution_usage_scope"] = {"after_sequence": after_sequence,
+                                                "through_sequence": snapshot.last_run_sequence}
             return OptimizationObservation(
                 state=snapshot.state.value,
                 output="\n".join(messages),
@@ -240,6 +302,9 @@ class IsolatedOptimizationRunner:
                 elapsed_seconds=time.monotonic() - started,
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
+                cached_input_tokens=usage["cached_input_tokens"],
+                reasoning_tokens=usage["reasoning_tokens"],
+                usage_reported=usage["reported"],
                 cost=usage.get("cost"),
             )
         finally:
@@ -248,7 +313,8 @@ class IsolatedOptimizationRunner:
 
 
 class _NativeConversation:
-    def __init__(self, runner, app, package, agent_id, context, started):
+    def __init__(self, runner, app, package, agent_id, context, started, workspace=None):
+        self.workspace = workspace
         self.runner, self.app, self.package = runner, app, package
         self.agent_id, self.context = agent_id, context
         self.session_id = None

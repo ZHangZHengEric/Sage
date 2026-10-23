@@ -42,6 +42,7 @@ from sagents.v2.skill.provider import (
     InvocationGrantSkillCatalog,
     SkillLoader,
 )
+from sagents.v2.contracts.runtime_skills import RuntimeSkillAttachment, RuntimeSkillAuthorization
 
 _LAZY_EXPORTS = {
     "SkillLoadTool": ("sagents.v2.tool.plugins.skill.operations", "SkillLoadTool"),
@@ -73,6 +74,8 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "RuntimeSkillAttachment",
+    "RuntimeSkillAuthorization",
     "SqliteSkillRepository",
     "MemorySkillRepository",
     "AutoSyncSkillWorkspace",

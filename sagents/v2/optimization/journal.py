@@ -18,10 +18,10 @@ class OptimizationJournal:
     storage is explicitly caller-selected. No automatic resume is provided.
     """
 
-    def __init__(self, path: str | Path | None, on_event=None):
+    def __init__(self, path: str | Path | None, on_event=None, *, start_sequence=0):
         self.path = Path(path) if path is not None else None
         self.file = None
-        self.sequence = 0
+        self.sequence = start_sequence
         self.on_event = on_event
 
     def __enter__(self):

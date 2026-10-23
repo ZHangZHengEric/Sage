@@ -51,6 +51,7 @@ async def test_mcp_real_stdio_lists_tools_and_reports_missing_desktop(tmp_path):
                 "rsi_status",
                 "rsi_questions",
                 "rsi_cancel",
+                "rsi_resume",
                 "rsi_version",
                 "rsi_apply",
             }
@@ -228,7 +229,8 @@ async def test_old_runtime_is_rejected_before_any_api_mutation(tmp_path):
 
 
 def private_run():
-    train = {'id': 'train', 'split': 'training', 'input': 'TRAIN_VISIBLE', 'rubric': 'TRAIN_RUBRIC'}
+    train = {'id': 'train', 'split': 'training', 'input': 'TRAIN_VISIBLE', 'rubric': 'TRAIN_RUBRIC',
+             'reference_answer': 'EVALUATOR_REFERENCE_SECRET'}
     dev = {'id': 'DEV_ID_SECRET', 'split': 'validation', 'input': 'DEV_QUESTION_SECRET', 'rubric': 'DEV_RUBRIC_SECRET'}
     test = {'id': 'TEST_ID_SECRET', 'split': 'test', 'input': 'TEST_QUESTION_SECRET', 'rubric': 'TEST_RUBRIC_SECRET'}
     evaluation = {'package_hash': 'hash', 'cases': [
@@ -255,6 +257,16 @@ def private_run():
         ]}
 
 
+def test_model_view_keeps_training_priorities_but_hides_raw_evaluator_reference():
+    from app.v2.cli.rsi_visibility import model_view
+    event = {'event': 'training_diagnosis_completed', 'data': {
+        'round': 2, 'summary': {'summary': 'TRAINING PRIORITY', 'priorities': []},
+        'reference_answer': 'EVALUATOR_REFERENCE_SECRET'}}
+    visible = model_view(event)
+    assert visible['data']['summary']['summary'] == 'TRAINING PRIORITY'
+    assert 'SECRET' not in json.dumps(visible)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('tool,arguments', [
     ('rsi_start', {'agent_id': 'a', 'goal': 'Improve', 'request_id': 'intent'}),
@@ -264,6 +276,7 @@ def private_run():
     ('rsi_questions', {'agent_id': 'a', 'run_id': 'r'}),
     ('rsi_version', {'agent_id': 'a', 'version_id': 'v'}),
     ('rsi_cancel', {'agent_id': 'a', 'run_id': 'r'}),
+    ('rsi_resume', {'agent_id': 'a', 'run_id': 'r'}),
     ('rsi_apply', {'agent_id': 'a', 'version_id': 'v', 'expected_fingerprint': 'x' * 64, 'confirmed': True}),
 ])
 async def test_every_mcp_read_mode_seals_test_and_dev_content(tmp_path, tool, arguments):

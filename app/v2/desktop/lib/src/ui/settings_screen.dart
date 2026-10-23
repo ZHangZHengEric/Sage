@@ -589,11 +589,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         frameBuilder: (title, action, body) => _SettingsContent(
           title: title,
           action: action,
+          stackedActions: true,
           fillRemaining: true,
           children: [body],
         ),
         fieldBuilder: (label, control) =>
-            _SettingsRow(label: label, control: control),
+            _SettingsRow(label: label, control: control, labelWidth: 220),
       );
     }
     return switch (_section) {
@@ -1060,17 +1061,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final loadingSelection =
         widget.controller.settingsAgentLoadingId == _settingsAgentId ||
         agent.id != _settingsAgentId;
+    final evolving = widget.controller.agents.any(
+      (value) =>
+          value.id == agent.id &&
+          (value.rsiStatus == 'queued' || value.rsiStatus == 'running'),
+    );
     return _SettingsContent(
       title: context.l10n.text('settings.agent'),
       status: _saving,
       fillRemaining: true,
-      action: Row(
-        mainAxisSize: MainAxisSize.min,
+      listAction: _SettingsActionButton(
+        key: const ValueKey('settings-agent-add'),
+        onTap: _saving || loadingSelection || _editingAgent
+            ? null
+            : _createAgent,
+        icon: const Icon(CupertinoIcons.add, size: 15),
+        label: context.l10n.text('common.add'),
+      ),
+      action: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           _SettingsActionButton(
             key: const ValueKey('settings-agent-set-default'),
             onTap:
                 _saving ||
+                    loadingSelection ||
                     (_draft.defaultAgentId?.isNotEmpty == true
                         ? agent.id == _draft.defaultAgentId
                         : agent.isDefault)
@@ -1092,16 +1110,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : 'settings.setAsDefault',
             ),
           ),
-          const SizedBox(width: 10),
-          _SettingsActionButton(
-            key: const ValueKey('settings-agent-add'),
-            onTap: _saving || loadingSelection || _editingAgent
-                ? null
-                : _createAgent,
-            icon: const Icon(CupertinoIcons.add, size: 15),
-            label: context.l10n.text('common.add'),
-          ),
-          const SizedBox(width: 10),
           _SettingsActionButton(
             key: const ValueKey('settings-agent-edit'),
             onTap: _saving || loadingSelection ? null : _toggleAgentEditing,
@@ -1112,6 +1120,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
             label: context.l10n.text(
               _editingAgent ? 'common.save' : 'common.edit',
             ),
+          ),
+          _SettingsActionButton(
+            key: const ValueKey('settings-agent-rsi'),
+            onTap: _saving || loadingSelection || _editingAgent
+                ? null
+                : () => _openRsi(agent),
+            icon: const Icon(CupertinoIcons.arrow_2_circlepath, size: 15),
+            label: context.l10n.languageCode == 'zh'
+                ? (evolving ? '进化中' : '进化')
+                : (evolving ? 'Evolving' : 'Evolution'),
+          ),
+          _SettingsActionButton(
+            key: const ValueKey('settings-agent-history'),
+            onTap: _saving || loadingSelection || _editingAgent
+                ? null
+                : () => _openRsi(agent, historyOnly: true),
+            icon: const Icon(CupertinoIcons.clock, size: 15),
+            label: context.l10n.languageCode == 'zh'
+                ? '版本历史'
+                : 'Version history',
+            width: 116,
+          ),
+          _SettingsActionButton(
+            key: const ValueKey('settings-agent-clone'),
+            onTap: _saving || loadingSelection
+                ? null
+                : () => _createAgent(sourceId: agent.id),
+            icon: const Icon(CupertinoIcons.doc_on_doc, size: 15),
+            label: context.l10n.text('common.copy'),
           ),
         ],
       ),
@@ -1158,50 +1195,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Wrap(
-                        spacing: 10,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          _SettingsActionButton(
-                            key: const ValueKey('settings-agent-rsi'),
-                            onTap: _saving || _editingAgent
-                                ? null
-                                : () => _openRsi(agent),
-                            icon: const Icon(
-                              CupertinoIcons.arrow_2_circlepath,
-                              size: 15,
-                            ),
-                            label: context.l10n.languageCode == 'zh'
-                                ? '进化'
-                                : 'Evolution',
-                          ),
-                          _SettingsActionButton(
-                            key: const ValueKey('settings-agent-history'),
-                            onTap: _saving || _editingAgent
-                                ? null
-                                : () => _openRsi(agent, historyOnly: true),
-                            icon: const Icon(CupertinoIcons.clock, size: 15),
-                            label: context.l10n.languageCode == 'zh'
-                                ? '版本历史'
-                                : 'Version history',
-                            width: 116,
-                          ),
-                          TextButton.icon(
-                            key: const ValueKey('settings-agent-clone'),
-                            onPressed: _saving
-                                ? null
-                                : () => _createAgent(sourceId: agent.id),
-                            icon: const Icon(
-                              CupertinoIcons.doc_on_doc,
-                              size: 16,
-                            ),
-                            label: Text(context.l10n.text('common.copy')),
-                          ),
-                        ],
-                      ),
-                    ),
                     _SettingsRowGroup(
                       children: [
                         _AgentTextRow(
@@ -1632,6 +1625,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 22),
                     _AssignmentSection(
                       title: context.l10n.text('settings.tools'),
+                      showSelectedCount: true,
                       groups: _toolAssignmentGroups(
                         widget.controller.toolCatalog,
                         context.l10n,
@@ -1853,6 +1847,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _selectSection(int value) {
+    if (value == 6) {
+      unawaited(widget.controller.refreshMcpConnections());
+    }
     if (value == _navItems(context).length - 1) {
       widget.controller.loadArchivedConversations();
     }
@@ -1870,7 +1867,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       color: colors.surface,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(30, 42, 30, 32),
-        child: _content(),
+        child: AdaptiveLiquidGlassLayer(
+          settings: _glass(context),
+          child: _content(),
+        ),
       ),
     );
     return LayoutBuilder(
@@ -3919,40 +3919,124 @@ class _SettingsContent extends StatelessWidget {
     required this.title,
     required this.children,
     this.action,
+    this.listAction,
+    this.stackedActions = false,
     this.status = false,
     this.fillRemaining = false,
   });
   final String title;
   final List<Widget> children;
   final Widget? action;
+  final Widget? listAction;
+  final bool stackedActions;
   final bool status;
   final bool fillRemaining;
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              key: const ValueKey('settings-content-title'),
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 160),
-            child: status
-                ? const CupertinoActivityIndicator(
+      if (stackedActions)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    key: const ValueKey('settings-content-title'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (status)
+                  const CupertinoActivityIndicator(
                     key: ValueKey('settings-saving'),
+                  ),
+              ],
+            ),
+            if (action != null) ...[
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerLeft, child: action),
+            ],
+          ],
+        )
+      else if (listAction != null)
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final heading = Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    key: const ValueKey('settings-content-title'),
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (status)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: CupertinoActivityIndicator(
+                      key: ValueKey('settings-saving'),
+                    ),
+                  ),
+                listAction!,
+              ],
+            );
+            return constraints.maxWidth >= 700
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: 250, height: 36, child: heading),
+                      const SizedBox(width: 32),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topRight,
+                          child: action,
+                        ),
+                      ),
+                    ],
                   )
-                : const SizedBox.shrink(key: ValueKey('settings-saved')),
-          ),
-          if (action != null) ...[const SizedBox(width: 14), action!],
-        ],
-      ),
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      heading,
+                      if (action != null) ...[
+                        const SizedBox(height: 12),
+                        Align(alignment: Alignment.centerRight, child: action),
+                      ],
+                    ],
+                  );
+          },
+        )
+      else
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                key: const ValueKey('settings-content-title'),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child: status
+                  ? const CupertinoActivityIndicator(
+                      key: ValueKey('settings-saving'),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('settings-saved')),
+            ),
+            if (action != null) ...[const SizedBox(width: 14), action!],
+          ],
+        ),
       const SizedBox(height: 28),
       Expanded(
         child: fillRemaining
@@ -4752,10 +4836,12 @@ class _SettingsRow extends StatelessWidget {
     required this.label,
     required this.control,
     this.description,
+    this.labelWidth,
   });
   final String label;
   final Widget control;
   final String? description;
+  final double? labelWidth;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -4780,7 +4866,7 @@ class _SettingsRow extends StatelessWidget {
           ],
         ],
       );
-      if (constraints.maxWidth < 560) {
+      if (constraints.maxWidth < (labelWidth == null ? 560 : 760)) {
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Column(
@@ -4799,9 +4885,17 @@ class _SettingsRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Row(
             children: [
-              Expanded(child: labelWidget),
-              const SizedBox(width: 24),
-              Flexible(child: control),
+              if (labelWidth != null) ...[
+                SizedBox(width: labelWidth, child: labelWidget),
+                const SizedBox(width: 24),
+                Expanded(
+                  child: Align(alignment: Alignment.centerLeft, child: control),
+                ),
+              ] else ...[
+                Expanded(child: labelWidget),
+                const SizedBox(width: 24),
+                Flexible(child: control),
+              ],
             ],
           ),
         ),
@@ -5464,8 +5558,10 @@ class _AssignmentSection extends StatelessWidget {
     this.groups = const [],
     this.labels = const {},
     this.description,
+    this.showSelectedCount = false,
   });
   final String title;
+  final bool showSelectedCount;
   final String? description;
   final Iterable<String> values;
   final List<_AssignmentGroup> groups;
@@ -5492,11 +5588,25 @@ class _AssignmentSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        Row(
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            if (showSelectedCount) ...[
+              const SizedBox(width: 8),
+              Text(
+                '${selected.length}',
+                key: ValueKey('assignment-count-$title'),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
         ),
         if (description case final description?) ...[
           const SizedBox(height: 5),

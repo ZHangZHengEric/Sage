@@ -9,6 +9,7 @@ from pydantic import Field, field_validator, model_serializer, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.runtime.extensions.contracts import ExtensionScope
+from sagents.v2.contracts.runtime_skills import RuntimeSkillAuthorization
 
 
 REMOVED_CAPABILITIES = frozenset(
@@ -96,6 +97,8 @@ class SkillModulesConfig(StrictModel):
 
 
 class RuntimeConfig(StrictModel):
+    # Host authority, independent of package Skills; empty denies attachments.
+    runtime_skill_authorizations: tuple[RuntimeSkillAuthorization, ...] = ()
     preset: Identifier = "standard"
     deployment_profile: Literal["controlled_host", "distributed"] = "controlled_host"
     plugin_trust_policy: Literal["trusted_declared", "built_in_only"] = (
@@ -143,6 +146,7 @@ class RuntimeConfig(StrictModel):
             data.pop("skills", None)
         # Newly introduced defaults must not invalidate stored package refs.
         for name, default in (
+            ("runtime_skill_authorizations", ()),
             ("start_workers", True),
             ("check_readiness", False),
             ("state_root", None),

@@ -6,6 +6,20 @@ extension StudioWorkspace on WorkspaceController {
   Studio? get selectedStudio =>
       studios.where((s) => s.id == selectedStudioId).firstOrNull;
 
+  bool studioAccessDenied(Studio studio) =>
+      _studioAccessDenied.contains(studio.id);
+
+  bool _pauseStudioPollingOnAccessError(Studio studio, Object exception) {
+    if (exception is! SageApiException ||
+        (exception.statusCode != 403 &&
+            exception.category != 'authorization')) {
+      return false;
+    }
+    _studioAccessDenied.add(studio.id);
+    _notifyStudioChanged();
+    return true;
+  }
+
   Conversation? studioExecution(Studio studio, StudioMember member) =>
       _conversations[studio.id]
           ?.where((c) => c.id == member.conversationId)
@@ -103,7 +117,7 @@ extension StudioWorkspace on WorkspaceController {
   void _startStudioPolling() {
     _studioPollTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
       for (final studio in studios) {
-        unawaited(recoverStudio(studio));
+        unawaited(recoverStudio(studio, background: true));
       }
     });
   }
@@ -121,8 +135,9 @@ extension StudioWorkspace on WorkspaceController {
     }
   }
 
-  Future<void> recoverStudio(Studio studio) async {
+  Future<void> recoverStudio(Studio studio, {bool background = false}) async {
     if (_disposed ||
+        (background && studioAccessDenied(studio)) ||
         _studioSending.contains(studio.id) ||
         _studioDispatching.contains(studio.id) ||
         !_studioRecovering.add(studio.id)) {
@@ -148,9 +163,13 @@ extension StudioWorkspace on WorkspaceController {
       if (studio.turns.any((t) => t.pendingMemberIds.isNotEmpty)) {
         await _dispatchStudioMembers(studio);
       }
-      if (_hostStudios.contains(studio.id)) await refreshStudioMessages(studio);
+      if (_hostStudios.contains(studio.id)) {
+        await refreshStudioMessages(studio, background: background);
+      }
     } on Object catch (exception) {
-      if (!_disposed) error = exception.toString();
+      if (!_disposed && !_pauseStudioPollingOnAccessError(studio, exception)) {
+        error = exception.toString();
+      }
     } finally {
       _studioRecovering.remove(studio.id);
     }
@@ -575,8 +594,15 @@ extension StudioWorkspace on WorkspaceController {
     await refreshStudioMessages(studio);
   }
 
-  Future<void> refreshStudioMessages(Studio studio) async {
-    if (_disposed || !_studioRefreshing.add(studio.id)) return;
+  Future<void> refreshStudioMessages(
+    Studio studio, {
+    bool background = false,
+  }) async {
+    if (_disposed ||
+        (background && studioAccessDenied(studio)) ||
+        !_studioRefreshing.add(studio.id)) {
+      return;
+    }
     try {
       var more = true;
       // Bound each poll; the next tick continues from the persisted cursor.
@@ -586,6 +612,7 @@ extension StudioWorkspace on WorkspaceController {
           afterSequence: studio.messageCursor,
         );
         if (_disposed) return;
+        if (_studioAccessDenied.remove(studio.id)) _notifyStudioChanged();
         var runsChanged = false;
         if (!_studioSending.contains(studio.id) &&
             !_studioDispatching.contains(studio.id)) {
@@ -646,7 +673,7 @@ extension StudioWorkspace on WorkspaceController {
         }
       }
     } on Object catch (exception) {
-      if (!_disposed) {
+      if (!_disposed && !_pauseStudioPollingOnAccessError(studio, exception)) {
         error = exception.toString();
         _notifyStudioChanged();
       }

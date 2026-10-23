@@ -98,7 +98,12 @@ async def test_registered_processor_bounds_next_model_request_and_persists_reada
         result, events = await run(app, agent, "offload")
         assert result.state.value == "completed", result
         message = next(m for m in model.requests[1].messages if m.role == "tool")
-        assert len(cast(TextBlock, message.content[0]).text) <= 2048 + 1024
+        assert isinstance(message.content[0], JsonBlock)
+        view = message.content[0].value
+        assert len(json.dumps(view, ensure_ascii=False)) <= 2048
+        assert 0 < view["end_line"] < 5000
+        assert view["remaining_start_line"] == view["end_line"] + 1
+        assert view["content"].count("\n") + 1 == view["end_line"]
         assert message.metadata["result_offloaded"]
         saved = list((workspace / ".sage/tool-results").glob("*.json"))
         assert len(saved) == 1

@@ -237,7 +237,13 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
             or any(marker in details for marker in _CONTEXT_WINDOW_MARKERS[:-1])
         )
     )
+    interrupted_response = (
+        response_started and status in {None, 200}
+        and provider_code == "invalid_provider_response"
+    )
     retryable = (
+        interrupted_response
+        or
         status in {408, 409, 425, 429}
         or (isinstance(status, int) and status >= 500)
         or isinstance(exc, (TimeoutError, ConnectionError))

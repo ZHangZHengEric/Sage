@@ -248,6 +248,10 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
         rounds: Annotated[int, Field(ge=1, le=100)] = 8,
         validation_case_count: Annotated[int, Field(ge=1, le=100)] = 24,
         max_concurrency: Annotated[int, Field(ge=1, le=16)] = 3,
+        evaluation_repeats: Annotated[int, Field(ge=1, le=10)] = 1,
+        evaluation_aggregation: Literal["minimum", "mean"] = "minimum",
+        builtin_scoring: Literal["quality", "quality_cost", "quality_latency", "quality_tokens"] = "quality",
+        refresh_incumbent: bool = False,
         human_test_count: Annotated[int, Field(ge=0, le=100)] = 12,
         optimization_scope: list[Literal["instructions", "skills", "tools"]]
         | None = None,
@@ -267,6 +271,10 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
             rounds=rounds,
             validation_case_count=validation_case_count,
             max_concurrency=max_concurrency,
+            evaluation_repeats=evaluation_repeats,
+            evaluation_aggregation=evaluation_aggregation,
+            builtin_scoring={"mode": builtin_scoring},
+            refresh_incumbent=refresh_incumbent,
             optimization_scope=tuple(
                 ["instructions"] if optimization_scope is None else optimization_scope
             ),
@@ -349,6 +357,13 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
             "training": [c for c in combined.values() if c["split"] == "training"],
             "validation": {"total": validation_count, "questions_visible": False},
         }
+
+    @server.tool()
+    async def rsi_resume(agent_id: str, run_id: str) -> dict:
+        """Resume the same interrupted local experiment with verified frozen settings and saved evidence."""
+        return model_view(await bridge.request(
+            "POST", f"{base(agent_id)}/runs/{segment(run_id)}/resume"
+        ))
 
     @server.tool()
     async def rsi_cancel(agent_id: str, run_id: str) -> dict:

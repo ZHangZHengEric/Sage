@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from sagents.v2.optimization import AgentPackageTestGenerator as AgentPackageTestGenerator
     from sagents.v2.optimization import OptimizationSuiteGeneration as OptimizationSuiteGeneration
     from sagents.v2.optimization import AgentPackageOptimizer as AgentPackageOptimizer
+    from sagents.v2.optimization import BuiltinScoring as BuiltinScoring
     from sagents.v2.optimization import IsolatedOptimizationRunner as IsolatedOptimizationRunner
     from sagents.v2.optimization import OptimizationAgent as OptimizationAgent
     from sagents.v2.optimization import OptimizationConstraints as OptimizationConstraints
@@ -88,6 +89,7 @@ _EXPORTS = {
         "OptimizationSuiteGeneration",
     ),
     "AgentPackageOptimizer": ("sagents.v2.optimization", "AgentPackageOptimizer"),
+    "BuiltinScoring": ("sagents.v2.optimization", "BuiltinScoring"),
     "IsolatedOptimizationRunner": (
         "sagents.v2.optimization",
         "IsolatedOptimizationRunner",
@@ -206,6 +208,7 @@ __all__ = [
     "AgentPackageTestGenerator",
     "OptimizationSuiteGeneration",
     "AgentPackageOptimizer",
+    "BuiltinScoring",
     "IsolatedOptimizationRunner",
     "OptimizationAgent",
     "OptimizationConstraints",

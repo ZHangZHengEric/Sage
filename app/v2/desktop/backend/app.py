@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.v2.desktop.backend.rsi import RsiStart, RsiApply
+from app.v2.desktop.backend.rsi_evaluation import EvaluationPlan, ScorerImport
 
 import asyncio
 import base64
@@ -428,9 +429,21 @@ def create_app(
     async def rsi_start(agent_id: str, value: RsiStart, request: Request):
         return _success(await _safe(runtime_service.start_rsi(agent_id, value, get_desktop_user_id(request))))
 
+    @app.post("/api/v2/agents/{agent_id}/rsi/scorers")
+    async def import_rsi_scorer(agent_id: str, value: ScorerImport, request: Request):
+        return _success(await _safe(runtime_service.import_rsi_scorer(agent_id, value, get_desktop_user_id(request))))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/evaluation-plans")
+    async def import_rsi_evaluation_plan(agent_id: str, value: EvaluationPlan, request: Request):
+        return _success(await _safe(runtime_service.import_rsi_evaluation_plan(agent_id, value, get_desktop_user_id(request))))
+
     @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}")
-    async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0):
-        return _success(await _safe(runtime_service.rsi_run(agent_id, run_id, get_desktop_user_id(request), after_sequence=after_sequence)))
+    async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0, compact: bool = False):
+        return _success(await _safe(runtime_service.rsi_run(agent_id, run_id, get_desktop_user_id(request), after_sequence=after_sequence, compact=compact)))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/resume")
+    async def rsi_resume(agent_id: str, run_id: str, request: Request):
+        return _success(await _safe(runtime_service.resume_rsi(agent_id, run_id, get_desktop_user_id(request))))
 
     @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/cancel")
     async def rsi_cancel(agent_id: str, run_id: str, request: Request):
