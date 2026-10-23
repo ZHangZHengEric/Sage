@@ -11,9 +11,9 @@ Map<String, Object?> event(
   'event': name,
   'data': {
     'call_id': id,
-    if (role != null) 'role': role,
-    if (activity != null) 'activity': activity,
-    if (caseId != null) 'case_id': caseId,
+    'role': ?role,
+    'activity': ?activity,
+    'case_id': ?caseId,
   },
 };
 

@@ -86,8 +86,9 @@ String rsiRunningActivity(
     }
     if (event['event'] == 'stability_check_started') checkingStability = true;
     if (event['event'] == 'stability_check_completed' ||
-        event['event'] == 'round_completed')
+        event['event'] == 'round_completed') {
       checkingStability = false;
+    }
     final value = data(event);
     final id = value['call_id']?.toString();
     if (id == null) continue;

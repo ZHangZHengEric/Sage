@@ -54,8 +54,19 @@ def test_alignment_execution_and_generated_tool_integrity_still_gate_selection()
     ):
         broken = new.model_copy(update={"cases": (new.cases[0].model_copy(update={"observation": observation}), new.cases[1])})
         assert not AgentPackageOptimizer._select_adaptive(old, broken, 0.01)[0]
-    with pytest.raises(ValueError, match="ordering"):
-        AgentPackageOptimizer._select_adaptive(old, new.model_copy(update={"cases": tuple(reversed(new.cases))}), 0.01)
+    # Shared cases are aligned by identity: arrival order may change when the
+    # training set grows, while missing or changed cases remain invalid.
+    reordered = new.model_copy(update={"cases": tuple(reversed(new.cases))})
+    assert AgentPackageOptimizer._select_adaptive(old, reordered, 0.01)[0]
+    assert not AgentPackageOptimizer._regressions(old, reordered)
+    with pytest.raises(ValueError, match="missing or changed"):
+        AgentPackageOptimizer._select_adaptive(
+            old, new.model_copy(update={"cases": new.cases[:-1]}), 0.01)
+    changed = new.cases[0].model_copy(update={
+        "case": new.cases[0].case.model_copy(update={"input": "different task"})})
+    with pytest.raises(ValueError, match="missing or changed"):
+        AgentPackageOptimizer._select_adaptive(
+            old, new.model_copy(update={"cases": (changed, new.cases[1])}), 0.01)
 
 
 def test_regression_debt_survives_other_improvements_until_repaired():

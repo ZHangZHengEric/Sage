@@ -222,8 +222,9 @@ class DelayedHistoryApi extends RsiApi {
     String runId, {
     int afterSequence = 0,
   }) {
-    if (delay)
+    if (delay) {
       return (pending[runId] ??= Completer<Map<String, Object?>>()).future;
+    }
     return super.rsiRun(agentId, runId, afterSequence: afterSequence);
   }
 }

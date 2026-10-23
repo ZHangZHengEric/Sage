@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -177,8 +176,9 @@ void main() {
         final runs = history?['runs'] as List? ?? [];
         if (runs.isEmpty) continue;
         final run = (runs.first as Map).cast<String, Object?>();
-        if (run['status'] == 'failed')
+        if (run['status'] == 'failed') {
           fail('Real RSI failed: ${run['error_type']}');
+        }
         if (run['status'] == 'completed') {
           finished = await tester.runAsync(
             () => api.rsiRun(agent, run['id'] as String),

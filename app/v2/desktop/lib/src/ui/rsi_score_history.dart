@@ -40,8 +40,9 @@ class _RsiScoreHistoryState extends State<RsiScoreHistory> {
     final matching = records
         .where((r) => r['round'] == requestedRound)
         .firstOrNull;
-    if (widget.round != null && matching == null)
+    if (widget.round != null && matching == null) {
       return const SizedBox.shrink();
+    }
     final selected = matching ?? records.last;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final colors = [

@@ -73,6 +73,19 @@ test = [
   "fakeredis>=2.38.0,<3",
   "aiosqlite>=0.21.0",
 ]
+# Optional text-only vendored tau-bench runtime; the base Sage install stays small.
+tau-bench = [
+  "litellm==1.82.6",
+  "deepdiff==9.1.0",
+  "addict==2.4.0",
+  "numpy>=1.24.0",
+  "pandas>=2.2.3",
+  "tenacity>=9.0.0",
+  "docstring-parser>=0.16",
+  "rich>=13.0.0",
+  "tiktoken>=0.8.0",
+  "pydub>=0.25.1",
+]
 dev = ["build>=1.0", "ruff==0.15.14"]
 
 [project.urls]
