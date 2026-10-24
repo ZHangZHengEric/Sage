@@ -4,7 +4,7 @@ import 'package:sage_desktop_v2/src/ui/rsi_dataset_summary.dart';
 
 void main() {
   testWidgets(
-    'import report separates deterministic checks, semantic advice and scorer self-test',
+    'import report separates fixed validation, advisory warnings and scorer self-test',
     (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
@@ -48,7 +48,8 @@ void main() {
       await tester.ensureVisible(find.text('覆盖标签与预审策略'));
       await tester.tap(find.text('覆盖标签与预审策略'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('导入的固定集仍按原题'), findsOneWidget);
+      expect(find.textContaining('固定规则校验，不调用预审模型'), findsOneWidget);
+      expect(find.textContaining('导入集按原题、原评分器评测'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

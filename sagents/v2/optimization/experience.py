@@ -27,6 +27,14 @@ def experience_document(attempts, *, max_chars=None):
         notes = attempt.patch.experience_notes if attempt.patch else ""
         rationale = attempt.patch.rationale if attempt.patch else ""
         lessons = []
+        experiment = attempt.patch.experiment if attempt.patch else None
+        if experiment is not None:
+            lessons.append("事前机制假设：" + experiment.mechanism
+                + "\n预期观测：" + experiment.expected_observation
+                + "\n证伪条件：" + experiment.falsification_condition
+                + "\n仍无法判断：" + experiment.inconclusive_condition
+                + "\n保护行为：" + "; ".join(experiment.protected_behaviors)
+                + "\n归因状态：未独立确认；采纳结果不能证明机制成立。")
         if notes:
             lessons.append("调优方经验（仍须证据验证）：\n" + notes)
         if rationale:

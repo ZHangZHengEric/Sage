@@ -1,6 +1,10 @@
 """Host-only recovery of interrupted human checkpoints; no tuning input."""
 
 from copy import deepcopy
+import json
+import os
+from pathlib import Path
+import tempfile
 from sagents.v2.optimization.contracts import (
     OptimizationGrade,
     OptimizationDialogueReply,
@@ -9,7 +13,35 @@ from sagents.v2.optimization.observer import (
     HumanTestObserver,
     IsolatedTestEvaluator,
     _measurement_retry,
+    _MEASUREMENT_IDENTITY,
 )
+
+
+def persist_human_evidence(path, records):
+    """A resumed observer's new rows must not erase completed private evidence."""
+    path = Path(path)
+    previous = json.loads(path.read_text()) if path.exists() else []
+    if not isinstance(previous, list):
+        raise ValueError('Human evidence must be a record list')
+    merged = {}
+    for record in [*previous, *records]:
+        key = (record['round'], record['package_hash'], record['case_id'], record['trial'])
+        old = merged.get(key)
+        if old is not None and old.get('conversation') != record.get('conversation'):
+            raise ValueError('Completed human execution evidence differs')
+        merged[key] = record
+    # Never truncate the only copy of previously completed private evidence.
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(json.dumps(list(merged.values()), ensure_ascii=False))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def resumable_human_test_observer(*, completed_records=(), **kwargs):
@@ -84,22 +116,14 @@ def resumable_human_test_observer(*, completed_records=(), **kwargs):
                     "diagnosis_pending": trial.get('status') != 'completed',
                 }
         pending[record["round"]] = (record["package_hash"], cached)
-    counters = {}
     observer = None
 
     async def evaluate(package, case):
-        # The core observer drains one checkpoint at a time. Trials of one case
-        # are sequential, so this identifies the exact original trial slot.
-        active = [
-            record for record in observer.records if record["status"] == "running"
-        ]
-        if len(active) != 1:
-            raise ValueError("human checkpoint execution is ambiguous")
-        checkpoint = active[0]
-        key = (checkpoint["round"], case.id)
-        trial = counters.get(key, 0) + 1
-        counters[key] = trial
-        old = pending.get(checkpoint["round"])
+        identity = _MEASUREMENT_IDENTITY.get()
+        if identity is None:
+            raise ValueError("human checkpoint execution has no measurement identity")
+        checkpoint_round, trial = identity
+        old = pending.get(checkpoint_round)
         if old is not None:
             package_hash, cached = old
             if package.content_hash != package_hash:

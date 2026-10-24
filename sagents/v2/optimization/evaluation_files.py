@@ -42,6 +42,19 @@ def assessment_loop_interrupted(observation):
         for event in observation.evidence.get('runtime_events', ()))
 
 
+def assessment_terminal_response_empty(observation):
+    """Defer an empty final reply to local assessment validation and repair.
+
+    Missing files or incomplete evidence must receive bounded validation feedback,
+    not repeat the whole analysis as a transport retry. This never changes the
+    native state or bypasses the file, schema and evidence checks below.
+    """
+    if observation.state not in {'suspended', 'failed'}:
+        return False
+    error = observation.evidence.get('error')
+    return isinstance(error, dict) and error.get('code') == 'model.empty_semantic_response'
+
+
 def evidence_documents(data):
     from sagents.v2.optimization.contracts import OptimizationObservation
     from sagents.v2.optimization.execution_records import conversation_messages

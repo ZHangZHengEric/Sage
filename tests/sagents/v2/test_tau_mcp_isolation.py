@@ -38,6 +38,9 @@ async def test_real_official_stdio_writes_are_private_to_the_case_workspace(tmp_
             idempotency_key=token, owner_run_id='isolation', owner_agent_id='target',
             tool_name='mcp_TauRetail_' + name, arguments=arguments), context)
         assert result.error is None
+        receipt = result.metadata["mcp_meta"]["sage.rsi.execution"]
+        assert receipt["protocol"] == "sage.rsi.execution-order/v1"
+        assert type(receipt["sequence"]) is int and receipt["sequence"] > 0
         blocks = [block.value for block in result.content if block.kind == 'json']
         return blocks[0] if blocks else json.loads(''.join(block.text for block in result.content if block.kind == 'text'))
     address = {**user['address'], 'address1': 'Isolated candidate address'}

@@ -13,7 +13,8 @@ def quick(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", ["target", "evaluator", "tuner", "reviewer"])
+# Default Desktop uses deterministic candidate checks; no reviewer model is invoked.
+@pytest.mark.parametrize("role", ["target", "evaluator", "tuner"])
 async def test_native_desktop_single_failure_never_restarts_optimizer_or_other_targets(
     tmp_path, monkeypatch, role
 ):

@@ -27,7 +27,6 @@ def test_retry_metadata_has_no_requests_or_exception_messages(tmp_path):
 @pytest.mark.parametrize("role,error_type", [
     ("target", TimeoutError), ("evaluator", TimeoutError),
     ("evaluator", RuntimeError), ("tuner", TimeoutError),
-    ("reviewer", RuntimeError),
 ])
 async def test_single_call_failure_recovers_without_reexecuting_completed_targets(
     tmp_path, monkeypatch, role, error_type,

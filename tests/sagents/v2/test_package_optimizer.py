@@ -138,7 +138,9 @@ class Runner:
 
 
 def optimizer(runner):
+    # Legacy fixture coverage; strict hypothesis protocol has dedicated tests.
     return AgentPackageOptimizer(
+        require_experiment=False,
         runner=runner,
         evaluator=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
         tuner=OptimizationAgent(package=bundle("tuner"), agent_id="assistant"),
@@ -219,6 +221,7 @@ async def test_malformed_and_unauthorized_proposals_consume_rounds_without_runni
     )
     result = await optimizer(runner).optimize(
         bundle(),
+        max_edit_repairs=0,  # Exercise rejection without same-round repair.
         validation_case_count=None,
         context=context(),
         goal="Accuracy",
@@ -759,6 +762,7 @@ async def test_unknown_capabilities_cannot_be_added(patch, policy):
     runner = Runner(proposals=[{"rationale": "Change", **patch}])
     result = await optimizer(runner).optimize(
         bundle(),
+        max_edit_repairs=0,  # Exercise rejection without same-round repair.
         validation_case_count=None,
         context=context(),
         goal="Accuracy",
@@ -1883,6 +1887,7 @@ async def test_skill_only_scope_rejects_other_parts_and_keeps_full_skill_candida
     )
     result = await optimizer(runner).optimize(
         original,
+        max_edit_repairs=0,  # Exercise rejection without same-round repair.
         validation_case_count=None,
         context=context(),
         goal="Accuracy",
@@ -1985,6 +1990,7 @@ async def test_skill_scope_recognizes_nonstandard_skill_roots_and_cannot_expand_
     )
     result = await optimizer(runner).optimize(
         original,
+        max_edit_repairs=0,  # Exercise rejection without same-round repair.
         validation_case_count=None,
         context=context(),
         goal="Accuracy",
@@ -2390,6 +2396,7 @@ async def test_exact_generated_case_count_rejects_an_incomplete_suite():
 
     generator = AgentPackageTestGenerator(
         runner=Runner(),
+        validation_repairs=0,
         designer=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
     )
     with pytest.raises(ValueError, match="case_count"):

@@ -51,6 +51,72 @@ Map<String, Object?> result(int i) => {
 };
 
 void main() {
+  testWidgets(
+    'discovery subset score cannot replace the complete retained overall score',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      Map<String, Object?> scored(int i, double score) => {
+        ...result(i),
+        'grade': {
+          'score': score,
+          'passed': score >= .6,
+          'rationale': 'Recorded score',
+        },
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: RsiObservatory(
+                run: const {
+                  'status': 'running',
+                  'rounds': 2,
+                  'evaluation_protocol': 'adaptive_validation',
+                  'validation_case_count': 1,
+                },
+                events: [
+                  event('suite_fixed', {
+                    'suite': {
+                      'cases': [testCase(0), testCase(3)],
+                    },
+                  }),
+                  event('evaluation_completed', {
+                    'round': 0,
+                    'evaluation': {
+                      'cases': [scored(0, .4), scored(3, .4)],
+                    },
+                  }),
+                  event('training_cases_added', {
+                    'round': 1,
+                    'cases': [testCase(1)],
+                  }),
+                  event('training_challenge_completed', {
+                    'round': 1,
+                    'evaluation': {
+                      'cases': [scored(1, .1)],
+                    },
+                    'retained_evaluation': {
+                      'cases': [scored(0, .8), scored(1, .8), scored(3, .9)],
+                    },
+                  }),
+                ],
+                settings: const LiquidGlassSettings(),
+                chinese: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('0.850'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final brightness in Brightness.values) {
     testWidgets(
       'current activity follows unfinished work in ${brightness.name}',

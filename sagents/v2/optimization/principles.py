@@ -25,10 +25,23 @@ Mandatory independent semantic package review principles:
   Ground every finding in concrete changed content and explain uncertainty. If the
   change cannot be safely approved, reject it. Never invent unseen test answers.
 - You never edit the package, tests or rubric. Return only the supplied JSON schema.
+- For added or revised Skills, compare the name and description with the actual
+  procedure: they must identify its concrete capability and loading conditions.
+  Flag generic optimization-container names or a name that promises unrelated or
+  broader behavior, citing the mismatched content. Check renamed Skills have
+  consistent bindings and loading references. Do not invent a preferred domain name
+  or reject a meaningful synonym merely because you would phrase it differently.
 """.strip()
 
 EVALUATION_PRINCIPLES = """
 Mandatory independent evaluation principles:
+- Your main decision is what to verify next, not how many flaws you can list.
+  Start from unmet score conditions and serious policy violations. Separate
+  controllable decisions from environment, user simulation, scorer and infrastructure
+  problems. State a falsifiable mechanism, alternative explanations and successful
+  behavior to protect. General style concerns do not justify production edits.
+  When evidence does not justify an intervention, explicitly request measurement,
+  flag a measurement issue, or recommend no change.
 - Diagnose causal ordering and turn boundaries. If execution ends with a promise
   and no required tool result, inspect whether the instructions scheduled the tool
   after a final reply. Under deterministic tool-or-text continuation, text without
@@ -134,6 +147,13 @@ def with_principles(agent, principles):
 
 TUNING_PRINCIPLES = """
 Mandatory package optimization principles:
+- Each changed candidate is ONE mechanism experiment declared before candidate
+  measurement: parent hash, applicability, change locations, existing-rule gap,
+  expected behavior, support/falsification/inconclusive conditions, measured training
+  and protection cases, protected behavior and risks. Supporting edits may serve
+  this same mechanism; independent mechanisms belong in later experiments.
+  Without a supported hypothesis, keep the retained package unchanged and request
+  a specific measurement. Acceptance alone never proves a causal hypothesis.
 - Preserve required step ordering, not only the presence of policy obligations.
   Check the declared continuation policy before writing a multi-step procedure.
   In deterministic tool-or-text execution, a text-only reply ends the run; separate
@@ -186,6 +206,21 @@ Mandatory package optimization principles:
   successful behavior. Proposed examples and expected benefits are not evidence
   of execution. Keep business policy in its authoritative source, not duplicated
   drifting copies; Skills cannot grant permissions, tools or automatic loading.
+- Name each Skill after the concrete reusable capability its procedure performs,
+  using a concise lowercase-hyphen name with an action and its object or domain.
+  Derive the name from the actual inputs, steps and observable result, not the
+  optimization process, experiment, benchmark or a catch-all guidance container.
+  For example, a procedure that checks eligible variants and compares prices could
+  be verify-eligible-variant-prices, not rsi-guidance or agent-improvements. This is
+  an illustration, not a prescribed name or domain. Do not promise a broader
+  capability than the body implements. Keep one coherent capability per Skill;
+  compose related steps, and split unrelated procedures within the host limits.
+  New Skills use YAML frontmatter with name and description. The description states
+  what the Skill does and when to load it; the body explains how to do it. Keep the
+  directory name, frontmatter name, manifest binding and load_skill references
+  identical. If an existing generic name obscures the procedure, rename it within
+  the granted scope and update its files, binding and references together. Preserve
+  meaningful existing names; do not churn names merely to create an apparent change.
 - Use tools for deterministic computation or bounded operations when evidence shows
   a capability gap. Define input/output behavior and validate results; a tool name
   alone does not implement a capability. Respect the host's creation/runtime limits.
@@ -289,9 +324,17 @@ Act as the user in a bounded target-agent test dialogue. Follow the current
 """.strip()
 
 
-def dialogue_user(agent):
+def dialogue_user(agent, *, preserve_instructions=False):
     """Use identical simulated-user boundaries for training and human-only tests."""
+    extra = ""
+    if preserve_instructions:
+        extra = agent.package.resolved_manifest().agents[agent.agent_id].instructions.inline or ""
+        if extra.startswith(DIALOGUE_USER_PRINCIPLES):
+            extra = extra[len(DIALOGUE_USER_PRINCIPLES):].strip()
+        if extra.startswith("User simulation instructions:\n"):
+            extra = extra[len("User simulation instructions:\n"):]
+    instructions = DIALOGUE_USER_PRINCIPLES + ("\n\nUser simulation instructions:\n" + extra if extra else "")
     data = agent.model_dump(mode="json")
     data["package"]["manifest"]["agents"][agent.agent_id]["instructions"] = {
-        "inline": DIALOGUE_USER_PRINCIPLES}
+        "inline": instructions}
     return type(agent).model_validate(data)

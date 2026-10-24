@@ -62,7 +62,8 @@ class _Server(uvicorn.Server):
 
 class ScorerModelGateway:
     def __init__(self, *, provider, model, model_binding, run_id, concurrency,
-                 model_budget, max_output_tokens=8192, timeout=90, audit=None, redact=()):
+                 model_budget, max_output_tokens=8192, timeout=90, audit=None, redact=(), purpose="scorer"):
+        self.purpose = purpose
         self.provider, self.model, self.model_binding = provider, model, model_binding
         self.run_id, self.concurrency, self.model_budget = run_id, concurrency, model_budget
         self.max_output_tokens, self.timeout, self.audit = max_output_tokens, timeout, audit
@@ -123,6 +124,34 @@ class ScorerModelGateway:
             yield ScorerModelAPI(protocol='openai-responses', base_url=self.base_url,
                 api_key=token, model=self.model, max_output_tokens=self.max_output_tokens,
                 timeout_seconds=self.timeout)
+        finally:
+            self._leases.pop(token, None)
+
+    @asynccontextmanager
+    async def bind_provider(self, request):
+        """In-process capability for the built-in user; shares the same budgets."""
+        from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+        from sagents.v2.model.contracts import ModelStreamEvent
+        gateway = self
+        token = secrets.token_urlsafe(32)
+        lease = {'case_id': request.case.id, 'split': request.case.split, 'calls': 0}
+        self._leases[token] = lease
+        class BoundProvider:
+            model_binding = gateway.model_binding
+
+            async def stream(self, native):
+                if token not in gateway._leases:
+                    raise RuntimeError('Expired user model capability')
+                result = await gateway._invoke(native, lease, token)
+                if isinstance(result, JSONResponse):
+                    import json
+                    error = json.loads(result.body)['error']
+                    raise SageV2Error(RuntimeErrorInfo(code=error['code'],
+                        category=ErrorCategory.PROVIDER_TRANSIENT if error['retryable'] else ErrorCategory.VALIDATION,
+                        message=error['message'], retryable=error['retryable'], safe_to_resume=True))
+                yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=result)
+        try:
+            yield BoundProvider()
         finally:
             self._leases.pop(token, None)
 
@@ -229,7 +258,7 @@ class ScorerModelGateway:
                     stream = self.provider.stream(native.model_copy(update={
                         'request_id': identity, 'run_id': self.run_id, 'model_binding': self.model_binding,
                         'max_output_tokens': native.max_output_tokens or self.max_output_tokens,
-                        'metadata': {**native.metadata, 'purpose': 'scorer',
+                        'metadata': {**native.metadata, 'purpose': self.purpose,
                                      'case_id': lease['case_id'], 'split': lease['split']}}))
                     try:
                         async for event in stream:
@@ -239,6 +268,8 @@ class ScorerModelGateway:
                         close = getattr(stream, 'aclose', None)
                         if close is not None:
                             await close()
+            if result is not None:
+                record['usage'] = result.usage.model_dump(mode='json', exclude={'provider_usage'})
             if result is None or (result.tool_calls and not allow_tools) or result.finish_reason in {'length', 'max_tokens', 'incomplete'}:
                 record.update(status='failed', error_type='model.incomplete')
                 return self.error(502, 'Model did not complete a text response', 'model.incomplete', True)

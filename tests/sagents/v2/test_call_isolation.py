@@ -217,6 +217,75 @@ async def test_user_cancel_drains_active_calls_and_does_not_start_queue():
 
 
 @pytest.mark.asyncio
+async def test_terminal_measurement_failure_drains_started_sibling_and_keeps_queue_unexecuted():
+    entered, failure_seen, finish_sibling = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    started, completed = [], []
+
+    async def work(case):
+        started.append(case)
+        if len(started) == 2:
+            entered.set()
+        await entered.wait()
+        if case == 0:
+            raise RuntimeError('Invalid measurement')
+        await finish_sibling.wait()
+        completed.append(case)
+        return case
+
+    task = asyncio.create_task(settle_cases(range(20), work, max_concurrency=2,
+        on_error=lambda case, error: failure_seen.set(), stop_on_error=lambda error: True))
+    await failure_seen.wait()
+    await asyncio.sleep(0)
+    assert started == [0, 1] and not task.done()
+    finish_sibling.set()
+    with pytest.raises(RuntimeError, match='Invalid measurement') as failure:
+        await task
+    assert completed == [1] and failure.value.rsi_siblings_drained
+
+
+@pytest.mark.asyncio
+async def test_exhausted_authoritative_scorer_halts_optimizer_dispatch(tmp_path):
+    failed_budget, finish_sibling = asyncio.Event(), asyncio.Event()
+
+    class Counted(DiagnosticRunner):
+        def __init__(self):
+            super().__init__()
+            self.targets = []
+
+        async def run(self, package, key, content, ctx):
+            if package.manifest.metadata.id == 'test.target':
+                self.targets.append(content)
+            return await super().run(package, key, content, ctx)
+
+    class BrokenScorer:
+        descriptor = ScorerDescriptor(id='broken', name='Broken', version='1')
+        failures = 0
+
+        async def score(self, request):
+            if request.case.id == 'c0':
+                self.failures += 1
+                if self.failures == 4:
+                    failed_budget.set()
+                raise ValueError('Unsupported native evidence')
+            await finish_sibling.wait()
+            return ScoringResult(grade=OptimizationGrade(score=1, passed=True, rationale='Passed'))
+
+    data = OptimizationSuite(cases=tuple(OptimizationCase(id=f'c{i}', input=f'task-{i}',
+        rubric='Correct', split='validation' if i == 9 else 'training') for i in range(10)))
+    runner = Counted()
+    kwargs = options(tmp_path)
+    kwargs.update(suite=data, scorer=BrokenScorer())
+    task = asyncio.create_task(isolated_optimizer(runner).optimize(bundle(), **kwargs))
+    await failed_budget.wait()
+    await asyncio.sleep(0)
+    assert len(runner.targets) == 2
+    finish_sibling.set()
+    with pytest.raises(ValueError, match='Unsupported native evidence') as failure:
+        await task
+    assert len(runner.targets) == 2 and failure.value.rsi_siblings_drained
+
+
+@pytest.mark.asyncio
 async def test_permissions_do_not_retry_and_arbitrary_errors_are_bounded():
     counts = collections.Counter()
 

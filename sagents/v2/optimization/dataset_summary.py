@@ -34,4 +34,4 @@ def summarize_dataset(dataset, *, environment_tool_count=None, environment_check
                   for split in ('training', 'validation', 'test')
                   for case in [c for c in cases if c.split == split][:2]],
         scorer_status='separate_validation_required',
-        semantic_review='diagnostic_only_for_imported_data')
+        semantic_review='not_run')

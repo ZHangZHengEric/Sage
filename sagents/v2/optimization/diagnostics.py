@@ -75,10 +75,17 @@ async def diagnose_scored_execution(*, grade, entries, rubric, policy, invoke, c
     results = []
     for index, chunk in enumerate(chunks):
         request = {
-            "task": "Independently diagnose this recorded execution. The authoritative score is fixed; "
+            "task": "Decide what should be verified next, using this recorded execution. Return next_action and next_verification. "
+                    "Start from actual failed scoring conditions or serious policy violations. Separate agent-controllable decisions "
+                    "from environment, user simulation, scoring and infrastructure uncertainty. Find the earliest relevant "
+                    "decision and state what evidence would support or contradict ONE mechanism. Passing behavior is a "
+                    "protection case, not a reason to invent stylistic repairs. Prefer no_change, further measurement or "
+                    "a measurement issue when no justified intervention is available. The authoritative score is fixed; "
                     "do not rescore or change the rubric. Explain causal mistakes and concrete reusable "
                     "improvements in instructions, Skills, tools or execution procedure. Analyze user turns, "
-                    "actual tool arguments/results and final outcome, including successful but fragile behavior. "
+                    "actual tool arguments/results and final outcome. Check serious policy boundaries on successes; "
+                    "separate outcome-relevant causes from general quality observations. In findings, supply attribution, "
+                    "priority, failed_condition, expected_observation, counterevidence, protected_behaviors and next_verification. "
                     "Cite execution entry indexes for every finding, distinguish confirmed facts from hypotheses, "
                     "and do not infer missing evidence. A reference action mismatch alone is not a failure unless "
                     "the scoring authority uses it. Do not invent problems to justify optimization. "
@@ -116,6 +123,7 @@ async def diagnose_scored_execution(*, grade, entries, rubric, policy, invoke, c
     else:
         request = {
             "task": "Synthesize ALL ordered execution-chunk diagnoses into a whole-execution diagnosis. "
+                    "Decide the next verification, preserving attribution, counterevidence and protected behaviors. "
                     "Connect earlier decisions to later outcomes, prioritize causal root causes and "
                     "concrete reusable improvements, preserve uncertainty, and retain valid original evidence "
                     "indexes. The external score is fixed. Return concise Chinese JSON matching response_schema.",

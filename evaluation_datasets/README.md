@@ -10,9 +10,19 @@
 | BFCL V4 多轮 | `bfcl/rsi.dataset.json`（base 200 题）；`bfcl/rsi.all.dataset.json`（三个类别 600 题） | 官方模拟工具 MCP + 官方逐轮状态／执行结果判定 | [README](bfcl/README.md) |
 | ToolSandbox 离线基础场景 | `toolsandbox/rsi.dataset.json` | 官方工具 MCP + milestone／minefield 相似度 | [README](toolsandbox/README.md) |
 
-三个目录都保留固定版本的官方源码、数据、许可证、来源哈希、依赖、MCP 示例和独立评分器。先安装对应目录的 `requirements.txt` 并运行 `preflight()`，再在页面分别导入数据和 `scorer.py`。MCP 连接名称必须与数据集声明一致，并显式设置 `SAGE_RSI_CASE_PROTOCOL=sage.rsi.case/v1`。
+各目录都保留固定版本的官方源码、数据、许可证、来源哈希、依赖、MCP 示例和独立评分器。先安装对应目录的 `requirements.txt` 并运行 `preflight()`，再在页面分别导入数据和 `scorer.py`。MCP 连接名称必须与数据集声明一致，并显式设置 `SAGE_RSI_CASE_PROTOCOL=sage.rsi.case/v1`。
 
 BFCL、ToolSandbox 的内部 split、通用用户驱动和支持范围均在各自 README 中声明；适配器运行通过不等于完整官方榜单复现。默认建议固定训练题池（每轮新增 0），避免自动生成没有官方评分参考的新题。
+
+新增三套环境：
+
+| 数据集 | 题数（train / validation / test） | 系统依赖 | 说明 |
+| --- | --- | --- | --- |
+| ALFWorld 文字版 | 120 / 24 / 24 | TextWorld、C/C++ 构建工具 | [数据、环境、评分器与 README](alfworld/README.md) |
+| ScienceWorld（已核验子集） | 75 / 27 / 23 | Java 17、py4j | [数据、环境、评分器与 README](scienceworld/README.md) |
+| AgentBench DB | 234 / 32 / 34 | Docker、MySQL 8.0 | [数据、环境、评分器与 README](agentbench_db/README.md) |
+
+以上各目录都有 `rsi.dataset.json`、`scorer.py`、`mcp.example.json`、`policy.md`、依赖和固定来源。文字环境已做真实模拟器测试；DB 的真实 MySQL 测试需要 Docker，详情见其 README。
 
 ## 运行设置
 
@@ -108,3 +118,13 @@ Python 文件使用 Desktop 后端解释器及已安装依赖。评分器按用�
 `tau_bench/` 保存固定版本的官方 tau2 源码、零售数据、MIT 许可证、来源哈希、业务工具 stdio MCP Server、标准 `rsi.dataset.json` 和独立 Python 评分器。
 
 `scorer.py` 从标准数据集的参考答案读取官方判定条件，从原生执行记录读取实际对话和工具调用，调用固定版本的官方评分逻辑重新计算奖励，不依赖预填 `tau_reward`。模型判定由评分器内部调用官方实现。详见 [τ-bench 说明](tau_bench/README.md)。
+
+
+## 独立模拟用户
+
+模拟用户与数据集、评分器分开选择。单轮用例跳过此模块；多轮用例通过用户背景和可见对话
+生成下一条消息或停止决定。RSI 内置默认实现，也支持单独上传 Python 并使用当前
+ModelProvider。tau 专用实现位于 [`tau_bench/user_simulator.py`](tau_bench/user_simulator.py)，
+单独上传并选中即可，评分器仍选择 `tau_bench/scorer.py`。
+标准输入输出、自测、依赖冻结和接入说明见
+[模拟用户 README](../sagents/v2/optimization/USER_SIMULATORS.md)。

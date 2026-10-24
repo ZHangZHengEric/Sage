@@ -1,0 +1,96 @@
+[
+  {
+    "request": {
+      "goal": "Solve the SQL task",
+      "case": {
+        "id": "agentbench-db-0",
+        "input": "What are the Notes when the Method is decision?",
+        "rubric": "Official DB comparison",
+        "reference_answer": "{\"format_version\": \"agentbench-db.reference/v1\", \"task_id\": \"agentbench-db-0\"}"
+      },
+      "observation": {
+        "state": "completed",
+        "evidence": {
+          "final_items": [
+            {
+              "item_id": "c",
+              "data": {
+                "kind": "tool_call",
+                "tool_call_id": "c",
+                "tool_name": "mcp_AgentBenchDB_commit_final_answer",
+                "arguments": {
+                  "answers": [
+                    "__wrong_answer__"
+                  ]
+                }
+              }
+            },
+            {
+              "item_id": "r",
+              "data": {
+                "kind": "tool_result",
+                "tool_call_id": "c",
+                "error": null,
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Final answer recorded."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expected_score": 0,
+    "expected_passed": false
+  },
+  {
+    "request": {
+      "goal": "Solve the SQL task",
+      "case": {
+        "id": "agentbench-db-0",
+        "input": "What are the Notes when the Method is decision?",
+        "rubric": "Official DB comparison",
+        "reference_answer": "{\"format_version\": \"agentbench-db.reference/v1\", \"task_id\": \"agentbench-db-0\"}"
+      },
+      "observation": {
+        "state": "completed",
+        "evidence": {
+          "final_items": [
+            {
+              "item_id": "c",
+              "data": {
+                "kind": "tool_call",
+                "tool_call_id": "c",
+                "tool_name": "mcp_AgentBenchDB_commit_final_answer",
+                "arguments": {
+                  "answers": [
+                    "Women +60kg Bronze"
+                  ]
+                }
+              }
+            },
+            {
+              "item_id": "r",
+              "data": {
+                "kind": "tool_result",
+                "tool_call_id": "c",
+                "error": null,
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Final answer recorded."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expected_score": 1,
+    "expected_passed": true
+  }
+]

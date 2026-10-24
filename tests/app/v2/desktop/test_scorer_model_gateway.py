@@ -238,3 +238,77 @@ async def score(request):
         assert not proxy._leases
     finally:
         await proxy.close()
+
+
+@pytest.mark.asyncio
+async def test_uploaded_user_calls_sage_provider_in_shared_pool_without_remote_credentials(tmp_path):
+    from sagents.v2.optimization.python_user_simulator import PythonUserSimulator
+    from sagents.v2.optimization.user_simulator import UserSimulatorDescriptor
+    from tests.sagents.v2.test_user_simulator import request as user_request, CONTINUE, STOP
+    from sagents.v2.optimization.observer import SharedCallPool
+    class UserModel(Model):
+        async def stream(self, value):
+            self.requests.append(value)
+            self.active += 1
+            self.maximum = max(self.maximum, self.active)
+            try:
+                await asyncio.sleep(.01)
+                yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=ModelResponse(
+                    response_id='offline-user', text=json.dumps(CONTINUE), finish_reason='stop',
+                    usage=UsageSummary(reported=True, input_tokens=12, output_tokens=6)))
+            finally:
+                self.active -= 1
+    model, audits, snapshots = UserModel(), [], []
+    pool = SharedCallPool(2, snapshots.append)
+    proxy = ScorerModelGateway(provider=model, model='fixture', model_binding='selected-provider',
+        run_id='offline', concurrency=pool, model_budget=ModelConcurrencyBudget(1),
+        audit=audits.append, purpose='user_simulator', redact=('remote-secret',))
+    code = '''import json
+from sagents.v2.optimization.user_simulator_runtime import get_model_provider
+from sagents.v2.optimization.default_user_simulator import generate_user_text
+from sagents.v2.model.contracts import ModelMessage
+from sagents.v2.contracts.items import TextBlock
+async def reply(request):
+    model = get_model_provider()
+    text = await generate_user_text(model, (ModelMessage(role='user', content=(TextBlock(text='USER OWNED PROMPT'),)),))
+    return json.loads(text)
+'''
+    code += '\nUSER_SIMULATOR_TEST_CASES = ' + repr([
+        {'request': user_request().model_dump(mode='json'), 'expected_reply': response,
+         'model_responses': [{'response_id': 'fixture', 'text': json.dumps(response), 'finish_reason': 'stop'}]}
+        for response in [CONTINUE, STOP]])
+    path = tmp_path / 'user.py'
+    path.write_text(code)
+    user = PythonUserSimulator(path=path, source_hash=hashlib.sha256(path.read_bytes()).hexdigest(),
+        descriptor=UserSimulatorDescriptor(id='fixture-user', name='Fixture user', version='1'), model_api_factory=proxy.bind)
+    try:
+        assert (await user.validate())['status'] == 'passed'
+        assert not model.requests  # Import checks consume recordings only.
+        await proxy.start()
+        replies = await asyncio.gather(*(user.reply(user_request()) for _ in range(3)))
+        assert all(r.can_continue for r in replies)
+        assert len(model.requests) == 3 and model.maximum == 1
+        assert all(r.metadata['purpose'] == 'user_simulator' and r.model_binding == 'selected-provider' for r in model.requests)
+        assert len(audits) == 3 and audits[0]['usage']['input_tokens'] == 12
+        assert 'USER OWNED PROMPT' not in json.dumps(audits) and 'remote-secret' not in json.dumps(audits)
+        assert not proxy._leases and proxy.model_budget.active == 0
+    finally:
+        await proxy.close()
+
+
+@pytest.mark.asyncio
+async def test_builtin_user_provider_uses_same_budget_and_expires_without_listening_socket():
+    from tests.sagents.v2.test_user_simulator import request as user_request
+    model, audit = Model(), []
+    proxy = gateway(model, audit.append)
+    proxy.purpose = 'user_simulator'
+    async with proxy.bind_provider(user_request()) as provider:
+        from sagents.v2.model.contracts import ModelRequest
+        async for event in provider.stream(ModelRequest(request_id='offline', run_id='offline', model_binding=provider.model_binding, messages=())):
+            assert event.response.text
+    assert not proxy._leases and model.requests[0].metadata['purpose'] == 'user_simulator'
+    with pytest.raises(RuntimeError, match='Expired'):
+        async for _ in provider.stream(ModelRequest(request_id='offline', run_id='offline', model_binding=provider.model_binding, messages=())):
+            pass
+    assert proxy.base_url is None and audit
+    await proxy.close()

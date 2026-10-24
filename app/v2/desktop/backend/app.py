@@ -4,6 +4,7 @@ from app.v2.desktop.backend.rsi import RsiStart, RsiApply, RsiResumeOptions
 from sagents.v2.optimization.dataset import validate_imported_dataset
 from sagents.v2.optimization.dataset_versions import DatasetRevisionRequest
 from app.v2.desktop.backend.rsi_evaluation import EvaluationPlan, ScorerImport
+from app.v2.desktop.backend.rsi_user_simulator import UserSimulatorImport
 
 import asyncio
 import base64
@@ -445,6 +446,10 @@ def create_app(
     async def rsi_start(agent_id: str, value: RsiStart, request: Request):
         return _success(await _safe(runtime_service.start_rsi(agent_id, value, get_desktop_user_id(request))))
 
+    @app.post("/api/v2/agents/{agent_id}/rsi/user-simulators")
+    async def import_rsi_user_simulator(agent_id: str, value: UserSimulatorImport, request: Request):
+        return _success(await _safe(runtime_service.import_rsi_user_simulator(agent_id, value, get_desktop_user_id(request))))
+
     @app.post("/api/v2/agents/{agent_id}/rsi/scorers")
     async def import_rsi_scorer(agent_id: str, value: ScorerImport, request: Request):
         return _success(await _safe(runtime_service.import_rsi_scorer(agent_id, value, get_desktop_user_id(request))))
@@ -456,6 +461,10 @@ def create_app(
     @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/dataset")
     async def rsi_run_dataset(agent_id: str, run_id: str, request: Request):
         return _success(await _safe(runtime_service.rsi_run_dataset(agent_id, run_id, get_desktop_user_id(request))))
+
+    @app.delete("/api/v2/agents/{agent_id}/rsi/runs/{run_id}")
+    async def delete_rsi_run(agent_id: str, run_id: str, request: Request):
+        return _success(await _safe(runtime_service.delete_rsi_run(agent_id, run_id, get_desktop_user_id(request))))
 
     @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}")
     async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0, compact: bool = False):

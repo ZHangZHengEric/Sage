@@ -30,6 +30,10 @@ def invoke(function, request):
 def main():
     path = Path(sys.argv[1]).resolve()
     validating = '--validate' in sys.argv[2:]
+    capture = None
+    if '--capture-dependencies' in sys.argv[2:]:
+        from sagents.v2.optimization.scorer_dependencies import DependencyCapture
+        capture = DependencyCapture(path)
     spec = importlib.util.spec_from_file_location('_sage_imported_scorer', path)
     module = importlib.util.module_from_spec(spec)
     # Module diagnostics must not corrupt the JSON result channel.
@@ -82,6 +86,9 @@ def main():
         else:
             request = ScoringRequest.model_validate_json(sys.stdin.buffer.readline(32 * 1024 * 1024 + 1))
             output = invoke(function, request).wire_json()
+    if capture is not None:
+        dependencies = capture.finish(module)
+        output = json.dumps({'payload': json.loads(output), 'dependency_manifest': dependencies})
     sys.stdout.write(output)
     sys.stdout.flush()
 
@@ -94,7 +101,10 @@ if __name__ == '__main__':
             from sagents.v2.contracts.errors import SageV2Error
             # Preserve only typed model failure identity, never provider messages
             # or credentials. The host may resume known transient model failures.
-            failure = ({'code': error.info.code, 'retryable': error.info.retryable}
+            from sagents.v2.optimization.scorer_dependencies import ScorerDependencyError
+            failure = ({'code': 'scorer.dependencies_changed', 'retryable': False}
+                if isinstance(error, ScorerDependencyError) else
+                {'code': error.info.code, 'retryable': error.info.retryable}
                 if isinstance(error, SageV2Error) else
                 {'code': 'scorer.execution_failed', 'retryable': False, 'error_type': type(error).__name__})
             sys.stdout.write(json.dumps({'execution_error': failure}))

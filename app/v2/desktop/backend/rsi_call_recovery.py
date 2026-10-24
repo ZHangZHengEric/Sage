@@ -25,7 +25,7 @@ def failed_call(error, journal):
     # Integrity/configuration failures are not failed inference attempts.
     if isinstance(error, (ValueError, RuntimeError)) and any(
         marker in str(error).lower()
-        for marker in ("frozen scorer source changed", "configuration differs", "binding differs",
+        for marker in ("frozen scorer source changed", "frozen scorer dependencies changed", "configuration differs", "binding differs",
                        "engine differs", "outside rsi host grant", "tools exceed")
     ):
         return None

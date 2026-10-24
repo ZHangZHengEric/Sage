@@ -1,0 +1,3 @@
+# Real MySQL 8.0 in Docker; same connector as pinned upstream.
+mysql-connector-python==9.3.0
+filelock>=3.16,<4

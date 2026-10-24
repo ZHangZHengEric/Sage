@@ -42,6 +42,7 @@ def retry_allowed(error):
         marker in str(original).lower()
         for marker in (
             "frozen scorer source changed",
+            "frozen scorer dependencies changed",
             "configuration differs",
             "binding differs",
             "engine differs",
@@ -79,15 +80,20 @@ async def retry_call(
             await retry_delay(attempt + 1)
 
 
-async def settle_cases(cases, evaluate, *, max_concurrency, on_error=None):
-    """Failures become results until ALL siblings drain; cancellation stays immediate."""
+async def settle_cases(cases, evaluate, *, max_concurrency, on_error=None, stop_on_error=None):
+    """Drain siblings; an explicit terminal measurement failure may halt dispatch."""
     slots = asyncio.Semaphore(max_concurrency)
+    halted = False
 
     async def bounded(case):
+        nonlocal halted
         async with slots:
+            if halted:
+                return None
             try:
                 return await evaluate(case)
             except Exception as error:
+                halted = bool(stop_on_error and stop_on_error(error)) or halted
                 if on_error is not None:
                     on_error(case, error)
                 return error

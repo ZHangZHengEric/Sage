@@ -9,7 +9,6 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import '../localization/app_localizations.dart';
 import 'rsi_observatory.dart';
 import 'rsi_dataset_revision.dart';
-import 'rsi_dataset_summary.dart';
 import 'rsi_dataset_details.dart';
 import 'rsi_activity.dart';
 import 'rsi_diff.dart';
@@ -42,6 +41,7 @@ class RsiScreen extends StatefulWidget {
 
 class _RsiScreenState extends State<RsiScreen> {
   final _goal = TextEditingController();
+  final _userSimulatorInstructions = TextEditingController();
   final _rounds = TextEditingController(text: '8');
   final _initialTrainingCount = TextEditingController(text: '6');
   final _trainingIncrement = TextEditingController(text: '6');
@@ -58,6 +58,9 @@ class _RsiScreenState extends State<RsiScreen> {
   final _parts = <String>{'instructions', 'skills'};
   Map<String, Object?> _history = {};
   Map<String, Object?>? _datasetVersion;
+  bool _configurationRestored = false;
+  bool _configurationEdited = false;
+  bool _restoringConfiguration = false;
   Map<String, Object?>? _run;
   Map<String, Object?>? _version;
   String? _selectedVersionId;
@@ -65,6 +68,7 @@ class _RsiScreenState extends State<RsiScreen> {
   String? _selectedRun, _model, _requestId, _error, _requestOptions;
   String? _caseFilename;
   String? _scorerId;
+  String? _userSimulatorId;
   String _builtinScoring = 'quality';
 
   String builtinScorerName(String mode) => switch (mode) {
@@ -149,14 +153,113 @@ class _RsiScreenState extends State<RsiScreen> {
   @override
   void initState() {
     super.initState();
+    for (final controller in _configurationFields.values) {
+      var previous = controller.text;
+      controller.addListener(() {
+        if (controller.text != previous) {
+          previous = controller.text;
+          _configurationChanged();
+        }
+      });
+    }
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
     unawaited(_refresh());
+  }
+
+  Map<String, TextEditingController> get _configurationFields => {
+    'goal': _goal,
+    'user_simulator_instructions': _userSimulatorInstructions,
+    'rounds': _rounds,
+    'initial_training_case_count': _initialTrainingCount,
+    'training_cases_per_round': _trainingIncrement,
+    'max_system_prompt_chars': _systemPromptLimit,
+    'max_skill_chars': _skillLengthLimit,
+    'max_skill_count': _skillCountLimit,
+    'max_edit_repairs': _editRepairLimit,
+    'validation_case_count': _testCount,
+    'human_test_count': _humanTestCount,
+    'max_concurrency': _concurrency,
+    'evaluation_repeats': _evaluationRepeats,
+    'human_test_repeats': _humanTestRepeats,
+  };
+
+  void _configurationChanged() {
+    if (!_restoringConfiguration) _configurationEdited = true;
+  }
+
+  Future<void> _restoreConfiguration(
+    Map<String, Object?>? run,
+    int revision,
+  ) async {
+    if (_configurationRestored || run == null || widget.historyOnly) return;
+    _configurationRestored = true;
+    if (_configurationEdited || _mutating) return;
+    // A failed run has the same durable input snapshot as a successful one.
+    // Restore once; subsequent polling must never reset the user's new edits.
+    setState(() {
+      _restoringConfiguration = true;
+      try {
+        for (final entry in _configurationFields.entries) {
+          if (run[entry.key] != null) {
+            entry.value.text = run[entry.key].toString();
+          }
+        }
+        _model =
+            (run.containsKey('requested_model_provider_id')
+                    ? run['requested_model_provider_id']
+                    : run['model_provider_id'])
+                ?.toString();
+        _scorerId = run['scorer_id']?.toString();
+        _userSimulatorId = run['user_simulator_id']?.toString();
+        _builtinScoring =
+            map(run['builtin_scoring'])['mode']?.toString() ?? 'quality';
+        if (run['optimization_scope'] is List) {
+          _parts
+            ..clear()
+            ..addAll((run['optimization_scope'] as List).whereType<String>());
+        }
+        _requestId = null;
+        _requestOptions = null;
+      } finally {
+        _restoringConfiguration = false;
+      }
+    });
+    Map<String, Object?>? dataset;
+    if (run['dataset_version_id'] != null) {
+      dataset = await widget.controller.rsiDataset(
+        widget.agentId,
+        run['dataset_version_id'].toString(),
+      );
+    } else if (run['dataset_manifest'] != null ||
+        run['suite'] != null ||
+        run['dataset'] != null) {
+      dataset = await widget.controller.rsiRunDataset(
+        widget.agentId,
+        run['id'].toString(),
+      );
+    }
+    final restoredDataset = dataset;
+    if (!mounted ||
+        revision != _revision ||
+        _configurationEdited ||
+        _mutating ||
+        restoredDataset == null) {
+      return;
+    }
+    setState(() {
+      _datasetVersion = restoredDataset;
+      _cases.text = jsonEncode(restoredDataset['dataset']);
+      _caseFilename =
+          map(restoredDataset['manifest'])['name']?.toString() ??
+          map(restoredDataset['dataset'])['name']?.toString();
+    });
   }
 
   @override
   void dispose() {
     _poll?.cancel();
     _goal.dispose();
+    _userSimulatorInstructions.dispose();
     _rounds.dispose();
     _initialTrainingCount.dispose();
     _trainingIncrement.dispose();
@@ -201,6 +304,7 @@ class _RsiScreenState extends State<RsiScreen> {
         _run = run;
         _events.addAll(rows(run?['events']));
       });
+      await _restoreConfiguration(run, revision);
       if (_versions && _selectedVersionId == null) {
         final latest = rows(history['versions']).firstOrNull;
         if (latest != null) await _openVersion(latest);
@@ -381,6 +485,8 @@ class _RsiScreenState extends State<RsiScreen> {
         suite,
         _scorerId,
         _builtinScoring,
+        _userSimulatorId,
+        _userSimulatorInstructions.text.trim(),
       ]);
       if (_requestOptions != options) {
         _requestId = null;
@@ -389,6 +495,10 @@ class _RsiScreenState extends State<RsiScreen> {
       _requestId ??= 'desktop-${DateTime.now().microsecondsSinceEpoch}';
       final started = await widget.controller.startRsi(widget.agentId, {
         'goal': _goal.text.trim(),
+        if (_userSimulatorId != null)
+          'user_simulator_id': _userSimulatorId
+        else if (_userSimulatorInstructions.text.trim().isNotEmpty)
+          'user_simulator_instructions': _userSimulatorInstructions.text.trim(),
         'rounds': count,
         'max_system_prompt_chars': systemPromptLimit,
         'max_skill_chars': skillLengthLimit,
@@ -812,83 +922,150 @@ class _RsiScreenState extends State<RsiScreen> {
         ),
       );
 
-  Widget datasetScope(
-    Map<String, Object?> manifest, {
-    required bool prepared,
-  }) => card(
-    Column(
-      key: ValueKey(
-        prepared ? 'rsi-prepared-dataset-scope' : 'rsi-run-dataset-scope',
-      ),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              prepared
-                  ? t('待启动版本', 'Prepared version')
-                  : t('本实验冻结口径', 'Frozen run scope'),
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            RsiDatasetBadge(
-              label: manifest['label'] == 'revised'
-                  ? t('修订集', 'Revised dataset')
-                  : t('原始集', 'Original dataset'),
-              icon: manifest['label'] == 'revised'
-                  ? Icons.edit_note_rounded
-                  : Icons.lock_outline_rounded,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '${t('原始 / 排除 / 参与', 'Original / excluded / active')}: '
-          '${manifest['original_count']} / ${manifest['excluded_count']} / ${manifest['active_count']}',
-        ),
-        if (manifest['label'] == 'revised')
-          Text(
-            t(
-              '本版本成绩属于修订集，不代表完整官方集成绩。原实验保留；需开始新实验应用此版本。',
-              'Scores belong to a revised dataset, not the complete official benchmark. Existing runs are retained; start a new run to use this version.',
-            ),
-          ),
-        const SizedBox(height: 8),
-        TextButton.icon(
-          key: ValueKey(
-            prepared
-                ? 'rsi-prepared-dataset-details'
-                : 'rsi-run-dataset-details',
-          ),
-          icon: const Icon(Icons.dataset_outlined, size: 18),
-          label: Text(t('查看详情', 'View details')),
-          onPressed: _mutating
-              ? null
-              : () => _mutate(() async {
-                  final version = prepared
-                      ? _datasetVersion
-                      : await widget.controller.rsiRunDataset(
-                          widget.agentId,
-                          _run!['id'].toString(),
-                        );
-                  if (version != null && mounted) {
-                    await showDatasetDetails(version);
-                  }
-                }),
-        ),
-      ],
-    ),
+  Map<String, Object?> get _runDatasetManifest =>
+      map(_run?['dataset_manifest'] ?? _run?['generated_dataset_manifest']);
+
+  Widget runDatasetDetailsButton({String? label}) => action(
+    label ?? t('查看详情', 'View details'),
+    CupertinoIcons.doc_text_search,
+    _mutating
+        ? null
+        : () => _mutate(() async {
+            final version = await widget.controller.rsiRunDataset(
+              widget.agentId,
+              _run!['id'].toString(),
+            );
+            if (mounted) {
+              await showDatasetDetails(version);
+            }
+          }),
+    key: const ValueKey('rsi-run-dataset-details'),
+    width: 112,
   );
 
   void selectScorer(Map<String, Object?>? plan) {
+    _configurationChanged();
     setState(() {
       _scorerId = plan?['id']?.toString();
       _builtinScoring = 'quality';
       _requestId = null;
     });
   }
+
+  String scorerLabel(Map<String, Object?> plan) {
+    final name = plan['name']?.toString() ?? plan['id'].toString();
+    final versions = rows(
+      _history['scorers'],
+    ).where((p) => p['name'] == plan['name']);
+    if (versions.length < 2) return name;
+    final version =
+        (plan['source_hash'] ??
+                map(plan['descriptor'])['version'] ??
+                plan['id'])
+            .toString();
+    return '$name · ${version.length > 10 ? version.substring(0, 10) : version}';
+  }
+
+  bool latestScorer(Map<String, Object?> plan) =>
+      rows(
+        _history['scorers'],
+      ).where((p) => p['name'] == plan['name']).firstOrNull?['id'] ==
+      plan['id'];
+
+  String? scorerLabelFor(Object? id) {
+    final plan = rows(
+      _history['scorers'],
+    ).where((p) => p['id'] == id).firstOrNull;
+    return plan == null ? null : scorerLabel(plan);
+  }
+
+  void selectUserSimulator(Map<String, Object?>? module) {
+    _configurationChanged();
+    setState(() {
+      _userSimulatorId = module?['id']?.toString();
+      _requestId = null;
+    });
+  }
+
+  String userSimulatorLabel(Map<String, Object?> module) {
+    final name = module['name']?.toString() ?? module['id'].toString();
+    final versions = rows(
+      _history['user_simulators'],
+    ).where((m) => m['name'] == name);
+    if (versions.length < 2) return name;
+    final version =
+        (map(module['descriptor'])['version'] ??
+                module['source_hash'] ??
+                module['id'])
+            .toString();
+    return '$name · ${version.length > 10 ? version.substring(0, 10) : version}';
+  }
+
+  String get userSimulatorName {
+    final module = rows(
+      _history['user_simulators'],
+    ).where((m) => m['id'] == _userSimulatorId).firstOrNull;
+    return module == null
+        ? (_userSimulatorId ?? t('RSI 内置模拟用户', 'RSI built-in user'))
+        : userSimulatorLabel(module);
+  }
+
+  Future<void> importUserSimulator() => _mutate(() async {
+    final file = await openFile(
+      acceptedTypeGroups: [
+        const XTypeGroup(label: 'Python', extensions: ['py']),
+      ],
+    );
+    if (file == null) return;
+    final module = await widget.controller.importRsiUserSimulator(
+      widget.agentId,
+      {'name': file.name, 'source': await file.readAsString()},
+    );
+    if (mounted) selectUserSimulator(module);
+  });
+
+  Future<void> chooseUserSimulator() => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 480),
+        child: GlassCard(
+          settings: glass,
+          padding: const EdgeInsets.all(8),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                key: const ValueKey('rsi-user-simulator-default'),
+                title: Text(t('RSI 内置模拟用户', 'RSI built-in user')),
+                selected: _userSimulatorId == null,
+                onTap: () {
+                  selectUserSimulator(null);
+                  Navigator.pop(dialogContext);
+                },
+              ),
+              for (final module in rows(_history['user_simulators']))
+                ListTile(
+                  key: ValueKey('rsi-user-simulator-${module['id']}'),
+                  title: Text(userSimulatorLabel(module)),
+                  subtitle: Text(
+                    map(module['validation'])['status'] == 'passed'
+                        ? t('自测通过', 'Self-test passed')
+                        : t('未验证', 'Unverified'),
+                  ),
+                  selected: _userSimulatorId == module['id'],
+                  onTap: () {
+                    selectUserSimulator(module);
+                    Navigator.pop(dialogContext);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   Future<void> importScorer() => _mutate(() async {
     final file = await openFile(
@@ -935,6 +1112,7 @@ class _RsiScreenState extends State<RsiScreen> {
                   title: Text(builtinScorerName(mode)),
                   selected: _scorerId == null && _builtinScoring == mode,
                   onTap: () {
+                    _configurationChanged();
                     selectScorer(null);
                     setState(() => _builtinScoring = mode);
                     Navigator.pop(dialogContext);
@@ -943,7 +1121,31 @@ class _RsiScreenState extends State<RsiScreen> {
               for (final plan in rows(_history['scorers']))
                 ListTile(
                   key: ValueKey('rsi-scorer-${plan['id']}'),
-                  title: Text('${plan['name']}'),
+                  title: Text(scorerLabel(plan)),
+                  subtitle: Text(
+                    [
+                      if (plan['created_at'] != null)
+                        timestamp(plan['created_at'])
+                      else
+                        t('导入时间未记录', 'Import time unavailable'),
+                      if (map(plan['validation'])['status'] == 'passed')
+                        t('自测通过', 'Self-test passed'),
+                    ].join(' · '),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (latestScorer(plan))
+                        Text(
+                          t('最新', 'Latest'),
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      if (_scorerId == plan['id']) ...[
+                        const SizedBox(width: 8),
+                        const Icon(CupertinoIcons.checkmark, size: 16),
+                      ],
+                    ],
+                  ),
                   selected: _scorerId == plan['id'],
                   onTap: () {
                     selectScorer(plan);
@@ -982,6 +1184,7 @@ class _RsiScreenState extends State<RsiScreen> {
                       : null,
                   onTap: () {
                     setState(() {
+                      _configurationChanged();
                       _model = option.key.isEmpty ? null : option.key;
                       _requestId = null;
                     });
@@ -1052,6 +1255,7 @@ class _RsiScreenState extends State<RsiScreen> {
     );
     final scorer = map(snapshot['scorer']);
     final scorerName =
+        scorerLabelFor(snapshot['scorer_id']) ??
         map(scorer['descriptor'])['name'] ??
         rows(
           _history['scorers'],
@@ -1088,6 +1292,20 @@ class _RsiScreenState extends State<RsiScreen> {
           children: [value('scorer', scorerName), _scorerHelp()],
         ),
       ),
+      field(
+        t('模拟用户', 'Simulated user'),
+        value(
+          'user-simulator',
+          map(map(snapshot['user_simulator'])['descriptor'])['name'] ??
+              snapshot['user_simulator_id'] ??
+              (snapshot['user_simulator_instructions'] != null
+                  ? t(
+                      'RSI 内置模拟用户（自定义指令）',
+                      'RSI built-in user (custom instructions)',
+                    )
+                  : t('RSI 内置模拟用户', 'RSI built-in user')),
+        ),
+      ),
       field(t('优化目标', 'Optimization goal'), value('goal', snapshot['goal'])),
       for (final entry in <String, String>{
         'rounds': t('优化轮数', 'Rounds'),
@@ -1118,6 +1336,19 @@ class _RsiScreenState extends State<RsiScreen> {
         value('model', providerName),
       ),
       field(t('优化范围', 'Optimization parts'), value('parts', parts)),
+      if (_runDatasetManifest.isNotEmpty)
+        field(
+          t('数据集', 'Dataset'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              value('dataset', _runDatasetManifest['name']),
+              runDatasetDetailsButton(),
+            ],
+          ),
+        ),
     ];
     return Column(
       key: const ValueKey('rsi-configuration-readonly'),
@@ -1142,6 +1373,7 @@ class _RsiScreenState extends State<RsiScreen> {
             .where((m) => m.id == _model)
             .firstOrNull
             ?.name ??
+        _model ??
         t('目标 Agent 模型', 'Target agent model');
     final fields = [
       field(
@@ -1153,10 +1385,8 @@ class _RsiScreenState extends State<RsiScreen> {
             GlassPicker(
               key: const ValueKey('rsi-scorer-picker'),
               value:
-                  rows(_history['scorers'])
-                      .where((p) => p['id'] == _scorerId)
-                      .firstOrNull?['name']
-                      ?.toString() ??
+                  scorerLabelFor(_scorerId) ??
+                  _scorerId ??
                   builtinScorerName(_builtinScoring),
               width: 260,
               height: 34,
@@ -1271,6 +1501,45 @@ class _RsiScreenState extends State<RsiScreen> {
           ),
         ),
       field(
+        t('模拟用户', 'Simulated user'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            GlassPicker(
+              key: const ValueKey('rsi-user-simulator-picker'),
+              value: userSimulatorName,
+              width: 260,
+              height: 34,
+              settings: glass,
+              textStyle: Theme.of(context).textTheme.bodyMedium,
+              onTap: enabled ? chooseUserSimulator : null,
+            ),
+            action(
+              t('导入模拟用户', 'Import simulated user'),
+              CupertinoIcons.folder,
+              enabled ? importUserSimulator : null,
+              key: const ValueKey('rsi-import-user-simulator'),
+              width: 150,
+            ),
+          ],
+        ),
+      ),
+      field(
+        t('模拟用户（留空使用默认）', 'Simulated user (default when empty)'),
+        SizedBox(
+          width: 340,
+          child: GlassTextField(
+            key: const ValueKey('rsi-user-simulator-instructions'),
+            controller: _userSimulatorInstructions,
+            enabled: enabled && _userSimulatorId == null,
+            maxLines: 3,
+            textStyle: Theme.of(context).textTheme.bodyMedium,
+            settings: glass,
+          ),
+        ),
+      ),
+      field(
         t('内部 Agent 模型', 'Internal agent model'),
         SizedBox(
           width: 260,
@@ -1317,6 +1586,7 @@ class _RsiScreenState extends State<RsiScreen> {
                       settings: glass,
                       shape: const LiquidRoundedRectangle(borderRadius: 10),
                       onTap: () => setState(() {
+                        _configurationChanged();
                         _parts.contains(part.key)
                             ? _parts.remove(part.key)
                             : _parts.add(part.key);
@@ -1365,6 +1635,23 @@ class _RsiScreenState extends State<RsiScreen> {
                 _caseFilename!,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
+            if (_datasetVersion != null)
+              action(
+                t('查看详情', 'View details'),
+                CupertinoIcons.doc_text_search,
+                _mutating
+                    ? null
+                    : () => _mutate(() async {
+                        await showDatasetDetails(_datasetVersion!);
+                      }),
+                key: const ValueKey('rsi-prepared-dataset-details'),
+                width: 112,
+              ),
+            if (_runDatasetManifest.isNotEmpty &&
+                (_datasetVersion == null ||
+                    _datasetVersion!['id'] !=
+                        _runDatasetManifest['version_id']))
+              runDatasetDetailsButton(label: t('本实验详情', 'Run details')),
             action(
               t('导入数据集', 'Import dataset'),
               CupertinoIcons.folder,
@@ -1395,6 +1682,7 @@ class _RsiScreenState extends State<RsiScreen> {
                 onPressed: !enabled
                     ? null
                     : () => setState(() {
+                        _configurationChanged();
                         _cases.clear();
                         _datasetVersion = null;
                         _caseFilename = null;
@@ -1417,6 +1705,86 @@ class _RsiScreenState extends State<RsiScreen> {
         ],
       ],
     );
+  }
+
+  Future<void> runHistoryMenu(Map<String, Object?> run, Offset position) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final point = overlay.globalToLocal(position);
+    final blocked = active(run['status']) || _mutating;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        point.dx,
+        point.dy,
+        overlay.size.width - point.dx,
+        overlay.size.height - point.dy,
+      ),
+      items: [
+        PopupMenuItem(
+          key: ValueKey('rsi-delete-run-${run['id']}'),
+          value: 'delete',
+          enabled: !blocked,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                CupertinoIcons.trash,
+                size: 16,
+                color: blocked ? null : Theme.of(context).colorScheme.error,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                active(run['status'])
+                    ? t('删除（请先停止实验）', 'Delete (stop experiment first)')
+                    : t('删除', 'Delete'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (choice != 'delete' || !mounted || _mutating) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(t('删除实验历史？', 'Delete experiment history?')),
+        content: Text(
+          '${run['goal']}\n${timestamp(run['created_at'])}\n\n${t('此实验将从历史列表移除。运行日志、已保存的 Agent 版本和数据集仍会保留。', 'This experiment will be removed from history. Logs, saved Agent versions and datasets will be retained.')}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(t('取消', 'Cancel')),
+          ),
+          FilledButton(
+            key: const ValueKey('rsi-confirm-delete-run'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(t('删除', 'Delete')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _mutate(() async {
+      await widget.controller.deleteRsiRun(
+        widget.agentId,
+        run['id'].toString(),
+      );
+      if (!mounted) return;
+      setState(() {
+        final remaining = rows(
+          _history['runs'],
+        ).where((r) => r['id'] != run['id']).toList();
+        _history = {..._history, 'runs': remaining};
+        if (_selectedRun == run['id']) {
+          _selectedRun = remaining.firstOrNull?['id']?.toString();
+          _run = null;
+          _version = null;
+          _events.clear();
+        }
+        _revision++;
+      });
+    });
   }
 
   Widget historyList() {
@@ -1443,41 +1811,47 @@ class _RsiScreenState extends State<RsiScreen> {
               ),
             ),
           for (final run in runs)
-            ListTile(
-              key: ValueKey('rsi-run-${run['id']}'),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-              selected: _selectedRun == run['id'],
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(11),
+            GestureDetector(
+              onSecondaryTapDown: (details) =>
+                  runHistoryMenu(run, details.globalPosition),
+              onLongPressStart: (details) =>
+                  runHistoryMenu(run, details.globalPosition),
+              child: ListTile(
+                key: ValueKey('rsi-run-${run['id']}'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                selected: _selectedRun == run['id'],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                selectedTileColor: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.08),
+                title: Text(
+                  '${t('目标：', 'Goal: ')}${run['goal']}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                subtitle: Text(
+                  '${status(run['status'])} · ${run['iteration']}/${run['rounds']}\n${timestamp(run['created_at'])}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                trailing: active(run['status'])
+                    ? const CupertinoActivityIndicator(radius: 7)
+                    : null,
+                onTap: () {
+                  if (_selectedRun == run['id']) return;
+                  setState(() {
+                    _selectedRun = run['id'].toString();
+                    _run = null;
+                    _version = null;
+                    _events.clear();
+                    _error = null;
+                    _revision++;
+                  });
+                  unawaited(_refresh());
+                },
               ),
-              selectedTileColor: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.08),
-              title: Text(
-                run['goal'].toString(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              subtitle: Text(
-                '${status(run['status'])} · ${run['iteration']}/${run['rounds']}\n${timestamp(run['created_at'])}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              trailing: active(run['status'])
-                  ? const CupertinoActivityIndicator(radius: 7)
-                  : null,
-              onTap: () {
-                if (_selectedRun == run['id']) return;
-                setState(() {
-                  _selectedRun = run['id'].toString();
-                  _run = null;
-                  _version = null;
-                  _events.clear();
-                  _error = null;
-                  _revision++;
-                });
-                unawaited(_refresh());
-              },
             ),
         ] else ...[
           for (final group in versionGroups().entries) ...[
@@ -1726,21 +2100,6 @@ class _RsiScreenState extends State<RsiScreen> {
                   child: const CupertinoActivityIndicator(),
                 ),
               ),
-            ),
-          if (!_versions && _datasetVersion != null && _showConfiguration)
-            datasetScope(map(_datasetVersion!['manifest']), prepared: true),
-          if (!_versions &&
-              _run != null &&
-              map(
-                _run!['dataset_manifest'] ??
-                    _run!['generated_dataset_manifest'],
-              ).isNotEmpty)
-            datasetScope(
-              map(
-                _run!['dataset_manifest'] ??
-                    _run!['generated_dataset_manifest'],
-              ),
-              prepared: false,
             ),
           if (!_versions &&
               _run == null &&

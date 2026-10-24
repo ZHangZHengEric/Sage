@@ -21,7 +21,7 @@ class RetailState:
         self.path = Path(path)
         self.initial_state = initial_state
 
-    def call(self, name, arguments):
+    def call(self, name, arguments, *, with_receipt=False):
         from tau2.domains.retail.data_model import RetailDB
         from tau2.domains.retail.tools import RetailTools
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -29,6 +29,7 @@ class RetailState:
         # DB transactionally, so writes survive subsequent tool connections.
         with sqlite3.connect(self.path, timeout=30) as connection:
             connection.execute('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, data TEXT NOT NULL)')
+            connection.execute('CREATE TABLE IF NOT EXISTS execution (sequence INTEGER PRIMARY KEY AUTOINCREMENT)')
             connection.execute('BEGIN IMMEDIATE')
             row = connection.execute('SELECT data FROM state WHERE id=1').fetchone()
             raw = row[0] if row else (ROOT / 'data/tau2/domains/retail/db.json').read_text()
@@ -40,19 +41,32 @@ class RetailState:
                 environment = get_environment(db=db)
                 environment.set_state(state.initialization_data, state.initialization_actions, state.message_history or [])
                 db = environment.tools.db
-            result = RetailTools(db).use_tool(name, **arguments)
-            connection.execute('INSERT OR REPLACE INTO state(id,data) VALUES(1,?)', (db.model_dump_json(),))
-            # Commit before returning. Failed official operations roll back.
+            error = None
+            try:
+                result = RetailTools(db).use_tool(name, **arguments)
+            except Exception as caught:
+                if not with_receipt:
+                    raise
+                error = caught
+            else:
+                connection.execute('INSERT OR REPLACE INTO state(id,data) VALUES(1,?)', (db.model_dump_json(),))
+            # Number calls under the same transaction lock as the actual state
+            # change, including failed calls without persisting their mutations.
+            sequence = connection.execute('INSERT INTO execution DEFAULT VALUES').lastrowid
+            receipt = {'protocol': 'sage.rsi.execution-order/v1', 'sequence': sequence}
             connection.commit()
         self.path.chmod(0o600)
+        if error is not None:
+            error.rsi_execution_receipt = receipt
+            raise error
         if hasattr(result, 'model_dump'):
             result = result.model_dump(mode='json')
-        return result
+        return (result, receipt) if with_receipt else result
 
 
 def create_server(state_path, *, initial_state=None):
     from mcp.server import Server
-    from mcp.types import TextContent, Tool
+    from mcp.types import CallToolResult, TextContent, Tool
     from tau2.domains.retail.tools import RetailTools
     server = Server('TauRetail')
     tools = RetailTools(None).get_tools()
@@ -65,8 +79,17 @@ def create_server(state_path, *, initial_state=None):
     async def call_tool(name, arguments):
         if name not in tools:
             raise ValueError('unknown official retail tool')
-        result = await asyncio.to_thread(state.call, name, arguments)
-        return [TextContent(type='text', text=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False))]
+        try:
+            result, receipt = await asyncio.to_thread(state.call, name, arguments, with_receipt=True)
+        except Exception as error:
+            receipt = getattr(error, 'rsi_execution_receipt', None)
+            if receipt is None:
+                raise
+            return CallToolResult(isError=True, content=[TextContent(type='text', text=str(error))],
+                _meta={'sage.rsi.execution': receipt})
+        return CallToolResult(content=[TextContent(type='text',
+            text=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False))],
+            _meta={'sage.rsi.execution': receipt})
     return server
 
 

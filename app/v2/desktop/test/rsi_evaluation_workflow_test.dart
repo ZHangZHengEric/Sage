@@ -124,6 +124,41 @@ class PlanApi extends RsiApi {
   }
 }
 
+class DuplicateScorerApi extends PlanApi {
+  DuplicateScorerApi() {
+    scorers.addAll([
+      {
+        'id': 'new-scorer',
+        'name': 'accuracy.py',
+        'source_hash': 'b' * 64,
+        'created_at': '2026-10-23T13:30:00Z',
+        'validation': {'status': 'passed'},
+      },
+      {
+        'id': 'old-scorer',
+        'name': 'accuracy.py',
+        'source_hash': 'a' * 64,
+        'validation': {'status': 'passed'},
+      },
+    ]);
+  }
+  @override
+  Future<Map<String, Object?>> importRsiScorer(
+    String agentId,
+    Map<String, Object?> scorer,
+  ) async {
+    final result = <String, Object?>{
+      'id': 'imported-scorer',
+      'name': scorer['name'],
+      'source_hash': 'c' * 64,
+      'created_at': '2026-10-23T14:00:00Z',
+      'validation': {'status': 'passed'},
+    };
+    scorers.insert(0, result);
+    return result;
+  }
+}
+
 Future<void> tapVisible(WidgetTester tester, String key) async {
   final finder = find.byKey(ValueKey(key));
   await tester.ensureVisible(finder);
@@ -133,6 +168,64 @@ Future<void> tapVisible(WidgetTester tester, String key) async {
 }
 
 void main() {
+  testWidgets(
+    'same-name scorer versions are distinguishable and newly imported version is selected',
+    (tester) async {
+      final previous = FileSelectorPlatform.instance;
+      FileSelectorPlatform.instance = PlanFileSelector();
+      addTearDown(() => FileSelectorPlatform.instance = previous);
+      tester.view.physicalSize = const Size(1440, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = DuplicateScorerApi();
+      final controller = WorkspaceController(api: api);
+      addTearDown(() {
+        controller.dispose();
+        api.close();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RsiScreen(
+            controller: controller,
+            agentId: 'agent',
+            agentName: 'Sage',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tapVisible(tester, 'rsi-toggle-setup');
+      await tapVisible(tester, 'rsi-scorer-picker');
+      expect(find.text('accuracy.py · bbbbbbbbbb'), findsOneWidget);
+      expect(find.text('accuracy.py · aaaaaaaaaa'), findsOneWidget);
+      expect(find.text('最新'), findsOneWidget);
+      expect(find.textContaining('导入时间未记录'), findsOneWidget);
+      await tapVisible(tester, 'rsi-scorer-old-scorer');
+      expect(find.text('accuracy.py · aaaaaaaaaa'), findsOneWidget);
+      await tapVisible(tester, 'rsi-import-scorer');
+      expect(find.text('accuracy.py · cccccccccc'), findsOneWidget);
+      await tapVisible(tester, 'rsi-scorer-picker');
+      final latest = find.byKey(const ValueKey('rsi-scorer-imported-scorer'));
+      expect(tester.widget<ListTile>(latest).selected, isTrue);
+      expect(
+        find.descendant(of: latest, matching: find.text('最新')),
+        findsOneWidget,
+      );
+      await tapVisible(tester, 'rsi-scorer-old-scorer');
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.text('accuracy.py · aaaaaaaaaa'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('rsi-goal')),
+        'Keep the selected version',
+      );
+      await tapVisible(tester, 'rsi-start');
+      expect(api.startOptions!['scorer_id'], 'old-scorer');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   final readyPath = Platform.environment['RSI_EVALUATION_TEST_READY'];
   testWidgets(
     'real API: import scorer, start RSI, finish and display fixed scores',

@@ -1,5 +1,16 @@
 # AgentPackageOptimizer
 
+Native MCP observations preserve every immutable item and bind any within-batch
+call-order projection to matching proposal/result receipts. Proposal order alone
+does not establish environment execution order; authoritative scorers must still
+replay and validate every environment outcome. Missing or conflicting receipts
+never authorize an inferred action or reward.
+
+Local file evaluator recovery replays durable responses through the original
+file/schema/evidence checks, including a rejected response and its recorded
+bounded repair. It preserves suspended native states; recovering a response is
+not accepting its assessment. This requires the host's file-only evaluator grant.
+
 An independent Python API for testing and improving a supplied
 `AgentPackageBundle`. It does not modify the original object, register packages,
 activate a version, or alter the target Agent's normal runtime loop.
@@ -98,7 +109,7 @@ exclusion evidence. Dataset management is absent from model-facing MCP tools.
 The validation designer sees the original package and previously generated
 validation questions only. The training designer sees current capabilities and
 training evidence, never validation questions or feedback. Separate fresh Sessions
-keep design requests independent. Host checks and an independent suite reviewer
+keep design requests independent. Host checks and an explicitly enabled independent suite reviewer
 check policy/rubric consistency, authorization and executable fixtures. They do
 not judge cross-split leakage or question memorization.
 
@@ -109,8 +120,9 @@ is `0.5 * training_mean + 0.5 * validation_mean`, so growing training sets do no
 overwhelm the fixed validation signal. A candidate is retained when that overall
 score improves by at least `min_improvement`. Individual regressions are allowed,
 recorded per round, and carried forward for repair from the stronger package.
-Execution completion, enabled generated-tool integrity audits, and independent
-goal/permission reviews still gate acceptance.
+Execution completion and enabled generated-tool integrity audits still gate
+acceptance. Candidate checks are deterministic by default; an explicitly supplied
+semantic reviewer is an additional host opt-in gate.
 
 Tuning receives complete bounded training evidence, previous attempts, validation
 mean/pass count, and per-question scores under stable anonymous indexes. No
@@ -144,7 +156,7 @@ and `files/` (prompt resources, Skills, granted tool definitions/resources), wit
 `evidence/` read-only. It returns a rationale and optional `experience_notes`,
 which are learning notes outside the production package. The host derives the audit
 patch, validates all file and manifest changes, seals `version/package/` with its
-content hash, independently reviews it, then loads that exact immutable bundle.
+content hash, then loads that exact validated immutable bundle.
 The editor cannot write another round or the sealed version. No process tools are
 granted. Ordinary code resources require explicit file grants and a real host
 execution binding; saving MCP source does not itself launch a server.
@@ -158,8 +170,8 @@ The baseline bundle is immutable. `OptimizationPatch.system_prompt` replaces the
 candidate's complete production prompt, without adding a framework heading or
 requiring a verbatim original prefix. Reorganize, consolidate and correct the prompt
 while preserving original business-policy meaning, responsibilities and permissions.
-Independent semantic review compares the complete candidate against the original;
-include responsibility and permission behavior in the fixed test rubrics. Other
+Keep responsibility and permission behavior in the fixed test rubrics and tuner
+authoring principles; deterministic validation does not prove semantic equivalence. Other
 agents' instructions are unchanged. `allow_system_prompt` and
 `max_system_prompt_chars` control this grant and its size limit.
 
@@ -585,8 +597,21 @@ this bounded recovery policy and a Resume evolution action for interrupted runs.
 
 ## Independent business and permission review
 
-Every changed, structurally valid proposal is independently reviewed before target
-execution. The reviewer sees original/current/candidate packages, the authorized
+Candidate validation defaults to fixed host rules, without a reviewer model call.
+Scope, structural, binding, metadata and resource errors are returned to the tuner
+for up to `max_edit_repairs` corrections in the same round. Exhaustion rejects the
+proposal without executing it. Passing validation is not a semantic approval.
+Desktop uses this mode. Dataset validation also defaults to fixed rules without a review model. An explicit
+`suite_reviewer=OptimizationAgent(...)` remains a separate SDK opt-in mechanism;
+there is no evaluator fallback. Generated JSON/schema, count and split errors are
+returned to the designer with bounded `validation_repairs` (default 2; Desktop
+uses `SuitePreflightPolicy.generated_repairs`), retaining each response before admission.
+The candidate-validation mode is frozen in the recovery configuration; changing it
+cannot silently resume an old experiment.
+
+SDK hosts may explicitly supply `reviewer=OptimizationAgent(...)` to opt into an
+additional independent semantic gate before execution. There is no evaluator
+fallback for candidate review. This reviewer sees original/current/candidate packages, the authorized
 goal, host constraints and training evidence. It does not see validation questions
 or results. It checks goal drift, changed grading requirements and unauthorized
 capabilities. It does not judge memorization or question leakage. The legacy
@@ -736,3 +761,129 @@ These small rule-based tasks do not certify arbitrary-domain generalization.
 ### Human-only observation sink
 
 `HumanTestObserver` accepts an `OptimizationTestSuite` and an isolated host evaluator. Pass its synchronous `observe` method as an event sink, await `finish()` after optimization, and call `cancel()` during host cleanup. It measures the baseline and every retained round; no return value or result is supplied to the optimizer. Test evidence must stay outside tuning requests, training generation, history, selection and termination. `IsolatedTestEvaluator` supplies fresh scoring/user sessions; `SharedCallLimitRunner` can share one call ceiling across both workloads without locking an entire dialogue. Test infrastructure errors remain missing measurements, and exact split overlap invalidates observation rather than steering optimization.
+
+## Shared scheduling and round completion
+
+All independent `(case, trial)` jobs in an evaluation share the configured
+concurrency ceiling. A slow first repetition does not block later repetitions.
+The Desktop host additionally shares one `SharedCallPool` across target calls,
+internal agent calls, Python scorer model requests, and human-only test calls.
+The observatory's active counter reads that pool, including human test work.
+Queueing time is excluded from dialogue execution latency; setup and actual
+execution remain included.
+
+Human baseline tests are admitted as soon as `suite_fixed` freezes the development
+suite. They run alongside baseline train/dev jobs, without waiting for their
+summary. Desktop supplies `checkpoint_barrier=observer.wait_for_checkpoint`:
+baseline and each retained round finish their declared human measurements before
+the next round starts. This callback returns completion only, never scores or
+hidden test evidence. Errors are recorded as measurement errors and close the
+checkpoint; they are not converted to zero grades. Candidate selection continues
+to depend solely on train/dev. Retained-round tests begin once selection fixes the
+retained package. SDK hosts can opt into the same barrier; without it, observer
+measurements retain the asynchronous API behavior.
+
+## Frozen Python scorer dependencies
+
+Scorer admission binds both entry source and local dependencies to a version.
+Validation records imported local Python sources and data read by the contract
+tests. Bundled `evaluation_datasets.<benchmark>` packages are pinned in full,
+including resource membership, so adding a file also changes the binding. Custom
+scorers must declare resources used only by other cases through
+`SCORER_DEPENDENCIES = ["relative/file.json", "/absolute/resource/directory"]`.
+Relative declarations resolve against the scorer entry file. Python and installed
+package versions are also bound. Runtime state under `.runtime` and bytecode are
+excluded. This checks integrity of trusted code; it is not a Python sandbox.
+
+Bindings are verified before and after each subprocess execution. A modified or
+new undeclared dependency raises an execution error rather than producing a grade.
+Re-import after an intentional dependency update to obtain a new version. Public
+validation metadata exposes the binding and file count, not private host paths.
+Imported scorer and evaluation-plan IDs are scoped to the owning user and agent.
+Plans retain their original dataset environment and reject conflicting overrides.
+A second Desktop host does not mark a live host's run interrupted; recovery checks
+both process ID and creation time before reclaiming abandoned work.
+
+## Simulated user configuration
+
+User simulation is independent of question design and scoring. Desktop uses the
+built-in `DefaultUserSimulator`, or an independently uploaded Python implementation
+selected via `user_simulator_id`. Both use the internal ModelProvider, shared call
+pool and standard continue/stop contract. Python import tests use recorded model
+responses; admission does not call live models or start RSI.
+
+See [User simulator protocol, upload, ModelProvider and stopping](USER_SIMULATORS.md)
+for the full contract and a complete uploadable example. Tau's adapter lives in
+`evaluation_datasets/tau_bench/user_simulator.py`; benchmark logic stays with the dataset.
+
+SDK hosts can pass `user_simulator=...` to the optimizer and independent test
+evaluator. Existing `test_driver=OptimizationAgent(...)` hosts retain native driver
+compatibility. Single-turn cases bypass simulation. Multi-turn cases should set
+`dialogue_completion=user` when the user owns completion; stopping and scoring are
+separate. Actual termination reasons are supplied to the scorer and saved in the
+final conversation turn. Recovery retains frozen simulator bindings and isolates
+state across cases, repeats and checkpoints.
+
+## Mechanism-first evaluation and tuning
+
+Evaluation now decides **what to verify next**. Execution diagnoses separate
+agent decisions, environment, user simulation, scoring and infrastructure, and
+record outcome/policy/quality priority, counterevidence, protected behavior and a
+next verification. Training synthesis returns `next_action`:
+`test_hypothesis`, `measure`, `measurement_issue`, or `no_change`. Without an
+intervention supported by the synthesis, the default optimizer records a request
+for further verification and retains the package instead of forcing an edit.
+The score remains authoritative and unchanged. Validation/test trajectories and
+questions remain unavailable to the tuner.
+
+A changed candidate must include an `OptimizationExperiment` **before candidate
+execution**: retained `parent_hash`, one primary `mechanism`, applicability,
+change locations, existing-rule gap, expected observation, support/falsification/
+inconclusive conditions, measured training IDs, protection cases, protected
+behaviors and risks. Host checks bind the parent and reject any unmeasured or
+hidden case reference. File editors return `experiment` with `rationale` and
+`experience_notes`; files remain the sole production edit source. Invalid cards
+use the existing bounded proposal repair path. No-change proposals need no card.
+The host archives the declaration, actual changed coordinates, exact candidate,
+measurements and selection separately. Acceptance is not proof of the mechanism.
+`require_experiment=False` is an explicit compatibility option for legacy SDK
+hosts; Desktop and new optimizers require the card by default.
+
+New training cases are measured on the **retained package first**, with all
+configured repeats and an independent `training_challenge` phase. Their recorded
+failures, successes and diagnoses join existing training evidence **before** the
+tuner is invoked. Existing trials are preserved. Only then may the candidate be
+edited and measured on the expanded suite. Recovery distinguishes retained
+discovery receipts from candidate receipts, so discovery cannot masquerade as a
+candidate execution. Successes remain regression safeguards.
+
+These changes implement the diagnosis/experiment and retained-first discovery
+parts of the proposal. They do not turn the existing selection policy into a
+statistical causal test or establish independent generalization. Fresh incumbent
+comparison remains the separate `refresh_incumbent` option; final independent
+acceptance requires its own frozen evaluation plan.
+
+Imported case environments may opt into `environment.terminal_on_done: true`.
+Desktop then wraps the target's deterministic continuation policy: only a complete,
+successful result from the bound case MCP, carrying JSON `done=true`, can mark the
+environment boundary. The host adds the receipt; assistant/user text and remote
+MCP metadata cannot forge it. The next target model request is skipped, and the
+normal scorer determines success independently. Existing bindings omit the new
+flag and retain their prior wire representation and fingerprints. SDK hosts using
+`McpCaseEnvironment` directly must install `CaseEnvironmentContinuationPolicy`
+alongside the case tool provider to use this opt-in behavior.
+
+A bounded local file evaluator may validate a completed assessment after the exact
+`model.empty_semantic_response` terminal error. This requires the host's local-file
+grant, full evidence read coverage, a readable assessment file, and the ordinary
+schema and evidence validation. Native suspended state remains in the evidence;
+other transport failures and invalid/missing assessments remain failures.
+Incomplete or missing file assessments after that terminal error receive bounded
+validation-repair feedback (including missing read ranges), rather than restarting
+the entire analysis as a transport failure. They remain unusable until validation
+passes; exhausted repairs still fail without manufacturing a diagnosis or grade.
+
+Single-turn native loop-guard episodes can be graded from complete bound tool
+receipts while retaining their genuine suspended Run state. See
+[native episode boundaries](NATIVE_EPISODES.md) for evidence checks, selection,
+independent tests, and atomic private-evidence recovery.

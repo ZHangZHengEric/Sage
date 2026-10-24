@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/THUDM/AgentBench",
+  "commit": "d1e4a10db08c87075c78972e48ecc182be03e2d5",
+  "files": {
+    "vendor/LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "vendor/README.md": "1b7d1f1cd7a74ac9497c639324ec342dd3f8769e9c0c4cd2cd92a4eb6740ac98",
+    "vendor/configs/tasks/dbbench.yaml": "83d9e26168ab306f16410ab83f3ac2937f6e685a0d9905b36799034ab8480d2a",
+    "vendor/data/dbbench/dev.jsonl": "eb941c58a7a5651357b19e46aa05070f6cd5a7d83ce70cefd24aa3581e1e1130",
+    "vendor/data/dbbench/standard.jsonl": "cf8dec6fb8051f46e6171136824aaa8b8707c3affbb3185c0bad2b39bc6b71e2",
+    "vendor/requirements.txt": "2a2ecd2cc0e25ef7155a088604213682d95912c94adfdab9a865ee4b4f0e5da2",
+    "vendor/src/server/tasks/dbbench/Dockerfile": "05646e1f7c6f5652128bd4bc7820c0e4103ad5619c02c7a9273a5161d1e6a55a",
+    "vendor/src/server/tasks/dbbench/__init__.py": "c922f005d2891751017836f1cc790bfb79e30f0aa0ced9bbd397675c0f5d454e",
+    "vendor/src/server/tasks/dbbench/environment.py": "3b1279ee06a1b3c27cac98f70466c10ae2c8538280381293f0521574b4b74838",
+    "vendor/src/server/tasks/dbbench/interaction.py": "b17b335c0c3236ec04a3e732b6d095300191be160b330f0699116ad516fe2e21",
+    "vendor/src/server/tasks/dbbench/requirements.txt": "2c6b1c8e9f159eadd42c02a56091112fad3b6082c0a2017c876e15f2acc9c55f",
+    "vendor/src/server/tasks/dbbench/result_processor.py": "e3b2f5bb86e30f4db2979a543325bfe12a8f043a8b1e72fe1487cd8a62a2bfac",
+    "vendor/src/server/tasks/dbbench/task.py": "931afb39e865b138a61115d460fbaf32c3e2710f7ad031e82e53953576bdd1b4"
+  }
+}

@@ -1,0 +1,2137 @@
+{
+  "format_version": "sage.rsi.dataset/v1",
+  "name": "ScienceWorld · pinned RSI subset",
+  "cases": [
+    {
+      "id": "scienceworld-0-5",
+      "input": "Your task is to boil ice. For compounds without a boiling point, combusting the substance is also acceptable. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-0-5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-0-5"
+      },
+      "coverage_tags": [
+        "task-1-boil"
+      ]
+    },
+    {
+      "id": "scienceworld-0-7",
+      "input": "Your task is to boil orange juice. For compounds without a boiling point, combusting the substance is also acceptable. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-0-7\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-0-7"
+      },
+      "coverage_tags": [
+        "task-1-boil"
+      ]
+    },
+    {
+      "id": "scienceworld-0-1",
+      "input": "Your task is to boil water. For compounds without a boiling point, combusting the substance is also acceptable. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-0-1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-0-1"
+      },
+      "coverage_tags": [
+        "task-1-boil"
+      ]
+    },
+    {
+      "id": "scienceworld-0-15",
+      "input": "Your task is to boil ice cream. For compounds without a boiling point, combusting the substance is also acceptable. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-0-15\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-0-15"
+      },
+      "coverage_tags": [
+        "task-1-boil"
+      ]
+    },
+    {
+      "id": "scienceworld-1-11",
+      "input": "Your task is to change the state of matter of chocolate. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-1-11\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-1-11"
+      },
+      "coverage_tags": [
+        "task-1-change-the-state-of-matter-of"
+      ]
+    },
+    {
+      "id": "scienceworld-1-4",
+      "input": "Your task is to change the state of matter of ice. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-1-4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-1-4"
+      },
+      "coverage_tags": [
+        "task-1-change-the-state-of-matter-of"
+      ]
+    },
+    {
+      "id": "scienceworld-1-12",
+      "input": "Your task is to change the state of matter of marshmallow. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-1-12\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-1-12"
+      },
+      "coverage_tags": [
+        "task-1-change-the-state-of-matter-of"
+      ]
+    },
+    {
+      "id": "scienceworld-1-14",
+      "input": "Your task is to change the state of matter of ice cream. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-1-14\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-1-14"
+      },
+      "coverage_tags": [
+        "task-1-change-the-state-of-matter-of"
+      ]
+    },
+    {
+      "id": "scienceworld-2-8",
+      "input": "Your task is to freeze apple juice. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-2-8\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-2-8"
+      },
+      "coverage_tags": [
+        "task-1-freeze"
+      ]
+    },
+    {
+      "id": "scienceworld-2-7",
+      "input": "Your task is to freeze orange juice. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-2-7\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-2-7"
+      },
+      "coverage_tags": [
+        "task-1-freeze"
+      ]
+    },
+    {
+      "id": "scienceworld-2-0",
+      "input": "Your task is to freeze water. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-2-0\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-2-0"
+      },
+      "coverage_tags": [
+        "task-1-freeze"
+      ]
+    },
+    {
+      "id": "scienceworld-2-14",
+      "input": "Your task is to freeze ice cream. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-2-14\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-2-14"
+      },
+      "coverage_tags": [
+        "task-1-freeze"
+      ]
+    },
+    {
+      "id": "scienceworld-3-4",
+      "input": "Your task is to melt ice. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-3-4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-3-4"
+      },
+      "coverage_tags": [
+        "task-1-melt"
+      ]
+    },
+    {
+      "id": "scienceworld-3-12",
+      "input": "Your task is to melt marshmallow. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-3-12\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-3-12"
+      },
+      "coverage_tags": [
+        "task-1-melt"
+      ]
+    },
+    {
+      "id": "scienceworld-3-13",
+      "input": "Your task is to melt marshmallow. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-3-13\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-3-13"
+      },
+      "coverage_tags": [
+        "task-1-melt"
+      ]
+    },
+    {
+      "id": "scienceworld-3-14",
+      "input": "Your task is to melt ice cream. First, focus on the substance. Then, take actions that will cause it to change its state of matter.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-3-14\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-3-14"
+      },
+      "coverage_tags": [
+        "task-1-melt"
+      ]
+    },
+    {
+      "id": "scienceworld-4-81",
+      "input": "Your task is to measure the melting point of gallium, which is located around the kitchen. First, focus on the thermometer. Next, focus on the gallium. If the melting point of gallium is above 150.0 degrees celsius, focus on the green box. If the melting point of gallium is below 150.0 degrees celsius, focus on the blue box. The boxes are located around the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-4-81\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-4-81"
+      },
+      "coverage_tags": [
+        "task-10-measure-melting-point-(known-substance)"
+      ]
+    },
+    {
+      "id": "scienceworld-4-112",
+      "input": "Your task is to measure the melting point of gallium, which is located around the kitchen. First, focus on the thermometer. Next, focus on the gallium. If the melting point of gallium is above 150.0 degrees celsius, focus on the green box. If the melting point of gallium is below 150.0 degrees celsius, focus on the blue box. The boxes are located around the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-4-112\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-4-112"
+      },
+      "coverage_tags": [
+        "task-10-measure-melting-point-(known-substance)"
+      ]
+    },
+    {
+      "id": "scienceworld-4-150",
+      "input": "Your task is to measure the melting point of gallium, which is located around the kitchen. First, focus on the thermometer. Next, focus on the gallium. If the melting point of gallium is above 200.0 degrees celsius, focus on the yellow box. If the melting point of gallium is below 200.0 degrees celsius, focus on the purple box. The boxes are located around the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-4-150\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-4-150"
+      },
+      "coverage_tags": [
+        "task-10-measure-melting-point-(known-substance)"
+      ]
+    },
+    {
+      "id": "scienceworld-4-219",
+      "input": "Your task is to measure the melting point of tin, which is located around the kitchen. First, focus on the thermometer. Next, focus on the tin. If the melting point of tin is above 10.0 degrees celsius, focus on the orange box. If the melting point of tin is below 10.0 degrees celsius, focus on the yellow box. The boxes are located around the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-4-219\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-4-219"
+      },
+      "coverage_tags": [
+        "task-10-measure-melting-point-(known-substance)"
+      ]
+    },
+    {
+      "id": "scienceworld-4-337",
+      "input": "Your task is to measure the melting point of tin, which is located around the kitchen. First, focus on the thermometer. Next, focus on the tin. If the melting point of tin is above 10.0 degrees celsius, focus on the orange box. If the melting point of tin is below 10.0 degrees celsius, focus on the yellow box. The boxes are located around the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-4-337\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-4-337"
+      },
+      "coverage_tags": [
+        "task-10-measure-melting-point-(known-substance)"
+      ]
+    },
+    {
+      "id": "scienceworld-6-82",
+      "input": "Your task is to measure the temperature of sodium chloride, which is located around the bathroom. First, focus on the thermometer. Next, focus on the sodium chloride. If the sodium chloride temperature is above 50.0 degrees celsius, place it in the green box. If the sodium chloride temperature is below 50.0 degrees celsius, place it in the blue box. The boxes are located around the bathroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-6-82\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-6-82"
+      },
+      "coverage_tags": [
+        "task-10-use-thermometer"
+      ]
+    },
+    {
+      "id": "scienceworld-6-11",
+      "input": "Your task is to measure the temperature of unknown substance B, which is located around the bedroom. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 50.0 degrees celsius, place it in the green box. If the unknown substance B temperature is below 50.0 degrees celsius, place it in the blue box. The boxes are located around the bedroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-6-11\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-6-11"
+      },
+      "coverage_tags": [
+        "task-10-use-thermometer"
+      ]
+    },
+    {
+      "id": "scienceworld-6-43",
+      "input": "Your task is to measure the temperature of unknown substance B, which is located around the living room. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 50.0 degrees celsius, place it in the yellow box. If the unknown substance B temperature is below 50.0 degrees celsius, place it in the purple box. The boxes are located around the living room.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-6-43\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-6-43"
+      },
+      "coverage_tags": [
+        "task-10-use-thermometer"
+      ]
+    },
+    {
+      "id": "scienceworld-6-306",
+      "input": "Your task is to measure the temperature of unknown substance B, which is located around the bathroom. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 200.0 degrees celsius, place it in the blue box. If the unknown substance B temperature is below 200.0 degrees celsius, place it in the orange box. The boxes are located around the bathroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-6-306\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-6-306"
+      },
+      "coverage_tags": [
+        "task-10-use-thermometer"
+      ]
+    },
+    {
+      "id": "scienceworld-6-436",
+      "input": "Your task is to measure the temperature of unknown substance B, which is located around the bathroom. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 0.0 degrees celsius, place it in the yellow box. If the unknown substance B temperature is below 0.0 degrees celsius, place it in the purple box. The boxes are located around the bathroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-6-436\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-6-436"
+      },
+      "coverage_tags": [
+        "task-10-use-thermometer"
+      ]
+    },
+    {
+      "id": "scienceworld-7-5",
+      "input": "Your task is to turn on the green light bulb. First, focus on the green light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-7-5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-7-5"
+      },
+      "coverage_tags": [
+        "task-2-power-component"
+      ]
+    },
+    {
+      "id": "scienceworld-7-0",
+      "input": "Your task is to turn on the red light bulb. First, focus on the red light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-7-0\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-7-0"
+      },
+      "coverage_tags": [
+        "task-2-power-component"
+      ]
+    },
+    {
+      "id": "scienceworld-7-4",
+      "input": "Your task is to turn on the green light bulb. First, focus on the green light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-7-4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-7-4"
+      },
+      "coverage_tags": [
+        "task-2-power-component"
+      ]
+    },
+    {
+      "id": "scienceworld-7-10",
+      "input": "Your task is to turn on the blue light bulb. First, focus on the blue light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-7-10\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-7-10"
+      },
+      "coverage_tags": [
+        "task-2-power-component"
+      ]
+    },
+    {
+      "id": "scienceworld-7-15",
+      "input": "Your task is to turn on the electric motor. First, focus on the electric motor. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-7-15\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-7-15"
+      },
+      "coverage_tags": [
+        "task-2-power-component"
+      ]
+    },
+    {
+      "id": "scienceworld-8-5",
+      "input": "Your task is to turn on the green light bulb by powering it using a nonrenewable power source. First, focus on the green light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-8-5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-8-5"
+      },
+      "coverage_tags": [
+        "task-2-power-component-(renewable-vs-nonrenewable-energy)"
+      ]
+    },
+    {
+      "id": "scienceworld-8-7",
+      "input": "Your task is to turn on the green light bulb by powering it using a nonrenewable power source. First, focus on the green light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-8-7\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-8-7"
+      },
+      "coverage_tags": [
+        "task-2-power-component-(renewable-vs-nonrenewable-energy)"
+      ]
+    },
+    {
+      "id": "scienceworld-8-1",
+      "input": "Your task is to turn on the red light bulb by powering it using a nonrenewable power source. First, focus on the red light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-8-1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-8-1"
+      },
+      "coverage_tags": [
+        "task-2-power-component-(renewable-vs-nonrenewable-energy)"
+      ]
+    },
+    {
+      "id": "scienceworld-8-11",
+      "input": "Your task is to turn on the blue light bulb by powering it using a nonrenewable power source. First, focus on the blue light bulb. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-8-11\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-8-11"
+      },
+      "coverage_tags": [
+        "task-2-power-component-(renewable-vs-nonrenewable-energy)"
+      ]
+    },
+    {
+      "id": "scienceworld-8-15",
+      "input": "Your task is to turn on the electric motor by powering it using a nonrenewable power source. First, focus on the electric motor. Then, create an electrical circuit that powers it on.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-8-15\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-8-15"
+      },
+      "coverage_tags": [
+        "task-2-power-component-(renewable-vs-nonrenewable-energy)"
+      ]
+    },
+    {
+      "id": "scienceworld-9-5",
+      "input": "Your task is to determine if aluminum foil is electrically conductive. The aluminum foil is located around the workshop. First, focus on the aluminum foil. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-9-5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-9-5"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity"
+      ]
+    },
+    {
+      "id": "scienceworld-9-15",
+      "input": "Your task is to determine if aluminum foil is electrically conductive. The aluminum foil is located around the workshop. First, focus on the aluminum foil. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-9-15\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-9-15"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity"
+      ]
+    },
+    {
+      "id": "scienceworld-9-79",
+      "input": "Your task is to determine if apricot is electrically conductive. The apricot is located around the workshop. First, focus on the apricot. If it is electrically conductive, place it in the yellow box. If it is electrically nonconductive, place it in the purple box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-9-79\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-9-79"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity"
+      ]
+    },
+    {
+      "id": "scienceworld-9-460",
+      "input": "Your task is to determine if paper clip is electrically conductive. The paper clip is located around the workshop. First, focus on the paper clip. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-9-460\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-9-460"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity"
+      ]
+    },
+    {
+      "id": "scienceworld-9-675",
+      "input": "Your task is to determine if sodium chloride is electrically conductive. The sodium chloride is located around the workshop. First, focus on the sodium chloride. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-9-675\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-9-675"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity"
+      ]
+    },
+    {
+      "id": "scienceworld-10-5",
+      "input": "Your task is to determine if unknown substance B is electrically conductive. The unknown substance B is located around the workshop. First, focus on the unknown substance B. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-10-5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-10-5"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity-of-unknown-substances"
+      ]
+    },
+    {
+      "id": "scienceworld-10-15",
+      "input": "Your task is to determine if unknown substance B is electrically conductive. The unknown substance B is located around the workshop. First, focus on the unknown substance B. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-10-15\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-10-15"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity-of-unknown-substances"
+      ]
+    },
+    {
+      "id": "scienceworld-10-49",
+      "input": "Your task is to determine if unknown substance C is electrically conductive. The unknown substance C is located around the workshop. First, focus on the unknown substance C. If it is electrically conductive, place it in the yellow box. If it is electrically nonconductive, place it in the purple box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-10-49\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-10-49"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity-of-unknown-substances"
+      ]
+    },
+    {
+      "id": "scienceworld-10-318",
+      "input": "Your task is to determine if unknown substance O is electrically conductive. The unknown substance O is located around the workshop. First, focus on the unknown substance O. If it is electrically conductive, place it in the orange box. If it is electrically nonconductive, place it in the yellow box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-10-318\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-10-318"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity-of-unknown-substances"
+      ]
+    },
+    {
+      "id": "scienceworld-10-460",
+      "input": "Your task is to determine if unknown substance U is electrically conductive. The unknown substance U is located around the workshop. First, focus on the unknown substance U. If it is electrically conductive, place it in the red box. If it is electrically nonconductive, place it in the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-10-460\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-10-460"
+      },
+      "coverage_tags": [
+        "task-2a-test-conductivity-of-unknown-substances"
+      ]
+    },
+    {
+      "id": "scienceworld-11-3",
+      "input": "Your task is to find a(n) animal. First, focus on the thing. Then, move it to the orange box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-11-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-11-3"
+      },
+      "coverage_tags": [
+        "task-3-find-animal"
+      ]
+    },
+    {
+      "id": "scienceworld-11-2",
+      "input": "Your task is to find a(n) animal. First, focus on the thing. Then, move it to the blue box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-11-2\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-11-2"
+      },
+      "coverage_tags": [
+        "task-3-find-animal"
+      ]
+    },
+    {
+      "id": "scienceworld-11-30",
+      "input": "Your task is to find a(n) animal. First, focus on the thing. Then, move it to the red box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-11-30\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-11-30"
+      },
+      "coverage_tags": [
+        "task-3-find-animal"
+      ]
+    },
+    {
+      "id": "scienceworld-11-153",
+      "input": "Your task is to find a(n) animal. First, focus on the thing. Then, move it to the orange box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-11-153\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-11-153"
+      },
+      "coverage_tags": [
+        "task-3-find-animal"
+      ]
+    },
+    {
+      "id": "scienceworld-11-243",
+      "input": "Your task is to find a(n) animal. First, focus on the thing. Then, move it to the orange box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-11-243\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-11-243"
+      },
+      "coverage_tags": [
+        "task-3-find-animal"
+      ]
+    },
+    {
+      "id": "scienceworld-12-3",
+      "input": "Your task is to find a(n) living thing. First, focus on the thing. Then, move it to the orange box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-12-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-12-3"
+      },
+      "coverage_tags": [
+        "task-3-find-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-12-2",
+      "input": "Your task is to find a(n) living thing. First, focus on the thing. Then, move it to the blue box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-12-2\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-12-2"
+      },
+      "coverage_tags": [
+        "task-3-find-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-12-30",
+      "input": "Your task is to find a(n) living thing. First, focus on the thing. Then, move it to the red box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-12-30\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-12-30"
+      },
+      "coverage_tags": [
+        "task-3-find-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-12-153",
+      "input": "Your task is to find a(n) living thing. First, focus on the thing. Then, move it to the orange box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-12-153\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-12-153"
+      },
+      "coverage_tags": [
+        "task-3-find-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-12-243",
+      "input": "Your task is to find a(n) living thing. First, focus on the thing. Then, move it to the orange box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-12-243\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-12-243"
+      },
+      "coverage_tags": [
+        "task-3-find-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-13-2",
+      "input": "Your task is to find a(n) non-living thing. First, focus on the thing. Then, move it to the blue box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-13-2\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-13-2"
+      },
+      "coverage_tags": [
+        "task-3-find-non-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-13-8",
+      "input": "Your task is to find a(n) non-living thing. First, focus on the thing. Then, move it to the blue box in the bathroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-13-8\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-13-8"
+      },
+      "coverage_tags": [
+        "task-3-find-non-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-13-12",
+      "input": "Your task is to find a(n) non-living thing. First, focus on the thing. Then, move it to the red box in the living room.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-13-12\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-13-12"
+      },
+      "coverage_tags": [
+        "task-3-find-non-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-13-150",
+      "input": "Your task is to find a(n) non-living thing. First, focus on the thing. Then, move it to the red box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-13-150\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-13-150"
+      },
+      "coverage_tags": [
+        "task-3-find-non-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-13-235",
+      "input": "Your task is to find a(n) non-living thing. First, focus on the thing. Then, move it to the green box in the workshop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-13-235\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-13-235"
+      },
+      "coverage_tags": [
+        "task-3-find-non-living-thing"
+      ]
+    },
+    {
+      "id": "scienceworld-14-19",
+      "input": "Your task is to find a(n) plant. First, focus on the thing. Then, move it to the green box in the bedroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-14-19\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-14-19"
+      },
+      "coverage_tags": [
+        "task-3-find-plant"
+      ]
+    },
+    {
+      "id": "scienceworld-14-25",
+      "input": "Your task is to find a(n) plant. First, focus on the thing. Then, move it to the green box in the workshop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-14-25\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-14-25"
+      },
+      "coverage_tags": [
+        "task-3-find-plant"
+      ]
+    },
+    {
+      "id": "scienceworld-14-47",
+      "input": "Your task is to find a(n) plant. First, focus on the thing. Then, move it to the purple box in the living room.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-14-47\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-14-47"
+      },
+      "coverage_tags": [
+        "task-3-find-plant"
+      ]
+    },
+    {
+      "id": "scienceworld-14-152",
+      "input": "Your task is to find a(n) plant. First, focus on the thing. Then, move it to the blue box in the kitchen.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-14-152\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-14-152"
+      },
+      "coverage_tags": [
+        "task-3-find-plant"
+      ]
+    },
+    {
+      "id": "scienceworld-14-229",
+      "input": "Your task is to find a(n) plant. First, focus on the thing. Then, move it to the green box in the bedroom.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-14-229\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-14-229"
+      },
+      "coverage_tags": [
+        "task-3-find-plant"
+      ]
+    },
+    {
+      "id": "scienceworld-16-106",
+      "input": "Your task is to grow a orange plant from seed. Seeds can be found in the greenhouse. First, focus on a seed. Then, make changes to the environment that grow the plant until it reaches the reproduction life stage.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-16-106\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-16-106"
+      },
+      "coverage_tags": [
+        "task-4-grow-plant"
+      ]
+    },
+    {
+      "id": "scienceworld-17-3",
+      "input": "Your task is to use chemistry to create the substance 'sodium acetate'. A recipe and some of the ingredients might be found near the kitchen. When you are done, focus on the sodium acetate.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-17-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-17-3"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix"
+      ]
+    },
+    {
+      "id": "scienceworld-17-16",
+      "input": "Your task is to use chemistry to create the substance 'smores'. A recipe and some of the ingredients might be found near the kitchen. When you are done, focus on the smores.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-17-16\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-17-16"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix"
+      ]
+    },
+    {
+      "id": "scienceworld-17-24",
+      "input": "Your task is to use chemistry to create the substance 'sugar water'. A recipe and some of the ingredients might be found near the kitchen. When you are done, focus on the sugar water.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-17-24\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-17-24"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix"
+      ]
+    },
+    {
+      "id": "scienceworld-18-1",
+      "input": "Your task is to use chemistry to create green paint. When you are done, focus on the green paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-18-1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-18-1"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(secondary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-18-5",
+      "input": "Your task is to use chemistry to create green paint. When you are done, focus on the green paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-18-5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-18-5"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(secondary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-18-10",
+      "input": "Your task is to use chemistry to create green paint. When you are done, focus on the green paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-18-10\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-18-10"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(secondary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-18-18",
+      "input": "Your task is to use chemistry to create orange paint. When you are done, focus on the orange paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-18-18\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-18-18"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(secondary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-18-27",
+      "input": "Your task is to use chemistry to create violet paint. When you are done, focus on the violet paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-18-27\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-18-27"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(secondary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-19-14",
+      "input": "Your task is to use chemistry to create red-orange paint. When you are part-way done, focus on the intermediate (secondary color) paint you created.  When you are completely done, focus on the orange paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-19-14\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-19-14"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(tertiary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-19-1",
+      "input": "Your task is to use chemistry to create green-blue paint. When you are part-way done, focus on the intermediate (secondary color) paint you created.  When you are completely done, focus on the green paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-19-1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-19-1"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(tertiary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-19-10",
+      "input": "Your task is to use chemistry to create yellow-green paint. When you are part-way done, focus on the intermediate (secondary color) paint you created.  When you are completely done, focus on the green paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-19-10\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-19-10"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(tertiary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-19-20",
+      "input": "Your task is to use chemistry to create yellow-orange paint. When you are part-way done, focus on the intermediate (secondary color) paint you created.  When you are completely done, focus on the orange paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-19-20\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-19-20"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(tertiary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-19-32",
+      "input": "Your task is to use chemistry to create blue-violet paint. When you are part-way done, focus on the intermediate (secondary color) paint you created.  When you are completely done, focus on the violet paint.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-19-32\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-19-32"
+      },
+      "coverage_tags": [
+        "task-5-chemistry-mix-paint-(tertiary-color)"
+      ]
+    },
+    {
+      "id": "scienceworld-20-3",
+      "input": "Your task is to find the animal with the longest life span.  The animals are in the 'outside' location.  Focus on the animal with the longest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-20-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-20-3"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-20-16",
+      "input": "Your task is to find the animal with the longest life span.  The animals are in the 'outside' location.  Focus on the animal with the longest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-20-16\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-20-16"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-20-17",
+      "input": "Your task is to find the animal with the longest life span.  The animals are in the 'outside' location.  Focus on the animal with the longest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-20-17\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-20-17"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-20-68",
+      "input": "Your task is to find the animal with the longest life span.  The animals are in the 'outside' location.  Focus on the animal with the longest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-20-68\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-20-68"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-20-105",
+      "input": "Your task is to find the animal with the longest life span.  The animals are in the 'outside' location.  Focus on the animal with the longest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-20-105\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-20-105"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-21-3",
+      "input": "Your task is to find the animal with the longest life span, then the shortest life span. First, focus on the animal with the longest life span.  Then, focus on the animal with the shortest life span. The animals are in the 'outside' location.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-21-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-21-3"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived-then-shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-21-16",
+      "input": "Your task is to find the animal with the longest life span, then the shortest life span. First, focus on the animal with the longest life span.  Then, focus on the animal with the shortest life span. The animals are in the 'outside' location.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-21-16\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-21-16"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived-then-shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-21-17",
+      "input": "Your task is to find the animal with the longest life span, then the shortest life span. First, focus on the animal with the longest life span.  Then, focus on the animal with the shortest life span. The animals are in the 'outside' location.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-21-17\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-21-17"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived-then-shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-21-68",
+      "input": "Your task is to find the animal with the longest life span, then the shortest life span. First, focus on the animal with the longest life span.  Then, focus on the animal with the shortest life span. The animals are in the 'outside' location.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-21-68\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-21-68"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived-then-shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-21-105",
+      "input": "Your task is to find the animal with the longest life span, then the shortest life span. First, focus on the animal with the longest life span.  Then, focus on the animal with the shortest life span. The animals are in the 'outside' location.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-21-105\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-21-105"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(longest-lived-then-shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-22-3",
+      "input": "Your task is to find the animal with the shortest life span.  The animals are in the 'outside' location.  Focus on the animal with the shortest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-22-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-22-3"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-22-16",
+      "input": "Your task is to find the animal with the shortest life span.  The animals are in the 'outside' location.  Focus on the animal with the shortest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-22-16\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-22-16"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-22-17",
+      "input": "Your task is to find the animal with the shortest life span.  The animals are in the 'outside' location.  Focus on the animal with the shortest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-22-17\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-22-17"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-22-68",
+      "input": "Your task is to find the animal with the shortest life span.  The animals are in the 'outside' location.  Focus on the animal with the shortest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-22-68\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-22-68"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-22-105",
+      "input": "Your task is to find the animal with the shortest life span.  The animals are in the 'outside' location.  Focus on the animal with the shortest life span.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-22-105\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-22-105"
+      },
+      "coverage_tags": [
+        "task-6-lifespan-(shortest-lived)"
+      ]
+    },
+    {
+      "id": "scienceworld-23-3",
+      "input": "Your task is to focus on the 3 life stages of the beaver, starting from earliest to latest.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-23-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-23-3"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-1"
+      ]
+    },
+    {
+      "id": "scienceworld-23-4",
+      "input": "Your task is to focus on the 3 life stages of the common toad, starting from earliest to latest.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-23-4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-23-4"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-1"
+      ]
+    },
+    {
+      "id": "scienceworld-23-1",
+      "input": "Your task is to focus on the 3 life stages of the wolf, starting from earliest to latest.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-23-1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-23-1"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-1"
+      ]
+    },
+    {
+      "id": "scienceworld-23-7",
+      "input": "Your task is to focus on the 3 life stages of the frog, starting from earliest to latest.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-23-7\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-23-7"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-1"
+      ]
+    },
+    {
+      "id": "scienceworld-23-13",
+      "input": "Your task is to focus on the 3 life stages of the brown bear, starting from earliest to latest.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-23-13\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-23-13"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-1"
+      ]
+    },
+    {
+      "id": "scienceworld-24-3",
+      "input": "Your task is to focus on the life stages of the banana plant, starting from earliest to latest. The plants are located outside.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-24-3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-24-3"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-2"
+      ]
+    },
+    {
+      "id": "scienceworld-24-2",
+      "input": "Your task is to focus on the life stages of the avocado plant, starting from earliest to latest. The plants are located outside.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-24-2\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-24-2"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-2"
+      ]
+    },
+    {
+      "id": "scienceworld-24-4",
+      "input": "Your task is to focus on the life stages of the cherry plant, starting from earliest to latest. The plants are located outside.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-24-4\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-24-4"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-2"
+      ]
+    },
+    {
+      "id": "scienceworld-24-6",
+      "input": "Your task is to focus on the life stages of the lemon plant, starting from earliest to latest. The plants are located outside.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-24-6\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-24-6"
+      },
+      "coverage_tags": [
+        "task-7-identify-life-stages-2"
+      ]
+    },
+    {
+      "id": "scienceworld-25-0",
+      "input": "Your task is to determine which of the two inclined planes (C, B) has the shallowest angle. After completing your experiment, focus on the inclined plane with the shallowest angle.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-25-0\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-25-0"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-determine-angle"
+      ]
+    },
+    {
+      "id": "scienceworld-25-1",
+      "input": "Your task is to determine which of the two inclined planes (C, B) has the steepest angle. After completing your experiment, focus on the inclined plane with the steepest angle.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-25-1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-25-1"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-determine-angle"
+      ]
+    },
+    {
+      "id": "scienceworld-25-2",
+      "input": "Your task is to determine which of the two inclined planes (C, B) has the shallowest angle. After completing your experiment, focus on the inclined plane with the shallowest angle.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-25-2\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-25-2"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-determine-angle"
+      ]
+    },
+    {
+      "id": "scienceworld-25-84",
+      "input": "Your task is to determine which of the two inclined planes (B, F) has the shallowest angle. After completing your experiment, focus on the inclined plane with the shallowest angle.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-25-84\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-25-84"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-determine-angle"
+      ]
+    },
+    {
+      "id": "scienceworld-25-150",
+      "input": "Your task is to determine which of the two inclined planes (C, J) has the shallowest angle. After completing your experiment, focus on the inclined plane with the shallowest angle.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-25-150\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-25-150"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-determine-angle"
+      ]
+    },
+    {
+      "id": "scienceworld-26-95",
+      "input": "Your task is to determine which of the two inclined planes (soapy water, paper) has the least friction. After completing your experiment, focus on the inclined plane with the least friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-26-95\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-26-95"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(named-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-26-114",
+      "input": "Your task is to determine which of the two inclined planes (titanium, paper) has the most friction. After completing your experiment, focus on the inclined plane with the most friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-26-114\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-26-114"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(named-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-26-115",
+      "input": "Your task is to determine which of the two inclined planes (titanium, paper) has the least friction. After completing your experiment, focus on the inclined plane with the least friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-26-115\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-26-115"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(named-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-26-850",
+      "input": "Your task is to determine which of the two inclined planes (soapy water, wood) has the most friction. After completing your experiment, focus on the inclined plane with the most friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-26-850\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-26-850"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(named-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-26-1368",
+      "input": "Your task is to determine which of the two inclined planes (titanium, glass) has the most friction. After completing your experiment, focus on the inclined plane with the most friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-26-1368\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-26-1368"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(named-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-27-31",
+      "input": "Your task is to determine which of the two inclined planes (unknown material E, unknown material C) has the least friction. After completing your experiment, focus on the inclined plane with the least friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-27-31\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-27-31"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(unnamed-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-27-30",
+      "input": "Your task is to determine which of the two inclined planes (unknown material E, unknown material C) has the most friction. After completing your experiment, focus on the inclined plane with the most friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-27-30\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-27-30"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(unnamed-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-27-32",
+      "input": "Your task is to determine which of the two inclined planes (unknown material E, unknown material C) has the most friction. After completing your experiment, focus on the inclined plane with the most friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-27-32\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-27-32"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(unnamed-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-27-119",
+      "input": "Your task is to determine which of the two inclined planes (unknown material E, unknown material G) has the least friction. After completing your experiment, focus on the inclined plane with the least friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-27-119\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-27-119"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(unnamed-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-27-156",
+      "input": "Your task is to determine which of the two inclined planes (unknown material E, unknown material G) has the most friction. After completing your experiment, focus on the inclined plane with the most friction.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-27-156\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-27-156"
+      },
+      "coverage_tags": [
+        "task-8-inclined-plane-friction-(unnamed-surfaces)"
+      ]
+    },
+    {
+      "id": "scienceworld-28-25",
+      "input": "Your task is to determine whether short plant height is a dominant or recessive trait in the pea plant. If the trait is dominant, focus on the green box. If the trait is recessive, focus on the blue box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-28-25\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-28-25"
+      },
+      "coverage_tags": [
+        "task-9-mendellian-genetics-(known-plant)"
+      ]
+    },
+    {
+      "id": "scienceworld-28-85",
+      "input": "Your task is to determine whether orange seed color is a dominant or recessive trait in the pea plant. If the trait is dominant, focus on the green box. If the trait is recessive, focus on the blue box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-28-85\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-28-85"
+      },
+      "coverage_tags": [
+        "task-9-mendellian-genetics-(known-plant)"
+      ]
+    },
+    {
+      "id": "scienceworld-28-94",
+      "input": "Your task is to determine whether round seed shape is a dominant or recessive trait in the pea plant. If the trait is dominant, focus on the green box. If the trait is recessive, focus on the blue box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-28-94\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-28-94"
+      },
+      "coverage_tags": [
+        "task-9-mendellian-genetics-(known-plant)"
+      ]
+    },
+    {
+      "id": "scienceworld-29-19",
+      "input": "Your task is to determine whether brown seed color is a dominant or recessive trait in the unknown E plant. If the trait is dominant, focus on the green box. If the trait is recessive, focus on the blue box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-29-19\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-29-19"
+      },
+      "coverage_tags": [
+        "task-9-mendellian-genetics-(unknown-plant)"
+      ]
+    },
+    {
+      "id": "scienceworld-29-94",
+      "input": "Your task is to determine whether small flower size is a dominant or recessive trait in the unknown E plant. If the trait is dominant, focus on the green box. If the trait is recessive, focus on the blue box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-29-94\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-29-94"
+      },
+      "coverage_tags": [
+        "task-9-mendellian-genetics-(unknown-plant)"
+      ]
+    },
+    {
+      "id": "scienceworld-29-333",
+      "input": "Your task is to determine whether orange flower color is a dominant or recessive trait in the unknown C plant. If the trait is dominant, focus on the red box. If the trait is recessive, focus on the green box.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"scienceworld.reference/v1\", \"task_id\": \"scienceworld-29-333\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "scienceworld-29-333"
+      },
+      "coverage_tags": [
+        "task-9-mendellian-genetics-(unknown-plant)"
+      ]
+    }
+  ],
+  "environment": {
+    "protocol": "sage.rsi.case/v1",
+    "mcp_servers": [
+      "ScienceWorld"
+    ]
+  }
+}

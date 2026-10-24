@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "ScienceWorld": {
+      "command": "/absolute/path/Sage/.venv/bin/python",
+      "args": [
+        "-m",
+        "evaluation_datasets.scienceworld.mcp_server",
+        "--state",
+        "/absolute/path/sage/runtime/scienceworld.sqlite3"
+      ],
+      "env": {
+        "PYTHONPATH": "/absolute/path/Sage",
+        "SAGE_RSI_CASE_PROTOCOL": "sage.rsi.case/v1"
+      }
+    }
+  }
+}

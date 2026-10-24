@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -31,11 +32,18 @@ class OptimizationCase(StrictModel):
 
 
 def case_prompt_identity(case):
-    """A shared greeting is not a duplicate of a different dialogue scenario."""
+    """Compare visible tasks in their world, rather than case IDs or text alone."""
     data = case.model_dump(mode="json") if isinstance(case, OptimizationCase) else case
     opening = " ".join(data["input"].casefold().split())
     context = " ".join(data.get("user_context", "").casefold().split())
-    return (opening, context if data.get("mode") == "dialogue" else "")
+    identity = (opening, context if data.get("mode") == "dialogue" else "")
+    environment = data.get("environment_context")
+    if environment:
+        # Environment keys are opaque and case-sensitive. A renamed case in the
+        # same world is still a duplicate; a different seed/world is not.
+        return (*identity, json.dumps(environment, sort_keys=True, ensure_ascii=False,
+                                      separators=(",", ":"), allow_nan=False))
+    return identity
 
 
 class OptimizationSuite(StrictModel):
@@ -120,15 +128,34 @@ class OptimizationConstraints(StrictModel):
     ] = ()
 
 
+class OptimizationExperiment(StrictModel):
+    """Predeclared, training-only experiment; acceptance is not causal proof."""
+    parent_hash: str = Field(min_length=1)
+    mechanism: str = Field(min_length=1, max_length=2000)
+    applicability: str = Field(min_length=1, max_length=2000)
+    change_locations: tuple[str, ...] = Field(min_length=1, max_length=32)
+    existing_rule_gap: str = Field(min_length=1, max_length=2000)
+    expected_observation: str = Field(min_length=1, max_length=2000)
+    support_condition: str = Field(min_length=1, max_length=2000)
+    falsification_condition: str = Field(min_length=1, max_length=2000)
+    inconclusive_condition: str = Field(min_length=1, max_length=2000)
+    training_case_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+    protection_case_ids: tuple[str, ...] = Field(default=(), max_length=100)
+    protected_behaviors: tuple[str, ...] = Field(min_length=1, max_length=16)
+    risks: tuple[str, ...] = Field(default=(), max_length=16)
+
+
 class OptimizationEditSummary(StrictModel):
     """File authors return an explanation; files are the sole change source."""
     rationale: str = Field(min_length=1)
     experience_notes: str = Field(default="", max_length=16000)
+    experiment: OptimizationExperiment | None = None
 
 
 class OptimizationPatch(StrictModel):
     rationale: str = Field(min_length=1)
     experience_notes: str = Field(default="", max_length=16000)
+    experiment: OptimizationExperiment | None = None
     system_prompt: VerbatimText | None = Field(
         default=None, description="Complete production system prompt replacing the current target prompt."
     )
@@ -172,6 +199,13 @@ class OptimizationFinding(StrictModel):
     recommendation: str = Field(min_length=1, max_length=2000)
     scope: Literal["instructions", "skills", "tools", "procedure"]
     confidence: Literal["confirmed", "hypothesis"]
+    attribution: Literal["agent", "environment", "user_simulator", "scoring", "infrastructure", "mixed", "unknown"] = "unknown"
+    priority: Literal["policy", "outcome", "quality"] = "outcome"
+    failed_condition: str = ""
+    expected_observation: str = ""
+    counterevidence: tuple[str, ...] = ()
+    protected_behaviors: tuple[str, ...] = ()
+    next_verification: str = ""
 
 
 class OptimizationDiagnosis(StrictModel):
@@ -180,6 +214,8 @@ class OptimizationDiagnosis(StrictModel):
     strengths: tuple[str, ...] = Field(default=(), max_length=4)
     uncertainties: tuple[str, ...] = Field(default=(), max_length=4)
     coverage: str = Field(min_length=1, max_length=1000)
+    next_action: Literal["test_hypothesis", "measure", "measurement_issue", "no_change"] = "measure"
+    next_verification: str = Field(default="", max_length=2000)
 
 
 class OptimizationPriority(StrictModel):
@@ -195,6 +231,8 @@ class OptimizationDiagnosisSummary(StrictModel):
         description="Brief synthesis, preferably under 600 characters. Put detailed actions in priorities, not a repeated numbered plan in summary.")
     priorities: tuple[OptimizationPriority, ...] = Field(default=(), max_length=8)
     uncertainties: tuple[str, ...] = Field(default=(), max_length=8)
+    next_action: Literal["test_hypothesis", "measure", "measurement_issue", "no_change"] = "measure"
+    next_verification: str = Field(default="", max_length=2000)
 
 
 class OptimizationGrade(StrictModel):
@@ -209,6 +247,12 @@ class OptimizationDialogueReply(StrictModel):
     can_continue: bool
     message: VerbatimText = ""
     rationale: str
+
+    @model_validator(mode="after")
+    def continuing_message(self):
+        if self.can_continue and not self.message.strip():
+            raise ValueError("continuing simulated user must supply a nonempty message")
+        return self
 
 
 class OptimizationDialogueTurn(StrictModel):

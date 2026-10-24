@@ -178,3 +178,106 @@ def test_persisted_file_validation_keeps_native_pause_and_completion_basis(tmp_p
     assert record['native_state'] == 'suspended'
     assert record['completion_basis'] == 'validated_assessment_file'
     assert record['read_coverage'][0]['read_through_line'] == 4
+
+
+@pytest.mark.parametrize('code,record,error,coverage,expected', [
+    ('model.empty_semantic_response', '{}', None, True, True),
+    ('model.provider_transient', '{}', None, True, False),
+    ('model.empty_semantic_response', '', None, True, True),
+    ('model.empty_semantic_response', '{}', 'Missing evidence', True, True),
+    ('model.empty_semantic_response', '{}', None, False, True),
+])
+def test_only_exact_empty_terminal_reply_can_defer_to_assessment_validation(code, record, error, coverage, expected):
+    from sagents.v2.optimization.evaluation_files import assessment_terminal_response_empty
+    observation = OptimizationObservation(state='suspended', evidence={
+        'error': {'code': code, 'retryable': True, 'category': 'provider_transient'},
+        'evaluation_record': record, 'evaluation_record_error': error,
+        'evaluation_read_coverage': [{'read_through_line': 4 if coverage else 0, 'total_lines': 4}]})
+    assert assessment_terminal_response_empty(observation) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('needs_read_repair', [False, True])
+async def test_empty_reply_after_written_assessment_does_not_restart_successful_analysis(tmp_path, needs_read_repair):
+    from sagents.v2.optimization.contracts import OptimizationGrade
+    from tests.sagents.v2.test_package_optimizer import Runner, optimizer, context, suite
+    calls = []
+    class FileRunner(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            if CONTROL not in package.files:
+                return await super().run(package, agent_id, content, ctx)
+            request = json.loads(content)
+            calls.append(request['response_schema']['title'])
+            context_doc = json.loads(package.files['evaluation/inputs/context.json'])
+            incomplete = needs_read_repair and 'repair' not in context_doc
+            if 'repair' in context_doc:
+                assert 'Read all evidence' in context_doc['repair']['reason']
+            assessment = {'summary': 'Official score confirms success', 'findings': [],
+                'strengths': ['Task completed'], 'uncertainties': [], 'coverage': 'All supplied messages',
+                'next_action': 'no_change', 'next_verification': 'No justified edit'}
+            return OptimizationObservation(state='suspended', evidence={
+                'error': {'code': 'model.empty_semantic_response', 'retryable': True, 'category': 'provider_transient'},
+                'evaluation_record': json.dumps(assessment),
+                'evaluation_record_error': 'Read all evidence files; missing lines 3-4' if incomplete else None,
+                'evaluation_read_coverage': [{'read_through_line': 2 if incomplete else 4, 'total_lines': 4}]})
+    opt = optimizer(FileRunner())
+    opt.evaluator = evaluator()
+    async def score(case, observation):
+        return OptimizationGrade(score=1, passed=True, rationale='Official scorer')
+    await opt.optimize(bundle(), context=context(), goal='Complete', suite=suite(), rounds=1,
+        validation_case_count=1, grow_training=False, final_max_cases=0, authoritative_grader=score,
+        call_retries=1, restart_file_evaluator=True, recovery_binding_id='frozen-test-binding',
+        journal_path=tmp_path/'audit.jsonl')
+    assert calls and set(calls) == {'OptimizationDiagnosis'}
+    events = [json.loads(line) for line in (tmp_path/'audit.jsonl').read_text().splitlines()]
+    assert not any(e['event'] in {'call_retry_scheduled', 'agent_call_failed'} for e in events)
+    validations = list((tmp_path/'evaluations').rglob('validation.json'))
+    assert len(calls) == (2 if needs_read_repair else 1) * sum(e['event'] == 'execution_scored' for e in events)
+    assert any(json.loads(p.read_text())['valid'] for p in validations)
+    assert len(validations) == (4 if needs_read_repair else 2)  # Train/dev; stability reuses the same input documents.
+    assert all(json.loads(p.read_text())['native_state'] == 'suspended' for p in validations)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('granted,code,valid,succeeds', [
+    (True, 'model.empty_semantic_response', True, True),
+    (False, 'model.empty_semantic_response', True, False),
+    (True, 'model.provider_transient', True, False),
+    (True, 'model.empty_semantic_response', False, False),
+    (True, 'model.empty_semantic_response', 'repair', True),
+    (True, 'model.empty_semantic_response', 'missing', False),
+])
+async def test_independent_test_analysis_uses_the_same_file_completion_boundary(tmp_path, granted, code, valid, succeeds):
+    from sagents.v2.optimization.observer import IsolatedTestEvaluator, HumanTestExecutionFailure
+    from sagents.v2.optimization.contracts import OptimizationDiagnosis
+    from tests.sagents.v2.test_package_optimizer import context
+    calls = []
+    class FileRunner:
+        async def run(self, package, agent_id, content, ctx):
+            calls.append(content)
+            incomplete = valid == 'repair' and len(calls) == 1
+            if valid == 'repair' and len(calls) > 1:
+                doc = json.loads(package.files['evaluation/inputs/context.json'])
+                assert 'missing lines' in doc['repair']['reason']
+            record = {'summary': 'Recorded success', 'findings': [], 'strengths': ['Completed'],
+                'uncertainties': [], 'coverage': 'All evidence', 'next_action': 'no_change'} if valid else {'findings': 'invalid'}
+            return OptimizationObservation(state='suspended', evidence={
+                'error': {'code': code, 'retryable': True, 'category': 'provider_transient'},
+                'evaluation_record': None if valid == 'missing' else json.dumps(record),
+                'evaluation_record_error': 'Read all evidence; missing lines 3-4' if incomplete else None,
+                'evaluation_read_coverage': [{'read_through_line': 2 if incomplete else 4, 'total_lines': 4}]})
+    role = evaluator()
+    measure = IsolatedTestEvaluator(runner=FileRunner(), evaluator=role, driver=role,
+        context=context(), goal='Complete', retry_local_evaluations=granted,
+        max_transport_retries=0, evidence_directory=tmp_path)
+    if succeeds:
+        result = await measure._ask(measure.evaluator, 'Diagnose', {}, OptimizationDiagnosis)
+        assert result.summary == 'Recorded success'
+        assert len(calls) == (2 if valid == 'repair' else 1)
+        validations = list(tmp_path.rglob('validation.json'))
+        assert any(json.loads(p.read_text())['valid'] for p in validations)
+        assert all(json.loads(p.read_text())['native_state'] == 'suspended' for p in validations)
+    else:
+        with pytest.raises((HumanTestExecutionFailure, ValueError)):
+            await measure._ask(measure.evaluator, 'Diagnose', {}, OptimizationDiagnosis)
+        assert not any(json.loads(p.read_text())['valid'] for p in tmp_path.rglob('validation.json'))

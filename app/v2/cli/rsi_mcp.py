@@ -256,6 +256,8 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
         optimization_scope: list[Literal["instructions", "skills", "tools"]]
         | None = None,
         model_provider_id: str | None = None,
+        user_simulator_instructions: str | None = None,
+        user_simulator_id: str | None = None,
         target_score: Annotated[float, Field(gt=0, le=1)] = 0.95,
         patience: Annotated[int, Field(ge=1, le=100)] = 3,
         stability_passes: Annotated[int, Field(ge=2, le=5)] = 2,
@@ -279,6 +281,8 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
                 ["instructions"] if optimization_scope is None else optimization_scope
             ),
             model_provider_id=model_provider_id,
+            user_simulator_instructions=user_simulator_instructions,
+            user_simulator_id=user_simulator_id,
             stopping_policy=OptimizationStoppingPolicy(
                 target_score=target_score,
                 patience=patience,

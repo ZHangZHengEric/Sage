@@ -1,0 +1,5 @@
+# Python 3.12; TextWorld builds native components (C/C++ toolchain required).
+textworld[pddl]==1.7.0
+termcolor==3.3.0
+PyYAML>=6,<7
+numpy>=1.26,<2

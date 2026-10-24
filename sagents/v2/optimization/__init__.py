@@ -112,3 +112,13 @@ __all__ = [
 ]
 
 from sagents.v2.optimization.observer import HumanTestObserver, IsolatedTestEvaluator
+
+from sagents.v2.optimization.user_simulator import UserSimulator, UserSimulatorDescriptor, UserSimulationRequest, UserSimulationReply
+from sagents.v2.optimization.python_user_simulator import PythonUserSimulator
+__all__ += ["UserSimulator", "UserSimulatorDescriptor", "UserSimulationRequest", "UserSimulationReply", "PythonUserSimulator"]
+
+from sagents.v2.optimization.default_user_simulator import DefaultUserSimulator
+__all__.append("DefaultUserSimulator")
+
+from sagents.v2.optimization.contracts import OptimizationExperiment
+__all__.append("OptimizationExperiment")

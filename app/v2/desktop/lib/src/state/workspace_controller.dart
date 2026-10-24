@@ -296,6 +296,8 @@ class WorkspaceController extends ChangeNotifier {
 
   Future<Map<String, Object?>> rsiHistory(String agentId) =>
       _api.rsiHistory(agentId);
+  Future<void> deleteRsiRun(String agentId, String runId) =>
+      _api.deleteRsiRun(agentId, runId);
   Future<Map<String, Object?>> importRsiDataset(
     String agentId,
     Map<String, Object?> dataset,
@@ -314,6 +316,11 @@ class WorkspaceController extends ChangeNotifier {
     String agentId,
     Map<String, Object?> scorer,
   ) => _api.importRsiScorer(agentId, scorer);
+
+  Future<Map<String, Object?>> importRsiUserSimulator(
+    String agentId,
+    Map<String, Object?> module,
+  ) => _api.importRsiUserSimulator(agentId, module);
 
   Future<Map<String, Object?>> importRsiEvaluationPlan(
     String agentId,

@@ -1,0 +1,6 @@
+{
+  "url": "https://github.com/alfworld/alfworld/releases/download/0.4.2/json_2.1.3_tw-pddl.zip",
+  "sha256": "5df77ea759f2211a4106082839ddbbb790f1ba4e7d097ed732cf453f72aa36cf",
+  "seed": 20261023,
+  "selection": "20 train + 4 valid_seen + 4 valid_unseen per task type; one trial per problem folder; solvable, non-movable, non-sliced only"
+}

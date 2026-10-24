@@ -1,0 +1,168 @@
+[
+  {
+    "request": {
+      "goal": "Complete the task",
+      "case": {
+        "id": "train-4055c3adcbef56ee",
+        "input": "Complete the task",
+        "rubric": "Official environment reward",
+        "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-4055c3adcbef56ee\"}"
+      },
+      "observation": {
+        "state": "completed",
+        "evidence": {
+          "final_items": [
+            {
+              "item_id": "final",
+              "data": {
+                "kind": "message",
+                "role": "assistant",
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Done."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expected_score": 0,
+    "expected_passed": false
+  },
+  {
+    "request": {
+      "goal": "Complete the task",
+      "case": {
+        "id": "train-4055c3adcbef56ee",
+        "input": "Complete the task",
+        "rubric": "Official environment reward",
+        "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-4055c3adcbef56ee\"}"
+      },
+      "observation": {
+        "state": "completed",
+        "evidence": {
+          "final_items": [
+            {
+              "item_id": "c0",
+              "data": {
+                "kind": "tool_call",
+                "tool_call_id": "0",
+                "tool_name": "mcp_ALFWorld_step",
+                "arguments": {
+                  "action": "go to toilet 1"
+                }
+              }
+            },
+            {
+              "item_id": "r0",
+              "data": {
+                "kind": "tool_result",
+                "tool_call_id": "0",
+                "error": null,
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "{\"observation\": \"You arrive at toilet 1. On the toilet 1, you see a candle 1, and a toiletpaper 2.\", \"admissible_commands\": [\"examine toilet 1\", \"go to bathtubbasin 1\", \"go to garbagecan 1\", \"go to handtowelholder 1\", \"go to shelf 1\", \"go to shelf 2\", \"go to shelf 3\", \"go to sinkbasin 1\", \"go to toiletpaperhanger 1\", \"go to towelholder 1\", \"help\", \"inventory\", \"look\", \"take candle 1 from toilet 1\", \"take toiletpaper 2 from toilet 1\"], \"done\": false}"
+                  }
+                ]
+              }
+            },
+            {
+              "item_id": "c1",
+              "data": {
+                "kind": "tool_call",
+                "tool_call_id": "1",
+                "tool_name": "mcp_ALFWorld_step",
+                "arguments": {
+                  "action": "take toiletpaper 2 from toilet 1"
+                }
+              }
+            },
+            {
+              "item_id": "r1",
+              "data": {
+                "kind": "tool_result",
+                "tool_call_id": "1",
+                "error": null,
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "{\"observation\": \"You pick up the toiletpaper 2 from the toilet 1.\", \"admissible_commands\": [\"examine toilet 1\", \"examine toiletpaper 2\", \"go to bathtubbasin 1\", \"go to garbagecan 1\", \"go to handtowelholder 1\", \"go to shelf 1\", \"go to shelf 2\", \"go to shelf 3\", \"go to sinkbasin 1\", \"go to toiletpaperhanger 1\", \"go to towelholder 1\", \"help\", \"inventory\", \"look\", \"move toiletpaper 2 to toilet 1\"], \"done\": false}"
+                  }
+                ]
+              }
+            },
+            {
+              "item_id": "c2",
+              "data": {
+                "kind": "tool_call",
+                "tool_call_id": "2",
+                "tool_name": "mcp_ALFWorld_step",
+                "arguments": {
+                  "action": "go to shelf 2"
+                }
+              }
+            },
+            {
+              "item_id": "r2",
+              "data": {
+                "kind": "tool_result",
+                "tool_call_id": "2",
+                "error": null,
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "{\"observation\": \"You arrive at shelf 2. On the shelf 2, you see a soapbottle 3, a soapbottle 2, and a tissuebox 1.\", \"admissible_commands\": [\"examine shelf 2\", \"examine toiletpaper 2\", \"go to bathtubbasin 1\", \"go to garbagecan 1\", \"go to handtowelholder 1\", \"go to shelf 1\", \"go to shelf 3\", \"go to sinkbasin 1\", \"go to toilet 1\", \"go to toiletpaperhanger 1\", \"go to towelholder 1\", \"help\", \"inventory\", \"look\", \"move toiletpaper 2 to shelf 2\"], \"done\": false}"
+                  }
+                ]
+              }
+            },
+            {
+              "item_id": "c3",
+              "data": {
+                "kind": "tool_call",
+                "tool_call_id": "3",
+                "tool_name": "mcp_ALFWorld_step",
+                "arguments": {
+                  "action": "move toiletpaper 2 to shelf 2"
+                }
+              }
+            },
+            {
+              "item_id": "r3",
+              "data": {
+                "kind": "tool_result",
+                "tool_call_id": "3",
+                "error": null,
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "{\"observation\": \"You move the toiletpaper 2 to the shelf 2.\", \"admissible_commands\": [\"examine shelf 2\", \"go to bathtubbasin 1\", \"go to garbagecan 1\", \"go to handtowelholder 1\", \"go to shelf 1\", \"go to shelf 3\", \"go to sinkbasin 1\", \"go to toilet 1\", \"go to toiletpaperhanger 1\", \"go to towelholder 1\", \"help\", \"inventory\", \"look\", \"take soapbottle 2 from shelf 2\", \"take soapbottle 3 from shelf 2\", \"take tissuebox 1 from shelf 2\", \"take toiletpaper 2 from shelf 2\"], \"done\": true}"
+                  }
+                ]
+              }
+            },
+            {
+              "item_id": "final",
+              "data": {
+                "kind": "message",
+                "role": "assistant",
+                "content": [
+                  {
+                    "kind": "text",
+                    "text": "Done."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expected_score": 1,
+    "expected_passed": true
+  }
+]

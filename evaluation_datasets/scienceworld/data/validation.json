@@ -1,0 +1,236 @@
+{
+  "jar_sha256": "e77b0fee7d68abe3ca5b12e57d86e2bfe7603f20c5200da0b0f085939faeb465",
+  "simplifications": "",
+  "target_action_limit": 200,
+  "verified_task_ids": [
+    "scienceworld-0-5",
+    "scienceworld-0-7",
+    "scienceworld-0-1",
+    "scienceworld-0-15",
+    "scienceworld-1-11",
+    "scienceworld-1-4",
+    "scienceworld-1-12",
+    "scienceworld-1-14",
+    "scienceworld-2-8",
+    "scienceworld-2-7",
+    "scienceworld-2-0",
+    "scienceworld-2-14",
+    "scienceworld-3-4",
+    "scienceworld-3-12",
+    "scienceworld-3-13",
+    "scienceworld-3-14",
+    "scienceworld-4-81",
+    "scienceworld-4-112",
+    "scienceworld-4-150",
+    "scienceworld-4-219",
+    "scienceworld-4-337",
+    "scienceworld-6-82",
+    "scienceworld-6-11",
+    "scienceworld-6-43",
+    "scienceworld-6-306",
+    "scienceworld-6-436",
+    "scienceworld-7-5",
+    "scienceworld-7-0",
+    "scienceworld-7-4",
+    "scienceworld-7-10",
+    "scienceworld-7-15",
+    "scienceworld-8-5",
+    "scienceworld-8-7",
+    "scienceworld-8-1",
+    "scienceworld-8-11",
+    "scienceworld-8-15",
+    "scienceworld-9-5",
+    "scienceworld-9-15",
+    "scienceworld-9-79",
+    "scienceworld-9-460",
+    "scienceworld-9-675",
+    "scienceworld-10-5",
+    "scienceworld-10-15",
+    "scienceworld-10-49",
+    "scienceworld-10-318",
+    "scienceworld-10-460",
+    "scienceworld-11-3",
+    "scienceworld-11-2",
+    "scienceworld-11-30",
+    "scienceworld-11-153",
+    "scienceworld-11-243",
+    "scienceworld-12-3",
+    "scienceworld-12-2",
+    "scienceworld-12-30",
+    "scienceworld-12-153",
+    "scienceworld-12-243",
+    "scienceworld-13-2",
+    "scienceworld-13-8",
+    "scienceworld-13-12",
+    "scienceworld-13-150",
+    "scienceworld-13-235",
+    "scienceworld-14-19",
+    "scienceworld-14-25",
+    "scienceworld-14-47",
+    "scienceworld-14-152",
+    "scienceworld-14-229",
+    "scienceworld-16-106",
+    "scienceworld-17-3",
+    "scienceworld-17-16",
+    "scienceworld-17-24",
+    "scienceworld-18-1",
+    "scienceworld-18-5",
+    "scienceworld-18-10",
+    "scienceworld-18-18",
+    "scienceworld-18-27",
+    "scienceworld-19-14",
+    "scienceworld-19-1",
+    "scienceworld-19-10",
+    "scienceworld-19-20",
+    "scienceworld-19-32",
+    "scienceworld-20-3",
+    "scienceworld-20-16",
+    "scienceworld-20-17",
+    "scienceworld-20-68",
+    "scienceworld-20-105",
+    "scienceworld-21-3",
+    "scienceworld-21-16",
+    "scienceworld-21-17",
+    "scienceworld-21-68",
+    "scienceworld-21-105",
+    "scienceworld-22-3",
+    "scienceworld-22-16",
+    "scienceworld-22-17",
+    "scienceworld-22-68",
+    "scienceworld-22-105",
+    "scienceworld-23-3",
+    "scienceworld-23-4",
+    "scienceworld-23-1",
+    "scienceworld-23-7",
+    "scienceworld-23-13",
+    "scienceworld-24-3",
+    "scienceworld-24-2",
+    "scienceworld-24-4",
+    "scienceworld-24-6",
+    "scienceworld-25-0",
+    "scienceworld-25-1",
+    "scienceworld-25-2",
+    "scienceworld-25-84",
+    "scienceworld-25-150",
+    "scienceworld-26-95",
+    "scienceworld-26-114",
+    "scienceworld-26-115",
+    "scienceworld-26-850",
+    "scienceworld-26-1368",
+    "scienceworld-27-31",
+    "scienceworld-27-30",
+    "scienceworld-27-32",
+    "scienceworld-27-119",
+    "scienceworld-27-156",
+    "scienceworld-28-25",
+    "scienceworld-28-85",
+    "scienceworld-28-94",
+    "scienceworld-29-19",
+    "scienceworld-29-94",
+    "scienceworld-29-333"
+  ],
+  "failed_reference_paths": [
+    {
+      "id": "scienceworld-0-25",
+      "score": 2
+    },
+    {
+      "id": "scienceworld-1-28",
+      "score": 1
+    },
+    {
+      "id": "scienceworld-2-28",
+      "score": 0
+    },
+    {
+      "id": "scienceworld-3-28",
+      "score": 2
+    },
+    {
+      "id": "scienceworld-15-9",
+      "score": 9
+    },
+    {
+      "id": "scienceworld-15-15",
+      "score": 2
+    },
+    {
+      "id": "scienceworld-15-33",
+      "score": 2
+    },
+    {
+      "id": "scienceworld-15-69",
+      "score": 2
+    },
+    {
+      "id": "scienceworld-15-105",
+      "score": 2
+    },
+    {
+      "id": "scienceworld-16-16",
+      "score": 0
+    },
+    {
+      "id": "scienceworld-16-9",
+      "score": 4
+    },
+    {
+      "id": "scienceworld-16-15",
+      "score": 1
+    },
+    {
+      "id": "scienceworld-16-69",
+      "score": 1
+    },
+    {
+      "id": "scienceworld-17-2",
+      "score": 29
+    },
+    {
+      "id": "scienceworld-17-4",
+      "score": 50
+    },
+    {
+      "id": "scienceworld-24-0",
+      "score": 0
+    },
+    {
+      "id": "scienceworld-28-22",
+      "score": 1
+    },
+    {
+      "id": "scienceworld-28-55",
+      "score": 0
+    },
+    {
+      "id": "scienceworld-29-133",
+      "score": 1
+    },
+    {
+      "id": "scienceworld-29-452",
+      "score": 1
+    }
+  ],
+  "fold_mismatches": [],
+  "prompt_overrides": {
+    "scienceworld-4-81": "Your task is to measure the melting point of gallium, which is located around the kitchen. First, focus on the thermometer. Next, focus on the gallium. If the melting point of gallium is above 150.0 degrees celsius, focus on the green box. If the melting point of gallium is below 150.0 degrees celsius, focus on the blue box. The boxes are located around the kitchen.",
+    "scienceworld-4-112": "Your task is to measure the melting point of gallium, which is located around the kitchen. First, focus on the thermometer. Next, focus on the gallium. If the melting point of gallium is above 150.0 degrees celsius, focus on the green box. If the melting point of gallium is below 150.0 degrees celsius, focus on the blue box. The boxes are located around the kitchen.",
+    "scienceworld-4-150": "Your task is to measure the melting point of gallium, which is located around the kitchen. First, focus on the thermometer. Next, focus on the gallium. If the melting point of gallium is above 200.0 degrees celsius, focus on the yellow box. If the melting point of gallium is below 200.0 degrees celsius, focus on the purple box. The boxes are located around the kitchen.",
+    "scienceworld-4-219": "Your task is to measure the melting point of tin, which is located around the kitchen. First, focus on the thermometer. Next, focus on the tin. If the melting point of tin is above 10.0 degrees celsius, focus on the orange box. If the melting point of tin is below 10.0 degrees celsius, focus on the yellow box. The boxes are located around the kitchen.",
+    "scienceworld-4-337": "Your task is to measure the melting point of tin, which is located around the kitchen. First, focus on the thermometer. Next, focus on the tin. If the melting point of tin is above 10.0 degrees celsius, focus on the orange box. If the melting point of tin is below 10.0 degrees celsius, focus on the yellow box. The boxes are located around the kitchen.",
+    "scienceworld-6-82": "Your task is to measure the temperature of sodium chloride, which is located around the bathroom. First, focus on the thermometer. Next, focus on the sodium chloride. If the sodium chloride temperature is above 50.0 degrees celsius, place it in the green box. If the sodium chloride temperature is below 50.0 degrees celsius, place it in the blue box. The boxes are located around the bathroom.",
+    "scienceworld-6-11": "Your task is to measure the temperature of unknown substance B, which is located around the bedroom. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 50.0 degrees celsius, place it in the green box. If the unknown substance B temperature is below 50.0 degrees celsius, place it in the blue box. The boxes are located around the bedroom.",
+    "scienceworld-6-43": "Your task is to measure the temperature of unknown substance B, which is located around the living room. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 50.0 degrees celsius, place it in the yellow box. If the unknown substance B temperature is below 50.0 degrees celsius, place it in the purple box. The boxes are located around the living room.",
+    "scienceworld-6-306": "Your task is to measure the temperature of unknown substance B, which is located around the bathroom. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 200.0 degrees celsius, place it in the blue box. If the unknown substance B temperature is below 200.0 degrees celsius, place it in the orange box. The boxes are located around the bathroom.",
+    "scienceworld-6-436": "Your task is to measure the temperature of unknown substance B, which is located around the bathroom. First, focus on the thermometer. Next, focus on the unknown substance B. If the unknown substance B temperature is above 0.0 degrees celsius, place it in the yellow box. If the unknown substance B temperature is below 0.0 degrees celsius, place it in the purple box. The boxes are located around the bathroom.",
+    "scienceworld-15-15": "Your task is to grow a apple. This will require growing several plants, and them being crosspollinated to produce fruit.  Seeds can be found in the greenhouse. To complete the task, focus on the grown apple.",
+    "scienceworld-15-33": "Your task is to grow a avocado. This will require growing several plants, and them being crosspollinated to produce fruit.  Seeds can be found in the greenhouse. To complete the task, focus on the grown avocado.",
+    "scienceworld-15-69": "Your task is to grow a cherry. This will require growing several plants, and them being crosspollinated to produce fruit.  Seeds can be found in the greenhouse. To complete the task, focus on the grown cherry.",
+    "scienceworld-15-105": "Your task is to grow a orange. This will require growing several plants, and them being crosspollinated to produce fruit.  Seeds can be found in the greenhouse. To complete the task, focus on the grown orange.",
+    "scienceworld-16-16": "Your task is to grow a apple plant from seed. Seeds can be found in the greenhouse. First, focus on a seed. Then, make changes to the environment that grow the plant until it reaches the reproduction life stage.",
+    "scienceworld-16-15": "Your task is to grow a apple plant from seed. Seeds can be found in the greenhouse. First, focus on a seed. Then, make changes to the environment that grow the plant until it reaches the reproduction life stage.",
+    "scienceworld-16-69": "Your task is to grow a cherry plant from seed. Seeds can be found in the greenhouse. First, focus on a seed. Then, make changes to the environment that grow the plant until it reaches the reproduction life stage.",
+    "scienceworld-16-106": "Your task is to grow a orange plant from seed. Seeds can be found in the greenhouse. First, focus on a seed. Then, make changes to the environment that grow the plant until it reaches the reproduction life stage.",
+    "scienceworld-17-4": "Your task is to use chemistry to create the substance 'banana sandwich'. A recipe and some of the ingredients might be found near the kitchen. When you are done, focus on the banana sandwich."
+  }
+}

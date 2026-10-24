@@ -8,6 +8,9 @@ import sys
 
 from sagents.v2.optimization.scoring import ScorerDescriptor, ScoringResult
 from sagents.v2.optimization.scorer_runtime import MODEL_API_ENV, ScorerModelAPI
+from sagents.v2.optimization.scorer_dependencies import (
+    ScorerDependencyError, verify_dependencies, verify_capture, dependency_binding,
+)
 
 
 class ScorerExecutionError(RuntimeError):
@@ -15,13 +18,18 @@ class ScorerExecutionError(RuntimeError):
 
 
 class PythonExecutionScorer:
-    def __init__(self, *, path, source_hash, descriptor, timeout=120, model_api=None, model_api_factory=None):
+    descriptor_type = ScorerDescriptor
+    worker_module = "sagents.v2.optimization.python_scorer_worker"
+
+    def __init__(self, *, path, source_hash, descriptor, timeout=120, model_api=None, model_api_factory=None,
+                 dependency_manifest=None):
         self.path = Path(path).resolve()
         self.source_hash = source_hash
-        self.descriptor = ScorerDescriptor.model_validate(descriptor)
+        self.descriptor = self.descriptor_type.model_validate(descriptor)
         self.timeout = timeout
         self.model_api = ScorerModelAPI.model_validate(model_api) if model_api is not None else None
         self.model_api_factory = model_api_factory
+        self.dependency_manifest = dependency_manifest
         if model_api is not None and model_api_factory is not None:
             raise ValueError("Choose an explicit model API or a runtime API factory")
 
@@ -38,11 +46,18 @@ class PythonExecutionScorer:
         result = json.loads(await self._execute(b'', validate=True))
         if result.get('status') != 'passed':
             raise ScorerExecutionError(result.get('error', 'scorer validation failed'))
+        result['dependency_binding'] = dependency_binding(self.source_hash, self.dependency_manifest)
+        result['dependency_file_count'] = len(self.dependency_manifest['files'])
         return result
 
     async def _execute(self, payload, *, validate=False, model_api=None):
         if hashlib.sha256(self.path.read_bytes()).hexdigest() != self.source_hash:
             raise ScorerExecutionError('frozen scorer source changed')
+        try:
+            if self.dependency_manifest is not None:
+                verify_dependencies(self.dependency_manifest)
+        except ScorerDependencyError as error:
+            raise ScorerExecutionError(str(error)) from error
         # Do not inherit model credentials from the Desktop process environment.
         environment = {'PATH': os.environ.get('PATH', os.defpath), 'PYTHONIOENCODING': 'utf-8',
                        'LANG': os.environ.get('LANG', 'en_US.UTF-8')}
@@ -51,11 +66,11 @@ class PythonExecutionScorer:
         if not validate and model_api is not None:
             environment[MODEL_API_ENV] = model_api.worker_environment()
         process = await asyncio.create_subprocess_exec(sys.executable, '-I', '-m',
-            'sagents.v2.optimization.python_scorer_worker', str(self.path),
-            *(['--validate'] if validate else []),
+            self.worker_module, str(self.path),
+            '--capture-dependencies', *(['--validate'] if validate else []),
             cwd=self.path.parent, env=environment,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-            limit=1024 * 1024 + 1)
+            limit=4 * 1024 * 1024 + 1)
         async def write():
             try:
                 process.stdin.write(payload + b'\n')
@@ -73,7 +88,7 @@ class PythonExecutionScorer:
                     chunks, size = [], 0
                     while chunk := await process.stdout.readline():
                         size += len(chunk)
-                        if size > 1024 * 1024:
+                        if size > 4 * 1024 * 1024:
                             raise ScorerExecutionError('scorer output exceeds 1 MiB')
                         chunks.append(chunk)
                     output = b''.join(chunks)
@@ -81,9 +96,28 @@ class PythonExecutionScorer:
                     code = await process.wait()
                     if code:
                         raise ScorerExecutionError(f'scorer process exited with code {code}')
+                    if hashlib.sha256(self.path.read_bytes()).hexdigest() != self.source_hash:
+                        raise ScorerExecutionError('frozen scorer source changed')
                     result = json.loads(output)
+                    if isinstance(result, dict) and 'dependency_manifest' in result:
+                        observed = result['dependency_manifest']
+                        try:
+                            if self.dependency_manifest is not None:
+                                verify_capture(self.dependency_manifest, observed)
+                                verify_dependencies(self.dependency_manifest)
+                            else:
+                                verify_dependencies(observed)
+                        except ScorerDependencyError as error:
+                            raise ScorerExecutionError(str(error)) from error
+                        self.dependency_manifest = self.dependency_manifest or observed
+                        result = result['payload']
+                        output = json.dumps(result).encode()
+                        if len(output) > 1024 * 1024:
+                            raise ScorerExecutionError('scorer output exceeds 1 MiB')
                     error = result.get('execution_error') if isinstance(result, dict) else None
                     if error is not None:
+                        if error.get('code') == 'scorer.dependencies_changed':
+                            raise ScorerExecutionError('frozen scorer dependencies changed')
                         if error.get('retryable') and str(error.get('code', '')).startswith('model.'):
                             from sagents.v2.optimization.recovery import OptimizationTransientFailure
                             raise OptimizationTransientFailure('Scorer ModelProvider transport interrupted')

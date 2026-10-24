@@ -36,10 +36,28 @@ from sagents.v2.model.contracts import (
 )
 
 
+def fixture_experiment(payload):
+    """Offline model declares its mechanism before candidate measurement."""
+    data = payload['data']
+    previous = data.get('previous_proposal') or {}
+    if previous.get('experiment'):
+        return previous['experiment']
+    return {'parent_hash': data['retained_parent_hash'],
+        'mechanism': 'Verify arithmetic before final response', 'applicability': 'Arithmetic tasks',
+        'change_locations': ['system_prompt'], 'existing_rule_gap': 'No explicit result verification',
+        'expected_observation': 'Arithmetic is checked before answering',
+        'support_condition': 'Recorded incorrect arithmetic becomes correct',
+        'falsification_condition': 'Arithmetic errors persist after verification',
+        'inconclusive_condition': 'No arithmetic execution evidence is recorded',
+        'training_case_ids': data.get('measured_training_case_ids') or ['train'],
+        'protection_case_ids': data.get('protection_case_ids', []),
+        'protected_behaviors': ['Preserve authorized scope'], 'risks': []}
+
+
 def authored_response(request, payload, changes):
     """Scripted model authors real package files through the runtime file tools."""
     if any(m.role == "tool" and str(m.tool_call_id).startswith("author-") for m in request.messages):
-        return ModelResponse(response_id="authored", text=json.dumps({"rationale": changes["rationale"]}), finish_reason="stop")
+        return ModelResponse(response_id="authored", text=json.dumps({"rationale": changes["rationale"], "experiment": changes.get("experiment") or fixture_experiment(payload)}), finish_reason="stop")
     data = payload["data"]
     manifest = data["package"]["manifest"]
     identity = data["agent_id"]
@@ -135,13 +153,15 @@ class RsiModel(ScriptedModelProvider):
             answer = dict(
                 approved=True, rationale="Goal and suites are consistent", issues=[]
             )
-        elif "instruction_guidance" in properties or set(properties) == {"rationale", "experience_notes"}:
+        elif "instruction_guidance" in properties or set(properties) == {"rationale", "experience_notes", "experiment"}:
             answer = dict(
                 rationale="Reusable arithmetic verification",
                 system_prompt="Answer accurately. Verify calculations before answering.",
+                experiment=fixture_experiment(json.loads(raw)),
             )
         elif "priorities" in properties:
-            answer = {"summary": "Preserve verified arithmetic behavior", "priorities": [], "uncertainties": []}
+            answer = {"summary": "Verify arithmetic procedure", "priorities": [], "uncertainties": [],
+                "next_action": "test_hypothesis", "next_verification": "Compare arithmetic verification with retained behavior"}
         elif "score" in properties:
             answer = dict(
                 score=0.9,
@@ -172,7 +192,7 @@ class RsiModel(ScriptedModelProvider):
                 )
                 return
             answer = "42"
-        if set(properties) == {"rationale", "experience_notes"}:
+        if set(properties) == {"rationale", "experience_notes", "experiment"}:
             yield ModelStreamEvent(kind=ModelEventKind.COMPLETED,
                 response=authored_response(request, json.loads(raw), answer))
             return
@@ -337,7 +357,7 @@ async def test_native_background_rounds_versions_confirmation_cas_and_restart(
             await service.rsi_version(agent_id, candidates[0]["id"], "bob")
         chosen = next(v for v in candidates if v["iteration"] == 1)
         version = await service.rsi_version(agent_id, chosen["id"], "alice")
-        assert version["review"]["approved"]
+        assert version["review"] is None
         assert (
             "Verify calculations"
             in AgentPackageBundle.model_validate(version["package"]).resolved_manifest().agents[agent_id].instructions.inline
@@ -427,6 +447,10 @@ async def test_background_idempotency_keepalive_cancel_and_no_replay(
     assert store.get(run["id"], "alice", agent_id, "run")["status"] == "cancelled"
     pending = dict(run, id="interrupted-test", status="running")
     store.put(pending, "alice", agent_id, "run")
+    # Simulate the owning host having exited; reopening a live run is safe.
+    import sqlite3
+    with sqlite3.connect(tmp_path / "runtime/rsi.sqlite3") as database:
+        database.execute("UPDATE records SET body=json_set(body, '$._host_owner.started', 0) WHERE id=?", (pending["id"],))
     reopened = RsiStore(tmp_path / "runtime/rsi.sqlite3")
     assert (
         reopened.get(pending["id"], "alice", agent_id, "run")["status"] == "interrupted"
@@ -498,8 +522,9 @@ async def test_repeated_configuration_is_retained_as_a_new_version(
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(180)
+@pytest.mark.parametrize("restricted_tools", [False, True])
 async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, restricted_tools
 ):
     model = RsiModel()
     service, agent_id = await setup_service(tmp_path, monkeypatch, model)
@@ -511,20 +536,23 @@ async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
         )
         from sagents.v2.tool.plugins.official import official_tool_definitions
 
-        tools = [d.name for d in official_tool_definitions()] + ["load_skill"]
+        tools = (["file_read"] if restricted_tools else
+                 [d.name for d in official_tool_definitions()] + ["load_skill"])
+        scope = ("instructions", "skills") if restricted_tools else ("instructions", "skills", "tools")
         await service.patch_agent_settings(
             agent_id, AgentSettingsPatch(available_tools=tools), "alice"
         )
         empty = await service.start_rsi(
             agent_id,
-            start_request("empty-skills").model_copy(update={"rounds": 1}),
+            start_request("empty-skills").model_copy(update={"rounds": 1, "optimization_scope": scope}),
             "alice",
         )
         await service._rsi_tasks[empty["id"]]
         assert (await service.rsi_run(agent_id, empty["id"], "alice"))[
             "status"
         ] == "completed"
-        assert any(t.name == "load_skill" for r in model.requests for t in r.tools)
+        if not restricted_tools:
+            assert any(t.name == "load_skill" for r in model.requests for t in r.tools)
         model.load_skill = True
         model.requests.clear()
         await service.patch_agent_settings(
@@ -536,7 +564,7 @@ async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
             "alice",
         )
         run = await service.start_rsi(
-            agent_id, start_request().model_copy(update={"rounds": 1}), "alice"
+            agent_id, start_request().model_copy(update={"rounds": 1, "optimization_scope": scope}), "alice"
         )
         await service._rsi_tasks[run["id"]]
         result = await service.rsi_run(agent_id, run["id"], "alice")
@@ -547,6 +575,25 @@ async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
         assert tool_messages
         rendered = "\n".join(m.model_dump_json() for m in tool_messages)
         assert "Skill arithmetic loaded" in rendered, rendered
+        if restricted_tools:
+            from evaluation_datasets import _support
+            audit = service.runtime_root / 'rsi' / run['id'] / 'audit.jsonl'
+            verified = False
+            for line in audit.read_text().splitlines():
+                event = json.loads(line)
+                if event['event'] != 'target_call_completed':
+                    continue
+                observation = event['data']['observation']
+                items = observation['evidence'].get('final_items', [])
+                results = {i['data']['tool_call_id']: i['data'] for i in items
+                           if i['data']['kind'] == 'tool_result'}
+                for item in items:
+                    call = item['data']
+                    if call.get('tool_name') == 'load_skill':
+                        assert _support.native_skill_read({'observation': observation}, call,
+                                                          results[call['tool_call_id']])
+                        verified = True
+            assert verified
         assert any(
             "Check arithmetic independently" in r.model_dump_json()
             for r in model.requests
@@ -561,7 +608,7 @@ async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(180)
-async def test_rejected_candidates_retained_but_cannot_be_applied(
+async def test_desktop_uses_rules_without_candidate_reviewer_and_preserves_old_rejections(
     tmp_path, monkeypatch
 ):
     service, agent_id = await setup_service(
@@ -573,11 +620,18 @@ async def test_rejected_candidates_retained_but_cannot_be_applied(
         await service._rsi_tasks[run["id"]]
         record = await service.rsi_run(agent_id, run["id"], "alice")
         assert record["status"] == "completed"
-        rejected = record["result"]["iterations"][1:]
-        assert len(rejected) == 3 and all(
-            item["review"]["approved"] is False for item in rejected
+        candidates = record["result"]["iterations"][1:]
+        assert len(candidates) == 3 and all(
+            item["review"] is None for item in candidates
         )
-        assert all(item["evaluation"] is None for item in rejected)
+        assert all(item["evaluation"] is not None for item in candidates)
+        assert not any(c["role"] == "semantic_review" for c in record["result"]["report"]["agent_calls"])
+        # Historical rejections remain enforceable; changing the default must
+        # not relabel an old rejected version as safe to apply.
+        version_id = f"{run['id']}.1"
+        version = service.rsi_store.get(version_id, "alice", agent_id, "version")
+        version["review"] = {"approved": False, "rationale": "Historical rejection"}
+        service.rsi_store.put(version, "alice", agent_id, "version")
         with pytest.raises(ValueError, match="rejected"):
             await service.apply_rsi_version(
                 agent_id,
@@ -771,7 +825,7 @@ class ToolCreatingRsiModel(RsiModel):
             )
         except ValueError:
             properties = {}
-        if "instruction_guidance" in properties or set(properties) == {"rationale", "experience_notes"}:
+        if "instruction_guidance" in properties or set(properties) == {"rationale", "experience_notes", "experiment"}:
             # Tuner writes a new implementation, not a pre-existing native tool.
             answer = {
                 "rationale": "Move arithmetic into a reusable pure calculator",
@@ -795,7 +849,7 @@ class ToolCreatingRsiModel(RsiModel):
                     }
                 },
             }
-            if set(properties) == {"rationale", "experience_notes"}:
+            if set(properties) == {"rationale", "experience_notes", "experiment"}:
                 yield ModelStreamEvent(kind=ModelEventKind.COMPLETED,
                     response=authored_response(request, json.loads(raw), answer))
                 return
@@ -1017,7 +1071,7 @@ async def test_interrupted_rsi_resumes_same_run_after_service_restart_without_re
             except ValueError:
                 data = {}
             props = data.get('response_schema', {}).get('properties', {})
-            if ('instruction_guidance' in props or set(props) == {'rationale', 'experience_notes'}) and data['data']['round'] == 2 and self.cut:
+            if ('instruction_guidance' in props or set(props) == {'rationale', 'experience_notes', 'experiment'}) and data['data']['round'] == 2 and self.cut:
                 raise ConnectionError('Simulated interruption before second proposal')
             if not props:
                 self.target_calls += 1
@@ -1029,6 +1083,13 @@ async def test_interrupted_rsi_resumes_same_run_after_service_restart_without_re
     await service._rsi_tasks[run['id']]
     old = await service.rsi_run(agent_id, run['id'], 'alice')
     assert old['status'] == 'failed' and old['resumable']
+    saved_configuration = {key: old[key] for key in (
+        'goal', 'rounds', 'initial_training_case_count', 'training_cases_per_round',
+        'max_system_prompt_chars', 'max_skill_chars', 'max_skill_count', 'max_edit_repairs',
+        'validation_case_count', 'human_test_count', 'max_concurrency',
+        'evaluation_repeats', 'human_test_repeats', 'optimization_scope',
+        'scorer_id', 'dataset_version_id', 'model_provider_id', 'requested_model_provider_id')}
+    assert saved_configuration['requested_model_provider_id'] == start_request().model_provider_id
     original_completed = [e for e in old["events"] if e["event"] == "case_completed"]
     assert first.target_calls == len(original_completed) >= 4
     old_sequence = old['sequence']
@@ -1040,6 +1101,8 @@ async def test_interrupted_rsi_resumes_same_run_after_service_restart_without_re
         return second
     monkeypatch.setattr(reopened, '_model_provider', bind)
     try:
+        persisted = await reopened.rsi_run(agent_id, run['id'], 'alice')
+        assert {key: persisted[key] for key in saved_configuration} == saved_configuration
         import httpx
         from app.v2.desktop.backend.app import create_app
         monkeypatch.setattr('app.v2.desktop.backend.app.get_desktop_user_id', lambda request: 'alice')

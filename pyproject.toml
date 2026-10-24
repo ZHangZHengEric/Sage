@@ -118,7 +118,7 @@ exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "
 "share/sage/docs/zh" = ["docs/zh/*.md"]
 
 [tool.setuptools.package-data]
-"evaluation_datasets" = ["**/*.json", "**/*.md", "**/*.txt", "**/*.py", "**/*.toml", "**/LICENSE", "**/ACKNOWLEDGEMENTS"]
+"evaluation_datasets" = ["**/*.json", "**/*.md", "**/*.txt", "**/*.py", "**/*.toml", "**/LICENSE", "**/ACKNOWLEDGEMENTS", "**/*.jar", "**/*.zip", "**/*.tw-pddl", "**/*.jsonl", "**/*.yaml", "**/*.pddl", "**/*.twl2", "**/*.tsv", "**/*.scala", "**/*.sbt", "**/*.npy", "**/*.c", "**/*.h", "**/*.l", "**/*.y", "**/*.sh", "**/*.pdf", "**/makefile", "**/Dockerfile", "**/alfworld-download"]
 "app.v1" = ["requirements*.txt"]
 "app.clients.terminal" = [
   "bin/*/run-sage-terminal.sh",

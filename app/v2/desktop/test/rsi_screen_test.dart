@@ -462,7 +462,153 @@ class RunningConfigurationApi extends RsiApi {
   };
 }
 
+class FailedConfigurationApi extends DatasetRevisionApi {
+  Completer<void>? loadGate;
+  @override
+  Future<Map<String, Object?>> rsiRun(
+    String agentId,
+    String runId, {
+    int afterSequence = 0,
+  }) async {
+    await loadGate?.future;
+    return {
+      ...await super.rsiRun(agentId, runId, afterSequence: afterSequence),
+      'status': 'failed',
+      'goal': 'Preserve this failed experiment setup',
+      'rounds': 7,
+      'initial_training_case_count': 9,
+      'training_cases_per_round': 0,
+      'max_system_prompt_chars': 24000,
+      'max_skill_chars': 12000,
+      'max_skill_count': 2,
+      'max_edit_repairs': 5,
+      'validation_case_count': 2,
+      'human_test_count': 1,
+      'max_concurrency': 4,
+      'evaluation_repeats': 3,
+      'human_test_repeats': 2,
+      'optimization_scope': ['skills', 'tools'],
+      'model_provider_id': 'resolved-model',
+      'requested_model_provider_id': 'selected-model',
+      'scorer_id': 'saved-scorer',
+    };
+  }
+}
+
 void main() {
+  testWidgets(
+    'failed experiment restores all settings after page recreation and polling preserves edits',
+    (tester) async {
+      final api = FailedConfigurationApi();
+      final controller = WorkspaceController(api: api);
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(() {
+        controller.dispose();
+        api.close();
+      });
+      for (var attempt = 0; attempt < 2; attempt++) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: RsiScreen(
+              controller: controller,
+              agentId: 'agent',
+              agentName: 'Sage',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('rsi-toggle-setup')));
+        await tester.pumpAndSettle();
+        String content(String key) => tester
+            .widget<GlassTextField>(
+              find.byKey(ValueKey(key), skipOffstage: false),
+            )
+            .controller!
+            .text;
+        expect(content('rsi-goal'), 'Preserve this failed experiment setup');
+        expect(content('rsi-rounds'), '7');
+        expect(content('rsi-initial-training-count'), '9');
+        expect(content('rsi-training-increment'), '0');
+        expect(content('rsi-concurrency'), '4');
+        expect(content('rsi-evaluation-repeats'), '3');
+        expect(content('rsi-human-test-repeats'), '2');
+        expect(find.text('saved-scorer', skipOffstage: false), findsOneWidget);
+        expect(
+          find.text('selected-model', skipOffstage: false),
+          findsOneWidget,
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('rsi-goal')),
+          'My new edits',
+        );
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pumpAndSettle();
+        expect(content('rsi-goal'), 'My new edits');
+        await tester.tap(find.byKey(const ValueKey('rsi-start')));
+        await tester.pumpAndSettle();
+        expect(
+          api.startOptions,
+          containsPair('dataset_version_id', 'source-v1'),
+        );
+        expect(api.startOptions, containsPair('scorer_id', 'saved-scorer'));
+        expect(
+          api.startOptions,
+          containsPair('model_provider_id', 'selected-model'),
+        );
+        expect(
+          api.startOptions,
+          containsPair('optimization_scope', ['skills', 'tools']),
+        );
+        expect(api.startOptions, containsPair('max_skill_count', 2));
+        expect(api.startOptions, containsPair('max_edit_repairs', 5));
+        expect(
+          api.startOptions,
+          containsPair('max_system_prompt_chars', 24000),
+        );
+        expect(api.startOptions, containsPair('max_skill_chars', 12000));
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('delayed initial load cannot overwrite a user edit', (
+    tester,
+  ) async {
+    final api = FailedConfigurationApi()..loadGate = Completer<void>();
+    final controller = WorkspaceController(api: api);
+    addTearDown(() {
+      controller.dispose();
+      api.close();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RsiScreen(
+          controller: controller,
+          agentId: 'agent',
+          agentName: 'Sage',
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const ValueKey('rsi-toggle-setup')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.byKey(const ValueKey('rsi-goal')),
+      'Do not overwrite this',
+    );
+    api.loadGate!.complete();
+    await tester.pumpAndSettle();
+    final field = tester.widget<GlassTextField>(
+      find.byKey(const ValueKey('rsi-goal')),
+    );
+    expect(field.controller!.text, 'Do not overwrite this');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   for (final brightness in Brightness.values) {
     testWidgets('open current optimization folder ${brightness.name}', (
       tester,
@@ -1063,7 +1209,7 @@ void main() {
           .widget<GlassTextField>(find.byKey(const ValueKey('rsi-rounds')))
           .controller
           ?.text,
-      '8',
+      '3',
     );
     await tester.enterText(find.byKey(const ValueKey('rsi-rounds')), '7');
     await tester.enterText(
@@ -1468,26 +1614,8 @@ void main() {
         const ValueKey('rsi-prepared-dataset-scope'),
         skipOffstage: false,
       );
-      expect(
-        find.descendant(
-          of: frozen,
-          matching: find.text('原始 / 排除 / 参与: 4 / 0 / 4', skipOffstage: false),
-          skipOffstage: false,
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: prepared,
-          matching: find.text('原始 / 排除 / 参与: 4 / 1 / 3', skipOffstage: false),
-          skipOffstage: false,
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining('本版本成绩属于修订集', skipOffstage: false),
-        findsOneWidget,
-      );
+      expect(frozen, findsNothing);
+      expect(prepared, findsNothing);
       final chooser = find.byKey(const ValueKey('rsi-choose-dataset-version'));
       await Scrollable.ensureVisible(tester.element(chooser), alignment: 0.4);
       await tester.pumpAndSettle();
@@ -1516,6 +1644,15 @@ void main() {
           find.text('版本: ${scope == 'run' ? 'source-v1' : 'revision-v2'}'),
           findsOneWidget,
         );
+        expect(
+          find.text(
+            '原始 / 排除 / 参与  ${scope == 'run' ? '4 / 0 / 4' : '4 / 1 / 3'}',
+          ),
+          findsOneWidget,
+        );
+        if (scope == 'prepared') {
+          expect(find.textContaining('修订集成绩不代表完整官方集成绩'), findsOneWidget);
+        }
         await tester.tap(
           find.byKey(const ValueKey('rsi-dataset-details-close')),
         );

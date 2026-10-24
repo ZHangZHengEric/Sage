@@ -47,7 +47,7 @@ def test_dataset_answers_and_splits_follow_one_schema():
     dataset = OptimizationDataset(name='Conversions', cases=suite().cases)
     assert dataset.optimization_suite() == suite()
     assert dataset.human_test_suite() is None
-    with pytest.raises(ValueError, match='unique'):
+    with pytest.raises(ValueError, match='duplicate dataset case IDs'):
         OptimizationDataset(name='bad', cases=(suite().cases[0], suite().cases[0]))
 
 

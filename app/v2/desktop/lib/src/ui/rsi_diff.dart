@@ -539,7 +539,13 @@ class _RsiDiffBrowserState extends State<_RsiDiffBrowser> {
               ),
               onTap: () => select(index),
             );
-            return compact ? SizedBox(width: 220, child: tile) : tile;
+            final paintedTile = Material(
+              type: MaterialType.transparency,
+              child: tile,
+            );
+            return compact
+                ? SizedBox(width: 220, child: paintedTile)
+                : paintedTile;
           },
         );
         return compact

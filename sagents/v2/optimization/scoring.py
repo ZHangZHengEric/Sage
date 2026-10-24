@@ -24,6 +24,7 @@ class ScoringRequest(StrictModel):
     case: OptimizationCase
     observation: OptimizationObservation
     conversation: tuple[dict[str, Any], ...] = ()
+    dialogue_stop_reason: str | None = None
 
 
 class ScoringResult(StrictModel):

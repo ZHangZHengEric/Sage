@@ -347,7 +347,8 @@ async def test_postrun_real_python_scorer_remains_authority_and_diagnoses_still_
                 value = (
                     diagnosis()
                     if title == "OptimizationDiagnosis"
-                    else {"summary": "Analyzed fixed score", "priorities": []}
+                    else {"summary": "Analyzed fixed score", "priorities": [],
+                          "next_action": "test_hypothesis", "next_verification": "Check the training mechanism"}
                 )
                 response = authored_evaluation_response(request, payload, value)
                 yield ModelStreamEvent(

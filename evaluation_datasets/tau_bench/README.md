@@ -2,7 +2,7 @@
 
 来源：Sierra Research `tau2-bench`，固定提交 `fc0055dc4e0a316c3f83133267fbd6faaa770992`。官方 Python 源码、零售数据库、政策、题目、split、共享用户模拟说明及 MIT 许可证保存在本目录。`upstream.json` 记录逐文件 SHA256；业务规则与评分逻辑未修改。
 
-官方 split：train 74 题、test 40 题。RSI 的 dev 从官方 train 独立划出；官方 test 不进入调优。`vendor/` 是官方代码，`scorer.py`、`mcp_server.py` 与 `runtime.py` 是 Sage 接入代码。
+官方 split：train 74 题、test 40 题。RSI 的 dev 从官方 train 独立划出；官方 test 不进入调优。`vendor/` 是官方代码，`scorer.py`、`user_simulator.py`、`mcp_server.py` 与 `runtime.py` 是 Sage 接入代码。
 
 ## 换电脑后从零运行（macOS Desktop）
 
@@ -74,6 +74,10 @@ Desktop 弹窗中选择 `stdio`：名称填 `TauRetail`，命令只填 Python �
 3. 设置优化目标、训练初始题量、每轮增量、轮数、并发和重复次数；内部模型使用目标模型。
 4. 点击“开始进化”。检查运行设置快照与题量，再观察基线轮和后续轮次。运行记录持久化到当前电脑，重新打开 Desktop 可查看。
 
+评分接入层支持并行工具调用：保持调用发起顺序，将乱序到达的结果按 `tool_call_id` 匹配，转换成官方要求的“一条 assistant 批次 + 对应 tool 结果”格式。调用参数、结果正文、错误标记和官方严格重放规则均保留；缺失结果、重复调用 ID、重复结果仍会报错。导入自测包含并行写入及反序返回场景。
+
+升级 `scorer.py` 后需重新导入并选中新评分器，再开始新实验。旧实验绑定的是导入时冻结的文件和哈希，不能靠修改仓库文件或原地覆盖旧评分器来更改已有实验的评分口径。旧记录和成绩保留；无需重新导入未修改的数据集。
+
 建议先用小规模验证链路，再运行完整实验：
 
 | 参数 | 快速流程检查 | 效果实验配置 |
@@ -129,7 +133,7 @@ python -m evaluation_datasets.tau_bench.mcp_server --state /absolute/path/tau-re
 
 页面“导入数据集”选择 `rsi.dataset.json`，格式为 `sage.rsi.dataset/v1`，包含问题、模拟用户上下文、参考答案和独立环境初始状态。固定 seed 20261021 将官方 train 划为 62 道训练题及 12 道 dev；40 道官方 test 保持独立。初始输入使用普通问候，完整场景指令只放入 `user_context`，由模拟用户逐步披露；标准字段 `dialogue_completion=user` 要求继续到模拟用户结束，不能因为中途数据库状态已匹配就提前终止。不能把 `reason_for_call` 中的对话安排直接发给目标。标准答案包括官方 `evaluation_criteria` 与 `initial_state`，不传给目标或模拟用户。
 
-基线 Agent 预先配置官方政策与业务 MCP 工具。页面选择该 Agent、导入数据集及评分器后，使用通用 RSI 流程，无专用实验宿主。建议先用少量题目验证流程。该流程的模拟用户使用通用 RSI 实现，与官方编排器不同；评分逻辑对齐不等于已复现官方完整榜单设置。
+基线 Agent 预先配置官方政策与业务 MCP 工具。页面选择该 Agent、导入数据集及评分器后，使用通用 RSI 流程，无专用实验宿主。建议先用少量题目验证流程。选择本目录的 `user_simulator.py` 可使用固定版本的官方用户提示词、场景格式和角色转换；评分与模拟用户对齐仍不等于复现官方完整榜单设置。
 
 ## 独立 Python 评分器
 
@@ -146,3 +150,54 @@ python -m evaluation_datasets.tau_bench.mcp_server --state /absolute/path/tau-re
 eval 仍对成功、失败和重复执行不稳定的轨迹做诊断、整理原因与建议；其输出不改变分数或通过状态。train 诊断交给调优，dev 仅匿名分数，test 证据仅供人查看。
 
 当前自动化覆盖协议调用、真实 stdio 状态隔离、真实官方数据库评分及自然语言判分逻辑；另已用 GPT-6.1 Sol 验证评分器直接调用真实模型 API。尚不能把这些测试视为真实模型的完整页面运行或效果提升证明。
+
+### 模拟用户与结束、执行顺序
+
+模拟用户是独立模块，与出题和评分分开。未选择 Python 时使用 Sage 内置模拟用户；
+桌面展开设置中的“模拟用户（留空使用默认）”可填写自定义行为要求，API/CLI 字段为
+`user_simulator_instructions`。同一配置用于 train、dev 和 test，只读取用户场景及可见对话。
+当前默认仍是 Sage 通用模拟用户，并非直接运行官方 `UserSimulator`；比较实验应固定该配置，
+不能将不同用户模拟配置的分数直接作为官方榜单同口径比较。
+
+框架把真实结束原因传给评分器：用户结束映射为 `USER_STOP`，轮数耗尽映射为
+`MAX_STEPS`，由官方 evaluator 执行非正常结束的零分规则。新框架始终传递真实结束原因。旧宿主请求未携带结束原因时，为保持运行中实验兼容，
+沿用旧解释，并在评分详情标记 `termination_reason_source=legacy_assumed_user_stop`；
+这些旧记录不能据此证明对话正常结束。单轮旧评分契约保持兼容。
+
+TauRetail MCP 在实际数据库事务中生成递增顺序回执，经 MCP `_meta` 保存到原生工具结果的
+`metadata.mcp_meta`；不改变业务工具返回内容。评分器按回执重放同一并行批次的实际执行顺序，
+包括失败调用。旧记录没有回执时仍按发出顺序重放，无法据此证明历史实际提交顺序；新旧回执
+混杂、重复或格式错误会明确报错。
+
+
+## 独立 Python 模拟用户
+
+在 RSI 设置中点击“导入模拟用户”，选择本目录的
+[`user_simulator.py`](user_simulator.py)，并在“模拟用户”列表中选中它。
+评分器仍单独上传 [`scorer.py`](scorer.py)。不选择 Python 模块时使用 RSI 内置实现；
+框架不会根据数据集名称自动切换。两种实现都使用所选内部模型及共享并发预算。
+
+这个适配器复用仓库固定版本官方 `UserSimulator.system_prompt`、
+`str(UserScenario)`、`UserState.flip_roles()` 和 `UserSimulator.is_stop()`。
+模型收到官方全局用户指令、完整场景和角色反转后的可见对话；一次生成一条自然语言，
+`temperature=0`，不使用工具，不插入 RSI 的 JSON 输出指令。官方 `generate()` 的
+传输由 Sage ModelProvider 替换；模型返回后才转换为框架的标准结构：
+
+| 官方输出 | 框架停止原因 | 传给评分器 |
+| --- | --- | --- |
+| 普通用户消息 | 继续 | — |
+| `###STOP###` | `completed` | `user_finished` |
+| `###TRANSFER###` | `transferred` | `user_transferred` |
+| `###OUT-OF-SCOPE###` | `out_of_scope` | `user_out_of_scope` |
+| 达到 `max_turns` | 宿主强制结束 | `turn_limit` |
+
+用户结束不代表通过；分数由官方评分器独立计算。轮次耗尽映射到官方 `MAX_STEPS`。
+适配器针对当前零用户工具的 retail 文本任务；不支持 telecom 用户工具或语音模拟。
+四项导入自测使用录制模型响应覆盖继续及三个停止标记，不请求真实模型。
+测试还逐项比较实际调用所用提示词及角色顺序与 vendored 官方模拟器的 `generate()` 请求。
+源码、官方指令和本目录依赖一起绑定，改动后需要重新导入。
+
+这仍是 Sage RSI 的适配运行方式：保留数据集的初始 `Hello.`、train/dev/test 划分、
+Sage 的 Agent/工具执行及轮数预算。模型选择、完整编排和终止预算也可能与榜单配置不同；
+不能把内部 RSI 成绩直接标成官方标准榜单成绩。
+接口和自定义实现说明见 [模拟用户 README](../../sagents/v2/optimization/USER_SIMULATORS.md)。

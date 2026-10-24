@@ -48,6 +48,13 @@ class V2ApiClient {
   Future<Map<String, Object?>> rsiHistory(String agentId) async =>
       (await _json('GET', _rsiPath(agentId)) as Map).cast<String, Object?>();
 
+  Future<void> deleteRsiRun(String agentId, String runId) async {
+    await _json(
+      'DELETE',
+      '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}',
+    );
+  }
+
   Future<Map<String, Object?>> startRsi(
     String agentId,
     Map<String, Object?> body,
@@ -102,6 +109,14 @@ class V2ApiClient {
     Map<String, Object?> scorer,
   ) async =>
       (await _json('POST', '${_rsiPath(agentId)}/scorers', body: scorer) as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> importRsiUserSimulator(
+    String agentId,
+    Map<String, Object?> module,
+  ) async =>
+      (await _json('POST', '${_rsiPath(agentId)}/user-simulators', body: module)
+              as Map)
           .cast<String, Object?>();
 
   Future<Map<String, Object?>> importRsiEvaluationPlan(

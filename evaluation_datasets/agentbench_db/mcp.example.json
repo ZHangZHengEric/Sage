@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "AgentBenchDB": {
+      "command": "/absolute/path/Sage/.venv/bin/python",
+      "args": [
+        "-m",
+        "evaluation_datasets.agentbench_db.mcp_server",
+        "--state",
+        "/absolute/path/sage/runtime/agentbench-db.sqlite3"
+      ],
+      "env": {
+        "PYTHONPATH": "/absolute/path/Sage",
+        "SAGE_RSI_CASE_PROTOCOL": "sage.rsi.case/v1"
+      }
+    }
+  }
+}

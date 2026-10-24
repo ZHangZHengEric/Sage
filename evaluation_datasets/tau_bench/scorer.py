@@ -17,6 +17,10 @@ SCORER_CONTRACT = """The pinned official evaluator is the sole numerical authori
 Reference format tau2.retail.reference/v1 supplies initial_state and evaluation_criteria.
 Replay the native recorded official business calls in a fresh environment initialized
 with initial_state. Separately replay reference actions to obtain expected state.
+Group parallel native calls into official assistant batches and pair their results
+by call ID, preserving arguments, outputs and error flags. Replay each parallel batch
+in transactional execution order when server receipts are present; legacy records
+without receipts retain issuance order and cannot prove the original commit order.
 DB success is the official comparison of these states, not exact read-call order,
 count or trace matching. Reference actions are evaluator-only expected outcomes,
 not user permissions; the executing agent must still obtain required confirmations.
@@ -35,7 +39,7 @@ user driver or tuner beyond authorized training evidence.
 """.strip()
 
 DESCRIPTOR = ScorerDescriptor(id='tau-bench.official-reward', name='τ-bench official reward',
-    version='native-records-v1-fc0055dc4e0a316c3f83133267fbd6faaa770992', contract=SCORER_CONTRACT)
+    version='native-records-v3-fc0055dc4e0a316c3f83133267fbd6faaa770992', contract=SCORER_CONTRACT)
 
 
 def text_content(blocks):
@@ -47,9 +51,37 @@ def text_content(blocks):
 
 
 def recorded_messages(request, tool_names):
-    """Use canonical completed Run items, preserving actual turn/tool ordering."""
+    """Normalize native parallel records to the official call-batch wire format.
+
+    Native results may finish in any order. Official replay expects one assistant
+    batch followed by its results in call order. Receipt-backed batches use
+    transaction order; legacy batches retain issuance order.
+    arguments, result bodies, errors and conversation boundaries are kept. Server
+    transaction receipts, when present, determine actual execution order.
+    Incomplete or ambiguous records fail explicitly instead of inventing results.
+    """
     from tau2.data_model.message import AssistantMessage, UserMessage, ToolMessage, ToolCall
     messages, seen, selected_calls = [], set(), set()
+    pending, results, sequences = [], {}, {}
+    seen_sequences = set()
+
+    def flush():
+        if not pending:
+            return
+        missing = [call.id for call in pending if call.id not in results]
+        if missing:
+            raise ValueError(f'native tool calls missing results before conversation boundary: {missing}')
+        ordered = pending
+        if sequences:
+            if set(sequences) != {call.id for call in pending}:
+                raise ValueError('mixed recorded and missing execution-order receipts')
+            ordered = sorted(pending, key=lambda call: sequences[call.id])
+        messages.append(AssistantMessage(role='assistant', tool_calls=list(ordered)))
+        messages.extend(results[call.id] for call in ordered)
+        pending.clear()
+        results.clear()
+        sequences.clear()
+
     turns = request.get('conversation') or [{'target': request['observation']}]
     for turn in turns:
         observation = turn.get('target') or turn.get('observation')
@@ -67,15 +99,32 @@ def recorded_messages(request, tool_names):
             item = envelope.get('data', {})
             kind = item.get('kind')
             if kind == 'message' and item.get('role') in {'user', 'assistant'}:
+                flush()
                 model = UserMessage if item['role'] == 'user' else AssistantMessage
                 messages.append(model(role=item['role'], content=text_content(item.get('content', []))))
             elif kind == 'tool_call' and item.get('tool_name') in tool_names:
-                selected_calls.add(item['tool_call_id'])
-                messages.append(AssistantMessage(role='assistant', tool_calls=[ToolCall(
-                    id=item['tool_call_id'], name=tool_names[item['tool_name']], arguments=item['arguments'])]))
+                identity = item['tool_call_id']
+                if identity in selected_calls:
+                    raise ValueError(f'duplicate native tool call ID: {identity}')
+                selected_calls.add(identity)
+                pending.append(ToolCall(id=identity, name=tool_names[item['tool_name']], arguments=item['arguments']))
             elif kind == 'tool_result' and item.get('tool_call_id') in selected_calls:
-                messages.append(ToolMessage(role='tool', id=item['tool_call_id'],
-                    content=text_content(item.get('content', [])), error=item.get('error') is not None))
+                identity = item['tool_call_id']
+                if identity in results or not any(call.id == identity for call in pending):
+                    raise ValueError(f'duplicate native tool result ID: {identity}')
+                receipt = item.get('metadata', {}).get('mcp_meta', {}).get('sage.rsi.execution')
+                if receipt is not None:
+                    sequence = receipt.get('sequence') if isinstance(receipt, dict) else None
+                    if (not isinstance(receipt, dict) or receipt.get('protocol') != 'sage.rsi.execution-order/v1'
+                            or type(sequence) is not int or sequence <= 0 or sequence in seen_sequences):
+                        raise ValueError('invalid or duplicate execution-order receipt')
+                    seen_sequences.add(sequence)
+                    sequences[identity] = sequence
+                results[identity] = ToolMessage(role='tool', id=identity,
+                    content=text_content(item.get('content', [])), error=item.get('error') is not None)
+                if len(results) == len(pending):
+                    flush()
+    flush()
     if not messages:
         raise ValueError('native execution has no supported recorded messages')
     return messages
@@ -141,8 +190,21 @@ def score(request: dict) -> dict:
     messages = recorded_messages(request, names)
     task = Task(id=reference['task_id'], user_scenario={'instructions': 'Scoring reference'},
         initial_state=reference.get('initial_state'), evaluation_criteria=reference['evaluation_criteria'])
+    stop_reason = request.get('dialogue_stop_reason') or request['observation'].get('evidence', {}).get('dialogue_stop_reason')
+    legacy_termination = request['case'].get('mode') == 'dialogue' and not stop_reason
+    termination = {'user_finished': TerminationReason.USER_STOP,
+        'user_transferred': TerminationReason.USER_STOP, 'user_out_of_scope': TerminationReason.USER_STOP,
+        'goal_achieved': TerminationReason.AGENT_STOP,
+        'turn_limit': TerminationReason.MAX_STEPS,
+        'tool_execution_audit_failed': TerminationReason.AGENT_ERROR}.get(stop_reason)
+    if termination is None:
+        if stop_reason is not None:
+            raise ValueError('unsupported dialogue termination reason')
+        # Old hosts do not send this field. Keep their existing interpretation
+        # observable instead of breaking a running experiment during upgrade.
+        termination = TerminationReason.USER_STOP
     simulation = SimulationRun(id='native-scoring', task_id=task.id, start_time='native', end_time='native',
-        duration=0, termination_reason=TerminationReason.USER_STOP, messages=messages)
+        duration=0, termination_reason=termination, messages=messages)
     # Only model transport is adapted here. The pinned official evaluator owns
     # assertion prompts, parsing, DB replay, reward_basis and reward composition.
     original = nl.generate
@@ -162,6 +224,8 @@ def score(request: dict) -> dict:
         rationale='Recomputed official reward from native messages and tool execution records')
     return ScoringResult(grade=grade, details={'official_reward': reward,
         'source': 'recomputed_native_execution', 'recorded_messages': len(messages),
+        'termination_reason': termination.value,
+        'termination_reason_source': 'legacy_assumed_user_stop' if legacy_termination else 'host' if stop_reason else 'single_turn',
         'model_calls': model_calls}).model_dump(mode='json')
 
 
@@ -194,9 +258,31 @@ def contract_request(executed):
         'observation': {'state': 'completed', 'evidence': {'final_items': items}}}
 
 
+def parallel_contract_request():
+    """Two independent writes whose native results arrive in reverse order."""
+    import copy
+    request = copy.deepcopy(contract_request(True))
+    items = request['observation']['evidence']['final_items']
+    users = json.loads((ROOT / 'data/tau2/domains/retail/db.json').read_text())['users']
+    user_id, user = list(users.items())[1]
+    address = {**user['address'], 'address1': 'Second contract test address'}
+    arguments = {'user_id': user_id, **address}
+    call = {'data': {'kind': 'tool_call', 'tool_call_id': 'update-second',
+        'tool_name': 'mcp_TauRetail_modify_user_address', 'arguments': arguments}}
+    result = {'data': {'kind': 'tool_result', 'tool_call_id': 'update-second', 'error': None,
+        'content': [{'kind': 'text', 'text': json.dumps({**user, 'address': address})}]}}
+    items[:] = [items[0], items[1], call, result, items[2]]
+    reference = json.loads(request['case']['reference_answer'])
+    reference['evaluation_criteria']['actions'].append({'action_id': 'address-second',
+        'name': 'modify_user_address', 'arguments': arguments})
+    request['case']['reference_answer'] = json.dumps(reference)
+    return request
+
+
 SCORER_TEST_CASES = [
     {'request': contract_request(False), 'expected_score': 0, 'expected_passed': False},
     {'request': contract_request(True), 'expected_score': 1, 'expected_passed': True},
+    {'request': parallel_contract_request(), 'expected_score': 1, 'expected_passed': True},
 ]
 
 

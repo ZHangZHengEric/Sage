@@ -50,7 +50,7 @@ def engine_fingerprint():
         import importlib.util
         import marshal
         names = [f"sagents.v2.optimization.{name}" for name in ('optimizer', 'contracts', 'feedback',
-                 'principles', 'generator', 'runner', 'recovery', 'observer', 'diagnostics', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'dataset_versions', 'dataset_summary', 'preflight', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints')]
+                 'principles', 'generator', 'runner', 'recovery', 'native_projection', 'native_recovery', 'native_episode', 'observer', 'diagnostics', 'experiments', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'dataset_versions', 'dataset_summary', 'preflight', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'scorer_dependencies', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints', 'user_simulator', 'default_user_simulator', 'python_user_simulator', 'python_user_simulator_worker', 'user_simulator_runtime')]
         names.extend(('sagents.v2.tool.generated', 'sagents.v2.tool.plugins.result_file', 'sagents.v2.optimization.builtin_scoring'))
         hashes = {}
         for name in names:
@@ -169,6 +169,13 @@ class OptimizationRecovery:
                                     request=start['request'], round=start.get('round', 0), trial=start.get('trial', 1),
                                     phase=start.get('phase', 'optimization'), case_id=start.get('case_id')))
                 self.cases[identity].append((result, consumed, records))
+                # These phase receipts have been incorporated into this case.
+                # A later independent measurement with the same case identity
+                # must not recover the previous dialogue as fresh evidence.
+                self.dialogues.pop(identity, None)
+                self.dialogue_scores.pop(identity, None)
+                self.scored_observations = {key: value for key, value in self.scored_observations.items()
+                    if key[:5] != identity}
         self._target_starts, self._target_results = targets, finished_targets
         self._agent_starts, self._case_calls = agents, case_calls
         if rejected_calls:

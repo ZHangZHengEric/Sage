@@ -26,6 +26,9 @@ from sagents.v2.optimization.contracts import OptimizationObservation
 # Hosts may use this to pair simulator seeds across independently run packages.
 OPTIMIZATION_TRIAL: ContextVar[int] = ContextVar("optimization_trial", default=1)
 OPTIMIZATION_CASE: ContextVar[object | None] = ContextVar("optimization_case", default=None)
+# Scheduling is host overhead, not target execution latency. The shared runner
+# sets this only while dispatching a send after acquiring its concurrency slot.
+OPTIMIZATION_QUEUE_WAIT: ContextVar[float] = ContextVar("optimization_queue_wait", default=0)
 
 
 async def execution_usage(store, run_id, *, after_sequence, last_sequence):
@@ -94,8 +97,8 @@ class IsolatedOptimizationRunner:
         builder_factory: BuilderFactory,
         authorize: PackageAuthorizer,
         root: str | Path | None = None,
-        max_evidence_events: int = 500,
-        max_evidence_bytes: int = 262144,
+        max_evidence_events: int = 5000,
+        max_evidence_bytes: int = 2097152,
         run_metadata=None,
         resume_user_input: bool = False,
     ):
@@ -222,6 +225,17 @@ class IsolatedOptimizationRunner:
             truncated = False
             boundary_messages = []
             omitted_events = 0
+            # Nonterminal native Runs have no RunResult. Capture completed item
+            # envelopes before event compaction, without inventing a final Run.
+            captured_items = {}
+            if result is None and resume_observation is not None:
+                captured_items = {item["item_id"]: item for item in
+                                  resume_observation.evidence.get("final_items", ())}
+                size = sum(len(json.dumps(item, ensure_ascii=False).encode())
+                           for item in captured_items.values())
+                if size > self.max_evidence_bytes:
+                    captured_items = {}
+                    truncated = True
             while (
                 cursor < snapshot.last_run_sequence
                 and scanned < self.max_evidence_events
@@ -237,6 +251,20 @@ class IsolatedOptimizationRunner:
                     cursor = event.run_sequence
                     scanned += 1
                     data = event.data
+                    if result is None and event.type == 'item.completed' and data.kind == 'item' and data.item is not None:
+                        item = data.item.model_dump(mode="json")
+                        identity = item["item_id"]
+                        previous_item = captured_items.get(identity)
+                        if previous_item is not None:
+                            if previous_item != item:
+                                truncated = True
+                        else:
+                            length = len(json.dumps(item, ensure_ascii=False).encode())
+                            if size + length > self.max_evidence_bytes:
+                                truncated = True
+                            else:
+                                captured_items[identity] = item
+                                size += length
                     if event.type == 'message.completed' and data.kind == 'item' and data.item is not None:
                         item = data.item.data
                         if item.kind == 'message' and item.role == 'assistant' and data.item.visibility == 'public':
@@ -250,7 +278,8 @@ class IsolatedOptimizationRunner:
                     ):
                         continue
                     from sagents.v2.optimization.execution_records import compact_execution_event
-                    value = compact_execution_event(event.model_dump(mode="json"), payload.get("final_items", []))
+                    value = compact_execution_event(event.model_dump(mode="json"),
+                        payload.get("final_items", []) if result is not None else list(captured_items.values()))
                     if value is None:
                         omitted_events += 1
                         continue
@@ -260,6 +289,8 @@ class IsolatedOptimizationRunner:
                         continue
                     size += length
                     events.append(value)
+            if result is None:
+                payload["final_items"] = list(captured_items.values())
             payload["runtime_events"] = events
             payload["runtime_lifecycle_events_omitted"] = omitted_events
             payload["runtime_events_truncated"] = (
@@ -295,7 +326,7 @@ class IsolatedOptimizationRunner:
             payload["execution_usage"] = usage
             payload["execution_usage_scope"] = {"after_sequence": after_sequence,
                                                 "through_sequence": snapshot.last_run_sequence}
-            return OptimizationObservation(
+            observation = OptimizationObservation(
                 state=snapshot.state.value,
                 output="\n".join(messages),
                 evidence=payload,
@@ -307,6 +338,8 @@ class IsolatedOptimizationRunner:
                 usage_reported=usage["reported"],
                 cost=usage.get("cost"),
             )
+            from sagents.v2.optimization.native_projection import project_mcp_execution_order
+            return project_mcp_execution_order(observation)
         finally:
             if stream is not None:
                 await stream.detach()
@@ -332,7 +365,7 @@ class _NativeConversation:
             content,
             self.context,
             self.session_id,
-            self.started if self.session_id is None else time.monotonic(),
+            self.started + OPTIMIZATION_QUEUE_WAIT.get() if self.session_id is None else time.monotonic(),
             self.package.model_copy(deep=True),
             resume_observation=self.pending_input,
         )

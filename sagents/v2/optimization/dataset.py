@@ -2,7 +2,7 @@
 from typing import Literal
 from collections import Counter
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, model_serializer
 
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.optimization.contracts import OptimizationCase, OptimizationSuite, OptimizationTestSuite
@@ -11,6 +11,14 @@ from sagents.v2.optimization.contracts import OptimizationCase, OptimizationSuit
 class DatasetEnvironment(StrictModel):
     protocol: Literal['sage.rsi.case/v1'] = 'sage.rsi.case/v1'
     mcp_servers: tuple[str, ...] = Field(min_length=1, max_length=16)
+    terminal_on_done: bool = Field(default=False, strict=True)
+
+    @model_serializer(mode='wrap')
+    def stable_legacy_binding(self, serialize):
+        value = serialize(self)
+        if not self.terminal_on_done:
+            value.pop('terminal_on_done', None)
+        return value
 
     @model_validator(mode='after')
     def unique_servers(self):

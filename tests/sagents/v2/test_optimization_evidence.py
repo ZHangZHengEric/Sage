@@ -198,15 +198,19 @@ def test_rich_repeated_diagnoses_fit_history_budget_without_losing_scores():
 
 
 @pytest.mark.asyncio
-async def test_new_questions_are_only_executed_by_current_candidates():
+async def test_new_questions_are_measured_by_retained_before_candidates():
     events = []
     result = await optimizer(AdaptiveRunner()).optimize(bundle(), context=context(),
         goal='Conversions', rounds=2, validation_case_count=2, on_event=events.append)
     started = [e['data'] for e in events if e['event'] == 'target_call_started']
-    assert not any(e['phase'] == 'training_challenge' for e in started)
+    assert any(e['phase'] == 'training_challenge' for e in started)
     added = {c.id for addition in result.report.training_additions if addition.round > 0 for c in addition.cases}
-    assert not any(e['package_hash'] == bundle().content_hash and e['case_id'] in added for e in started)
+    challenges = [e for e in started if e['phase'] == 'training_challenge']
+    assert {e['case_id'] for e in challenges} == added
+    parents = {r.round: r.parent_hash for r in result.report.rounds}
+    assert all(e['package_hash'] == parents[e['round']] for e in challenges)
     for record in result.report.rounds:
         expected = {c.case.id for c in record.evaluation.cases}
-        actual = {e['case_id'] for e in started if e['package_hash'] == record.candidate_package.content_hash}
+        actual = {e['case_id'] for e in started if e['round'] == record.round
+                  and e['phase'] == 'optimization' and e['package_hash'] == record.candidate_package.content_hash}
         assert expected == actual

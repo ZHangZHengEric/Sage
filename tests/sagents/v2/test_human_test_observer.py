@@ -39,6 +39,14 @@ async def test_test_scores_and_errors_do_not_change_optimizer_inputs_or_selectio
         await observer.finish()
         requests = [json.loads(text)["data"] for name, text in runner.requests if name == "test.tuner"]
         assert "HIDDEN TEST" not in json.dumps(runner.requests)
+        # Parent hashes bind the exact runtime package, whose version contains a
+        # random optimization ID. Normalize them to their actual round identity;
+        # keep package contents and the selected parent round comparable.
+        parents = {bundle().content_hash: 'baseline'}
+        parents.update({r.candidate_package.content_hash: f'candidate-{r.round}'
+            for r in result.report.rounds if r.candidate_package is not None})
+        for request in requests:
+            request['retained_parent_hash'] = parents[request['retained_parent_hash']]
         # Runtime package versions have random IDs; compare actual decision inputs.
         payloads.append(re.sub(r'\.opt\.[0-9a-f]{32}\.', '.opt.RUN.', json.dumps(requests, sort_keys=True)))
         outcomes.append(([r.accepted for r in result.report.rounds], result.report.termination.reason))
@@ -67,6 +75,31 @@ async def test_rejected_round_measures_retained_package_and_current_development_
     await observer.finish()
     assert seen == [original.content_hash] * 2
     assert observer.records[1]['scores'] == {'training': .4, 'validation': .6, 'test': .7}
+
+
+@pytest.mark.asyncio
+async def test_training_discovery_and_fresh_control_preserve_full_retained_snapshot():
+    original = bundle()
+    async def evaluate(package, case):
+        return {'grade': {'score': 1, 'passed': True, 'rationale': 'Independent test'}}
+    observer = HumanTestObserver(baseline=original, suite=suite(), evaluate=evaluate, publish=lambda _: None)
+    def measured(train, dev, extra=None):
+        cases = [{'case': {'id': 'train', 'split': 'training'}, 'grade': {'score': train}},
+                 {'case': {'id': 'dev', 'split': 'validation'}, 'grade': {'score': dev}}]
+        if extra is not None:
+            cases.append({'case': {'id': 'new', 'split': 'training'}, 'grade': {'score': extra}})
+        return {'package_hash': original.content_hash, 'cases': cases}
+    observer.observe(event('evaluation_completed', round=0, evaluation=measured(.4, .6)))
+    observer.observe(event('training_challenge_completed', round=1,
+        evaluation={'cases': [measured(0, 0, .8)['cases'][-1]]}, retained_evaluation=measured(.4, .6, .8)))
+    assert observer._development_snapshot()[0] == {'training': pytest.approx(.6), 'validation': .6}
+    observer.observe(event('incumbent_evaluation_completed', round=1, evaluation=measured(.5, .7, .9)))
+    observer.observe(event('round_completed', record={'round': 1, 'accepted': False,
+        'candidate_package': bundle('rejected').model_dump(mode='json'), 'evaluation': measured(1, 1, 1)}))
+    await observer.finish()
+    assert observer.records[1]['package_hash'] == original.content_hash
+    assert observer.records[1]['scores'] == {'training': .7, 'validation': .7, 'test': 1}
+    assert len(observer.records[1]['development_cases']) == 3
 
 
 @pytest.mark.asyncio

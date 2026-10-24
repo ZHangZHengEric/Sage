@@ -1,4 +1,5 @@
 import 'rsi_transcript.dart';
+import 'rsi_token_usage.dart';
 import 'rsi_activity.dart';
 import 'rsi_conversation_stream.dart';
 import 'dart:convert';
@@ -211,12 +212,16 @@ class _RsiObservatoryState extends State<RsiObservatory>
         .take(_pageSize)
         .toList();
     final graded = cases.where((c) => c.grade.isNotEmpty).length;
+    final pool = widget.run?['call_pool'];
     final responding = running
-        ? cases
-              .where(
-                (c) => const ['responding', 'evaluating'].contains(c.state),
-              )
-              .length
+        ? pool is Map && pool['active'] is num
+              ? (pool['active'] as num).toInt()
+              : cases
+                    .where(
+                      (c) =>
+                          const ['responding', 'evaluating'].contains(c.state),
+                    )
+                    .length
         : 0;
     final run = widget.run;
     final status = switch (run?['status']) {
@@ -284,6 +289,21 @@ class _RsiObservatoryState extends State<RsiObservatory>
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (_map(
+                        run?['dataset_manifest'] ??
+                            run?['generated_dataset_manifest'],
+                      )['label'] ==
+                      'revised')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        tr('修订集成绩', 'Revised-set scores'),
+                        key: const ValueKey('rsi-revised-set-label'),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.labelMedium?.copyWith(color: violet),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 24,
@@ -410,6 +430,14 @@ class _RsiObservatoryState extends State<RsiObservatory>
             },
           ),
         ),
+        if (widget.run != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 8),
+            child: RsiTokenUsage(
+              usage: _map(widget.run?['token_usage']),
+              chinese: widget.chinese,
+            ),
+          ),
         if (passes.isNotEmpty)
           Padding(
             key: const ValueKey('rsi-pass-selector'),
@@ -853,26 +881,29 @@ class _RsiObservatoryState extends State<RsiObservatory>
                 blur: 0,
               ),
               padding: const EdgeInsets.all(8),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (var index = 1; index <= count; index++)
-                    ListTile(
-                      key: ValueKey('rsi-matrix-execution-$index'),
-                      title: Text(tr('第 $index 次执行', 'Execution $index')),
-                      selected: index == selected,
-                      trailing: index == selected
-                          ? const Icon(CupertinoIcons.checkmark, size: 16)
-                          : null,
-                      onTap: () {
-                        setState(() {
-                          _selectedExecution = index;
-                          _page = 0;
-                        });
-                        Navigator.pop(context);
-                      },
-                    ),
-                ],
+              child: Material(
+                type: MaterialType.transparency,
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (var index = 1; index <= count; index++)
+                      ListTile(
+                        key: ValueKey('rsi-matrix-execution-$index'),
+                        title: Text(tr('第 $index 次执行', 'Execution $index')),
+                        selected: index == selected,
+                        trailing: index == selected
+                            ? const Icon(CupertinoIcons.checkmark, size: 16)
+                            : null,
+                        onTap: () {
+                          setState(() {
+                            _selectedExecution = index;
+                            _page = 0;
+                          });
+                          Navigator.pop(context);
+                        },
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1782,8 +1813,12 @@ class _Projection {
             if (!suite.any((c) => c['id'] == item['id'])) suite.add(item);
           }
         case 'training_challenge_completed':
-          selectedScore = _mean(_map(data['evaluation']));
-          selectedOverall = _overall(_map(data['evaluation']));
+          selectedScore = _mean(
+            _map(data['retained_evaluation'] ?? data['evaluation']),
+          );
+          selectedOverall = _overall(
+            _map(data['retained_evaluation'] ?? data['evaluation']),
+          );
         case 'suite_fixed':
           suite.clear();
           suite.addAll(_rows(_map(data['suite'])['cases']));

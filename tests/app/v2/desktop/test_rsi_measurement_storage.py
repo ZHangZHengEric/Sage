@@ -75,6 +75,11 @@ def test_legacy_inline_record_migrates_on_progress_and_survives_reopen(tmp_path)
     store.put(value, "alice", "agent", "run", preserve_test_observations=True)
     reopened = RsiStore(path)
     restored = reopened.get("run", "alice", "agent", "run")
+    assert restored["status"] == "running"
+    # Reclaim only after the owning process identity no longer exists.
+    with store.connect() as db:
+        db.execute("UPDATE records SET body=json_set(body, '$._host_owner.started', 0) WHERE id='run'")
+    restored = RsiStore(path).get("run", "alice", "agent", "run")
     assert restored["status"] == "interrupted"
     assert restored["test_observations"] == value["test_observations"]
     summary = reopened.summaries("alice", "agent", "run")[0]

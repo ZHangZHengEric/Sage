@@ -15,13 +15,15 @@ async def test_import_freezes_source_and_binds_owner_agent_and_hash(tmp_path, mo
         source = ScorerImport(name='accuracy.py', source="def score(request):\n return {'score': .8, 'passed': True, 'rationale': 'Correct'}\n")
         source = source.model_copy(update={"source": source.source + "\nSCORER_TEST_CASES = " + repr([{'request': scoring_request().model_dump(mode='json'), 'expected_score': .8, 'expected_passed': True}])})
         imported = await service.import_rsi_scorer(agent, source, 'alice')
+        assert imported['created_at']
         assert imported == await service.import_rsi_scorer(agent, source, 'alice')
         history = await service.rsi_history(agent, 'alice')
         assert history['scorers'] == [imported]
         assert 'def score' not in json.dumps(history) and 'scorer.py' not in json.dumps(history)
         request = start_request().model_copy(update={'scorer': ScorerSelection(mode='python', module_id=imported['id'], descriptor=imported['descriptor'])})
         selection = await service._rsi_scorer_selection(request, 'alice', agent)
-        assert selection.binding_id == imported['source_hash']
+        assert selection.binding_id == imported['validation']['dependency_binding']
+        assert selection.binding_id != imported['source_hash']
         with pytest.raises(ValueError):
             await service._rsi_scorer_selection(request, 'bob', agent)
         stored = service.rsi_store.get(imported['id'], 'alice', agent, 'scorer')
@@ -29,6 +31,32 @@ async def test_import_freezes_source_and_binds_owner_agent_and_hash(tmp_path, mo
         Path(stored['path']).write_text('changed')
         with pytest.raises(ValueError, match='changed'):
             await service._rsi_scorer_selection(request, 'alice', agent)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_same_name_changed_source_creates_distinct_versions_and_reimport_does_not_reorder(tmp_path, monkeypatch):
+    service, agent = await setup_service(tmp_path, monkeypatch, RsiModel())
+    try:
+        code = "def score(request):\n return {'score': .8, 'passed': True, 'rationale': 'Correct'}\n"
+        code += 'SCORER_TEST_CASES = ' + repr([{'request': scoring_request().model_dump(mode='json'),
+            'expected_score': .8, 'expected_passed': True}])
+        first = await service.import_rsi_scorer(agent, ScorerImport(name='scorer.py', source=code), 'alice')
+        second = await service.import_rsi_scorer(agent, ScorerImport(name='scorer.py', source=code+'\n# Updated adapter\n'), 'alice')
+        assert first['name'] == second['name']
+        assert first['id'] != second['id'] and first['source_hash'] != second['source_hash']
+        assert first['created_at'] < second['created_at']
+        assert await service.import_rsi_scorer(agent, ScorerImport(name='scorer.py', source=code), 'alice') == first
+        assert (await service.rsi_history(agent, 'alice'))['scorers'] == [second, first]
+        from pathlib import Path
+        old = service.rsi_store.get(first['id'], 'alice', agent, 'scorer')
+        assert Path(old['path']).read_text() == code
+        # Old records without import dates remain selectable and readable.
+        old.pop('created_at')
+        service.rsi_store.put(old, 'alice', agent, 'scorer')
+        history = await service.rsi_history(agent, 'alice')
+        assert next(v for v in history['scorers'] if v['id'] == first['id'])['created_at'] is None
     finally:
         await service.close()
 
@@ -65,7 +93,7 @@ async def test_native_rsi_supplies_shared_model_api_without_replacing_scorer_log
             except ValueError:
                 title = None
             if title in {'OptimizationDiagnosis', 'OptimizationDiagnosisSummary'}:
-                value = diagnosis() if title == 'OptimizationDiagnosis' else {'summary': 'Scorer fixed score; analyzed execution', 'priorities': []}
+                value = diagnosis() if title == 'OptimizationDiagnosis' else {'summary': 'Scorer fixed score; analyzed execution', 'priorities': [], 'next_action': 'test_hypothesis', 'next_verification': 'Check arithmetic verification on training evidence'}
                 yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=ModelResponse(
                     response_id='analysis', text=json.dumps(value), finish_reason='stop') if not json.loads(raw).get('data', {}).get('protocol') == 'sage.rsi.evaluation-files/v1' else authored_evaluation_response(request, json.loads(raw), value))
                 return
@@ -122,7 +150,7 @@ async def test_native_evaluator_reads_files_writes_json_and_repairs_invalid_evid
                 if title == 'OptimizationDiagnosis':
                     answer = diagnosis(999999 if not self.bad_written else 0)
                 elif title == 'OptimizationDiagnosisSummary':
-                    answer = {'summary': 'Prioritize actual training evidence', 'priorities': []}
+                    answer = {'summary': 'Prioritize actual training evidence', 'priorities': [], 'next_action': 'test_hypothesis', 'next_verification': 'Check arithmetic verification on training evidence'}
                 else:
                     answer = {'score': .9, 'passed': True, 'rationale': 'File-based evaluation'}
                 response = authored_evaluation_response(request, payload, answer)
@@ -184,14 +212,15 @@ async def test_user_completed_dialogues_score_once_in_native_train_dev_and_human
             except ValueError:
                 payload = {}
             title = payload.get('response_schema', {}).get('title')
-            if title == 'OptimizationDialogueReply':
+            if title in {'OptimizationDialogueReply', 'UserSimulationReply'}:
                 continuation = len(payload['data']['conversation']) < 4
                 value = {'can_continue': continuation, 'message': 'Please verify the arithmetic.' if continuation else '',
-                    'rationale': 'Follow-up verification requested' if continuation else 'Scenario complete'}
+                    'rationale': 'Follow-up verification requested' if continuation else 'Scenario complete',
+                    **({'stop_reason': 'completed'} if not continuation and title == 'UserSimulationReply' else {})}
             elif title == 'OptimizationDiagnosis':
                 value = diagnosis()
             elif title == 'OptimizationDiagnosisSummary':
-                value = {'summary': 'Preserve the fixed scorer score and verify arithmetic.', 'priorities': []}
+                value = {'summary': 'Preserve the fixed scorer score and verify arithmetic.', 'priorities': [], 'next_action': 'test_hypothesis', 'next_verification': 'Check arithmetic verification on training evidence'}
             else:
                 if title is None:
                     target_calls.append(raw)

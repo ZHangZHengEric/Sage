@@ -30,6 +30,9 @@ String rsiActivityLabel(
     'training_growth_deferred' => t('暂缓扩增训练题', 'Training expansion paused'),
     'test_generation_started' => t('准备题目', 'Preparing questions'),
     'suite_review_completed' => t('题目检查完成', 'Questions reviewed'),
+    'dataset_validation_started' => t('校验数据集规则', 'Validating dataset rules'),
+    'dataset_validation_completed' => t('数据集规则校验完成', 'Dataset rules validated'),
+    'package_validation_passed' => t('候选规则校验完成', 'Candidate rules validated'),
     'training_cases_added' ||
     'suite_fixed' => t('准备执行对话', 'Preparing conversations'),
     'target_call_started' => t('执行对话', 'Running conversations'),
@@ -74,6 +77,9 @@ String rsiRunningActivity(
   List<Map<String, Object?>> events, {
   required bool chinese,
 }) {
+  if (run?['stage'] == 'checkpoint_measurements_pending') {
+    return chinese ? '等待本轮测试测量完成' : 'Waiting for round test measurements';
+  }
   if (run?['stage'] == 'infrastructure_retry') {
     return rsiActivityLabel('infrastructure_retry', chinese: chinese);
   }

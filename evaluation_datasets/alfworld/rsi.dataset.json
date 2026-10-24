@@ -1,0 +1,2869 @@
+{
+  "format_version": "sage.rsi.dataset/v1",
+  "name": "ALFWorld · pinned RSI subset",
+  "cases": [
+    {
+      "id": "train-4055c3adcbef56ee",
+      "input": "Your task is to: put some toiletpaper on shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-4055c3adcbef56ee\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-4055c3adcbef56ee"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-b0a4ecce75dacc0e",
+      "input": "Your task is to: put some box on armchair.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-b0a4ecce75dacc0e\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-b0a4ecce75dacc0e"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-3cb84ee92b24c083",
+      "input": "Your task is to: put some soapbottle on cart.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-3cb84ee92b24c083\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-3cb84ee92b24c083"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-98281bd0b508d87c",
+      "input": "Your task is to: put a cellphone in desk.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-98281bd0b508d87c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-98281bd0b508d87c"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-0d3bed711a129530",
+      "input": "Your task is to: put some candle on toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-0d3bed711a129530\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-0d3bed711a129530"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-256f50f7ee302d82",
+      "input": "Your task is to: put a watch in coffeetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-256f50f7ee302d82\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-256f50f7ee302d82"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-3aef1acfc5b88f40",
+      "input": "Your task is to: put a pen in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-3aef1acfc5b88f40\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-3aef1acfc5b88f40"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-734641f76e6b567c",
+      "input": "Your task is to: put some cellphone on armchair.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-734641f76e6b567c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-734641f76e6b567c"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-d3ac8568d2f0e225",
+      "input": "Your task is to: put some keychain on sofa.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-d3ac8568d2f0e225\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-d3ac8568d2f0e225"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-b2d3485a05a53e2c",
+      "input": "Your task is to: put some creditcard on desk.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-b2d3485a05a53e2c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-b2d3485a05a53e2c"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-48b9a66a32d346f7",
+      "input": "Your task is to: put some pencil on shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-48b9a66a32d346f7\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-48b9a66a32d346f7"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-7206f5bd9787dd24",
+      "input": "Your task is to: put some spraybottle on toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-7206f5bd9787dd24\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-7206f5bd9787dd24"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-2fd2db30242a7367",
+      "input": "Your task is to: put some handtowel on cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2fd2db30242a7367\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2fd2db30242a7367"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-62f843d92e156dc2",
+      "input": "Your task is to: put a newspaper in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-62f843d92e156dc2\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-62f843d92e156dc2"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-ef8c5d4e3402f1d7",
+      "input": "Your task is to: put some candle on toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-ef8c5d4e3402f1d7\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-ef8c5d4e3402f1d7"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-cbf6aaaab1b37479",
+      "input": "Your task is to: put some cellphone on shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-cbf6aaaab1b37479\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-cbf6aaaab1b37479"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-1892d701870ff628",
+      "input": "Your task is to: put a cd in safe.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-1892d701870ff628\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-1892d701870ff628"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-c9dd94c71f313487",
+      "input": "Your task is to: put some toiletpaper on toiletpaperhanger.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-c9dd94c71f313487\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-c9dd94c71f313487"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-1acaacc6b227e58a",
+      "input": "Your task is to: put a tissuebox in toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-1acaacc6b227e58a\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-1acaacc6b227e58a"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-57574c1c3f00eebc",
+      "input": "Your task is to: put a handtowel in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-57574c1c3f00eebc\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-57574c1c3f00eebc"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "train-d0fc8d37520b75ae",
+      "input": "Your task is to: look at pillow under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-d0fc8d37520b75ae\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-d0fc8d37520b75ae"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-84c1bac89e0d2b50",
+      "input": "Your task is to: look at pen under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-84c1bac89e0d2b50\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-84c1bac89e0d2b50"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-14357087a685ee31",
+      "input": "Your task is to: look at alarmclock under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-14357087a685ee31\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-14357087a685ee31"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-f8d6b39a65851c76",
+      "input": "Your task is to: examine the watch with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-f8d6b39a65851c76\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-f8d6b39a65851c76"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-b678e7d706e982d8",
+      "input": "Your task is to: examine the bowl with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-b678e7d706e982d8\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-b678e7d706e982d8"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-299dbbc13cfc9e28",
+      "input": "Your task is to: examine the alarmclock with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-299dbbc13cfc9e28\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-299dbbc13cfc9e28"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-d38e4d8747e01769",
+      "input": "Your task is to: look at book under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-d38e4d8747e01769\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-d38e4d8747e01769"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-99b9a5af6d920537",
+      "input": "Your task is to: look at pillow under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-99b9a5af6d920537\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-99b9a5af6d920537"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-5ca6b498a810475c",
+      "input": "Your task is to: look at alarmclock under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-5ca6b498a810475c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-5ca6b498a810475c"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-203ecf6a9b0af7a4",
+      "input": "Your task is to: look at pencil under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-203ecf6a9b0af7a4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-203ecf6a9b0af7a4"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-ccd0d3bbae5467bc",
+      "input": "Your task is to: look at pencil under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-ccd0d3bbae5467bc\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-ccd0d3bbae5467bc"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-9db87d37f6e49a07",
+      "input": "Your task is to: look at newspaper under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-9db87d37f6e49a07\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-9db87d37f6e49a07"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-e35819a1173a354e",
+      "input": "Your task is to: look at pencil under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e35819a1173a354e\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e35819a1173a354e"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-4673f1fc805c3312",
+      "input": "Your task is to: look at bowl under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-4673f1fc805c3312\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-4673f1fc805c3312"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-e2b2ec0e0c267378",
+      "input": "Your task is to: examine the vase with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e2b2ec0e0c267378\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e2b2ec0e0c267378"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-253c25551223547f",
+      "input": "Your task is to: look at statue under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-253c25551223547f\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-253c25551223547f"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-2049b425b0fd9b04",
+      "input": "Your task is to: examine the statue with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2049b425b0fd9b04\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2049b425b0fd9b04"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-1e0aa236d4b86de5",
+      "input": "Your task is to: look at alarmclock under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-1e0aa236d4b86de5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-1e0aa236d4b86de5"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-3bc49106a493339d",
+      "input": "Your task is to: examine the vase with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-3bc49106a493339d\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-3bc49106a493339d"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-06012344e3097c52",
+      "input": "Your task is to: examine the pen with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-06012344e3097c52\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-06012344e3097c52"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "train-4c838493c66443a4",
+      "input": "Your task is to: put a clean spatula in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-4c838493c66443a4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-4c838493c66443a4"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-e3cfc8ecbc347db1",
+      "input": "Your task is to: clean some butterknife and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e3cfc8ecbc347db1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e3cfc8ecbc347db1"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-8a9b34edb9b92ff9",
+      "input": "Your task is to: clean some fork and put it in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-8a9b34edb9b92ff9\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-8a9b34edb9b92ff9"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-a66776e52634bfab",
+      "input": "Your task is to: put a clean cup in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-a66776e52634bfab\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-a66776e52634bfab"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-f4e9481b6e5a513b",
+      "input": "Your task is to: clean some lettuce and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-f4e9481b6e5a513b\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-f4e9481b6e5a513b"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-e53c018361aa9687",
+      "input": "Your task is to: put a clean cloth in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e53c018361aa9687\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e53c018361aa9687"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-fbd463816e23163f",
+      "input": "Your task is to: put a clean egg in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-fbd463816e23163f\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-fbd463816e23163f"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-fd4345c00940a836",
+      "input": "Your task is to: clean some kettle and put it in shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-fd4345c00940a836\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-fd4345c00940a836"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-e22341ed45a851db",
+      "input": "Your task is to: clean some cloth and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e22341ed45a851db\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e22341ed45a851db"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-72a72316f570bfbf",
+      "input": "Your task is to: put a clean fork in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-72a72316f570bfbf\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-72a72316f570bfbf"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-24c04d956e4425f4",
+      "input": "Your task is to: clean some knife and put it in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-24c04d956e4425f4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-24c04d956e4425f4"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-e22348553eedba1d",
+      "input": "Your task is to: clean some cloth and put it in toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e22348553eedba1d\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e22348553eedba1d"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-539a9b9eae924275",
+      "input": "Your task is to: put a clean egg in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-539a9b9eae924275\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-539a9b9eae924275"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-85b9b1b7e7d5c762",
+      "input": "Your task is to: put a clean egg in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-85b9b1b7e7d5c762\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-85b9b1b7e7d5c762"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-2944e3ae5c045864",
+      "input": "Your task is to: put a clean fork in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2944e3ae5c045864\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2944e3ae5c045864"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-c037c4e70d191844",
+      "input": "Your task is to: put a clean potato in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-c037c4e70d191844\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-c037c4e70d191844"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-8c944e775a42abd1",
+      "input": "Your task is to: put a clean spatula in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-8c944e775a42abd1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-8c944e775a42abd1"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-f8e85be86f87cf44",
+      "input": "Your task is to: put a clean soapbar in cart.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-f8e85be86f87cf44\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-f8e85be86f87cf44"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-95375d0fa63fa815",
+      "input": "Your task is to: put a clean dishsponge in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-95375d0fa63fa815\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-95375d0fa63fa815"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-1caf564546d5a28c",
+      "input": "Your task is to: clean some spoon and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-1caf564546d5a28c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-1caf564546d5a28c"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-2e18fbc6e5354603",
+      "input": "Your task is to: put a hot potato in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2e18fbc6e5354603\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2e18fbc6e5354603"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-cb31bf8590061f22",
+      "input": "Your task is to: put a hot apple in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-cb31bf8590061f22\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-cb31bf8590061f22"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-b26009a21a8df919",
+      "input": "Your task is to: heat some mug and put it in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-b26009a21a8df919\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-b26009a21a8df919"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-02d310280eb3f625",
+      "input": "Your task is to: heat some plate and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-02d310280eb3f625\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-02d310280eb3f625"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-2bfab92577657706",
+      "input": "Your task is to: put a hot egg in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2bfab92577657706\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2bfab92577657706"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-3451c28911d5a3d4",
+      "input": "Your task is to: heat some potato and put it in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-3451c28911d5a3d4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-3451c28911d5a3d4"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-dd2ad512b12c3b00",
+      "input": "Your task is to: heat some egg and put it in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-dd2ad512b12c3b00\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-dd2ad512b12c3b00"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-565671a30ca3e8ea",
+      "input": "Your task is to: put a hot mug in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-565671a30ca3e8ea\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-565671a30ca3e8ea"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-81d4927a69916061",
+      "input": "Your task is to: put a hot mug in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-81d4927a69916061\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-81d4927a69916061"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-2f7bb51c921f34f7",
+      "input": "Your task is to: heat some egg and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2f7bb51c921f34f7\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2f7bb51c921f34f7"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-88a90f8c5c370260",
+      "input": "Your task is to: heat some mug and put it in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-88a90f8c5c370260\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-88a90f8c5c370260"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-11db5b1507a00288",
+      "input": "Your task is to: heat some cup and put it in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-11db5b1507a00288\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-11db5b1507a00288"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-6d1067a996932f54",
+      "input": "Your task is to: heat some apple and put it in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-6d1067a996932f54\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-6d1067a996932f54"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-f3048c706ebbb31e",
+      "input": "Your task is to: put a hot mug in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-f3048c706ebbb31e\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-f3048c706ebbb31e"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-0a7ff3f112f426f3",
+      "input": "Your task is to: heat some apple and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-0a7ff3f112f426f3\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-0a7ff3f112f426f3"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-c5cc4c53e30dd80a",
+      "input": "Your task is to: put a hot mug in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-c5cc4c53e30dd80a\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-c5cc4c53e30dd80a"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-a7f48c23b83fc712",
+      "input": "Your task is to: heat some potato and put it in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-a7f48c23b83fc712\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-a7f48c23b83fc712"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-58626ce914623b48",
+      "input": "Your task is to: put a hot egg in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-58626ce914623b48\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-58626ce914623b48"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-8b0e578436ecaa47",
+      "input": "Your task is to: heat some apple and put it in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-8b0e578436ecaa47\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-8b0e578436ecaa47"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-63e86f63deacb3c9",
+      "input": "Your task is to: heat some mug and put it in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-63e86f63deacb3c9\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-63e86f63deacb3c9"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-95e89fc5cdd1bc79",
+      "input": "Your task is to: put a cool bread in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-95e89fc5cdd1bc79\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-95e89fc5cdd1bc79"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-b3289e817a7cba9d",
+      "input": "Your task is to: cool some cup and put it in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-b3289e817a7cba9d\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-b3289e817a7cba9d"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-eda17d69f6939ac9",
+      "input": "Your task is to: cool some bread and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-eda17d69f6939ac9\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-eda17d69f6939ac9"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-be1a743fb7418ccc",
+      "input": "Your task is to: cool some pan and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-be1a743fb7418ccc\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-be1a743fb7418ccc"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-062159d83aa4971c",
+      "input": "Your task is to: put a cool winebottle in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-062159d83aa4971c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-062159d83aa4971c"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-c4a195da0bece8c5",
+      "input": "Your task is to: cool some tomato and put it in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-c4a195da0bece8c5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-c4a195da0bece8c5"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-cc980bd3dfe2cb31",
+      "input": "Your task is to: cool some cup and put it in shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-cc980bd3dfe2cb31\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-cc980bd3dfe2cb31"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-85b4b494f4b40cd5",
+      "input": "Your task is to: put a cool lettuce in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-85b4b494f4b40cd5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-85b4b494f4b40cd5"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-46eaa1708cad68b8",
+      "input": "Your task is to: put a cool bread in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-46eaa1708cad68b8\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-46eaa1708cad68b8"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-60dbdbc4a84582d1",
+      "input": "Your task is to: cool some apple and put it in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-60dbdbc4a84582d1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-60dbdbc4a84582d1"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-95b5160e77a2f238",
+      "input": "Your task is to: cool some apple and put it in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-95b5160e77a2f238\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-95b5160e77a2f238"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-f4a1e35580658050",
+      "input": "Your task is to: put a cool apple in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-f4a1e35580658050\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-f4a1e35580658050"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-5ee9feb7c58fbc2c",
+      "input": "Your task is to: cool some apple and put it in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-5ee9feb7c58fbc2c\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-5ee9feb7c58fbc2c"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-310f2934025406b6",
+      "input": "Your task is to: put a cool bowl in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-310f2934025406b6\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-310f2934025406b6"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-76e4e6e78b9240e5",
+      "input": "Your task is to: cool some apple and put it in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-76e4e6e78b9240e5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-76e4e6e78b9240e5"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-672e81f8697976a5",
+      "input": "Your task is to: cool some tomato and put it in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-672e81f8697976a5\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-672e81f8697976a5"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-718912c7a76a3a0e",
+      "input": "Your task is to: cool some cup and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-718912c7a76a3a0e\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-718912c7a76a3a0e"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-079f7aadb3288070",
+      "input": "Your task is to: cool some pan and put it in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-079f7aadb3288070\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-079f7aadb3288070"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-8190f603b3312a3b",
+      "input": "Your task is to: cool some winebottle and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-8190f603b3312a3b\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-8190f603b3312a3b"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-20bb737044d58b70",
+      "input": "Your task is to: cool some mug and put it in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-20bb737044d58b70\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-20bb737044d58b70"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "train-886e60e29fabcbd4",
+      "input": "Your task is to: put two pen in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-886e60e29fabcbd4\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-886e60e29fabcbd4"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-45e15c8e9e24dae1",
+      "input": "Your task is to: find two remotecontrol and put them in ottoman.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-45e15c8e9e24dae1\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-45e15c8e9e24dae1"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-6cb6cb3dea092daf",
+      "input": "Your task is to: find two glassbottle and put them in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-6cb6cb3dea092daf\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-6cb6cb3dea092daf"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-d7c60dd4fe2b4702",
+      "input": "Your task is to: find two candle and put them in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-d7c60dd4fe2b4702\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-d7c60dd4fe2b4702"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-e1a221b676a96538",
+      "input": "Your task is to: put two newspaper in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-e1a221b676a96538\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-e1a221b676a96538"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-040a20af11afe392",
+      "input": "Your task is to: put two soapbar in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-040a20af11afe392\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-040a20af11afe392"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-0bd74ddaaea8d49a",
+      "input": "Your task is to: put two watch in shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-0bd74ddaaea8d49a\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-0bd74ddaaea8d49a"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-b7ca83f93befb877",
+      "input": "Your task is to: find two plate and put them in coffeetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-b7ca83f93befb877\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-b7ca83f93befb877"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-226ac443b1e9b5df",
+      "input": "Your task is to: put two candle in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-226ac443b1e9b5df\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-226ac443b1e9b5df"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-c882e48bc662dbf8",
+      "input": "Your task is to: put two soapbar in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-c882e48bc662dbf8\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-c882e48bc662dbf8"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-a7e89adcef5bbe43",
+      "input": "Your task is to: find two lettuce and put them in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-a7e89adcef5bbe43\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-a7e89adcef5bbe43"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-88f046a83d5bfbd9",
+      "input": "Your task is to: find two soapbottle and put them in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-88f046a83d5bfbd9\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-88f046a83d5bfbd9"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-81ab40350bac5e4f",
+      "input": "Your task is to: find two remotecontrol and put them in armchair.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-81ab40350bac5e4f\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-81ab40350bac5e4f"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-894e2e45f2b3554d",
+      "input": "Your task is to: find two spraybottle and put them in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-894e2e45f2b3554d\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-894e2e45f2b3554d"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-06c633422134ae5a",
+      "input": "Your task is to: put two remotecontrol in sofa.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-06c633422134ae5a\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-06c633422134ae5a"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-2446b5537159e602",
+      "input": "Your task is to: put two creditcard in armchair.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-2446b5537159e602\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-2446b5537159e602"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-71b312782d33aa81",
+      "input": "Your task is to: find two pencil and put them in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-71b312782d33aa81\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-71b312782d33aa81"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-76e1882bc2f2fbf8",
+      "input": "Your task is to: find two pencil and put them in coffeetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-76e1882bc2f2fbf8\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-76e1882bc2f2fbf8"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-7d8ef7914f889bef",
+      "input": "Your task is to: put two pot in shelf.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-7d8ef7914f889bef\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-7d8ef7914f889bef"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "train-3387af767aea66bb",
+      "input": "Your task is to: put two cup in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"train-3387af767aea66bb\"}",
+      "split": "training",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "train-3387af767aea66bb"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_seen-ca5eaea1444c1fc3",
+      "input": "Your task is to: put a mug in sidetable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-ca5eaea1444c1fc3\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-ca5eaea1444c1fc3"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_seen-2a265a3f25641652",
+      "input": "Your task is to: put some creditcard on drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-2a265a3f25641652\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-2a265a3f25641652"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_seen-3bfef4caa835f345",
+      "input": "Your task is to: put a candle in toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-3bfef4caa835f345\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-3bfef4caa835f345"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_seen-95b0aacdca57cac9",
+      "input": "Your task is to: put some box on dresser.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-95b0aacdca57cac9\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-95b0aacdca57cac9"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_seen-474edd8749840416",
+      "input": "Your task is to: look at pillow under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-474edd8749840416\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-474edd8749840416"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_seen-b678fd904e5d413c",
+      "input": "Your task is to: examine the bowl with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-b678fd904e5d413c\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-b678fd904e5d413c"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_seen-3d484d5545d0cc32",
+      "input": "Your task is to: look at cd under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-3d484d5545d0cc32\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-3d484d5545d0cc32"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_seen-a327941eb42974c2",
+      "input": "Your task is to: examine the keychain with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-a327941eb42974c2\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-a327941eb42974c2"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_seen-c6f45775d4b4671e",
+      "input": "Your task is to: put a clean butterknife in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-c6f45775d4b4671e\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-c6f45775d4b4671e"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-035b75be5951f45b",
+      "input": "Your task is to: put a clean fork in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-035b75be5951f45b\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-035b75be5951f45b"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-b8ca47ea84683ab7",
+      "input": "Your task is to: clean some ladle and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-b8ca47ea84683ab7\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-b8ca47ea84683ab7"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-7020ba5688368294",
+      "input": "Your task is to: put a clean plate in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-7020ba5688368294\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-7020ba5688368294"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-5ffda61ca5f7b668",
+      "input": "Your task is to: put a hot potato in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-5ffda61ca5f7b668\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-5ffda61ca5f7b668"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-84f80a3ce2bd94d3",
+      "input": "Your task is to: heat some egg and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-84f80a3ce2bd94d3\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-84f80a3ce2bd94d3"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-2d3cb73d8f274ef6",
+      "input": "Your task is to: heat some tomato and put it in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-2d3cb73d8f274ef6\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-2d3cb73d8f274ef6"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-d3d93026429d6f41",
+      "input": "Your task is to: put a hot cup in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-d3d93026429d6f41\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-d3d93026429d6f41"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-f11af65a2d438e2e",
+      "input": "Your task is to: cool some pan and put it in stoveburner.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-f11af65a2d438e2e\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-f11af65a2d438e2e"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-7be5e6699b9d2956",
+      "input": "Your task is to: cool some lettuce and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-7be5e6699b9d2956\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-7be5e6699b9d2956"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-83899711d6dd0972",
+      "input": "Your task is to: cool some pan and put it in diningtable.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-83899711d6dd0972\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-83899711d6dd0972"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-25ca20a603bcc502",
+      "input": "Your task is to: cool some tomato and put it in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-25ca20a603bcc502\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-25ca20a603bcc502"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_seen-b1a1dfb082a72753",
+      "input": "Your task is to: put two spatula in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-b1a1dfb082a72753\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-b1a1dfb082a72753"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_seen-d675ea576b4319cc",
+      "input": "Your task is to: put two newspaper in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-d675ea576b4319cc\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-d675ea576b4319cc"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_seen-f8de4ec83992a61f",
+      "input": "Your task is to: put two soapbar in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-f8de4ec83992a61f\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-f8de4ec83992a61f"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_seen-6473fe50acbac49c",
+      "input": "Your task is to: put two toiletpaper in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_seen-6473fe50acbac49c\"}",
+      "split": "validation",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_seen-6473fe50acbac49c"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_unseen-1f16ba136988bc8c",
+      "input": "Your task is to: put some saltshaker on drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-1f16ba136988bc8c\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-1f16ba136988bc8c"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_unseen-29d132bbe83573e9",
+      "input": "Your task is to: put some saltshaker on cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-29d132bbe83573e9\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-29d132bbe83573e9"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_unseen-6f2ef1752fe4e37c",
+      "input": "Your task is to: put a vase in safe.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-6f2ef1752fe4e37c\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-6f2ef1752fe4e37c"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_unseen-d4c098de3cfe806c",
+      "input": "Your task is to: put a soapbottle in toilet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-d4c098de3cfe806c\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-d4c098de3cfe806c"
+      },
+      "coverage_tags": [
+        "pick_and_place_simple"
+      ]
+    },
+    {
+      "id": "valid_unseen-f3236cb3d2d668d8",
+      "input": "Your task is to: examine the cd with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-f3236cb3d2d668d8\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-f3236cb3d2d668d8"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_unseen-9b1cd0ebcfe117a7",
+      "input": "Your task is to: examine the book with the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-9b1cd0ebcfe117a7\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-9b1cd0ebcfe117a7"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_unseen-acd1abe32e91175c",
+      "input": "Your task is to: look at alarmclock under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-acd1abe32e91175c\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-acd1abe32e91175c"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_unseen-61268b6811bd8c54",
+      "input": "Your task is to: look at bowl under the desklamp.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-61268b6811bd8c54\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-61268b6811bd8c54"
+      },
+      "coverage_tags": [
+        "look_at_obj_in_light"
+      ]
+    },
+    {
+      "id": "valid_unseen-3cf13c2ef308b24f",
+      "input": "Your task is to: put a clean plate in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-3cf13c2ef308b24f\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-3cf13c2ef308b24f"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-f8fcaa506aab7f2a",
+      "input": "Your task is to: clean some spatula and put it in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-f8fcaa506aab7f2a\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-f8fcaa506aab7f2a"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-18599591f69edca0",
+      "input": "Your task is to: clean some knife and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-18599591f69edca0\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-18599591f69edca0"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-6989d97fa65f5009",
+      "input": "Your task is to: clean some soapbar and put it in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-6989d97fa65f5009\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-6989d97fa65f5009"
+      },
+      "coverage_tags": [
+        "pick_clean_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-4af43c5743ef9bf4",
+      "input": "Your task is to: heat some mug and put it in cabinet.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-4af43c5743ef9bf4\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-4af43c5743ef9bf4"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-4c52ff248683a743",
+      "input": "Your task is to: heat some egg and put it in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-4c52ff248683a743\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-4c52ff248683a743"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-799fb7dc0adbc831",
+      "input": "Your task is to: heat some mug and put it in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-799fb7dc0adbc831\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-799fb7dc0adbc831"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-f317e6d0ac75dd61",
+      "input": "Your task is to: heat some apple and put it in fridge.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-f317e6d0ac75dd61\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-f317e6d0ac75dd61"
+      },
+      "coverage_tags": [
+        "pick_heat_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-a133ab7f447fbfe7",
+      "input": "Your task is to: cool some pan and put it in countertop.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-a133ab7f447fbfe7\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-a133ab7f447fbfe7"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-5092a44350a94fee",
+      "input": "Your task is to: cool some mug and put it in coffeemachine.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-5092a44350a94fee\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-5092a44350a94fee"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-217721fe1a865ed5",
+      "input": "Your task is to: put a cool tomato in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-217721fe1a865ed5\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-217721fe1a865ed5"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-90507f9f6c10d19d",
+      "input": "Your task is to: cool some potato and put it in microwave.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-90507f9f6c10d19d\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-90507f9f6c10d19d"
+      },
+      "coverage_tags": [
+        "pick_cool_then_place_in_recep"
+      ]
+    },
+    {
+      "id": "valid_unseen-5cd4c51c650ab9bb",
+      "input": "Your task is to: put two soapbar in garbagecan.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-5cd4c51c650ab9bb\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-5cd4c51c650ab9bb"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_unseen-8058082e119d3b4e",
+      "input": "Your task is to: put two cd in safe.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-8058082e119d3b4e\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-8058082e119d3b4e"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_unseen-4e1996c9adcfeb4f",
+      "input": "Your task is to: put two keychain in safe.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-4e1996c9adcfeb4f\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-4e1996c9adcfeb4f"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    },
+    {
+      "id": "valid_unseen-0622d63dfac28487",
+      "input": "Your task is to: put two peppershaker in drawer.\nUse observe first, then step to act in the world.",
+      "rubric": "Complete the task in the official environment within 200 actions.",
+      "reference_answer": "{\"format_version\": \"alfworld.reference/v1\", \"task_id\": \"valid_unseen-0622d63dfac28487\"}",
+      "split": "test",
+      "mode": "single_turn",
+      "max_turns": 5,
+      "dialogue_completion": "score",
+      "user_context": "",
+      "environment_context": {
+        "task_id": "valid_unseen-0622d63dfac28487"
+      },
+      "coverage_tags": [
+        "pick_two_obj_and_place"
+      ]
+    }
+  ],
+  "environment": {
+    "protocol": "sage.rsi.case/v1",
+    "mcp_servers": [
+      "ALFWorld"
+    ],
+    "terminal_on_done": true
+  }
+}

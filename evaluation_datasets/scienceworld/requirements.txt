@@ -1,0 +1,4 @@
+# Runtime also requires Java 17 (not a Python package).
+py4j==0.10.9.9
+# Only used for reproducible streaming extraction from the official goldpath archive.
+ijson==3.4.0

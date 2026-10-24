@@ -553,6 +553,7 @@ class McpToolPlugin:
             ).encode("utf-8")
         )
         result_truncated = response_bytes > server.max_result_bytes
+        remote_meta = _value(response, "_meta", _value(response, "meta", None))
         content = (
             (
                 TextBlock(
@@ -592,6 +593,7 @@ class McpToolPlugin:
                 "tool_result_received": True,
                 "mcp_result_truncated": result_truncated,
                 "mcp_result_size_bytes": response_bytes,
+                **({"mcp_meta": remote_meta} if isinstance(remote_meta, dict) and remote_meta and not result_truncated else {}),
             },
         )
 

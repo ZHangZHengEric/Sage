@@ -24,6 +24,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field, field_validator
 from .rsi_evaluation import EvaluationPlan, ScorerImport, ScorerSelection, McpExecutionScorer, scorer_binding
 from .rsi_call_recovery import failed_call
+from .rsi_ownership import process_identity, process_alive, legacy_sidecar_alive
 
 from sagents.v2.optimization.dataset import OptimizationDataset, validate_imported_dataset
 from sagents.v2.optimization.dataset_summary import summarize_dataset
@@ -32,6 +33,7 @@ from sagents.v2.optimization.recovery import configuration_fingerprint
 from sagents.v2.optimization.scoring import ScorerDescriptor
 from sagents.v2.optimization.builtin_scoring import BuiltinScoring, BuiltinScoringUnavailable
 from sagents.v2.optimization.python_scorer import PythonExecutionScorer
+from sagents.v2.optimization.scorer_dependencies import dependency_binding, verify_dependencies
 
 from sagents.v2 import AgentPackageOptimizer, IsolatedOptimizationRunner
 from sagents.v2.agent.management import AgentPackageBundle
@@ -49,7 +51,8 @@ from sagents.v2.optimization.contracts import (
 )
 from sagents.v2.optimization.recovery import engine_fingerprint
 from sagents.v2.optimization.generator import AgentPackageTestGenerator
-from sagents.v2.optimization.observer import SharedCallLimitRunner
+from sagents.v2.optimization.observer import SharedCallLimitRunner, SharedCallPool
+from .rsi_user_simulator import DesktopUserSimulatorMixin
 from .rsi_test_recovery import resumable_human_test_observer, completed_checkpoint_events, RecoveringIsolatedTestEvaluator as IsolatedTestEvaluator
 from sagents.v2.package.manifest.agents import Instructions
 from sagents.v2.skill import FilesystemSkillProvider
@@ -81,7 +84,7 @@ def fingerprint(agent):
 def rsi_binding(agent, provider, internal_provider):
     return hashlib.sha256(json.dumps({"agent": fingerprint(agent), "user": agent.user_id,
         "target": provider.model_dump(mode="json"), "internal": internal_provider.model_dump(mode="json"),
-        "grant": "desktop.rsi.local-workspace/v7-phased-evaluation"}, sort_keys=True).encode()).hexdigest()
+        "grant": "desktop.rsi.local-workspace/v9-native-episodes"}, sort_keys=True).encode()).hexdigest()
 
 
 def private_json(path, value):
@@ -105,8 +108,12 @@ def rsi_journal(root, value, *, existing=False):
 class RsiStart(StrictModel):
     goal: str = Field(min_length=1, max_length=16000)
     rounds: int = Field(default=8, ge=1, le=100)
+    call_timeout_seconds: int = Field(default=240, ge=30, le=7200)
     optimization_scope: tuple[OptimizationPart, ...] = ("instructions", "skills")
     model_provider_id: str | None = None
+    user_simulator_id: str | None = None
+    user_simulator_binding_id: str | None = None
+    user_simulator_instructions: str | None = Field(default=None, min_length=1, max_length=16000)
     suite: OptimizationSuite | None = None
     evaluation_plan_id: str | None = None
     scorer: ScorerSelection | None = None
@@ -140,6 +147,13 @@ class RsiStart(StrictModel):
     )
     request_id: str = Field(min_length=1, max_length=128)
 
+    @field_validator('user_simulator_instructions')
+    @classmethod
+    def simulator_instructions_not_blank(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError('user simulator instructions must not be blank')
+        return value
+
     @field_validator('dataset', mode='before')
     @classmethod
     def imported_dataset_wire_fields(cls, value):
@@ -153,12 +167,12 @@ def rsi_timeout_seconds(request: RsiStart) -> int:
     batches = (count + request.max_concurrency - 1) // request.max_concurrency
     test_count = len(request.human_test_suite.cases) if request.human_test_suite else request.human_test_count
     test_batches = (test_count + request.max_concurrency - 1) // request.max_concurrency
-    test_budget = (request.rounds + 1) * test_batches * 480 * request.human_test_repeats
-    # Target + evaluator can each consume the 240-second per-call budget.
+    test_budget = (request.rounds + 1) * test_batches * (2 * request.call_timeout_seconds) * request.human_test_repeats
+    # Target + evaluator can each consume the configured per-call budget.
     # Include the growing training set and stability passes; retain a bounded deadline.
     return min(
         86400,
-        max(3600, (request.rounds * (2 if request.refresh_incumbent else 1) + 2) * batches * 480 * request.evaluation_repeats + test_budget),
+        max(3600, (request.rounds * (2 if request.refresh_incumbent else 1) + 2) * batches * (2 * request.call_timeout_seconds) * request.evaluation_repeats + test_budget),
     )
 
 
@@ -206,6 +220,7 @@ def frozen_rsi_request(frozen, run):
 class RsiStore:
     def __init__(self, path: Path, *, recover_interrupted: bool = True):
         self.path = path
+        self.owner = process_identity()
         with self.connect() as db:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, user TEXT, agent TEXT, kind TEXT, body TEXT, summary TEXT)"
@@ -238,7 +253,9 @@ class RsiStore:
                 "SELECT id, body FROM records WHERE kind='run'"
             ).fetchall() if recover_interrupted else ():
                 value = json.loads(row[1])
-                if self.external_alive(value):
+                if (self.external_alive(value) or process_alive(value.get("_host_owner"))
+                        or (not value.get("_host_owner") and legacy_sidecar_alive(
+                            self.path.parent / "desktop-v2-sidecar.json"))):
                     continue
                 if value["status"] in {"queued", "running"}:
                     value.update(
@@ -275,7 +292,7 @@ class RsiStore:
     def metadata(value):
         metadata = {k: v for k, v in value.items()
             if k not in {"config", "package", "assets", "record", "test_observations",
-                         "human_test_suite", "_test_observations_external", "dataset_version", "dataset_diagnostics"}}
+                         "human_test_suite", "_test_observations_external", "_host_owner", "dataset_version", "dataset_diagnostics"}}
         # Full case IDs and exclusion evidence belong in explicit human detail
         # reads, not every history summary. The durable body remains lossless.
         for key in ("dataset_manifest", "generated_dataset_manifest", "manifest"):
@@ -300,8 +317,21 @@ class RsiStore:
         # changed human measurements. Generic callers always write their value.
         body = dict(value)
         body.pop("_test_observations_external", None)
+        body.pop("_host_owner", None)
         with self.connect() as db:
+            previous = db.execute("SELECT user, agent, kind, body FROM records WHERE id=?",
+                                  (value["id"],)).fetchone()
+            if previous and previous[:3] != (user, agent, kind):
+                raise ValueError("RSI record identity belongs to another owner or kind")
             if kind == "run":
+                old = json.loads(previous[3]) if previous else {}
+                if old.get("status") in {"queued", "running"} and not old.get("external_host"):
+                    owner = old.get("_host_owner")
+                    if ((owner != self.owner and process_alive(owner))
+                            or (not owner and legacy_sidecar_alive(self.path.parent / "desktop-v2-sidecar.json"))):
+                        raise PermissionError("RSI run belongs to another live host")
+                if body.get("status") in {"queued", "running"} and not body.get("external_host"):
+                    body["_host_owner"] = self.owner
                 existing = preserve_test_observations and db.execute(
                     "SELECT 1 FROM run_test_observations WHERE id=? AND user=? AND agent=?",
                     (value["id"], user, agent),
@@ -334,6 +364,7 @@ class RsiStore:
     @staticmethod
     def _decode(db, encoded, user, agent):
         value = json.loads(encoded)
+        value.pop("_host_owner", None)
         if value.pop("_test_observations_external", False):
             row = db.execute(
                 "SELECT body FROM run_test_observations WHERE id=? AND user=? AND agent=?",
@@ -385,7 +416,7 @@ class RsiStore:
             return self._decode(db, row[0], user, agent)
 
 
-class DesktopRsiMixin:
+class DesktopRsiMixin(DesktopUserSimulatorMixin):
     def _dataset_record_id(self, agent_id, version_id, user_id):
         return "rsi_dataset_" + configuration_fingerprint([user_id, agent_id, version_id])
 
@@ -454,7 +485,7 @@ class DesktopRsiMixin:
     async def import_rsi_scorer(self, agent_id, scorer: ScorerImport, user_id):
         await self._agent(agent_id, user_id)
         source_hash = hashlib.sha256(scorer.source.encode()).hexdigest()
-        identity = "rsi_scorer_" + hashlib.sha256((source_hash + scorer.name).encode()).hexdigest()[:24]
+        identity = "rsi_scorer_" + configuration_fingerprint([user_id, agent_id, source_hash, scorer.name])[:24]
         scope = hashlib.sha256(f"{user_id}\0{agent_id}".encode()).hexdigest()
         directory = self.runtime_root / "rsi-scorers" / scope / source_hash
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -468,21 +499,30 @@ class DesktopRsiMixin:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(scorer.source)
         descriptor = ScorerDescriptor(id=identity, name=scorer.name, version=source_hash)
+        checker = PythonExecutionScorer(path=path, source_hash=source_hash, descriptor=descriptor, timeout=10)
         try:
-            validation = await PythonExecutionScorer(path=path, source_hash=source_hash,
-                descriptor=descriptor, timeout=10).validate()
+            validation = await checker.validate()
         except (TimeoutError, RuntimeError, ValueError) as exc:
             raise ValueError(f"scorer validation failed: {str(exc) or '10-second validation timeout'}") from exc
-        descriptor = descriptor.model_copy(update={"contract": validation.get("scoring_contract")})
-        value = {"validation": validation, "id": identity, "name": scorer.name, "source_hash": source_hash,
-                 "path": str(path), "descriptor": descriptor.model_dump(mode="json")}
-        self.rsi_store.put(value, user_id, agent_id, "scorer")
-        return {k: value[k] for k in ("id", "name", "source_hash", "descriptor", "validation")}
+        dependencies = checker.dependency_manifest
+        binding = dependency_binding(source_hash, dependencies)
+        identity = "rsi_scorer_" + configuration_fingerprint([user_id, agent_id, binding, scorer.name])[:24]
+        descriptor = ScorerDescriptor(id=identity, name=scorer.name, version=binding,
+            contract=validation.get("scoring_contract"))
+        try:
+            value = self.rsi_store.get(identity, user_id, agent_id, "scorer")
+        except ValueError:
+            value = {"validation": validation, "id": identity, "name": scorer.name, "source_hash": source_hash,
+                     "dependency_manifest": dependencies, "binding_hash": binding,
+                     "created_at": utc_now().isoformat(), "path": str(path), "descriptor": descriptor.model_dump(mode="json")}
+            self.rsi_store.put(value, user_id, agent_id, "scorer")
+        # Identical content reuses the immutable version and original date/order.
+        return {k: value.get(k) for k in ("id", "name", "source_hash", "descriptor", "validation", "created_at")}
 
     async def import_rsi_evaluation_plan(self, agent_id, plan: EvaluationPlan, user_id):
         await self._agent(agent_id, user_id)
         data = plan.model_dump(mode="json")
-        identity = "rsi_plan_" + hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:24]
+        identity = "rsi_plan_" + configuration_fingerprint([user_id, agent_id, data])[:24]
         value = {"id": identity, "name": plan.name, "plan": data}
         training_suite, test_suite = plan.training_suite(), plan.test_suite()
         value["validation_case_count"] = sum(c.split == "validation" for c in training_suite.cases) if training_suite else None
@@ -505,9 +545,15 @@ class DesktopRsiMixin:
             digest = hashlib.sha256(Path(stored["path"]).read_bytes()).hexdigest()
             if digest != stored["source_hash"] or selection.descriptor.model_dump(mode="json") != stored["descriptor"]:
                 raise ValueError("frozen scorer source changed")
-            if selection.binding_id is not None and selection.binding_id != digest:
+            dependencies = stored.get("dependency_manifest")
+            if dependencies is not None:
+                verify_dependencies(dependencies)
+            binding = dependency_binding(digest, dependencies)
+            if stored.get("binding_hash", binding) != binding:
+                raise ValueError("frozen scorer dependencies changed")
+            if selection.binding_id is not None and selection.binding_id != binding:
                 raise ValueError("RSI scorer binding changed since this experiment")
-            return selection.model_copy(update={"binding_id": digest})
+            return selection.model_copy(update={"binding_id": binding})
         plugin = await self._mcp_plugin(user_id)
         definition = await plugin.get_tool(selection.tool, run_id="rsi-scorer-admission")
         binding = scorer_binding(selection, plugin, definition)
@@ -520,6 +566,7 @@ class DesktopRsiMixin:
         self.rsi_store = RsiStore(self.runtime_root / "rsi.sqlite3")
         self._rsi_tasks = {}
         self._rsi_cursors = {}
+        self._rsi_usage_readers = {}
 
     @property
     def rsi_active(self):
@@ -646,14 +693,16 @@ class DesktopRsiMixin:
         versions = self.rsi_store.summaries(user_id, agent_id, "version")
         return {
             "current_fingerprint": fingerprint(agent),
-            "runs": self.rsi_store.summaries(user_id, agent_id, "run"),
+            "runs": [r for r in self.rsi_store.summaries(user_id, agent_id, "run") if not r.get("deleted_at")],
             "dataset_versions": [{"id": item["version_id"], "manifest": item["manifest"], "created_at": item["created_at"]}
                 for item in self.rsi_store.summaries(user_id, agent_id, "dataset")],
             "versions": [
                 {k: v for k, v in item.items() if k != "record"} for item in versions
             ],
-            "scorers": [{k: p[k] for k in ("id", "name", "source_hash", "descriptor", "validation")}
+            "scorers": [{k: p.get(k) for k in ("id", "name", "source_hash", "descriptor", "validation", "created_at")}
                         for p in self.rsi_store.list(user_id, agent_id, "scorer")],
+            "user_simulators": [{k: module.get(k) for k in ("id", "name", "source_hash", "descriptor", "validation", "created_at")}
+                for module in self.rsi_store.list(user_id, agent_id, "user_simulator")],
             "evaluation_plans": [{"id": p["id"], "name": p["name"],
                 "scorer": p["plan"]["scorer"], "goal": p["plan"].get("goal"),
                 "builtin_scoring": p["plan"].get("builtin_scoring", {"mode": "quality"}),
@@ -661,6 +710,20 @@ class DesktopRsiMixin:
                 "human_test_count": p.get("human_test_count")}
                 for p in self.rsi_store.list(user_id, agent_id, "evaluation_plan")],
         }
+
+    async def delete_rsi_run(self, agent_id, run_id, user_id):
+        await self._agent(agent_id, user_id)
+        async with self._agent_update_lock:
+            value = self.rsi_store.get(run_id, user_id, agent_id, "run")
+            task = self._rsi_tasks.get(run_id)
+            if value["status"] in {"queued", "running"} or (task is not None and not task.done()):
+                raise ValueError("Stop the running experiment before deleting its history")
+            if not value.get("deleted_at"):
+                value.update(deleted_at=utc_now().isoformat(), deleted_by=user_id)
+                self.rsi_store.put(value, user_id, agent_id, "run")
+            # Retain immutable configurations, journals, versions and dataset
+            # provenance; deletion removes the entry from normal history only.
+            return {"id": run_id, "deleted": True}
 
     async def rsi_version(self, agent_id, version_id, user_id):
         self = cast("DesktopV2Service", self)
@@ -708,6 +771,11 @@ class DesktopRsiMixin:
         result = path.parent / "result.json"
         if result.exists():
             value["result"] = json.loads(result.read_text())
+        from .rsi_usage import RsiUsageReader
+        reader = self._rsi_usage_readers.setdefault(run_id, RsiUsageReader())
+        value["token_usage"] = reader.read(path.parent, value)
+        while len(self._rsi_usage_readers) > 32:
+            self._rsi_usage_readers.pop(next(iter(self._rsi_usage_readers)))
         if compact:
             from app.v2.desktop.backend.rsi_presentation import compact_rsi_payload
             return compact_rsi_payload(value)
@@ -716,6 +784,21 @@ class DesktopRsiMixin:
     async def start_rsi(self, agent_id, request: RsiStart, user_id):
         self = cast("DesktopV2Service", self)
         dataset_manifest = None
+        if request.evaluation_plan_id:
+            if any(value is not None for value in (request.dataset, request.dataset_version_id,
+                    request.suite, request.human_test_suite, request.scorer, request.scorer_id)):
+                raise ValueError("selected evaluation plan is the single source of cases and scorer")
+            stored = self.rsi_store.get(request.evaluation_plan_id, user_id, agent_id, "evaluation_plan")
+            plan = EvaluationPlan.model_validate(stored["plan"])
+            # Keep the complete dataset, including its environment. Flattening
+            # it to cases loses the MCP binding before deterministic admission.
+            training_suite, test_suite = plan.training_suite(), plan.test_suite()
+            request = request.model_copy(update={"dataset": plan.dataset,
+                "suite": None if plan.dataset is not None else training_suite,
+                "human_test_suite": None if plan.dataset is not None else test_suite,
+                "validation_case_count": sum(c.split == "validation" for c in training_suite.cases) if training_suite else request.validation_case_count,
+                "human_test_count": len(test_suite.cases) if test_suite else request.human_test_count,
+                "scorer": plan.scorer, "builtin_scoring": plan.builtin_scoring})
         if request.dataset_version_id is not None:
             if request.dataset is not None or request.suite is not None or request.evaluation_plan_id is not None or request.human_test_suite is not None:
                 raise ValueError("dataset version is the single source of cases")
@@ -726,16 +809,6 @@ class DesktopRsiMixin:
             registered = await self.import_rsi_dataset(agent_id, request.dataset, user_id)
             dataset_manifest = registered["manifest"]
             request = request.model_copy(update={"dataset_version_id": registered["id"]})
-        if request.evaluation_plan_id:
-            stored = self.rsi_store.get(request.evaluation_plan_id, user_id, agent_id, "evaluation_plan")
-            plan = EvaluationPlan.model_validate(stored["plan"])
-            if request.suite is not None or request.human_test_suite is not None or request.scorer is not None:
-                raise ValueError("selected evaluation plan is the single source of suites and scorer")
-            training_suite, test_suite = plan.training_suite(), plan.test_suite()
-            request = request.model_copy(update={"suite": training_suite, "human_test_suite": test_suite,
-                "validation_case_count": sum(c.split == "validation" for c in training_suite.cases) if training_suite else request.validation_case_count,
-                "human_test_count": len(test_suite.cases) if test_suite else request.human_test_count,
-                "scorer": plan.scorer, "builtin_scoring": plan.builtin_scoring})
         if request.dataset is not None:
             if request.suite is not None or request.human_test_suite is not None:
                 raise ValueError("dataset is the single source of imported cases")
@@ -755,6 +828,9 @@ class DesktopRsiMixin:
             stored = self.rsi_store.get(request.scorer_id, user_id, agent_id, "scorer")
             request = request.model_copy(update={"scorer": ScorerSelection(mode="python",
                 module_id=stored["id"], descriptor=stored["descriptor"])})
+        user_module = self._rsi_user_simulator_selection(request, user_id, agent_id)
+        if user_module is not None:
+            request = request.model_copy(update={"user_simulator_binding_id": user_module["binding_hash"]})
         selection = await self._rsi_scorer_selection(request, user_id, agent_id)
         if selection is not None:
             request = request.model_copy(update={"scorer": selection})
@@ -830,6 +906,8 @@ class DesktopRsiMixin:
                 "max_edit_repairs": request.max_edit_repairs,
                 "evaluation_repeats": request.evaluation_repeats,
                 "human_test_repeats": request.human_test_repeats,
+                "user_simulator_instructions": request.user_simulator_instructions,
+                "user_simulator_id": request.user_simulator_id,
                 "evaluation_aggregation": request.evaluation_aggregation,
                 "rounds": request.rounds,
                 "validation_case_count": request.validation_case_count,
@@ -840,6 +918,7 @@ class DesktopRsiMixin:
                 "timeout_seconds": rsi_timeout_seconds(request),
                 "optimization_scope": request.optimization_scope,
                 "model_provider_id": internal_provider.id,
+                "requested_model_provider_id": request.model_provider_id,
                 "created_at": utc_now().isoformat(),
                 "base_fingerprint": fingerprint(agent),
                 "stage": "queued",
@@ -874,13 +953,16 @@ class DesktopRsiMixin:
         records = {r.name: r for r in await self.catalog.list_mcp(user_id) if not r.disabled}
         if any(name not in records for name in binding.mcp_servers):
             raise ValueError(f'dataset.environment.mcp_servers unavailable: {sorted(set(binding.mcp_servers) - set(records))}')
-        return McpCaseEnvironment(tuple(self._mcp_config(records[name]) for name in binding.mcp_servers))
+        return McpCaseEnvironment(tuple(self._mcp_config(records[name]) for name in binding.mcp_servers),
+            terminal_on_done=binding.terminal_on_done)
 
     async def resume_rsi(self, agent_id, run_id, user_id, *, upgrade_call_isolation=False):
         self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
             value = self.rsi_store.get(run_id, user_id, agent_id, "run")
+            if value.get("deleted_at"):
+                raise ValueError("This experiment has been deleted from history")
             if value.get("external_host"):
                 raise ValueError("External experiments resume through their owning host")
             if value["status"] not in {"interrupted", "cancelled", "failed"} or not value.get("resumable"):
@@ -900,6 +982,7 @@ class DesktopRsiMixin:
             frozen = json.loads((root / "resume-context.json").read_text())
             request = frozen_rsi_request(frozen, value)
             await self._rsi_scorer_selection(request, user_id, agent_id)
+            self._rsi_user_simulator_selection(request, user_id, agent_id)
             provider = await self._provider(agent, user_id)
             internal_provider = provider
             if request.model_provider_id:
@@ -939,6 +1022,8 @@ class DesktopRsiMixin:
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
             value = self.rsi_store.get(run_id, user_id, agent_id, "run")
+            if value.get("deleted_at"):
+                raise ValueError("This experiment has been deleted from history")
             if value.get("external_host") or value["status"] != "completed":
                 raise ValueError("Human tests resume only after the native experiment completes")
             if any(r["status"] in {"queued", "running"}
@@ -954,6 +1039,7 @@ class DesktopRsiMixin:
             if not (request.human_test_suite or request.human_test_count):
                 raise ValueError("Experiment has no predeclared human test suite")
             await self._rsi_scorer_selection(request, user_id, agent_id)
+            self._rsi_user_simulator_selection(request, user_id, agent_id)
             provider = await self._provider(agent, user_id)
             internal_provider = provider
             if request.model_provider_id:
@@ -993,6 +1079,7 @@ class DesktopRsiMixin:
         original_finished_at = value.get("finished_at")
         test_observer = None
         scorer_gateway = None
+        user_gateway = None
 
         def save(*, measurements_changed=False):
             self.rsi_store.put(value, user, identity, "run",
@@ -1104,6 +1191,8 @@ class DesktopRsiMixin:
                 target_execution_context.update(
                     text_without_tool_calls="ends the current run unless an earlier explicit status or host rule overrides completion",
                     tool_steps="pending tool calls continue before the final response; separate tool/model steps are not separate user turns")
+            if request.dataset and request.dataset.environment and request.dataset.environment.terminal_on_done:
+                target_execution_context['environment_completion'] = 'A successful bound case tool result with done=true ends execution before another model call; this is not proof of a passing score.'
             # Describe the host's actual default/explicit selection to internal
             # roles only. The selected target package and its baseline stay intact.
             execution_guidance = "\nHost target execution semantics: " + json.dumps(target_execution_context, ensure_ascii=False)
@@ -1111,15 +1200,14 @@ class DesktopRsiMixin:
                 "evaluator",
                 "tuner",
                 "designer",
-                "reviewer",
-                "suite_reviewer",
+                "user_simulator",
             ):
                 manifest = self._manifest(agent, internal_provider,
                                           ("file_read", "file_write", "file_update") if role == "tuner" else ("file_read", "file_write") if role == "evaluator" else (), ())
                 definition = manifest.agents[identity].model_copy(
                     update={
                         "instructions": Instructions(
-                            inline=f"You are the independent RSI {role}. Follow the supplied JSON schema. Preserve the original agent goal. Use reusable improvements; never memorize test answers." + execution_guidance
+                            inline=(request.user_simulator_instructions or "") if role == "user_simulator" else f"You are the independent RSI {role}. Follow the supplied JSON schema. Preserve the original agent goal. Use reusable improvements; never memorize test answers." + execution_guidance
                         ),
                     }
                 )
@@ -1148,6 +1236,10 @@ class DesktopRsiMixin:
                 if "tools" in request.optimization_scope
                 else set(package.manifest.agents[identity].tools)
             )
+            # Skill loading is the runtime capability for enabled/new Skills;
+            # it must not depend on granting arbitrary tool optimization.
+            if "skills" in request.optimization_scope or package.manifest.agents[identity].skills:
+                allowed_tools.add("load_skill")
             tool_scopes = {
                 scope
                 for definition in definitions
@@ -1208,6 +1300,8 @@ class DesktopRsiMixin:
                     target.write_bytes(base64.b64decode(content, validate=True))
                 selected = role_provider.get(bundle.manifest.metadata.id, provider)
                 model = await self._model_provider(selected, agent)
+                from .rsi_usage import MeteredRsiModel, stage_for_package
+                model = MeteredRsiModel(model, root, stage_for_package(bundle))
                 skills = FilesystemSkillProvider((workspace / "skills",))
 
                 def assess(call):
@@ -1272,6 +1366,18 @@ class DesktopRsiMixin:
                         )
                     )
                 choices = dict(bundle.manifest.runtime.capabilities)
+                if environment is not None and environment.terminal_on_done and bundle.manifest.metadata.id == package.manifest.metadata.id:
+                    from sagents.v2.optimization.environment import CaseEnvironmentContinuationPolicy
+                    current = choices.get('agent.continuation-policy')
+                    policy_plugin = current.plugin if current else 'sage.agent.continuation.deterministic'
+                    completion = CaseEnvironmentContinuationPolicy(policy_plugin)
+                    registrations.append(ExtensionRegistration(
+                        descriptor=ExtensionDescriptor(plugin_id='sage.rsi.case-terminal', name='Case terminal boundary', version='1',
+                            provides=(CapabilityOffer(capability='agent.continuation-policy', api_version='2'),),
+                            supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                            config_schema={'type': 'object', 'additionalProperties': False}),
+                        factory=lambda context, deps: completion, ownership='borrowed'))
+                    choices['agent.continuation-policy'] = CapabilitySelection(plugin='sage.rsi.case-terminal')
                 if environment is not None and bundle.manifest.metadata.id == package.manifest.metadata.id:
                     from sagents.v2.optimization.runner import OPTIMIZATION_CASE
                     from sagents.v2.tool.provider import ToolProvider
@@ -1369,12 +1475,8 @@ class DesktopRsiMixin:
                 editable_files=tuple(
                     name for name in package.files if name != "desktop/context.json"
                 ),
-                creatable_files=("skills/rsi-guidance/SKILL.md",),
                 allow_skill_changes=True,
                 allow_skill_creation=True,
-                skill_candidates={
-                    "rsi-guidance": "Reusable methods for the original goal"
-                },
                 allow_tool_changes=True,
                 allow_tool_creation=True,
                 require_clean_generated_tools="tools" in request.optimization_scope,
@@ -1398,10 +1500,14 @@ class DesktopRsiMixin:
                 evaluator=roles["evaluator"],
                 tuner=roles["tuner"],
                 test_designer=roles["designer"],
-                reviewer=roles["reviewer"],
-                suite_reviewer=roles["suite_reviewer"],
+                test_driver=roles["user_simulator"],
             )
-            shared_calls = asyncio.Semaphore(request.max_concurrency)
+            def publish_call_pool(state):
+                value["call_pool"] = state
+                save()
+
+            value["user_simulator"] = {"mode": "custom" if request.user_simulator_instructions else "default"}
+            shared_calls = SharedCallPool(request.max_concurrency, publish_call_pool)
             optimizer.runner = SharedCallLimitRunner(optimizer.runner, shared_calls)
             context = RequestContext(actor=ActorRef(
                 principal_id=user, principal_type=PrincipalType.USER,
@@ -1431,10 +1537,35 @@ class DesktopRsiMixin:
                 await scorer_gateway.start()
                 value["scorer_model_transport"] = "sage-model-provider"
                 scorer = PythonExecutionScorer(path=stored["path"], source_hash=stored["source_hash"],
-                    descriptor=selection.descriptor, model_api_factory=scorer_gateway.bind)
+                    descriptor=selection.descriptor, model_api_factory=scorer_gateway.bind,
+                    dependency_manifest=stored.get("dependency_manifest"))
             elif request.scorer is not None and request.scorer.mode == "mcp":
                 selection = await self._rsi_scorer_selection(request, user, identity)
                 scorer = McpExecutionScorer(selection, await self._mcp_plugin(user), context, value["id"])
+            user_module = self._rsi_user_simulator_selection(request, user, identity)
+            from .scorer_model_api import ScorerModelGateway
+            from sagents.v2.optimization.default_user_simulator import DefaultUserSimulator
+            from sagents.v2.optimization.python_user_simulator import PythonUserSimulator
+            model = await self._model_provider(internal_provider, agent, enable_thinking=False)
+            def audit_user_model(record):
+                path = root / "user-simulator-model-calls.jsonl"
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+            user_gateway = ScorerModelGateway(provider=model, model=internal_provider.model,
+                model_binding=internal_provider.id, run_id=value["id"], concurrency=shared_calls,
+                model_budget=self.model_budget, max_output_tokens=internal_provider.max_tokens,
+                purpose="user_simulator", audit=audit_user_model, redact=(internal_provider.api_key,))
+            if user_module is not None:
+                await user_gateway.start()
+                optimizer.user_simulator = PythonUserSimulator(path=user_module["path"],
+                    source_hash=user_module["source_hash"], descriptor=user_module["descriptor"],
+                    dependency_manifest=user_module["dependency_manifest"], model_api_factory=user_gateway.bind)
+                value["user_simulator"] = {"mode": "python", "id": user_module["id"],
+                    "descriptor": user_module["descriptor"]}
+            else:
+                optimizer.user_simulator = DefaultUserSimulator(user_gateway.bind_provider,
+                    instructions=request.user_simulator_instructions)
             if request.human_test_count or request.human_test_suite:
                 # Separate runner, fresh Applications/Sessions and private evidence.
                 # This sink never supplies data to optimizer.optimize().
@@ -1448,6 +1579,14 @@ class DesktopRsiMixin:
                     value["test_observations"] = records
                     save(measurements_changed=True)
                 try:
+                    def audit_test_preflight(event, **data):
+                        path = test_root / "preflight.jsonl"
+                        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                            stream.write(json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n")
+                        if event not in {"human_test_preflight_call_completed", "human_test_generation_call_completed"}:
+                            value.setdefault("dataset_diagnostics", []).append({"event": event, "phase": "test", **data})
+                            save()
                     test_suite = request.human_test_suite
                     if test_suite is None and value.get("human_test_suite"):
                         test_suite = OptimizationTestSuite.model_validate(value["human_test_suite"])
@@ -1455,23 +1594,17 @@ class DesktopRsiMixin:
                     if test_suite is None:
                         generation = await AgentPackageTestGenerator(
                             runner=test_runner, designer=roles["designer"], call_retries=3,
+                            validation_repairs=request.preflight_policy.generated_repairs,
                         ).generate_split_with_record(
                             package, context=context, goal=request.goal, split="test",
                             case_count=request.human_test_count, max_cases=request.human_test_count,
+                            on_call=lambda call: audit_test_preflight("human_test_generation_call_completed", call=call.model_dump(mode="json")),
                             timeout_seconds=240,
                         )
                         test_suite = OptimizationTestSuite(cases=generation.suite.cases)
                     if not value.get("human_test_preflight_completed"):
-                        def audit_test_preflight(event, **data):
-                            path = test_root / "preflight.jsonl"
-                            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-                            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                                stream.write(json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n")
-                            if event != "human_test_preflight_call_completed":
-                                value.setdefault("dataset_diagnostics", []).append({"event": event, "phase": "test", **data})
-                                save()
                         test_suite = await AgentPackageTestGenerator(runner=test_runner, designer=roles["designer"], call_retries=3).review_drafts(
-                            package, test_suite.cases, reviewer=roles["suite_reviewer"], context=context,
+                            package, test_suite.cases, reviewer=None, context=context,
                             goal=request.goal, schema=OptimizationTestSuite, generated=generated_test_suite,
                             policy=request.preflight_policy,
                             scorer_contract=scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
@@ -1486,12 +1619,13 @@ class DesktopRsiMixin:
                         concurrency=request.max_concurrency,
                         repeats=request.human_test_repeats,
                         evaluate=IsolatedTestEvaluator(
-                            runner=test_runner, evaluator=roles["evaluator"], driver=roles["designer"],
+                            runner=test_runner, evaluator=roles["evaluator"], driver=optimizer.test_driver,
                             evidence_directory=test_root / "evaluations",
                             checkpoint_binding_id=value['request_hash'] + ':' + value['recovery_binding_id'],
                             retry_local_evaluations=True, restart_incomplete_dialogues=True,
-                            context=context, goal=request.goal,
+                            context=context, goal=request.goal, timeout=request.call_timeout_seconds,
                             scorer=scorer,
+                            user_simulator=optimizer.user_simulator,
                             call_retries=3,
                             require_clean_generated_tools=constraints.require_clean_generated_tools,
                         ),
@@ -1527,7 +1661,7 @@ class DesktopRsiMixin:
                     refresh_incumbent=request.refresh_incumbent,
                     validation_case_count=request.validation_case_count,
                     max_concurrency=request.max_concurrency,
-                    call_timeout_seconds=240,
+                    call_timeout_seconds=request.call_timeout_seconds,
                     call_retries=3,
                     allow_call_isolation_upgrade=value.get("call_isolation_upgrade", {}).get("state") == "requested",
                     timeout_seconds=rsi_timeout_seconds(request),
@@ -1542,6 +1676,7 @@ class DesktopRsiMixin:
                     restart_file_evaluator=True,
                     journal_start_sequence=value.get("sequence", 0) if source else 0,
                     on_event=observe,
+                    checkpoint_barrier=test_observer.wait_for_checkpoint if test_observer else None,
                 )
             if human_only:
                 if test_observer is None:
@@ -1605,6 +1740,8 @@ class DesktopRsiMixin:
                 self.rsi_store.put(stored, user, identity, "version")
             value.update(
                 status="completed",
+                stage="result_completed",
+                resumable=False,
                 recommended_hash=(result.candidate_package.content_hash
                                   if result.report.goal_verified else None),
                 retained_hash=result.candidate_package.content_hash,
@@ -1612,6 +1749,8 @@ class DesktopRsiMixin:
                 goal_verified=result.report.goal_verified,
                 recommendation_block_reason=result.report.recommendation_block_reason,
             )
+            for key in ("exit_reason", "error_type", "error_code", "error"):
+                value.pop(key, None)
         except asyncio.CancelledError:
             value["status"] = "completed" if human_only else "interrupted"
             if human_only:
@@ -1635,11 +1774,12 @@ class DesktopRsiMixin:
         finally:
             if test_observer is not None:
                 await test_observer.cancel()
-                (root / "human-test" / "evidence.json").write_text(
-                    json.dumps(test_observer.evidence, ensure_ascii=False), encoding="utf-8",
-                )
+                from .rsi_test_recovery import persist_human_evidence
+                persist_human_evidence(root / "human-test" / "evidence.json", test_observer.evidence)
             if scorer_gateway is not None:
                 await scorer_gateway.close()
+            if user_gateway is not None:
+                await user_gateway.close()
             if human_only:
                 value["human_test_recovery_finished_at"] = utc_now().isoformat()
                 value["finished_at"] = original_finished_at

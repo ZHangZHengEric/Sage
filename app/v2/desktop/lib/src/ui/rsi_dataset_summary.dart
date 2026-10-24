@@ -351,8 +351,8 @@ class RsiDatasetSummary extends StatelessWidget {
                 ),
                 Text(
                   t(
-                    '语义预审仅提供诊断意见；导入的固定集仍按原题、原评分器评测。',
-                    'Semantic review is advisory; imported fixed datasets keep their original cases and scorer.',
+                    '数据集使用固定规则校验，不调用预审模型；导入集按原题、原评分器评测。',
+                    'Dataset validation uses fixed rules without a review model; imported datasets keep their original cases and scorer.',
                   ),
                   style: detailsStyle,
                 ),

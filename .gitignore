@@ -168,6 +168,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-alfworld-rsi/
 env/
 venv/
 ENV/

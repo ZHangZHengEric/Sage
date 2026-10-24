@@ -32,9 +32,12 @@ class AgentPackageTestGenerator:
     passing it to AgentPackageOptimizer.optimize(suite=...).
     """
 
-    def __init__(self, *, runner: OptimizationRunner, designer: OptimizationAgent, call_retries=0, on_retry=None):
+    def __init__(self, *, runner: OptimizationRunner, designer: OptimizationAgent, call_retries=0, on_retry=None, validation_repairs=2):
         if type(call_retries) is not int or not 0 <= call_retries <= 12:
             raise ValueError("call_retries must be 0..12")
+        if type(validation_repairs) is not int or not 0 <= validation_repairs <= 5:
+            raise ValueError("validation_repairs must be 0..5")
+        self.validation_repairs = validation_repairs
         self.on_retry = on_retry
         self.call_retries = call_retries
         self.runner = runner
@@ -176,6 +179,12 @@ class AgentPackageTestGenerator:
     async def review_drafts(self, package, cases, *, reviewer, context, goal, schema,
                             generated, policy, scorer_contract=None, emit, timeout_seconds=120):
         """Use the shared admission policy for human-only test generation too."""
+        if reviewer is None:
+            validated = schema(cases=tuple(cases))
+            emit('dataset_validation_completed', phase='test',
+                 source='generated' if generated else 'imported', policy='deterministic/v1',
+                 case_ids=[case.id for case in validated.cases], status='passed')
+            return validated
         from sagents.v2.optimization.preflight import admit_cases, GeneratedCasesRejected
         from sagents.v2.optimization.contracts import OptimizationSuiteReview
         from sagents.v2.optimization.principles import SUITE_REVIEW_PRINCIPLES
@@ -305,8 +314,10 @@ class AgentPackageTestGenerator:
                 "Keep each rubric concise and grounded in the authorized policy. Do not manufacture "
                 "unrelated requirements or require tools the target cannot use. Avoid test "
                 "questions that require real external side effects. For multi-turn goals, use "
-                "mode=dialogue, set max_turns, and supply the simulated user's known facts "
-                "in user_context. The target initially sees only input, not user_context. "
+                "mode=dialogue, set max_turns and dialogue_completion=user, and supply the simulated user's known facts "
+                "in user_context, including the original goal and any required follow-up requests. "
+                "Always explicitly set mode; use single_turn for one user request even when tools require many steps. "
+                "Write input as the actual first user message. The target initially sees only input, not user_context. "
                 "Use the goal's language for input, rubric and user_context. "
                 + (
                     f"Create exactly {case_count} cases."
@@ -335,52 +346,66 @@ class AgentPackageTestGenerator:
             },
             ensure_ascii=False,
         )
+        original_request = request
         async with asyncio.timeout(timeout_seconds):
-            observation = await self.runner.run(
-                self.designer.package.model_copy(deep=True),
-                self.designer.agent_id,
-                request,
-                context,
-            )
-            call = OptimizationAgentCall(
-                role="test_design",
-                observation=observation,
-                request=request,
-                phase="final" if final else "optimization",
-                round=round,
-            )
-            # Retain raw output even if validation below rejects the designer's response.
-            if on_call is not None:
-                on_call(call.model_copy(deep=True))
-            if observation.state != "completed":
-                raise RuntimeError(
-                    f"test-design agent did not complete: {observation.state}"
+            for attempt in range(self.validation_repairs + 1):
+                observation = await self.runner.run(
+                    self.designer.package.model_copy(deep=True),
+                    self.designer.agent_id,
+                    request,
+                    context,
                 )
-            response = observation.output.strip()
-            fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", response, re.DOTALL)
-            suite = suite_type.model_validate_json(
-                fenced.group(1) if fenced else response
-            )
-            if len(suite.cases) > max_cases:
-                raise ValueError("generated suite exceeds max_cases")
-            if case_count is not None and len(suite.cases) != case_count:
-                raise ValueError("generated suite does not match case_count")
-            if split and any(c.split != split for c in suite.cases):
-                raise ValueError("generated cases use the wrong split")
-            if final:
-                assert isinstance(suite, OptimizationFinalSuite)
-                suite.assert_disjoint(excluded_cases)
-            else:
-                if {case.id for case in suite.cases} & {
-                    case.id for case in excluded_cases
-                }:
-                    raise ValueError("generated suite repeats excluded case ids")
-                inputs = [
-                    " ".join(case.input.casefold().split())
-                    for case in (*excluded_cases, *suite.cases)
-                ]
-                if not split and len(inputs) != len(set(inputs)):
-                    raise ValueError("generated suite repeats normalized inputs")
+                call = OptimizationAgentCall(
+                    role="test_design",
+                    observation=observation,
+                    request=request,
+                    phase="final" if final else "optimization",
+                    round=round,
+                )
+                # Retain raw output even if validation below rejects the designer's response.
+                if on_call is not None:
+                    on_call(call.model_copy(deep=True))
+                if observation.state != "completed":
+                    raise RuntimeError(
+                        f"test-design agent did not complete: {observation.state}"
+                    )
+                try:
+                    response = observation.output.strip()
+                    fenced = re.fullmatch(r"```(?:json)?\s*\n(.*?)\n```", response, re.DOTALL)
+                    suite = suite_type.model_validate_json(
+                        fenced.group(1) if fenced else response
+                    )
+                    if len(suite.cases) > max_cases:
+                        raise ValueError("generated suite exceeds max_cases")
+                    if case_count is not None and len(suite.cases) != case_count:
+                        raise ValueError("generated suite does not match case_count")
+                    if split and any(c.split != split for c in suite.cases):
+                        raise ValueError("generated cases use the wrong split")
+                    if final:
+                        assert isinstance(suite, OptimizationFinalSuite)
+                        suite.assert_disjoint(excluded_cases)
+                    else:
+                        if {case.id for case in suite.cases} & {
+                            case.id for case in excluded_cases
+                        }:
+                            raise ValueError("generated suite repeats excluded case ids")
+                        inputs = [
+                            " ".join(case.input.casefold().split())
+                            for case in (*excluded_cases, *suite.cases)
+                        ]
+                        if not split and len(inputs) != len(set(inputs)):
+                            raise ValueError("generated suite repeats normalized inputs")
+                    break
+                except ValueError as error:
+                    if attempt >= self.validation_repairs:
+                        raise ValueError(f"Generated draft validation failed after {attempt} repairs: {error}") from error
+                    request = json.dumps({
+                        "task": "Repair your generated draft to satisfy the fixed validation rules. Return the complete corrected JSON, preserving the original goal, requested count, splits and scoring requirements.",
+                        "data": {"original_request": json.loads(original_request),
+                                 "invalid_response": observation.output, "validation_error": str(error),
+                                 "repair": attempt + 1, "max_repairs": self.validation_repairs},
+                        "response_schema": suite_type.model_json_schema(),
+                    }, ensure_ascii=False)
         if split:
             # Independent designers need no shared knowledge of the other split's IDs.
             suite = suite.model_copy(
