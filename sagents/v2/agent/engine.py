@@ -3176,6 +3176,19 @@ class AgentLoopEngine:
                     return result
         return None
 
+    async def _awaits_deferred_delegation(self, run, call) -> bool:
+        """True when this call's latest receipt is a durable delegation wait."""
+        events = await self.runtime.session_store.read_events(run.run_id)
+        for event in reversed(events):
+            if (
+                event.type == "tool.call.received"
+                and isinstance(event.data, ToolEventData)
+                and event.data.operation_id == call.operation_id
+            ):
+                result = ToolExecutionResult.model_validate(event.data.execution_result)
+                return bool(result.metadata.get("delegation_deferred_until"))
+        return False
+
     async def _execute_tool_batch(self, run, calls, crossed, context, state, step_id) -> tuple[RunSnapshot, AgentLoopCheckpointState, dict[str, ToolExecutionResult]]:
         """Execute siblings concurrently; one owner serializes durable receipts.
 
@@ -3385,6 +3398,18 @@ class AgentLoopEngine:
             # Reuse the original operation identity, including after process loss.
             call = previous[call.tool_call_id]
             receipt = await self._tool_execution_receipt(run, call)
+            if receipt is None and await self._awaits_deferred_delegation(run, call):
+                # Poll the same children through reconciliation; the wait itself
+                # is durable, so there is no unknown side effect to record.
+                return await self._reconcile_or_suspend_tool(
+                    run, call, context, turn_id, step_id, state, RuntimeErrorInfo(
+                        code="tool.delegation_wait_poll_failed",
+                        category=ErrorCategory.PROVIDER_TRANSIENT,
+                        message="Delegated children could not be polled after a deferred wait",
+                        retryable=True,
+                        safe_to_resume=True,
+                    ),
+                )
             if receipt is None:
                 uncertainty = RuntimeErrorInfo(
                     code="tool.outcome_unknown_after_worker_restart",
@@ -3448,7 +3473,7 @@ class AgentLoopEngine:
             result = result.model_copy(update={"error": localized})
         self._apply_tool_expansion(call, result)
         if state is not None and result.metadata.get("delegation_deferred_until"):
-            return await self._defer_delegation(run, state, result, context, step_id), None
+            return await self._defer_delegation(run, call, state, result, context, step_id), None
         pending_delegations = result.metadata.get("delegation_interactions")
         if (
             state is not None
@@ -3832,7 +3857,7 @@ class AgentLoopEngine:
             if reconciled.state == ReconcileState.SUCCEEDED and reconciled.result:
                 if state is not None and reconciled.result.metadata.get("delegation_deferred_until"):
                     return await self._defer_delegation(
-                        await self.runtime.get_run(run.run_id), state, reconciled.result, context, step_id
+                        await self.runtime.get_run(run.run_id), call, state, reconciled.result, context, step_id
                     ), None
                 pending = reconciled.result.metadata.get("delegation_interactions")
                 if state is not None and isinstance(pending, list) and pending:
@@ -3941,7 +3966,7 @@ class AgentLoopEngine:
             None,
         )
 
-    async def _defer_delegation(self, run, state, result, context, step_id) -> RunSnapshot:
+    async def _defer_delegation(self, run, call, state, result, context, step_id) -> RunSnapshot:
         from datetime import datetime
 
         due = datetime.fromisoformat(result.metadata["delegation_deferred_until"])
@@ -3949,10 +3974,20 @@ class AgentLoopEngine:
             "automatic_resume_at": due, "automatic_resume_reason": "delegation.wait",
         })
         return await self._commit_running(
-            run, context, (EventDraft(
-                type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
-                data=StepEventData(state="delegation_wait", retry_at=due),
-            ),), recovery_state=state,
+            run, context, (
+                EventDraft(
+                    type="tool.call.received", turn_id=state.turn_id, step_id=step_id,
+                    data=ToolEventData(
+                        tool_call_id=call.tool_call_id, tool_name=call.tool_name,
+                        operation_id=call.operation_id, idempotency_key=call.idempotency_key,
+                        state="received", execution_result=result.model_dump(mode="json"),
+                    ),
+                ),
+                EventDraft(
+                    type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
+                    data=StepEventData(state="delegation_wait", retry_at=due),
+                ),
+            ), recovery_state=state,
         )
 
     async def _resume_uncertain_tool(self, run, state, decision, payload, context) -> tuple[RunSnapshot, ToolExecutionResult | None]:
