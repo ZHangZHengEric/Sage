@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, TypeVar, TypedDict, Unpack, NotRequired
@@ -27,6 +27,7 @@ from sagents.v2.composition.contracts import (
 )
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.contracts.commands import StartRun
+from sagents.v2.contracts.runtime_skills import RuntimeSkillAuthorization
 from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor, RunHandle, RunSnapshot
@@ -215,6 +216,24 @@ class SAgentApplication:
                 raise ValueError("security profile is an App identity; create a new App to change it")
             self._loaded_agents.set_runtime(selected)
         return selected.model_copy(deep=True)
+
+    async def update_runtime_skill_authorizations(
+        self, authorizations: Sequence[RuntimeSkillAuthorization | dict[str, Any]],
+    ) -> tuple[RuntimeSkillAuthorization, ...]:
+        """Replace the App-wide runtime Skill ceiling without rebuilding.
+
+        The new set applies to every later admission, child delegation and
+        execution or resume, including Runs already accepted. A loop that is
+        currently executing keeps the Skills it has already loaded.
+        """
+        if self._loaded_agents is None:
+            raise RuntimeError("runtime updates require a Builder-built App")
+        grants = tuple(RuntimeSkillAuthorization.model_validate(value) for value in authorizations)
+        async with self._assembly_operation(), self._loaded_agents.lock:
+            runtime = self._loaded_agents.runtime
+            self._loaded_agents.set_runtime(
+                runtime.model_copy(update={"runtime_skill_authorizations": grants}))
+        return grants
 
     async def update_model(self, model_id: str, config: ModelRoute | dict[str, Any]) -> ModelCatalogConfig:
         """Add or replace one model atomically; credentials live in App config."""

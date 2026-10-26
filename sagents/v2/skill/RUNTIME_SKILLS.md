@@ -76,8 +76,12 @@ finally:
 `RuntimeConfig.runtime_skill_authorizations` 是宿主侧独立白名单，默认空列表即拒绝。
 `RuntimeSkillAuthorization.from_bundle(...)` 固定来源 descriptor 和文件内容 hash；
 `target_agent_ids=("director",)` 可进一步限制 attachment 根节点，`max_bytes` 限制
-单个 bundle 的总字节数。该上限在 `build()` 配置，不能通过 `load_agent(runtime=...)`
-扩大，也不会因为历史 Agent revision 中保存了旧授权而恢复旧权限。
+单个 bundle 的总字节数。该上限在 `build()` 给初值，之后用
+`await app.update_runtime_skill_authorizations(grants)` 整体替换（追加和撤销都走它），
+不需要重建 App；不能通过 `load_agent(runtime=...)` 修改，也不参与 Agent revision 的
+composition hash，因此更新后已加载的 Agent 继续可用。新上限对之后的提交、子 Run 委派
+以及每次执行或恢复（包括已提交的暂停 Run）立即生效；正在执行的循环已加载的 Skill
+不会被中途收回。历史 Agent revision 中保存的旧授权不会恢复旧权限。
 
 原有 `enabled_skills` 和 Package Skill 白名单继续控制 Package 内的 Skill。
 额外 Skill 通过专用 attachment 授权，两者独立；仅把名字写入 `enabled_skills`
@@ -105,7 +109,7 @@ attachment 是幂等的。现有 provider 冲突在目录访问/加载前检查�
 | 同一 Session 新建顶层 Run | 不自动继承；宿主按需再次提交 |
 | 取消或完成 | 不向未来顶层 Run 续期；持久化命令保留为审计记录 |
 | 进程重启，恢复原 Run | 从持久化 StartRun 恢复，不依赖宿主再次注册 bundle 对象或源文件仍存在 |
-| 恢复时宿主删除或收紧授权 | 重新检查当前 App 上限，拒绝继续执行该授权；不会重新启用历史上限 |
+| 恢复时宿主删除或收紧授权（重启后或运行中 `update_runtime_skill_authorizations`） | 重新检查当前 App 上限，拒绝继续执行该授权；不会重新启用历史上限 |
 
 `files_base64` 保存经过安全路径校验的文件快照，支持二进制附件，并校验
 `content_hash`。源文件之后变化不会替换原 Run 的内容。使用远程 SessionStore 时，

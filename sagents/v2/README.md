@@ -259,7 +259,8 @@ and command's static tool grants apply. A catalog registration alone is not a
 grant to expose every tool.
 
 Team Runs can attach extra Skills through `RunConfig.skill_attachments`, under
-explicit host `RuntimeConfig.runtime_skill_authorizations`. Availability follows
+explicit host `RuntimeConfig.runtime_skill_authorizations` (replaceable while
+running via `app.update_runtime_skill_authorizations`). Availability follows
 the delegation subtree without changing execution permissions. See
 [runtime Skill scope, authorization and recovery](skill/RUNTIME_SKILLS.md).
 

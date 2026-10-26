@@ -1,3 +1,7 @@
+## 2026-10-26 15:30 运行时 Skill 白名单支持运行中更新
+
+- 新增 `app.update_runtime_skill_authorizations()` 整体替换白名单，所有内核共享同一上限，无需重建 App；白名单不再计入 Agent revision hash。（Eric ZZ）
+
 ## 2026-10-19 支持 Web 对话运行中终止和追加输入
 
 - 运行中保持输入框可编辑，空输入显示终止，有内容显示发送；补充要求通过原任务的 V2 steering inbox 在下一处理节点接收，终止复用 CancelRun。

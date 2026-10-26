@@ -476,14 +476,14 @@ class ApplicationAssembler:
             job_runtime=services["execution.job-runtime"],
             execution_binding_provider=self.state.execution_binding_provider,
             derived_state_store=derived_state,
-            runtime_skill_authorizations=self.state.runtime_skill_authorizations,
+            runtime_skill_authorizations=self.state.runtime_skill_authority,
         )
         driver_runtime = HarnessRuntime(
             driver_session_store,
             job_runtime=services["execution.job-runtime"],
             execution_binding_provider=self.state.execution_binding_provider,
             derived_state_store=derived_state,
-            runtime_skill_authorizations=self.state.runtime_skill_authorizations,
+            runtime_skill_authorizations=self.state.runtime_skill_authority,
         )
 
         # Selection/scope ownership belongs to the application; the Agent graph
@@ -653,7 +653,7 @@ class ApplicationAssembler:
                 active_command = await session_store.get_start_command(run_id)
                 from sagents.v2.skill.runtime import active_runtime_skills
                 runtime_skills = await active_runtime_skills(
-                    active_command, session_store, self.state.runtime_skill_authorizations,
+                    active_command, session_store, self.state.runtime_skill_authority.grants,
                 )
                 if runtime_skills and not standard_skills:
                     raise ValueError("runtime Skills require skill.provider and a Skill workspace")

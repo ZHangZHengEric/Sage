@@ -111,7 +111,8 @@ class SAgentBuilder:
         self._registry.validate_runtime(runtime)
         snapshot = copy(self)
         snapshot._state = copy(self._state)
-        snapshot._state.runtime_skill_authorizations = runtime.runtime_skill_authorizations
+        from sagents.v2.contracts.runtime_skills import RuntimeSkillAuthority
+        snapshot._state.runtime_skill_authority = RuntimeSkillAuthority(runtime.runtime_skill_authorizations)
         snapshot._state.manual_dispatcher_start = not runtime.start_workers
         snapshot._state.check_readiness = runtime.check_readiness
         store_selection = runtime.selections("session.store")

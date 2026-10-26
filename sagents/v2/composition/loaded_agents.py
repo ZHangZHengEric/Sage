@@ -270,6 +270,7 @@ class LoadedAgents:
     def set_runtime(self, runtime: RuntimeConfig) -> None:
         self.runtime = runtime
         self.process_assembler._runtime_config = runtime
+        self.builder._state.runtime_skill_authority.grants = runtime.runtime_skill_authorizations
 
     async def run_configuration(self, run_id: str, context: RequestContext) -> dict[str, Any]:
         from dataclasses import asdict
@@ -336,8 +337,11 @@ class LoadedAgents:
                 or selected.deployment_profile != self.runtime.deployment_profile):
             raise ValueError("security profile is an App identity; create a new App to change it")
         if selected.runtime_skill_authorizations != self.runtime.runtime_skill_authorizations:
-            raise ValueError("runtime Skill authorization is an App identity; configure it in build()")
-        return selected
+            raise ValueError(
+                "runtime Skill authorization is App-wide; use update_runtime_skill_authorizations()"
+            )
+        # The live App ceiling is never part of an Agent revision identity.
+        return selected.model_copy(update={"runtime_skill_authorizations": ()})
 
     async def load(self, *args: Any, **kwargs: Any) -> LoadedAgent:
         async with self.application._assembly_operation():

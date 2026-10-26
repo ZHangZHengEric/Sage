@@ -59,7 +59,7 @@ async def initialize_process(catalog):
     binding = services.get("execution.binding")
     control = HarnessRuntime(store, job_runtime=services["execution.job-runtime"],
                              execution_binding_provider=binding, derived_state_store=derived,
-                             runtime_skill_authorizations=runtime.runtime_skill_authorizations)
+                             runtime_skill_authorizations=builder._state.runtime_skill_authority)
     access = AuthorizedSessionAccess(store, runtime=control, derived_state=derived if derived is not store else None)
     scheduler = services["execution.scheduler"]
     capabilities = await scheduler.capabilities()
