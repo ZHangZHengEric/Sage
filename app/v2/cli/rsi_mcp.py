@@ -151,11 +151,10 @@ class DesktopBridge:
 def _score_summary(result):
     report = result.get("report", {})
 
-    def mean(evaluation, split="validation"):
-        if split == "validation" and "validation" in evaluation:
-            return evaluation["validation"].get("score")
+    def training_mean(evaluation):
         grades = [
-            case.get("grade", {}).get("score") for case in evaluation.get("cases", []) if case.get("case", {}).get("split") == split
+            case.get("grade", {}).get("score") for case in evaluation.get("cases", [])
+            if case.get("case", {}).get("split") == "training"
         ]
         grades = [score for score in grades if isinstance(score, (int, float))]
         return sum(grades) / len(grades) if grades else None
@@ -164,11 +163,8 @@ def _score_summary(result):
         "improved": report.get("improved"),
         "termination": report.get("termination"),
         "goal_verified": report.get("goal_verified"),
-        "recommendation_block_reason": report.get("recommendation_block_reason"),
-        "baseline": mean(report.get("baseline", {})),
-        "selected": mean(report.get("selected", {})),
-        "validation": report.get("selected", {}).get("validation"),
-        "training": mean(report.get("selected", {}), "training"),
+        "baseline_training": training_mean(report.get("baseline", {})),
+        "selected_training": training_mean(report.get("selected", {})),
     }
 
 
@@ -224,7 +220,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
             "Optimize existing Sage Desktop agents with real evaluations. "
             "Start returns a durable run ID; poll incrementally with after_sequence. "
             "Reuse request_id for the same intent. Never claim an interim score "
-            "is a final success. Training evidence is visible; dev exposes anonymous scores only; "
+            "is a final success. Training evidence is visible; dev measurements stay host-only; "
             "test evidence is human-only and never returned by these tools, even with include_details. "
             "Applying a version requires explicit user approval."
         ),
@@ -309,7 +305,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
         """Read real conversation/evaluation events. Advance using next_sequence.
 
         Defaults to 50 compact events; include_details returns training evidence/packages.
-        Dev remains anonymous scores and test stays hidden in every mode.
+        Dev measurements and mixed scores stay host-only; test stays hidden in every mode.
 
         Status may already be terminal while older events still need pagination.
         """
@@ -378,7 +374,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
 
     @server.tool()
     async def rsi_version(agent_id: str, version_id: str) -> dict:
-        """Read a package, training evidence and anonymous dev scores before applying."""
+        """Read a package, training evidence and retention status before applying."""
         return model_view(await bridge.request(
             "GET", f"{base(agent_id)}/versions/{segment(version_id)}"
         ))

@@ -84,7 +84,8 @@ The evidence/ directory is read-only. Do not change grading, acquire permissions
 modify unrelated files, or create a second JSON patch. An unchanged package is valid
 when no evidence supports a useful change. The host validates file differences,
 seals a separate version/package copy, then loads that exact validated bundle
-for inference. Validation provides anonymous scores only; never infer hidden cases.
+for inference. Validation measurements remain host-only; never infer hidden cases
+or their scores from retention status or training-growth scheduling.
 """.strip()
 
 

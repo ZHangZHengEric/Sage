@@ -62,7 +62,7 @@ from sagents.v2.optimization.principles import (
     with_principles,
 )
 from sagents.v2.optimization.journal import OptimizationJournal
-from sagents.v2.optimization.feedback import training_feedback_batch, training_feedback_summary
+from sagents.v2.optimization.feedback import training_feedback_batch, training_feedback_summary, training_growth_feedback
 from sagents.v2.optimization.recovery import OptimizationRecoveryRequired, OptimizationTransientFailure, configuration_fingerprint, case_key, engine_fingerprint, model_transport_interrupted
 from sagents.v2.optimization.native_recovery import RevalidatingOptimizationRecovery as OptimizationRecovery
 from sagents.v2.optimization.native_episode import close_single_turn_episode, evaluation_episode_finished
@@ -227,11 +227,12 @@ class AgentPackageOptimizer:
 
         validation_case_count sets the immutable validation size. Training is
         independently generated and extended against the current agent each round;
-        only anonymous validation scores reach the tuner. No final exam is run.
+        validation results remain host-only. No final exam is run.
         Explicit None retains the legacy fixed-suite SDK path for old callers.
 
         Validation inputs, rubrics, answers and rationale stay hidden from the
-        tuner; anonymous scores are disclosed. Adaptive selection improves the
+        tuner, including aggregate and anonymous per-case scores. The tuner receives
+        only retention status and parent identity. Adaptive selection improves the
         equally weighted split means by ``min_improvement``, allowing recorded
         per-case regressions that later rounds repair. Legacy fixed suites keep
         their historical per-case/latency selection policy.
@@ -1594,21 +1595,6 @@ class AgentPackageOptimizer:
                     else []
                 )
 
-                def validation_summary(evaluation):
-                    results = [
-                        r for r in evaluation.cases if r.case.split == "validation"
-                    ]
-                    return {
-                        "score": sum(r.grade.score for r in results) / len(results),
-                        "passed": sum(r.grade.passed for r in results),
-                        "total": len(results),
-                        "items": [
-                            {"index": i, "score": r.grade.score,
-                             **({"objective_score": r.objective_score} if r.objective_score is not None else {})}
-                            for i, r in enumerate(results, 1)
-                        ],
-                    }
-
                 async def add_training_challenges(index):
                     nonlocal fixed_suite, best_evaluation, active_phase, active_round
                     active_round = index
@@ -1772,8 +1758,8 @@ class AgentPackageOptimizer:
                     patch = None
                     candidate = None
                     evaluation = None
-                    # Exclude hidden case details and free-text selection reasons.
-                    # Adaptive mode may disclose selection outcomes and scores.
+                    # Dev measurements and mixed scores remain host-only. Retention
+                    # outcomes/parent identity are the intentional indirect feedback.
                     file_evidence = "file_read" in self.tuner.package.resolved_manifest().agents[self.tuner.agent_id].tools
                     training_cases = [item for item in best_evaluation.cases if item.case.split == "training"]
                     training = ([training_feedback_summary(item) for item in training_cases]
@@ -1792,13 +1778,7 @@ class AgentPackageOptimizer:
                     previous = [
                         {
                             "round": item.round,
-                            **({
-                                "accepted": item.accepted,
-                                "overall_before": item.overall_before,
-                                "overall_after": item.overall_after,
-                                "objective_before": item.objective_before,
-                                "objective_after": item.objective_after,
-                            } if adaptive else {}),
+                            **({"accepted": item.accepted} if adaptive else {}),
                             "patch": item.patch.model_dump(mode="json")
                             if item.patch
                             else None,
@@ -1957,16 +1937,13 @@ class AgentPackageOptimizer:
                                                        else "training-evidence/experience.md"}
                                                       if file_evidence else {"document": experience_document(history, max_chars=24000)}),
                                 "training": [] if file_evidence else training,
-                                "training_growth": training_growth,
+                                "training_growth": training_growth_feedback(training_growth),
                                 "unmeasured_training_cases": [c.model_dump(mode="json", exclude={"reference_answer"})
                                     for c in fixed_suite.cases if c.split == "training"
                                     and c.id not in {r.case.id for r in best_evaluation.cases}],
                                 **(
                                     {
                                         "selected_round": selected_round,
-                                        "validation": validation_summary(
-                                            best_evaluation
-                                        ),
                                         "selection_policy": {
                                             **builtin_scoring.selection_policy(),
                                             "min_improvement": min_improvement,
@@ -1974,21 +1951,13 @@ class AgentPackageOptimizer:
                                         },
                                         "training_regressions": training_regressions[:16],
                                         "training_regressions_omitted": max(0, len(training_regressions) - 16),
-                                        "validation_history": [
-                                            {
-                                                "round": h.round,
-                                                **validation_summary(h.evaluation),
-                                            }
-                                            for h in history
-                                            if h.evaluation is not None
-                                        ],
                                     }
                                     if adaptive
                                     else {}
                                 ),
                                 "previous_attempts": previous,
                                 "previous_attempts_omitted": max(0, len(history) - 4),
-                                "feedback_note": "Validation item indexes are anonymous and stable within this run; only scores are disclosed, never question text, answers or grading feedback. Tool evidence is bounded excerpts; complete raw records remain with the host. Truncated evidence is not proof of absence."
+                                "feedback_note": "Validation results are host-only: no questions, answers, diagnoses, aggregate or per-case scores, score history or mixed selection scores are disclosed. Retention outcomes and parent identity are indirect feedback, not proof of generalization. Training growth is host-controlled; do not infer hidden-case outcomes from scheduling. Tool evidence is bounded excerpts; complete raw records remain with the host. Truncated evidence is not proof of absence."
                                 + (" The package is the retained parent identified by selected_round (0 means the original). Previous attempts marked accepted=false are not part of that parent. Passing package validation does not establish performance. Do not describe a rejected patch as retained; if retrying any part of it, explain the new training evidence and treat its benefit as unverified."
                                    if adaptive else ""),
                             },

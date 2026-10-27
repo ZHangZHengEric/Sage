@@ -1,16 +1,22 @@
 """Model-facing RSI views. Human Desktop views retain their separate evidence.
 
 Detailed MCP reads do not expand visibility: training evidence is available,
-validation is anonymous scores only, and test observations are never returned.
+validation measurements and mixed scores are host-only, and test observations
+are never returned. Retention and scheduling outcomes are indirect feedback.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 
+from sagents.v2.optimization.feedback import training_growth_feedback
+
 _PRIVATE = {'test_observations', 'benchmark_measurement', 'agent_calls', 'internal_agents', 'call', 'tuner_call',
             'recommendation_block_reason', 'assets', 'config', 'reference_answer',
             'dataset_manifest', 'generated_dataset_manifest', 'dataset_diagnostics', 'dataset_version', 'dataset_versions', 'dataset_validation',
-            'exclusions', 'active_case_ids'}
+            'exclusions', 'active_case_ids',
+            'validation', 'validation_history', 'validation_score', 'validation_scores',
+            'dev_score', 'dev_scores', 'overall_score', 'overall_before', 'overall_after',
+            'objective_before', 'objective_after', 'regressed_validation'}
 _EVENT_FIELDS = {
     'operation_started': {'goal', 'agent_id', 'rounds', 'evaluation_repeats', 'max_concurrency', 'package', 'constraints', 'optimization_scope', 'builtin_scoring'},
     'suite_fixed': {'suite'},
@@ -29,17 +35,6 @@ _EVENT_FIELDS = {
     'optimization_stopped': {'reason', 'completed_rounds', 'stability_passes'},
     'result_completed': {'result'},
 }
-
-
-def validation_scores(cases):
-    rows = [c for c in cases if c.get('case', {}).get('split') == 'validation']
-    scores = [r.get('grade', {}).get('score') for r in rows]
-    valid = all(isinstance(s, (int, float)) for s in scores)
-    return {'score': sum(scores) / len(scores) if scores and valid else None,
-            'total': len(rows), 'passed': sum(r.get('grade', {}).get('passed') is True for r in rows),
-            'items': [{'index': i, 'score': r.get('grade', {}).get('score'),
-                       **({'objective_score': r['objective_score']} if r.get('objective_score') is not None else {})}
-                      for i, r in enumerate(rows, 1)]}
 
 
 def model_view(value):
@@ -76,14 +71,14 @@ def model_view(value):
         if key in _PRIVATE or key.startswith(('human_test', 'final_')):
             continue
         if key == 'cases' and isinstance(child, list):
-            if any('case' in r for r in child if isinstance(r, dict)):
-                safe['validation'] = validation_scores(child)
-            elif any(r.get('split') == 'validation' for r in child if isinstance(r, dict)):
+            if any(r.get('split') == 'validation' for r in child if isinstance(r, dict)):
                 safe['validation_count'] = sum(r.get('split') == 'validation' for r in child)
             safe[key] = model_view(child)
+        elif key == 'training_growth' and isinstance(child, dict):
+            safe[key] = training_growth_feedback(child)
         elif key == 'reason':
             # Old fixed-suite rejection messages may contain private case IDs.
-            safe[key] = child if child in {'target_reached', 'stagnation', 'round_limit'} else 'See training evidence and anonymous validation scores'
+            safe[key] = child if child in {'target_reached', 'stagnation', 'round_limit'} else 'See training evidence; selection measurements remain host-only'
         elif key.endswith('package') and isinstance(child, dict) and 'manifest' in child:
             package = deepcopy(child)
             package['manifest']['tests'] = {'scenarios': [], 'gates': {}}

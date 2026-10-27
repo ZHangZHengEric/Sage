@@ -185,3 +185,16 @@ def training_feedback_batch(results, *, max_chars=120000, include_reference_answ
         if len(json.dumps(values, ensure_ascii=False)) > max_chars:
             raise ValueError("training feedback budget cannot retain all case identities and trial grades")
     return values
+
+
+def training_growth_feedback(decision):
+    """Expose scheduling and training facts, never dev counts or gate reasons.
+
+    Scheduling can depend on dev; its allowed flag is intentional indirect
+    feedback, not evidence identifying which hidden measurements changed.
+    Use an allowlist so new host diagnostic fields stay private by default.
+    """
+    return {key: decision[key] for key in (
+        "enabled", "allowed", "previous_round", "training_passed",
+        "training_total", "training_measured", "regressed_training",
+    ) if key in decision}

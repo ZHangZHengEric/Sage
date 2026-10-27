@@ -20,7 +20,7 @@ def write_directory_index(root):
   - `manifest.json`、`dependencies.json`、`files/prompts/`、`files/skills/`、`files/tools/`。
 - `workspace/iterations/round-NNN/version/package/`：校验后封存并用于推理的候选包。
 - `workspace/iterations/round-NNN/evaluation/training-evidence/`：该候选的训练执行和分类分析。
-- `workspace/iterations/round-NNN/validation-scores.json`：匿名 dev 得分。
+- `workspace/iterations/round-NNN/validation-scores.json`：宿主与人工审计使用的匿名 dev 得分，不进入调优方 evidence。
 - `workspace/iterations/round-NNN/proposal.json`、`decision.json`：实际差异与采纳结论。
 - `workspace/iterations/round-NNN/experience.md`：本轮结束后的累计经验快照；采纳状态与调优方假设分开记录。
 - `human-test/`：仅供人查看的 test 执行、评估和分数，不提供给调优方。

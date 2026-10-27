@@ -2748,7 +2748,7 @@ class AdaptiveRunner(Runner):
 
 
 @pytest.mark.asyncio
-async def test_adaptive_questions_grow_validation_stays_fixed_and_only_aggregate_reaches_tuner():
+async def test_adaptive_questions_grow_and_validation_results_stay_host_only():
     runner = AdaptiveRunner()
     result = await optimizer(runner).optimize(
         bundle(),
@@ -2777,13 +2777,9 @@ async def test_adaptive_questions_grow_validation_stays_fixed_and_only_aggregate
     requests = [
         json.loads(c)["data"] for name, c in runner.requests if name == "test.tuner"
     ]
-    assert requests[0]["validation"] == {
-        "score": 0.4,
-        "passed": 0,
-        "total": 5,
-        "items": [{"index": i, "score": 0.4} for i in range(1, 6)],
-    }
-    assert len(requests[1]["validation_history"]) == 1
+    assert all("validation" not in r and "validation_history" not in r for r in requests)
+    assert requests[1]["selected_round"] == 1
+    assert requests[1]["previous_attempts"][0]["accepted"] is True
     assert "validation secret task" not in json.dumps(requests)
     assert "validation-0" not in json.dumps(requests)
     assert result.report.final_verification is None
@@ -2848,7 +2844,7 @@ def test_memorization_flag_does_not_block_goal_and_permission_review():
 
 
 @pytest.mark.asyncio
-async def test_adaptive_validation_item_scores_have_stable_anonymous_indexes_without_feedback():
+async def test_adaptive_validation_item_scores_remain_in_host_report_only():
     class ItemScores(AdaptiveRunner):
         async def run(self, package, agent_id, content, ctx):
             if package.manifest.metadata.id == "test.evaluator":
@@ -2876,7 +2872,7 @@ async def test_adaptive_validation_item_scores_have_stable_anonymous_indexes_wit
             return await super().run(package, agent_id, content, ctx)
 
     runner = ItemScores()
-    await optimizer(runner).optimize(
+    result = await optimizer(runner).optimize(
         bundle(),
         context=context(),
         goal="Conversions",
@@ -2886,18 +2882,11 @@ async def test_adaptive_validation_item_scores_have_stable_anonymous_indexes_wit
     requests = [
         json.loads(c)["data"] for name, c in runner.requests if name == "test.tuner"
     ]
-    assert requests[0]["validation"]["items"] == [
-        {"index": 1, "score": 0.2},
-        {"index": 2, "score": 0.5},
-    ]
-    assert requests[1]["validation"]["items"] == [
-        {"index": 1, "score": 0.6},
-        {"index": 2, "score": 0.9},
-    ]
-    assert (
-        requests[1]["validation_history"][0]["items"]
-        == requests[1]["validation"]["items"]
-    )
+    assert all("validation" not in r and "validation_history" not in r for r in requests)
+    assert [c.grade.score for c in result.report.baseline.cases if c.case.split == "validation"] == [.2, .5]
+    assert [c.grade.score for c in result.report.rounds[0].evaluation.cases if c.case.split == "validation"] == [.6, .9]
+    assert "overall_before" not in requests[1]["previous_attempts"][0]
+    assert "objective_before" not in requests[1]["previous_attempts"][0]
     payload = json.dumps(requests)
     assert "PRIVATE validation explanation" not in payload
     assert "validation secret task" not in payload

@@ -239,12 +239,16 @@ def private_run():
     ]}
     report = {'suite': {'cases': [train, dev]}, 'baseline': evaluation, 'selected': evaluation,
         'agent_calls': [{'request': 'DEV_PROCESS_SECRET TEST_QUESTION_SECRET'}],
+        'validation_history': [{'score': .8237}],
+        'overall_before': .6237, 'objective_after': .7237,
         'suite_review': {'approved': True, 'issues': [], 'rationale': 'DEV_QUESTION_SECRET'}}
     result = {'report': report}
     return {'id': 'run', 'status': 'completed', 'result': result,
         'human_test_suite': {'cases': [test]}, 'test_observations': [{'score': .137}],
         'human_test_error': 'TEST_ERROR_SECRET',
         'iterations': [{'evaluation': evaluation, 'reason': 'DEV_ID_SECRET regressed',
+            'overall_after': .6237, 'objective_before': .7237,
+            'training_growth': {'allowed': False, 'reason': 'regression', 'regressed_validation': 1, 'training_total': 1},
             'regressions': [{'split': 'validation', 'case_id': 'DEV_ID_SECRET', 'previous_score': .9}]}],
         'events': [
             {'sequence': 1, 'event': 'suite_fixed', 'data': {'suite': {'cases': [train, dev, test]}}},
@@ -288,15 +292,20 @@ async def test_every_mcp_read_mode_seals_test_and_dev_content(tmp_path, tool, ar
     response = await create_server(tmp_path, bridge=Bridge()).call_tool(tool, arguments)
     text = response[0].text
     assert 'SECRET' not in text
-    assert '0.137' not in text
+    assert all(number not in text for number in ('0.137', '0.8', '0.6237', '0.7237', '0.8237'))
+    assert 'overall_after' not in text and 'regressed_validation' not in text
     assert 'test_observations' not in text and 'human_test_suite' not in text
     assert 'TRAIN_VISIBLE' in text
     if tool == 'rsi_status' and arguments.get('include_details'):
         value = json.loads(text)
-        assert value['result']['report']['selected']['validation'] == {
-            'score': .8, 'total': 1, 'passed': 0, 'items': [{'index': 1, 'score': .8}]}
+        assert 'validation' not in value['result']['report']['selected']
+        assert value['iterations'][0]['training_growth'] == {'allowed': False, 'training_total': 1}
         assert value['events'][3]['data']['result']['observation']['output'] == 'TRAIN_PROCESS'
         assert value['next_sequence'] == 7
+    if tool == 'rsi_status' and not arguments.get('include_details'):
+        scores = json.loads(text)['scores']
+        assert scores['baseline_training'] == .4 and scores['selected_training'] == .4
+        assert 'validation' not in scores and 'selected' not in scores
     if tool == 'rsi_questions':
         assert json.loads(text)['validation'] == {'total': 1, 'questions_visible': False}
 

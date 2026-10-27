@@ -101,7 +101,7 @@ async def test_next_round_uses_overall_better_parent_and_training_regressions_on
     assert requests[1]["training_regressions"]
     assert all(r["current"]["case"]["split"] == "training" for r in requests[1]["training_regressions"])
     assert "validation secret task" not in json.dumps(requests[1])
-    assert "rationale" not in json.dumps(requests[1]["validation"])
+    assert "validation" not in requests[1] and "validation_history" not in requests[1]
 
 
 @pytest.mark.asyncio
@@ -121,8 +121,9 @@ async def test_rejected_compliant_attempt_is_not_presented_as_retained_to_tuner(
     attempt, = next_request["previous_attempts"]
     assert next_request["selected_round"] == 0
     assert attempt["accepted"] is False
-    assert attempt["overall_before"] == pytest.approx(0.8)
-    assert attempt["overall_after"] == pytest.approx(0.7)
+    assert "overall_before" not in attempt and "overall_after" not in attempt
+    assert first.overall_before == pytest.approx(0.8)
+    assert first.overall_after == pytest.approx(0.7)
     assert attempt["semantic_review"]["approved"] is True
     assert "guidance-1" not in json.dumps(next_request["package"])
     assert "accepted=false are not part of that parent" in next_request["feedback_note"]

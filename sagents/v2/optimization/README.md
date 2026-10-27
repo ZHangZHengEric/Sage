@@ -124,17 +124,23 @@ Execution completion and enabled generated-tool integrity audits still gate
 acceptance. Candidate checks are deterministic by default; an explicitly supplied
 semantic reviewer is an additional host opt-in gate.
 
-Tuning receives complete bounded training evidence, previous attempts, validation
-mean/pass count, and per-question scores under stable anonymous indexes. No
-validation question text, original IDs, rubrics, answers or grading rationale is
-included. Validation score history uses the same indexes within a run. The host
-report and Desktop question library retain the full evidence for user inspection.
-The tuner additionally receives bounded unresolved training regressions with
-their prior scores and current training evidence. Validation regressions remain
-anonymous scores only. Round records include overall scores before/after and all
-observed per-case regressions for host inspection.
-These repeated validation scores guide selection and tuning; they are not an
-untouched final exam or an independent quality certification.
+Tuning receives bounded training evidence, previous attempts, retention status
+and the retained parent identity. Validation aggregates, pass counts, anonymous
+per-question scores, historical scores and mixed train/dev selection scores are
+host-only. No validation question text, original IDs, rubrics, answers or grading
+rationale is included. The external RSI MCP enforces the same boundary in all
+read modes, including detailed reads, history and versions; compact score summaries
+report explicitly named training means only.
+The tuner additionally receives unresolved training regressions with their prior
+scores and current training evidence. Growth feedback exposes host scheduling and
+training facts, but no validation regression counts or private gate reasons.
+Retention and scheduling still convey indirect feedback, so hiding scores does
+not make repeatedly used dev data an untouched final exam.
+Host reports, journals, `validation-scores.json` and Desktop retain the full
+measurements, mixed scores and regression diagnostics for user inspection. The
+training evidence directory and experience-document layout stay unchanged. This
+visibility change updates the recovery engine fingerprint; resume old experiments
+with their original engine or start a new run instead of replaying old requests.
 
 Retaining progress and verifying stable success are separate. At a round or
 patience limit, the adaptive result keeps the retained stronger package and its
@@ -419,8 +425,8 @@ host-provided implementations and grants.
 The adaptive workflow enables `OptimizationStoppingPolicy` by default: all
 accumulated training and fixed validation cases must pass with score >= 0.95,
 followed by a fresh complete evaluation (two independent passes total). Failed
-fresh evidence replaces the measurement of that package; training details and
-anonymous validation scores reach later tuning. Reused results do not establish
+fresh evidence replaces the measurement of that package; training details reach
+later tuning, while validation results remain host-only. Reused results do not establish
 stability. Every new round first adds training challenges; the training set grows
 until the run stops. Three rounds without retained improvement stop for
 stagnation; maximum rounds and host timeouts also apply.
@@ -749,7 +755,7 @@ with a complete shipping policy, and expense normalization with a different targ
 model. Each uses a separate persisted Agent and independently generated questions.
 An objective Python oracle checks outputs against the declared business rules,
 including actual generated-tool execution where required. It also checks fixed
-validation, anonymous per-item score disclosure, same-question parent/candidate
+validation, host-only validation measurements, same-question parent/candidate
 comparisons and unchanged live Agent configurations. No candidate is applied.
 
 Saved request/run identities allow the command to inspect existing runs without

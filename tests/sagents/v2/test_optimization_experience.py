@@ -87,6 +87,9 @@ async def test_resume_reconstructs_experience_without_replaying_completed_target
         assert result.report.tuning_experience.count(lesson) == 1
     data = [json.loads(text)['data'] for name, text in second.requests if name == 'test.tuner']
     assert 'lesson-one' in data[0]['tuning_experience']['document']
+    assert all('validation' not in request and 'validation_history' not in request for request in data)
+    assert all('overall_before' not in attempt and 'objective_before' not in attempt
+               for request in data for attempt in request['previous_attempts'])
 
 
 @pytest.mark.asyncio
@@ -96,6 +99,10 @@ async def test_file_editor_notes_are_separate_from_authored_package_and_next_rou
         async def run(self, package, agent_id, content, ctx):
             if package.manifest.metadata.id == 'test.tuner':
                 number = json.loads(package.files[EDIT_CONTEXT])['round']
+                payload = json.loads(content)['data']
+                assert 'validation' not in payload and 'validation_history' not in payload
+                assert all('overall_before' not in attempt and 'objective_before' not in attempt
+                           for attempt in payload['previous_attempts'])
                 root = tmp_path / f'iterations/round-{number:03d}/editor'
                 if number == 2:
                     assert 'editor-lesson-1' in (root / 'evidence/training-evidence/experience.md').read_text()
