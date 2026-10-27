@@ -72,3 +72,14 @@ class RuntimeSkillAuthorization(StrictModel):
             descriptor=bundle.descriptor, content_hash=bundle.content_hash,
             target_agent_ids=target_agent_ids, max_bytes=max_bytes,
         )
+
+
+class RuntimeSkillAuthority:
+    """One App's current host ceiling, shared by every kernel and revision.
+
+    Admission, delegation and each execution or resume read ``grants`` at
+    check time, so a replacement applies to them without rebuilding the App.
+    """
+
+    def __init__(self, grants=()) -> None:
+        self.grants: tuple[RuntimeSkillAuthorization, ...] = tuple(grants)

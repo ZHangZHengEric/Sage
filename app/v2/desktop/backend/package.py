@@ -203,10 +203,15 @@ def _runtime_capabilities(
     invalid = REMOVED_CAPABILITIES.intersection(selections) | REMOVED_CAPABILITIES.intersection(configs)
     if invalid:
         raise ValueError(f"removed capability configuration: {', '.join(sorted(invalid))}")
+    from sagents.v2.runtime.extensions.official import builtin_extension_registry
     runtime = default_runtime(session_root)
     paths = {
         key: runtime.selections(key)[0].config
         for key in runtime.capabilities
+    }
+    official = {
+        registration.descriptor.plugin_id: registration.descriptor.config_schema
+        for registration in builtin_extension_registry().registrations()
     }
     capabilities: dict[str, CapabilityBinding] = {}
     for capability in _MANIFEST_CAPABILITIES:
@@ -215,9 +220,11 @@ def _runtime_capabilities(
             selections.get(capability, DESKTOP_COMPONENT_DEFAULTS[capability]),
         )
         host_config = dict(paths.get(capability, {}))
-        if capability == "observability.provider":
-            from sagents.v2.runtime.extensions.official import builtin_extension_registry
-            properties = builtin_extension_registry().get(plugin_id).descriptor.config_schema["properties"]
+        # Host paths belong to the default plugin; a stricter alternative such
+        # as ``sage.memory.noop`` must not receive fields it does not declare.
+        schema = official.get(plugin_id) or {}
+        if schema.get("additionalProperties") is False:
+            properties = schema.get("properties", {})
             host_config = {key: value for key, value in host_config.items() if key in properties}
 
         if capability == "workspace.initializer":

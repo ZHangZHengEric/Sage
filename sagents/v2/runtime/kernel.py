@@ -26,6 +26,7 @@ from sagents.v2.contracts.commands import (
 )
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.runtime_skills import RuntimeSkillAuthority
 from sagents.v2.contracts.events import (
     CheckpointEventData,
     RunEventData,
@@ -72,7 +73,15 @@ class HarnessRuntime:
         self.job_runtime = job_runtime
         self.execution_binding_provider = execution_binding_provider
         self.derived_state_store = derived_state_store
-        self.runtime_skill_authorizations = runtime_skill_authorizations
+        self._skill_authority = (
+            runtime_skill_authorizations
+            if isinstance(runtime_skill_authorizations, RuntimeSkillAuthority)
+            else RuntimeSkillAuthority(runtime_skill_authorizations)
+        )
+
+    @property
+    def runtime_skill_authorizations(self):
+        return self._skill_authority.grants
 
     async def record_execution_binding(self, binding, context):
         """Persist observational binding facts; policy authority stays in StartRun."""

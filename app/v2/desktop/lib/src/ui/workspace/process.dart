@@ -90,7 +90,11 @@ class _ProcessPanelState extends State<_ProcessPanel> {
               button: true,
               expanded: _expanded,
               label: context.l10n.text(
-                panel.running ? 'workspace.processing' : 'workspace.processed',
+                panel.running
+                    ? 'workspace.processing'
+                    : panel.failed
+                    ? 'workspace.processFailed'
+                    : 'workspace.processed',
               ),
               child: InkWell(
                 key: const ValueKey('process-panel-toggle'),
@@ -108,19 +112,28 @@ class _ProcessPanelState extends State<_ProcessPanel> {
                           ),
                         ),
                         const SizedBox(width: 8),
+                      ] else if (panel.failed) ...[
+                        Icon(
+                          CupertinoIcons.exclamationmark_circle,
+                          size: 15,
+                          color: colors.error,
+                        ),
+                        const SizedBox(width: 8),
                       ],
                       Text(
                         panel.running
                             ? context.l10n.text('workspace.processing')
+                            : panel.failed
+                            ? context.l10n.text('workspace.processFailed')
                             : context.l10n.text('workspace.processedTime', {
                                 'time': _elapsedLabel(elapsed),
                               }),
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
-                          color: colors.onSurfaceVariant.withValues(
-                            alpha: 0.86,
-                          ),
+                          color: !panel.running && panel.failed
+                              ? colors.error
+                              : colors.onSurfaceVariant.withValues(alpha: 0.86),
                         ),
                       ),
                       if (panel.running) ...[
@@ -147,6 +160,20 @@ class _ProcessPanelState extends State<_ProcessPanel> {
                 ),
               ),
             ),
+            if (!panel.running &&
+                panel.failed &&
+                panel.failureMessage.isNotEmpty)
+              Padding(
+                key: const ValueKey('process-panel-failure'),
+                padding: const EdgeInsets.only(left: 23, bottom: 8),
+                child: SelectableText(
+                  panel.failureMessage,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontSize: 12,
+                    color: colors.error,
+                  ),
+                ),
+              ),
             Divider(
               height: 1,
               color: colors.outlineVariant.withValues(alpha: 0.36),

@@ -2466,7 +2466,11 @@ class WorkspaceController extends ChangeNotifier {
         conversation.thinking = false;
         error = exception.toString();
         if (conversation.runId.isEmpty) {
-          conversation.status = RunStatus.failed;
+          _applyTerminalState(
+            conversation,
+            RunStatus.failed,
+            failureMessage: _runFailureText(exception),
+          );
         } else if (_isActive(conversation.status)) {
           unawaited(_recoverStream(conversation));
         }
@@ -2487,6 +2491,15 @@ class WorkspaceController extends ChangeNotifier {
       cancelOnError: true,
     );
     _streams[conversation.id] = subscription;
+  }
+
+  String _runFailureText(Object exception) {
+    final message = exception.toString();
+    if (exception is! SageApiException) return message;
+    final diagnostic =
+        exception.metadata['diagnostic_message']?.toString().trim() ?? '';
+    if (diagnostic.isEmpty || message.contains(diagnostic)) return message;
+    return '$message\n$diagnostic';
   }
 
   bool _isActive(RunStatus status) => {
@@ -2700,13 +2713,15 @@ class WorkspaceController extends ChangeNotifier {
         completedAt: occurredAt,
       );
     } else if (type == 'run.failed') {
+      final rawError = eventData['error'];
+      final message = rawError is Map ? rawError['message']?.toString() : null;
       _applyTerminalState(
         conversation,
         RunStatus.failed,
         completedAt: occurredAt,
+        failureMessage: message ?? '',
       );
-      final rawError = eventData['error'];
-      if (rawError is Map) error = rawError['message']?.toString();
+      if (message != null) error = message;
     }
     if (_shouldRefreshWorkspace(type)) {
       _scheduleWorkspaceRefresh(conversation);
@@ -2977,6 +2992,8 @@ class WorkspaceController extends ChangeNotifier {
     Conversation conversation, {
     bool promoteFinal = false,
     DateTime? completedAt,
+    bool failed = false,
+    String failureMessage = '',
   }) {
     final panel =
         conversation.processPanels.where((value) => value.running).lastOrNull ??
@@ -2994,6 +3011,10 @@ class WorkspaceController extends ChangeNotifier {
     }
     panel.running = false;
     panel.completedAt = completedAt ?? DateTime.now();
+    if (failed) {
+      panel.failed = true;
+      if (failureMessage.isNotEmpty) panel.failureMessage = failureMessage;
+    }
     for (final segment in conversation.processPanels.where(
       (value) => value.runId == panel.runId,
     )) {
@@ -3056,6 +3077,8 @@ class WorkspaceController extends ChangeNotifier {
     }
     panel.completedAt = null;
     panel.running = true;
+    panel.failed = false;
+    panel.failureMessage = '';
   }
 
   void _trackToolResult(Conversation conversation, Map<String, Object?> data) {
@@ -3158,6 +3181,7 @@ class WorkspaceController extends ChangeNotifier {
     RunStatus status, {
     bool promoteFinal = false,
     DateTime? completedAt,
+    String failureMessage = '',
   }) {
     conversation.status = status;
     conversation.thinking = false;
@@ -3167,6 +3191,8 @@ class WorkspaceController extends ChangeNotifier {
       conversation,
       promoteFinal: promoteFinal,
       completedAt: completedAt,
+      failed: status == RunStatus.failed,
+      failureMessage: failureMessage,
     );
     conversation.resetCompletedGoalMode();
     if (status == RunStatus.completed &&
@@ -3482,6 +3508,8 @@ class WorkspaceController extends ChangeNotifier {
             startedAt: panel.startedAt,
             completedAt: panel.completedAt,
             running: panel.running,
+            failed: panel.failed,
+            failureMessage: panel.failureMessage,
             activities: panel.activities,
           );
         }

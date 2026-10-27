@@ -148,6 +148,7 @@ class SAgent:
             runtime.session_store, runtime=runtime
         )
         self._tasks: dict[str, asyncio.Task[RunSnapshot]] = {}
+        self._recoveries: set[asyncio.Task] = set()
         self._observers: set[asyncio.Task[RunSnapshot]] = set()
         self._drivers: dict[str, RunDriver] = {}
         self._closed = False
@@ -490,6 +491,11 @@ class SAgent:
         # a scheduler/lease concern, not this in-process registry.
         current = self._tasks.get(run_id)
         if current is not None and not current.done():
+            if current in self._recoveries:
+                return asyncio.create_task(
+                    self._join_recovery(run_id, current),
+                    name=f"sagent-v2-join-recover:{run_id}",
+                )
             return current
         task = asyncio.create_task(
             self._create_and_drive(run_id, context, resume=resume),
@@ -517,8 +523,33 @@ class SAgent:
         return await self._drive(driver, run_id, context, resume=resume)
 
     async def _recover_interrupted_run(self, run_id, context):
-        """Ask the concrete driver to rebuild a crossed durable barrier."""
+        """Ask the concrete driver to rebuild a crossed durable barrier.
 
+        Recovery is a live driver task like any execution: registering it lets
+        a concurrent ensure_execution join it instead of driving the Run twice.
+        """
+
+        current = self._tasks.get(run_id)
+        if current is not None and not current.done():
+            return await current
+        task = asyncio.create_task(
+            self._recover_with_driver(run_id, context),
+            name=f"sagent-v2-recover:{run_id}",
+        )
+        self._tasks[run_id] = task
+        self._recoveries.add(task)
+        task.add_done_callback(self._recoveries.discard)
+        task.add_done_callback(
+            lambda completed, key=run_id: self._discard_task(key, completed)
+        )
+        return await task
+
+    async def _join_recovery(self, run_id, recovery):
+        # None means "driver cannot recover"; execution callers still need a snapshot.
+        result = await asyncio.shield(recovery)
+        return result if result is not None else await self.runtime.get_run(run_id)
+
+    async def _recover_with_driver(self, run_id, context):
         driver = self._drivers.get(run_id)
         if driver is None:
             driver = self._driver_factory(run_id)

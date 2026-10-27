@@ -291,6 +291,68 @@ async def test_cold_restart_retains_source_scope_and_rechecks_host_grant(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_live_authorization_update_applies_without_rebuild(tmp_path):
+    app, bindings, models = await open_app(tmp_path, {"root": (LOAD,)}, authorized=False)
+    try:
+        agent = await load_tree(app)
+        with pytest.raises(SageV2Error, match="host authorization"):
+            await run(app, agent, key="before-grant")
+        grant = RuntimeSkillAuthorization.from_bundle(EXTRA)
+        assert await app.update_runtime_skill_authorizations([grant.model_dump(mode="json")]) == (grant,)
+        assert app.runtime_configuration.runtime_skill_authorizations == (grant,)
+        # The App ceiling is not part of an Agent revision identity.
+        assert (await load_tree(app)).composition_hash == agent.composition_hash
+        result, _ = await run(app, agent, key="after-grant")
+        assert result.state.value == "completed"
+        assert any("UNIQUE RUNTIME INSTRUCTIONS" in prompt(request) for _, request in models.seen)
+        await app.update_runtime_skill_authorizations(())
+        with pytest.raises(SageV2Error, match="host authorization"):
+            await run(app, agent, key="after-revoke")
+        with pytest.raises(ValueError, match="update_runtime_skill_authorizations"):
+            await app.load_agent(no_skills("maker"), runtime=app.runtime_configuration.model_copy(
+                update={"runtime_skill_authorizations": (grant,)}))
+    finally:
+        await app.close()
+        await bindings.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revoke", [False, True])
+async def test_live_revocation_rechecks_suspended_run_on_resume(tmp_path, revoke):
+    app, bindings, _ = await open_app(tmp_path, {"root": (delegate("d1"),), "d1": (delegate("d2"),),
+        "d1.d2": (delegate("maker"),), "d1.d2.maker": (LOAD, ("file_write", {
+            "file_path": "live.txt", "content": "resumed"}))}, approval=True)
+    try:
+        agent = await load_tree(app)
+        paused, _ = await run(app, agent, attachments=(ATTACHMENT.model_copy(update={"target_agent_id": "d1"}),))
+        assert paused.state.value == "suspended"
+        if revoke:
+            await app.update_runtime_skill_authorizations(())
+        state = await app.runtime.get_run(paused.run_id)
+        store = app.runtime.session_store
+        suspension = await store.get_suspension(state.suspension_id)
+        interaction = await store.get_interaction(suspension.interaction_id)
+        receipt = await app.runtime.reply_interaction(ReplyInteraction(
+            run_id=paused.run_id, suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id, expected_revision=state.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="approve_once", idempotency_key="approve-live",
+        ), CONTEXT)
+        assert receipt.decision.value == "accepted", receipt
+        await app.entrypoint().continue_run(paused.run_id, CONTEXT, agent=agent)
+        async with asyncio.timeout(60):
+            while (await app.runtime.get_run(paused.run_id)).state.value in {"queued", "running", "resuming"}:
+                await asyncio.sleep(0.01)
+        state = await app.runtime.get_run(paused.run_id)
+        assert state.state.value == ("failed" if revoke else "completed")
+        assert (tmp_path / "workspace/live.txt").exists() == (not revoke)
+    finally:
+        await app.close()
+        await bindings.close()
+
+
+@pytest.mark.asyncio
 async def test_cancellation_does_not_renew_attachment_in_next_run(tmp_path):
     app, bindings, models = await open_app(tmp_path, {"root": (delegate("d1"),),
         "d1": (delegate("d2"),), "d1.d2": (delegate("maker"),),
