@@ -127,6 +127,36 @@ async def test_continuing_usage_pressure_advances_coverage_without_a_reduction_p
 
 
 @pytest.mark.asyncio
+async def test_continuing_usage_pressure_after_reference_compaction_summarizes():
+    summary = Summary()
+    store = InMemoryConversationSummaryStore()
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=32768),
+        reducer=PersistentSummaryContextReducer(store, summarizer=summary),
+    )
+    batches = []
+    for i in range(6):
+        call = ModelToolCall(tool_call_id=f"tool-{i}", name="read", arguments={})
+        batches += [
+            ModelMessage(role="assistant", tool_calls=(call,)),
+            message(
+                f"result {i} " * 500, "tool", tool_call_id=f"tool-{i}",
+                metadata={"context_reference": {"uri": f"artifact://durable/{i}"}},
+            ),
+        ]
+    source = (message("exact request", "user"), *batches)
+    strategies = []
+    for _ in range(3):
+        assembler.observe_usage("run", 40000)
+        projection = await assembler.prepare_projection(command(), source, run_id="run")
+        strategies.append(projection.strategy)
+    # References are cheap first aid; pressure that survives them must summarize.
+    assert strategies[0] == "reference_compaction"
+    assert strategies[1] == "persistent_summary"
+    assert summary.requests
+
+
+@pytest.mark.asyncio
 async def test_no_fresh_history_still_allows_required_checkpoint_recovery():
     summary = Summary()
     assembler = DefaultContextAssembler(

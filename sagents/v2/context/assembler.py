@@ -305,8 +305,10 @@ class DefaultContextAssembler:
             ),
             force=run_id in self._compression_requested,
             allow_summary_rewrite=self._compression_requested.get(run_id, False),
+            # References only shrink this request view; canonical history keeps
+            # the full results, so pressure that survives them must summarize.
             allow_reference_compaction=not (
-                self._compression_requested.get(run_id, False)
+                run_id in self._compression_requested
                 and self._projection_signatures.get(run_id, (None, None))[1]
                 == "reference_compaction"
             ),
