@@ -2361,6 +2361,20 @@ class _MissingProviderAgentApi extends _FakeApi {
       );
 }
 
+class _RejectedRunStartApi extends _FakeApi {
+  @override
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) async* {
+    lastRunBody = Map<String, Object?>.of(body);
+    throw const SageApiException(
+      '部分信息无效，无法处理该请求。',
+      statusCode: 400,
+      code: 'desktop.run_start_failed',
+      category: 'validation',
+      metadata: {'diagnostic_message': 'agent has no usable model provider'},
+    );
+  }
+}
+
 // Dispose externally owned controllers inside the widget test's fake-async
 // scope, before Flutter verifies that no polling timers remain.
 List<WorkspaceController>? _widgetControllers;
@@ -3554,6 +3568,137 @@ void main() {
       expect(restored.invocationMode, InvocationMode.normal);
     },
   );
+
+  test(
+    'rejected run start stops the process panel and keeps the reason',
+    () async {
+      final api = _RejectedRunStartApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await controller.initialize();
+
+      await controller.send('你好');
+      await pumpEventQueue();
+
+      final conversation = controller.selectedConversation!;
+      expect(api.lastRunBody, isNotNull);
+      expect(conversation.status, RunStatus.failed);
+      final panel = conversation.processPanels.single;
+      expect(panel.running, isFalse);
+      expect(panel.completedAt, isNotNull);
+      expect(panel.failed, isTrue);
+      expect(
+        panel.failureMessage,
+        '部分信息无效，无法处理该请求。\nagent has no usable model provider',
+      );
+      final restored = RuntimeProcessPanel.fromJson(panel.toJson());
+      expect(restored.running, isFalse);
+      expect(restored.failed, isTrue);
+      expect(restored.failureMessage, panel.failureMessage);
+    },
+  );
+
+  testWidgets('rejected run start renders a persistent failure', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = await _controller(api: _RejectedRunStartApi());
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('agent-composer')), '你好');
+    await tester.tap(find.byKey(const ValueKey('send-button')));
+    await tester.pumpAndSettle();
+    controller.clearError();
+    await tester.pumpAndSettle();
+
+    final processPanel = find.byKey(const ValueKey('process-panel'));
+    expect(processPanel, findsOneWidget);
+    expect(
+      find.descendant(
+        of: processPanel,
+        matching: find.byType(CupertinoActivityIndicator),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('process-panel-failure')),
+        matching: find.textContaining('agent has no usable model provider'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  test('restored rejected start no longer keeps a running panel', () {
+    final conversation = Conversation.fromJson({
+      'id': 'conversation_rejected',
+      'status': 'failed',
+      'run_id': '',
+      'messages': [
+        {'id': 'message_1', 'role': 'user', 'text': '你好'},
+      ],
+      'process_panels': [
+        {
+          'id': 'process_1',
+          'anchor_message_id': 'message_1',
+          'run_id': '',
+          'started_at': '2026-10-27T03:01:45.000Z',
+          'running': true,
+          'activities': [],
+        },
+      ],
+    });
+
+    final panel = conversation.processPanels.single;
+    expect(panel.running, isFalse);
+    expect(panel.failed, isTrue);
+    expect(panel.completedAt, panel.startedAt);
+  });
+
+  test('restored start without accepted run becomes failed', () {
+    final conversation = Conversation.fromJson({
+      'id': 'conversation_lost',
+      'status': 'starting',
+      'run_id': '',
+      'process_panels': [
+        {
+          'id': 'process_1',
+          'anchor_message_id': '',
+          'started_at': '2026-10-27T03:01:45.000Z',
+          'running': true,
+        },
+      ],
+    });
+
+    expect(conversation.status, RunStatus.failed);
+    expect(conversation.processPanels.single.running, isFalse);
+  });
+
+  test('restored active run with a run id keeps its running panel', () {
+    final conversation = Conversation.fromJson({
+      'id': 'conversation_active',
+      'status': 'running',
+      'run_id': 'run_active',
+      'process_panels': [
+        {
+          'id': 'process_1',
+          'anchor_message_id': '',
+          'run_id': 'run_active',
+          'started_at': '2026-10-27T03:01:45.000Z',
+          'running': true,
+        },
+      ],
+    });
+
+    expect(conversation.status, RunStatus.running);
+    expect(conversation.processPanels.single.running, isTrue);
+    expect(conversation.processPanels.single.failed, isFalse);
+  });
 
   test(
     'failed parent keeps active child manageable and blocks tree deletion',

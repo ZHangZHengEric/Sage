@@ -1000,6 +1000,8 @@ class RuntimeProcessPanel {
     List<RuntimeActivity>? activities,
     this.completedAt,
     this.running = true,
+    this.failed = false,
+    this.failureMessage = '',
   }) : activities = activities ?? [];
 
   final String id;
@@ -1008,6 +1010,8 @@ class RuntimeProcessPanel {
   String runId;
   DateTime? completedAt;
   bool running;
+  bool failed;
+  String failureMessage;
   final List<RuntimeActivity> activities;
 
   factory RuntimeProcessPanel.fromJson(Map<String, Object?> json) {
@@ -1021,6 +1025,8 @@ class RuntimeProcessPanel {
           DateTime.now(),
       completedAt: DateTime.tryParse(json['completed_at']?.toString() ?? ''),
       running: json['running'] == true,
+      failed: json['failed'] == true,
+      failureMessage: json['failure_message']?.toString() ?? '',
       activities: rawActivities is List
           ? [
               for (final value in rawActivities)
@@ -1038,6 +1044,8 @@ class RuntimeProcessPanel {
     'started_at': startedAt.toIso8601String(),
     'completed_at': completedAt?.toIso8601String(),
     'running': running,
+    if (failed) 'failed': true,
+    if (failureMessage.isNotEmpty) 'failure_message': failureMessage,
     'activities': [for (final value in activities) value.toJson()],
   };
 }
@@ -1180,7 +1188,7 @@ class Conversation {
         );
       }
     }
-    return Conversation(
+    final conversation = Conversation(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '新会话',
       agentId: json['agent_id']?.toString() ?? '',
@@ -1221,6 +1229,45 @@ class Conversation {
       archived: json['archived'] == true,
       archivedAt: DateTime.tryParse(json['archived_at']?.toString() ?? ''),
     )..resetCompletedGoalMode();
+    conversation._settleOrphanedProcessPanels();
+    return conversation;
+  }
+
+  // A Run that was never accepted has no runId and cannot be reconnected, so
+  // a persisted running panel would otherwise keep its timer forever.
+  void _settleOrphanedProcessPanels() {
+    final unrecoverable =
+        runId.isEmpty &&
+        {
+          RunStatus.starting,
+          RunStatus.running,
+          RunStatus.suspending,
+        }.contains(status);
+    if (unrecoverable) status = RunStatus.failed;
+    if (!{
+      RunStatus.idle,
+      RunStatus.completed,
+      RunStatus.failed,
+      RunStatus.cancelled,
+    }.contains(status)) {
+      return;
+    }
+    for (final panel in processPanels.where((value) => value.running)) {
+      panel.running = false;
+      panel.failed = panel.failed || status == RunStatus.failed;
+      final lastActivityAt = panel.activities
+          .map((value) => value.completedAt ?? value.startedAt)
+          .fold<DateTime?>(
+            null,
+            (latest, value) =>
+                latest == null || value.isAfter(latest) ? value : latest,
+          );
+      panel.completedAt ??= lastActivityAt ?? panel.startedAt;
+      for (final activity in panel.activities.where((value) => value.active)) {
+        activity.active = false;
+        activity.completedAt ??= panel.completedAt;
+      }
+    }
   }
 
   Map<String, Object?> toJson() => {

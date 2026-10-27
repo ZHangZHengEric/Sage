@@ -809,6 +809,7 @@ class _MessageListState extends State<_MessageList> {
 
   bool _shouldShowPanel(RuntimeProcessPanel panel) {
     return panel.running ||
+        panel.failed ||
         panel.activities.isNotEmpty ||
         _processMessagesFor(panel).isNotEmpty ||
         _subSessionsFor(panel).isNotEmpty;
