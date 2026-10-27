@@ -20,7 +20,7 @@ from sagents.v2.package.manifest.root import (
     PluginDeclaration,
     SageManifest,
 )
-from sagents.v2.package.manifest.runtime import RuntimeConfig
+from sagents.v2.package.manifest.runtime import RETIRED_BUDGET_FIELDS, RuntimeConfig
 
 
 class ResolvedAgent(StrictModel):
@@ -56,11 +56,21 @@ class PolicyCeiling(StrictModel):
     allowed_model_routes: frozenset[str] = frozenset()
     max_steps: int | None = None
     max_input_tokens: int | None = None
-    max_system_tokens: int | None = None
-    protected_recent_tokens: int | None = None
     max_output_tokens: int | None = None
     max_total_tokens: int | None = None
     deadline_seconds: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_estimated_ceilings(cls, value):
+        # Saved Agent revisions predate the retirement and must still restore.
+        if isinstance(value, dict):
+            return {
+                key: item
+                for key, item in value.items()
+                if key not in {"max_system_tokens", "protected_recent_tokens"}
+            }
+        return value
 
 
 class ResolvedSageManifest(StrictModel):
@@ -184,13 +194,6 @@ class CompositionResolver:
                 max_input_tokens=_minimum(
                     agent.budgets.input_tokens, global_budget.input_tokens
                 ),
-                max_system_tokens=_minimum(
-                    agent.budgets.system_tokens, global_budget.system_tokens
-                ),
-                protected_recent_tokens=_minimum(
-                    agent.budgets.protected_recent_tokens,
-                    global_budget.protected_recent_tokens,
-                ),
                 max_output_tokens=_minimum(
                     agent.budgets.output_tokens, global_budget.output_tokens
                 ),
@@ -208,6 +211,13 @@ class CompositionResolver:
         for definition in payload["agents"].values():
             if not definition.get("preload_skills"):
                 definition.pop("preload_skills", None)
+        # Retired budget fields stay in the digest as null, so packages keep
+        # their revision identity whether or not they still set them.
+        for budgets in (
+            payload["policies"]["budgets"],
+            *(definition["budgets"] for definition in payload["agents"].values()),
+        ):
+            budgets.update(dict.fromkeys(RETIRED_BUDGET_FIELDS))
         payload["models"] = catalog.model_dump(mode="json")
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

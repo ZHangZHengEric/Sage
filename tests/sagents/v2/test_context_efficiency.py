@@ -48,25 +48,44 @@ def test_workspace_memory_is_bounded_but_core_instructions_are_not_silently_cut(
         provider._identity_document("AGENT", "instruction " * 5000, "en")
 
 
-def test_manifest_system_and_protected_limits_respect_global_ceiling():
+def test_retired_estimated_budgets_load_but_are_never_enforced_or_reported():
+    from sagents.v2.context import ContextBudget
     from sagents.v2.package.presets.factory import BuiltinPackageFactory
-    from sagents.v2.package.manifest.resolver import CompositionResolver
+    from sagents.v2.package.manifest.resolver import CompositionResolver, PolicyCeiling
 
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.context-zones",
     )
+    resolver = CompositionResolver(models=TEST_MODELS)
+    plain = resolver.resolve(package)
     data = package.model_dump(mode="json")
     agent_id = data["entrypoint"]["agent"]
     data["agents"][agent_id]["budgets"].update(
         system_tokens=12000, protected_recent_tokens=4096
     )
     data["policies"]["budgets"].update(system_tokens=8000, protected_recent_tokens=0)
-    resolved = CompositionResolver(models=TEST_MODELS).resolve(
-        type(package).model_validate(data)
+    resolved = resolver.resolve(type(package).model_validate(data))
+
+    ceiling = resolved.policy_ceilings[agent_id].model_dump()
+    assert "max_system_tokens" not in ceiling
+    assert "protected_recent_tokens" not in ceiling
+    # Packages that never set them keep their revision identity.
+    assert resolved.manifest_hash == plain.manifest_hash
+    # Saved revisions and host budgets written before retirement still load.
+    legacy = {**ceiling, "max_system_tokens": 16384, "protected_recent_tokens": None}
+    assert PolicyCeiling.model_validate(legacy).model_dump() == ceiling
+    budget = ContextBudget(max_input_tokens=1000, max_system_tokens=1, protected_recent_tokens=0)
+    assert budget.model_dump() == ContextBudget(max_input_tokens=1000).model_dump()
+
+
+def test_optimizer_cannot_tune_retired_budget_fields():
+    from sagents.v2.optimization.contracts import OptimizationConstraints
+
+    constraints = OptimizationConstraints.model_validate(
+        {"editable_budget_fields": ["max_steps", "system_tokens", "protected_recent_tokens"]}
     )
-    assert resolved.policy_ceilings[agent_id].max_system_tokens == 8000
-    assert resolved.policy_ceilings[agent_id].protected_recent_tokens == 0
+    assert constraints.editable_budget_fields == ("max_steps",)
 
 
 @pytest.mark.asyncio

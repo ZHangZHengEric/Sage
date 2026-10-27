@@ -30,11 +30,16 @@ class Instructions(StrictModel):
 class AgentBudgets(StrictModel):
     max_steps: int | None = Field(default=None, gt=0)
     input_tokens: int | None = Field(default=None, gt=0)
-    system_tokens: int | None = Field(default=None, gt=0)
-    protected_recent_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, gt=0)
     total_tokens: int | None = Field(default=None, gt=0)
     wall_time_seconds: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_estimated_budgets(cls, value):
+        from sagents.v2.package.manifest.runtime import retire_budget_fields
+
+        return retire_budget_fields(value)
 
 
 class AgentMemoryBehavior(StrictModel):

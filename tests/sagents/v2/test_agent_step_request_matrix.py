@@ -79,6 +79,34 @@ async def test_step_request_builder_owns_mode_projection_and_request_metadata():
 
 
 @pytest.mark.asyncio
+async def test_request_budget_reports_exact_system_characters_not_retired_limits():
+    builder = DefaultAgentStepRequestBuilder(
+        context_assembler=cast('ContextAssembler', PassthroughContextAssembler()),
+        tool_catalog=InMemoryToolCatalog((_tool("read_value"),)),
+        tool_selection_policy=DirectToolSelectionPolicy(),
+    )
+    messages = (
+        ModelMessage(role="system", content=(TextBlock(text="角色" * 10),)),
+        ModelMessage(role="developer", content=(TextBlock(text="skill"),)),
+        ModelMessage(role="user", content=(TextBlock(text="not counted"),)),
+    )
+
+    prepared = await builder.prepare(
+        command=_command(None),
+        run_id="run_1",
+        turn_id="turn_1",
+        step_id="step_1",
+        messages=messages,
+        pending_continuation_reason=None,
+        language="en",
+    )
+
+    budget = prepared.request.metadata["request_budget"]
+    assert budget["system_characters"] == 25
+    assert "max_system_tokens" not in str(budget)
+
+
+@pytest.mark.asyncio
 async def test_step_request_builder_hides_goal_tools_outside_goal_modes():
     builder = DefaultAgentStepRequestBuilder(
         context_assembler=cast('ContextAssembler', PassthroughContextAssembler()),

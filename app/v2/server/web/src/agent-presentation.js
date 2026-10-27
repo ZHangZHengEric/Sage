@@ -33,8 +33,6 @@ export const budgetFields = [
   { key: 'wall_time_seconds', label: '运行时间上限', unit: '秒', min: 1, step: 'any', help: '限制整次运行的时间。留空继承全局时间预算；全局也未设置时，不额外设置整次运行的时限。模型请求和工具各自的超时限制仍然有效。' },
   { key: 'output_tokens', label: '输出 Token 预算', unit: 'Token', min: 1, help: '限制每次模型请求的输出预算，不是整次运行的累计输出。留空继承全局输出预算；未配置时，跟随所选模型的单次输出预算、协议默认值和有效探测结果。仍受模型的实际输出限制。' },
   { key: 'input_tokens', label: '输入 Token 预算', unit: 'Token', min: 1, help: '影响可携带的历史与工具内容。留空继承全局输入预算，再与模型上下文窗口取较小值；两者均未配置时默认 32,768 Token。上下文管理还会预留输出空间。' },
-  { key: 'system_tokens', label: '系统 Token 预算', unit: 'Token', min: 1, help: '留空继承全局配置；未配置时默认值为 16,384 Token。此项为保留配置，当前不会按此数值独立截断系统提示词或工具定义。' },
-  { key: 'protected_recent_tokens', label: '保留近期 Token', unit: 'Token', min: 0, help: '留空继承全局配置；未配置时默认值为 8,192 Token，0 表示显式配置为零。此项为保留配置，当前以完整的近期对话单元进行保护，不按该数值逐 Token 裁剪。' },
   { key: 'total_tokens', label: '总 Token 预算', unit: 'Token', min: 1, help: '限制整次运行累计消耗的输入与输出 Token 总量。留空继承全局总量预算；全局也未设置时，不额外设置总 Token 上限。模型容量、单次输出预算等限制仍然有效。' },
 ]
 
@@ -49,8 +47,6 @@ export function agentBudgetPlaceholder(key, form = {}, models = [], defaults = {
     wall_time_seconds: global.wall_time_seconds ?? '不设时限',
     output_tokens: global.output_tokens ?? modelOutputBudget(model, model.request?.max_output_tokens) ?? '跟随模型',
     input_tokens: minimum(global.input_tokens, model.limits?.context_window) ?? 32768,
-    system_tokens: global.system_tokens ?? 16384,
-    protected_recent_tokens: global.protected_recent_tokens ?? 8192,
     total_tokens: global.total_tokens ?? '不设总量上限',
   }
   const value = values[key]
