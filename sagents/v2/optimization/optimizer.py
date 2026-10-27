@@ -233,7 +233,7 @@ class AgentPackageOptimizer:
         Validation inputs, rubrics, answers and rationale stay hidden from the
         tuner, including aggregate and anonymous per-case scores. The tuner receives
         only retention status and parent identity. Adaptive selection improves the
-        equally weighted split means by ``min_improvement``, allowing recorded
+        validation mean by ``min_improvement``, allowing recorded
         per-case regressions that later rounds repair. Legacy fixed suites keep
         their historical per-case/latency selection policy.
         Fixed-rule validation failures are repaired in the same round up to max_edit_repairs;
@@ -2167,8 +2167,8 @@ class AgentPackageOptimizer:
                             review=review,
                             overall_before=best_evaluation.overall_score() if adaptive else None,
                             overall_after=self._paired_evaluations(best_evaluation, evaluation)[1].overall_score() if adaptive else None,
-                            objective_before=best_evaluation.objective_score() if builtin_scoring.mode != "quality" else None,
-                            objective_after=self._paired_evaluations(best_evaluation, evaluation)[1].objective_score() if builtin_scoring.mode != "quality" else None,
+                            objective_before=best_evaluation.objective_score("validation") if builtin_scoring.mode != "quality" else None,
+                            objective_after=self._paired_evaluations(best_evaluation, evaluation)[1].objective_score("validation") if builtin_scoring.mode != "quality" else None,
                             regressions=self._regressions(best_evaluation, evaluation) if adaptive else (),
                         )
                     )
@@ -2676,7 +2676,7 @@ class AgentPackageOptimizer:
 
     @staticmethod
     def _select_adaptive(previous, candidate, minimum, minimum_latency=None):
-        # Check every new execution, but compute improvement only on shared cases.
+        # Check every execution; only fixed validation scores determine improvement.
         for new in candidate.cases:
             if not evaluation_episode_finished(new.observation, new.case):
                 return False, "Target execution did not complete"
@@ -2684,14 +2684,15 @@ class AgentPackageOptimizer:
             if audit and not audit["passed"]:
                 return False, "Generated-tool execution audit failed"
         previous, paired = AgentPackageOptimizer._paired_evaluations(previous, candidate)
-        before, after = previous.objective_score(), paired.objective_score()
+        before, after = previous.objective_score("validation"), paired.objective_score("validation")
         if after - before >= minimum - 1e-12:
             count = len(AgentPackageOptimizer._regressions(previous, candidate))
-            metric = "Selection score" if any(c.objective_score is not None for c in paired.cases) else "Overall quality"
+            validation = [c for c in paired.cases if c.case.split == "validation"]
+            metric = "Validation selection score" if any(c.objective_score is not None for c in validation) else "Validation quality"
             return True, (f"{metric} improved {before:.4f} -> {after:.4f}; "
-                          f"on {len(previous.cases)} common cases; {len(candidate.cases) - len(previous.cases)} new training cases not backtested; "
+                          f"on {len(validation)} validation cases; {len(candidate.cases) - len(previous.cases)} new training cases not backtested; "
                           f"{count} case regressions retained for follow-up")
-        return False, "Insufficient overall quality improvement"
+        return False, "Insufficient validation improvement"
 
     @staticmethod
     def _select(previous, candidate, minimum, minimum_latency=None):

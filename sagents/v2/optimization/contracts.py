@@ -291,12 +291,13 @@ class OptimizationEvaluation(StrictModel):
         """Equal split weights remain stable as training questions accumulate."""
         return (self.mean_score("training") + self.mean_score("validation")) / 2
 
-    def objective_score(self) -> float:
-        def mean(split):
+    def objective_score(self, split: str | None = None) -> float:
+        """Score one split, or retain the mixed aggregate for historical reporting."""
+        def mean(case_split):
             values = [c.grade.score if c.objective_score is None else c.objective_score
-                      for c in self.cases if c.case.split == split]
+                      for c in self.cases if c.case.split == case_split]
             return sum(values) / len(values)
-        return (mean("training") + mean("validation")) / 2
+        return mean(split) if split is not None else (mean("training") + mean("validation")) / 2
 
 
 class OptimizationSuiteIssue(StrictModel):

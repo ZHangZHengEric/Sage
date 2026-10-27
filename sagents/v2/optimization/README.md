@@ -115,11 +115,13 @@ not judge cross-split leakage or question memorization.
 
 New training questions first run against the incumbent package. The incumbent and
 proposal are then compared on exactly the same cumulative questions; adding hard
-questions cannot itself be misreported as a proposal regression. Overall quality
-is `0.5 * training_mean + 0.5 * validation_mean`, so growing training sets do not
-overwhelm the fixed validation signal. A candidate is retained when that overall
-score improves by at least `min_improvement`. Individual regressions are allowed,
-recorded per round, and carried forward for repair from the stronger package.
+questions cannot itself be misreported as a proposal regression. Acceptance uses only the fixed validation mean, or its built-in resource objective
+when enabled. Training scores remain available for diagnosis and guidance, but do
+not contribute to acceptance. A candidate is retained when that validation score
+improves by at least `min_improvement`. Individual regressions are allowed,
+recorded per round, and carried forward for repair from the retained package.
+Mixed `overall_score` and `overall_before/after` remain historical reporting fields,
+not selection criteria.
 Execution completion and enabled generated-tool integrity audits still gate
 acceptance. Candidate checks are deterministic by default; an explicitly supplied
 semantic reviewer is an additional host opt-in gate.

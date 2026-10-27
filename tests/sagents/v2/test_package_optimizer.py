@@ -2813,7 +2813,7 @@ async def test_adaptive_convergence_uses_validation_and_training_without_final_c
 
 
 @pytest.mark.asyncio
-async def test_adaptive_allows_training_improvement_with_flat_validation():
+async def test_adaptive_rejects_training_only_improvement_with_flat_validation():
     runner = AdaptiveRunner(
         scores={
             "base": {"training": 0.4, "validation": 0.4},
@@ -2827,7 +2827,8 @@ async def test_adaptive_allows_training_improvement_with_flat_validation():
         rounds=1,
         validation_case_count=2,
     )
-    assert result.report.rounds[0].accepted
+    assert not result.report.rounds[0].accepted
+    assert result.candidate_package.content_hash == result.report.rounds[0].parent_hash
 
 
 def test_memorization_flag_does_not_block_goal_and_permission_review():

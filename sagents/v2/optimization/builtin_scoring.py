@@ -49,7 +49,7 @@ class BuiltinScoring(StrictModel):
 
     def selection_policy(self):
         return {"builtin_scoring": self.model_dump(mode="json"),
-            "metric": ("0.5 * training_mean + 0.5 * validation_mean" if self.mode == "quality" else
-                "Equal split means of quality * (1 - weight + weight / (1 + measured_resource / reference))"),
+            "metric": ("validation_mean" if self.mode == "quality" else
+                "Validation mean of quality * (1 - weight + weight / (1 + measured_resource / reference))"),
             "instruction": "Quality grades and task pass/fail remain authoritative. Resource metrics come from target execution only. "
                 "Do not weaken task completion or claim unmeasured savings."}

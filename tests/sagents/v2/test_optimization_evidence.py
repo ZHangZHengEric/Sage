@@ -68,7 +68,7 @@ def test_expanding_questions_cannot_create_fake_improvement_or_hide_common_case_
     assert not AgentPackageOptimizer._select_adaptive(previous, evaluation(.5, .5, 1), .03)[0]
     changed = evaluation(.4, .9, 0)
     accepted, reason = AgentPackageOptimizer._select_adaptive(previous, changed, .03)
-    assert accepted and '2 common cases' in reason and '1 new training cases' in reason
+    assert accepted and '1 validation cases' in reason and '1 new training cases' in reason
     assert AgentPackageOptimizer._regressions(previous, changed)[0].case_id == 'train'
     missing = OptimizationEvaluation(package_hash='p', cases=(measured('train', [.9]),))
     with pytest.raises(ValueError, match='missing or changed'):

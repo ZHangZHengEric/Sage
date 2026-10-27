@@ -1,10 +1,10 @@
-"""Overall adaptive quality permits local tradeoffs and tracks their repair."""
+"""Validation selects versions; training regressions remain diagnostic evidence."""
 
 import json
 
 import pytest
 
-from sagents.v2 import AgentPackageOptimizer
+from sagents.v2 import AgentPackageOptimizer, BuiltinScoring
 from sagents.v2.optimization.contracts import (
     OptimizationCase, OptimizationCaseResult, OptimizationEvaluation,
     OptimizationGrade, OptimizationObservation,
@@ -36,13 +36,46 @@ def test_tau_tradeoff_is_accepted_and_regression_is_recorded():
     assert regression.previous_score == 1 and regression.current_score == 0
 
 
-def test_training_growth_does_not_change_split_weights_or_hide_overall_loss():
+def test_training_count_does_not_hide_validation_loss():
     old = evaluation([0.8] * 100, [0.8])
     new = evaluation([0.9] * 100, [0.6])
     assert not AgentPackageOptimizer._select_adaptive(old, new, 0.01)[0]
     assert not AgentPackageOptimizer._select_adaptive(old, old, 0.01)[0]
     small = evaluation([0.81] * 100, [0.8])
     assert not AgentPackageOptimizer._select_adaptive(old, small, 0.01)[0]
+
+
+@pytest.mark.parametrize("training,validation,minimum,accepted", [
+    ([1], [.7], .01, False),  # Training gain cannot compensate for dev loss.
+    ([1], [.8], .01, False),  # Training-only improvements do not select a version.
+    ([0], [.82], .01, True),  # Dev gain is not diluted or vetoed by training loss.
+    ([1], [.82], .03, False),  # The existing threshold applies to dev itself.
+])
+def test_only_validation_quality_determines_improvement(training, validation, minimum, accepted):
+    old = evaluation([.8], [.8])
+    new = evaluation(training, validation)
+    selected, reason = AgentPackageOptimizer._select_adaptive(old, new, minimum)
+    assert selected is accepted
+    assert "Validation" in reason or "validation" in reason
+
+
+@pytest.mark.parametrize("mode", ["quality_cost", "quality_latency", "quality_tokens"])
+def test_efficiency_selection_also_ignores_training_objectives(mode):
+    scoring = BuiltinScoring(mode=mode)
+
+    def with_resources(train_resource, dev_resource):
+        measured = evaluation([1], [1])
+        return measured.model_copy(update={"cases": tuple(scoring.apply(case.model_copy(update={
+            "observation": OptimizationObservation(state="completed", cost=resource,
+                elapsed_seconds=resource, input_tokens=resource * 1000, usage_reported=True),
+        })) for case, resource in zip(measured.cases, (train_resource, dev_resource), strict=True))})
+
+    old = with_resources(10, 10)
+    train_only = with_resources(1, 10)
+    dev_better = with_resources(100, 1)
+    assert not AgentPackageOptimizer._select_adaptive(old, train_only, .01)[0]
+    assert AgentPackageOptimizer._select_adaptive(old, dev_better, .01)[0]
+    assert scoring.selection_policy()["metric"].startswith("Validation mean")
 
 
 def test_alignment_execution_and_generated_tool_integrity_still_gate_selection():
@@ -80,7 +113,7 @@ def test_regression_debt_survives_other_improvements_until_repaired():
 
 
 @pytest.mark.asyncio
-async def test_next_round_uses_overall_better_parent_and_training_regressions_only():
+async def test_next_round_uses_dev_better_parent_and_training_regressions_only():
     runner = AdaptiveRunner(scores={
         "base": {"training": 0.4, "validation": 0.4},
         "guidance-1": {"training": 0.3, "validation": 0.8},
@@ -89,13 +122,15 @@ async def test_next_round_uses_overall_better_parent_and_training_regressions_on
     result = await optimizer(runner).optimize(bundle(), context=context(), goal="Conversions",
         rounds=2, validation_case_count=2)
     first, second = result.report.rounds
-    assert first.accepted and second.accepted
+    assert first.accepted and not second.accepted
+    assert result.candidate_package.content_hash == first.candidate_package.content_hash
     assert second.parent_hash == first.candidate_package.content_hash
     assert first.overall_before == pytest.approx(0.4)
     assert first.overall_after == pytest.approx(0.55)
     assert first.regressions and all(r.split == "training" for r in first.regressions)
     requests = [json.loads(text)["data"] for name, text in runner.requests if name == "test.tuner"]
     assert requests[1]["selection_policy"]["individual_regressions_allowed"] is True
+    assert requests[1]["selection_policy"]["metric"] == "validation_mean"
     assert requests[1]["selected_round"] == 1
     assert requests[1]["previous_attempts"][0]["accepted"] is True
     assert requests[1]["training_regressions"]
