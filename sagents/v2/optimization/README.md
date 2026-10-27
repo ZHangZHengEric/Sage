@@ -128,9 +128,14 @@ Tuning receives bounded training evidence, previous attempts, retention status
 and the retained parent identity. Validation aggregates, pass counts, anonymous
 per-question scores, historical scores and mixed train/dev selection scores are
 host-only. No validation question text, original IDs, rubrics, answers or grading
-rationale is included. The external RSI MCP enforces the same boundary in all
-read modes, including detailed reads, history and versions; compact score summaries
-report explicitly named training means only.
+rationale is included in internal tuning inputs.
+The external RSI MCP is instead a user-delegated review interface: all read modes
+can expose train/dev grades, diagnoses, executions, regressions and selection
+metrics; `rsi_questions` includes dev questions. Compact score summaries explicitly
+name baseline/selected training and validation means. Test data, reference-answer
+fields, credentials and unclassified raw internal calls remain excluded. Review
+output is not automatically supplied to the internal tuner. External edits based
+on dev feedback still make dev part of development, not an independent final exam.
 The tuner additionally receives unresolved training regressions with their prior
 scores and current training evidence. Growth feedback exposes host scheduling and
 training facts, but no validation regression counts or private gate reasons.

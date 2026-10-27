@@ -1,4 +1,4 @@
-"""Stdio MCP access to the Desktop-owned RSI runtime.
+"""User-review stdio MCP access to the Desktop-owned RSI runtime.
 
 No optimizer, writer, or model credentials are duplicated in this process.
 Start Desktop first; its durable jobs survive MCP client disconnection.
@@ -21,7 +21,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from app.v2.desktop.backend.rsi import RsiApply, RsiStart
-from app.v2.cli.rsi_visibility import model_view
+from app.v2.cli.rsi_visibility import review_view
 from sagents.v2.optimization.contracts import (
     OptimizationStoppingPolicy,
 )
@@ -151,10 +151,10 @@ class DesktopBridge:
 def _score_summary(result):
     report = result.get("report", {})
 
-    def training_mean(evaluation):
+    def mean(evaluation, split):
         grades = [
             case.get("grade", {}).get("score") for case in evaluation.get("cases", [])
-            if case.get("case", {}).get("split") == "training"
+            if case.get("case", {}).get("split") == split
         ]
         grades = [score for score in grades if isinstance(score, (int, float))]
         return sum(grades) / len(grades) if grades else None
@@ -163,8 +163,10 @@ def _score_summary(result):
         "improved": report.get("improved"),
         "termination": report.get("termination"),
         "goal_verified": report.get("goal_verified"),
-        "baseline_training": training_mean(report.get("baseline", {})),
-        "selected_training": training_mean(report.get("selected", {})),
+        "baseline_training": mean(report.get("baseline", {}), "training"),
+        "selected_training": mean(report.get("selected", {}), "training"),
+        "baseline_validation": mean(report.get("baseline", {}), "validation"),
+        "selected_validation": mean(report.get("selected", {}), "validation"),
     }
 
 
@@ -220,7 +222,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
             "Optimize existing Sage Desktop agents with real evaluations. "
             "Start returns a durable run ID; poll incrementally with after_sequence. "
             "Reuse request_id for the same intent. Never claim an interim score "
-            "is a final success. Training evidence is visible; dev measurements stay host-only; "
+            "is a final success. This is a user-review interface, not an internal tuner input: train/dev scores, executions and diagnoses are visible; "
             "test evidence is human-only and never returned by these tools, even with include_details. "
             "Applying a version requires explicit user approval."
         ),
@@ -285,14 +287,14 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
                 stability_passes=stability_passes,
             ),
         )
-        return model_view(await bridge.request(
+        return review_view(await bridge.request(
             "POST", base(agent_id), json=request.model_dump(mode="json")
         ))
 
     @server.tool()
     async def rsi_history(agent_id: str) -> dict:
         """Read durable runs, candidate versions and current configuration fingerprint."""
-        return model_view(await bridge.request("GET", base(agent_id)))
+        return review_view(await bridge.request("GET", base(agent_id)))
 
     @server.tool()
     async def rsi_status(
@@ -304,8 +306,9 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
     ) -> dict:
         """Read real conversation/evaluation events. Advance using next_sequence.
 
-        Defaults to 50 compact events; include_details returns training evidence/packages.
-        Dev measurements and mixed scores stay host-only; test stays hidden in every mode.
+        Defaults to 50 compact events; include_details returns train/dev evidence and packages.
+        User review includes train/dev scores, executions and diagnoses, plus selection metrics.
+        Test stays hidden in every mode; raw mixed-split calls are not returned.
 
         Status may already be terminal while older events still need pagination.
         """
@@ -318,7 +321,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
         value["next_sequence"] = max(
             [after_sequence] + [e["sequence"] for e in value["events"]]
         )
-        value = model_view(value)
+        value = review_view(value)
         if include_details:
             return value
         result = value.pop("result", None)
@@ -329,7 +332,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
 
     @server.tool()
     async def rsi_questions(agent_id: str, run_id: str) -> dict:
-        """Read training questions and dev count; dev questions and all test data stay hidden."""
+        """Read train/dev questions for user review; all test data stays hidden."""
         cursor = 0
         cases = []
         suite = None
@@ -355,27 +358,28 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
         combined = {c["id"]: c for c in ((suite or {}).get("cases", []) + cases)}
         return {
             "training": [c for c in combined.values() if c["split"] == "training"],
-            "validation": {"total": validation_count, "questions_visible": False},
+            "validation": {"total": validation_count, "questions_visible": True,
+                           "cases": [c for c in combined.values() if c["split"] == "validation"]},
         }
 
     @server.tool()
     async def rsi_resume(agent_id: str, run_id: str) -> dict:
         """Resume the same interrupted local experiment with verified frozen settings and saved evidence."""
-        return model_view(await bridge.request(
+        return review_view(await bridge.request(
             "POST", f"{base(agent_id)}/runs/{segment(run_id)}/resume"
         ))
 
     @server.tool()
     async def rsi_cancel(agent_id: str, run_id: str) -> dict:
         """Cancel a specified job; queued cases stop and active conversations are drained."""
-        return model_view(await bridge.request(
+        return review_view(await bridge.request(
             "POST", f"{base(agent_id)}/runs/{segment(run_id)}/cancel"
         ))
 
     @server.tool()
     async def rsi_version(agent_id: str, version_id: str) -> dict:
-        """Read a package, training evidence and retention status before applying."""
-        return model_view(await bridge.request(
+        """Review a package, train/dev evidence, diagnoses and retention status before applying."""
+        return review_view(await bridge.request(
             "GET", f"{base(agent_id)}/versions/{segment(version_id)}"
         ))
 
@@ -393,7 +397,7 @@ def create_server(data_root: Path, *, bridge: DesktopBridge | None = None) -> Fa
         request = RsiApply(
             confirmed=confirmed, expected_fingerprint=expected_fingerprint
         )
-        return model_view(await bridge.request(
+        return review_view(await bridge.request(
             "POST",
             f"{base(agent_id)}/versions/{segment(version_id)}/apply",
             json=request.model_dump(mode="json"),

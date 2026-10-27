@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.v2.cli.rsi_visibility import model_view
+from app.v2.cli.rsi_visibility import review_view
 from app.v2.desktop.backend.catalog import DesktopAgentRecord
 from app.v2.desktop.backend.rsi import DesktopRsiMixin, RsiStore
 from examples.v2.desktop_optimization_mirror import DesktopOptimizationMirror
@@ -73,7 +73,7 @@ async def test_external_host_events_and_human_scores_are_visible_without_resetti
     mirror.finish({'candidate': {'pass^1': .9}})
     public = store.get(mirror.run_id, 'owner', 'agent', 'run')
     assert public['status'] == 'completed'
-    private_view = json.dumps(model_view(public))
+    private_view = json.dumps(review_view(public))
     assert 'HUMAN-ONLY-TEST' not in private_view and 'benchmark_measurement' not in private_view
     assert store.list('another-user', 'agent', 'run') == []
 

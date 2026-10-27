@@ -1,22 +1,17 @@
-"""Model-facing RSI views. Human Desktop views retain their separate evidence.
+"""External RSI MCP user-review projection, separate from internal tuning inputs.
 
-Detailed MCP reads do not expand visibility: training evidence is available,
-validation measurements and mixed scores are host-only, and test observations
-are never returned. Retention and scheduling outcomes are indirect feedback.
+The user-delegated reviewer can inspect train/dev executions, grades, diagnoses
+and selection metrics. Test observations, raw mixed-split calls and credentials
+remain excluded. Internal tuning isolation is enforced in the SDK, not here.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 
-from sagents.v2.optimization.feedback import training_growth_feedback
-
 _PRIVATE = {'test_observations', 'benchmark_measurement', 'agent_calls', 'internal_agents', 'call', 'tuner_call',
             'recommendation_block_reason', 'assets', 'config', 'reference_answer',
             'dataset_manifest', 'generated_dataset_manifest', 'dataset_diagnostics', 'dataset_version', 'dataset_versions', 'dataset_validation',
-            'exclusions', 'active_case_ids',
-            'validation', 'validation_history', 'validation_score', 'validation_scores',
-            'dev_score', 'dev_scores', 'overall_score', 'overall_before', 'overall_after',
-            'objective_before', 'objective_after', 'regressed_validation'}
+            'exclusions', 'active_case_ids'}
 _EVENT_FIELDS = {
     'operation_started': {'goal', 'agent_id', 'rounds', 'evaluation_repeats', 'max_concurrency', 'package', 'constraints', 'optimization_scope', 'builtin_scoring'},
     'suite_fixed': {'suite'},
@@ -37,34 +32,34 @@ _EVENT_FIELDS = {
 }
 
 
-def model_view(value):
+def review_view(value):
     if isinstance(value, list):
-        return [safe for item in value if (safe := model_view(item)) is not None]
+        return [safe for item in value if (safe := review_view(item)) is not None]
     if not isinstance(value, dict):
         return deepcopy(value)
     if 'event' in value and 'data' in value:
         name, data = value['event'], value['data']
         # Raw target/user/evaluator events cannot be classified safely from a
-        # paginated page alone. Their contents stay on Desktop; completed train
+        # paginated page alone. Their contents stay on Desktop; completed train/dev
         # case evidence is delivered via case_completed/evaluation snapshots.
         fields = _EVENT_FIELDS.get(name, {'round', 'phase', 'trial', 'role'})
-        safe = model_view({k: v for k, v in data.items() if k in fields})
+        safe = review_view({k: v for k, v in data.items() if k in fields})
         return {**{k: value[k] for k in ('sequence', 'event', 'timestamp') if k in value}, 'data': safe}
     case = value.get('case')
     if isinstance(case, dict) and 'split' in case:
-        if case['split'] != 'training':
+        if case['split'] not in {'training', 'validation'}:
             return None
-        training = deepcopy(value)
-        training['case'].pop('reference_answer', None)
-        return training
+        reviewed = deepcopy(value)
+        reviewed['case'].pop('reference_answer', None)
+        return reviewed
     if 'split' in value:
-        if value['split'] != 'training':
+        if value['split'] not in {'training', 'validation'}:
             return None
-        training = deepcopy(value)
-        training.pop('reference_answer', None)
-        return training
+        reviewed = deepcopy(value)
+        reviewed.pop('reference_answer', None)
+        return reviewed
     if 'issues' in value and 'approved' in value:
-        # A suite-review rationale can quote hidden validation questions.
+        # Mixed-split preflight rationale may quote excluded test evidence.
         return {'approved': value['approved']}
     safe = {}
     for key, child in value.items():
@@ -73,18 +68,18 @@ def model_view(value):
         if key == 'cases' and isinstance(child, list):
             if any(r.get('split') == 'validation' for r in child if isinstance(r, dict)):
                 safe['validation_count'] = sum(r.get('split') == 'validation' for r in child)
-            safe[key] = model_view(child)
-        elif key == 'training_growth' and isinstance(child, dict):
-            safe[key] = training_growth_feedback(child)
+            safe[key] = review_view(child)
         elif key == 'reason':
-            # Old fixed-suite rejection messages may contain private case IDs.
-            safe[key] = child if child in {'target_reached', 'stagnation', 'round_limit'} else 'See training evidence; selection measurements remain host-only'
+            # Legacy final-exam reasons may contain hidden test case IDs.
+            # Dev diagnoses remain available in each case grade/assessment.
+            safe[key] = child if child in {'target_reached', 'stagnation', 'round_limit',
+                'regression', 'training_passed', 'unmeasured_round', 'no_regression'} else 'See train/dev evaluation evidence; mixed-split free-text reasons are omitted'
         elif key.endswith('package') and isinstance(child, dict) and 'manifest' in child:
             package = deepcopy(child)
             package['manifest']['tests'] = {'scenarios': [], 'gates': {}}
             safe[key] = package
         else:
-            cleaned = model_view(child)
+            cleaned = review_view(child)
             if cleaned is not None:
                 safe[key] = cleaned
     return safe

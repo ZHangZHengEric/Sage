@@ -231,11 +231,13 @@ async def test_old_runtime_is_rejected_before_any_api_mutation(tmp_path):
 def private_run():
     train = {'id': 'train', 'split': 'training', 'input': 'TRAIN_VISIBLE', 'rubric': 'TRAIN_RUBRIC',
              'reference_answer': 'EVALUATOR_REFERENCE_SECRET'}
-    dev = {'id': 'DEV_ID_SECRET', 'split': 'validation', 'input': 'DEV_QUESTION_SECRET', 'rubric': 'DEV_RUBRIC_SECRET'}
+    dev = {'id': 'DEV_ID_SECRET', 'split': 'validation', 'input': 'DEV_QUESTION_SECRET', 'rubric': 'DEV_RUBRIC_SECRET',
+           'reference_answer': 'DEV_REFERENCE_SECRET'}
     test = {'id': 'TEST_ID_SECRET', 'split': 'test', 'input': 'TEST_QUESTION_SECRET', 'rubric': 'TEST_RUBRIC_SECRET'}
     evaluation = {'package_hash': 'hash', 'cases': [
         {'case': train, 'grade': {'score': .4, 'passed': False, 'rationale': 'TRAIN_FEEDBACK'}, 'observation': {'output': 'TRAIN_PROCESS'}},
-        {'case': dev, 'grade': {'score': .8, 'passed': False, 'rationale': 'DEV_FEEDBACK_SECRET'}, 'observation': {'output': 'DEV_PROCESS_SECRET'}},
+        {'case': dev, 'grade': {'score': .8, 'passed': False, 'rationale': 'DEV_FEEDBACK_SECRET',
+            'diagnosis': {'summary': 'DEV_DIAGNOSIS_VISIBLE'}}, 'observation': {'output': 'DEV_PROCESS_SECRET'}},
     ]}
     report = {'suite': {'cases': [train, dev]}, 'baseline': evaluation, 'selected': evaluation,
         'agent_calls': [{'request': 'DEV_PROCESS_SECRET TEST_QUESTION_SECRET'}],
@@ -261,12 +263,12 @@ def private_run():
         ]}
 
 
-def test_model_view_keeps_training_priorities_but_hides_raw_evaluator_reference():
-    from app.v2.cli.rsi_visibility import model_view
+def test_review_view_keeps_training_priorities_but_hides_raw_evaluator_reference():
+    from app.v2.cli.rsi_visibility import review_view
     event = {'event': 'training_diagnosis_completed', 'data': {
         'round': 2, 'summary': {'summary': 'TRAINING PRIORITY', 'priorities': []},
         'reference_answer': 'EVALUATOR_REFERENCE_SECRET'}}
-    visible = model_view(event)
+    visible = review_view(event)
     assert visible['data']['summary']['summary'] == 'TRAINING PRIORITY'
     assert 'SECRET' not in json.dumps(visible)
 
@@ -283,7 +285,7 @@ def test_model_view_keeps_training_priorities_but_hides_raw_evaluator_reference(
     ('rsi_resume', {'agent_id': 'a', 'run_id': 'r'}),
     ('rsi_apply', {'agent_id': 'a', 'version_id': 'v', 'expected_fingerprint': 'x' * 64, 'confirmed': True}),
 ])
-async def test_every_mcp_read_mode_seals_test_and_dev_content(tmp_path, tool, arguments):
+async def test_every_mcp_read_mode_allows_user_dev_review_but_seals_test(tmp_path, tool, arguments):
     class Bridge:
         async def request(self, *args, **kwargs):
             return private_run()
@@ -291,23 +293,38 @@ async def test_every_mcp_read_mode_seals_test_and_dev_content(tmp_path, tool, ar
             pass
     response = await create_server(tmp_path, bridge=Bridge()).call_tool(tool, arguments)
     text = response[0].text
-    assert 'SECRET' not in text
-    assert all(number not in text for number in ('0.137', '0.8', '0.6237', '0.7237', '0.8237'))
-    assert 'overall_after' not in text and 'regressed_validation' not in text
+    assert all(secret not in text for secret in (
+        'TEST_ID_SECRET', 'TEST_QUESTION_SECRET', 'TEST_RUBRIC_SECRET',
+        'TEST_ERROR_SECRET', 'EVALUATOR_REFERENCE_SECRET', 'DEV_REFERENCE_SECRET', '0.137'))
     assert 'test_observations' not in text and 'human_test_suite' not in text
-    assert 'TRAIN_VISIBLE' in text
+    assert 'TRAIN_VISIBLE' in text and 'DEV_QUESTION_SECRET' in text
+    if tool != 'rsi_questions':
+        assert 'DEV_DIAGNOSIS_VISIBLE' in text and '0.8' in text
     if tool == 'rsi_status' and arguments.get('include_details'):
         value = json.loads(text)
-        assert 'validation' not in value['result']['report']['selected']
-        assert value['iterations'][0]['training_growth'] == {'allowed': False, 'training_total': 1}
+        dev = value['result']['report']['selected']['cases'][1]
+        assert dev['case']['id'] == 'DEV_ID_SECRET'
+        assert dev['grade']['score'] == .8
+        assert dev['grade']['rationale'] == 'DEV_FEEDBACK_SECRET'
+        assert dev['grade']['diagnosis']['summary'] == 'DEV_DIAGNOSIS_VISIBLE'
+        assert dev['observation']['output'] == 'DEV_PROCESS_SECRET'
+        assert value['result']['report']['validation_history'] == [{'score': .8237}]
+        assert value['iterations'][0]['overall_after'] == .6237
+        assert value['iterations'][0]['objective_before'] == .7237
+        assert value['iterations'][0]['regressions'][0]['case_id'] == 'DEV_ID_SECRET'
+        assert value['iterations'][0]['training_growth'] == {
+            'allowed': False, 'reason': 'regression', 'regressed_validation': 1, 'training_total': 1}
         assert value['events'][3]['data']['result']['observation']['output'] == 'TRAIN_PROCESS'
         assert value['next_sequence'] == 7
     if tool == 'rsi_status' and not arguments.get('include_details'):
         scores = json.loads(text)['scores']
         assert scores['baseline_training'] == .4 and scores['selected_training'] == .4
-        assert 'validation' not in scores and 'selected' not in scores
+        assert scores['baseline_validation'] == .8 and scores['selected_validation'] == .8
     if tool == 'rsi_questions':
-        assert json.loads(text)['validation'] == {'total': 1, 'questions_visible': False}
+        validation = json.loads(text)['validation']
+        assert validation['total'] == 1 and validation['questions_visible'] is True
+        assert validation['cases'][0]['id'] == 'DEV_ID_SECRET'
+
 
 
 @pytest.mark.asyncio
@@ -320,8 +337,8 @@ async def test_mcp_schema_does_not_accept_agent_authored_dev_or_test_suites(tmp_
     assert 'human_test_count' in start.inputSchema['properties']
 
 
-def test_model_views_hide_dataset_exclusion_and_preflight_provenance_even_in_details():
-    from app.v2.cli.rsi_visibility import model_view
+def test_review_views_hide_dataset_exclusion_and_preflight_provenance_even_in_details():
+    from app.v2.cli.rsi_visibility import review_view
     secret = 'HIDDEN_DEV_TEST_DIAGNOSIS'
     human = {
         'dataset_manifest': {'active_case_ids': [secret], 'exclusions': [{'case_id': secret, 'evidence': [secret]}]},
@@ -335,6 +352,55 @@ def test_model_views_hide_dataset_exclusion_and_preflight_provenance_even_in_det
         ],
         'suite_review': {'approved': False, 'rationale': secret, 'issues': []},
     }
-    visible = model_view(human)
+    visible = review_view(human)
     assert secret not in json.dumps(visible)
     assert visible['suite_review']['approved'] is False
+
+
+def test_review_projection_preserves_dev_case_events_without_mutating_human_record():
+    from copy import deepcopy
+    from app.v2.cli.rsi_visibility import review_view
+
+    raw = private_run()
+    snapshot = deepcopy(raw)
+    cases = raw['result']['report']['selected']['cases']
+    for result in cases:
+        event = {'sequence': 9, 'event': 'case_completed', 'data': {'result': result}}
+        visible = review_view(event)
+        assert visible['data']['result']['grade'] == result['grade']
+        assert 'reference_answer' not in visible['data']['result']['case']
+    test = {'case': {'id': 'TEST_ID_SECRET', 'split': 'test'},
+            'grade': {'score': .137, 'rationale': 'TEST_DIAGNOSIS_SECRET'}}
+    visible = review_view({'event': 'case_completed', 'data': {'result': test}})
+    assert 'result' not in visible['data']
+    assert raw == snapshot
+
+
+@pytest.mark.asyncio
+async def test_external_review_does_not_relax_actual_internal_tuning_inputs(tmp_path):
+    from tests.sagents.v2.test_package_optimizer import Runner, bundle, context, optimizer, suite
+
+    runner = Runner()
+    result = await optimizer(runner).optimize(bundle(), context=context(), goal='Conversions',
+        suite=suite(), rounds=2, validation_case_count=1, grow_training=False)
+    internal = [json.loads(content)['data'] for name, content in runner.requests if name == 'test.tuner']
+    assert all('validation' not in data and 'validation_history' not in data for data in internal)
+    assert all('holdout-secret' not in json.dumps(data) and 'Convert 7 cm' not in json.dumps(data)
+               for data in internal)
+    assert all('overall_before' not in attempt and 'objective_before' not in attempt
+               for data in internal for attempt in data['previous_attempts'])
+
+    class Bridge:
+        async def request(self, *args, **kwargs):
+            return {'result': result.model_dump(mode='json'), 'events': []}
+        async def close(self):
+            pass
+
+    response = await create_server(tmp_path, bridge=Bridge()).call_tool('rsi_status', {
+        'agent_id': 'a', 'run_id': 'r', 'include_details': True})
+    report = json.loads(response[0].text)['result']['report']
+    dev, = [c for c in report['selected']['cases'] if c['case']['split'] == 'validation']
+    assert dev['case']['id'] == 'holdout-secret' and dev['case']['input'] == 'Convert 7 cm'
+    assert dev['grade']['score'] == .6 and dev['grade']['rationale'] == 'Checked result'
+    assert report['rounds'][0]['overall_before'] == .4
+    assert 'agent_calls' not in report  # Mixed-split raw internal calls stay excluded.
