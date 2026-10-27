@@ -104,6 +104,29 @@ def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
     )
 
 
+def test_desktop_manifest_omits_host_paths_undeclared_by_selected_plugin(tmp_path: Path):
+    from sagents.v2.runtime.extensions.official import builtin_extension_registry
+
+    manifest = desktop_v2_manifest(
+        session_root=tmp_path,
+        component_selections={
+            "memory.provider": "sage.memory.noop",
+            "session-memory.provider": "sage.session-memory.noop",
+        },
+        component_configs={"memory.provider": {}},
+    )
+    capabilities = manifest.runtime.capabilities
+    memory = cast(CapabilitySelection, capabilities["memory.provider"])
+    session_memory = cast(CapabilitySelection, capabilities["session-memory.provider"])
+
+    assert (memory.plugin, memory.config) == ("sage.memory.noop", {})
+    assert (session_memory.plugin, session_memory.config) == ("sage.session-memory.noop", {})
+    registry = builtin_extension_registry()
+    for choice in capabilities.values():
+        selection = cast(CapabilitySelection, choice)
+        registry.validate_parameters(selection.plugin, selection.config)
+
+
 @pytest.mark.asyncio
 async def test_desktop_binding_provisions_a_run_owned_sandbox(tmp_path: Path):
     workspace = tmp_path / "workspace"
