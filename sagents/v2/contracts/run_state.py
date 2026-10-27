@@ -104,6 +104,8 @@ class RunSnapshot(StrictModel):
     session_id: Identifier
     run_id: Identifier
     state: RunState
+    # Execution CAS token. Inbox appends advance event sequences and Session
+    # revision without invalidating an in-flight execution snapshot.
     revision: int = Field(ge=0)
     last_run_sequence: int = Field(ge=0)
     concurrency_mode: SessionConcurrencyMode

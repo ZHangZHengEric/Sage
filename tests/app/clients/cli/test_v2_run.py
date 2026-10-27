@@ -1940,6 +1940,30 @@ async def test_steerer_parses_frames_and_defers_until_the_turn_starts():
     assert plain.pending == ["early"]
 
 
+async def test_steerer_matches_events_before_receipts_by_id():
+    from app.v2.cli.runner import _Steerer
+
+    frames = []
+    renderer = SimpleNamespace(frame=frames.append)
+    steerer = _Steerer(None, "run_1", CONTEXT, cast('EventRenderer', renderer), None, json_frames=False)
+    steerer.turn_id = "turn_1"
+
+    async def submit(command, context):
+        text = command.input[0].content[0].text
+        # Durable events may reach the stream before the submission returns.
+        steerer.observe(SimpleNamespace(type="steer.accepted", data=SimpleNamespace(steer_id=text)))
+        if text == "applied":
+            steerer.observe(SimpleNamespace(type="steer.applied", data=SimpleNamespace(steer_id=text)))
+        else:
+            steerer.observe(SimpleNamespace(type="steer.rejected", data=SimpleNamespace(steer_id=text)))
+        await asyncio.sleep(0)
+        return SimpleNamespace(error=None, result={"steer_id": text})
+
+    steerer.agent = SimpleNamespace(runtime=SimpleNamespace(steer_run=submit))
+    assert await asyncio.gather(steerer.submit("applied"), steerer.submit("rejected")) == [True, True]
+    assert steerer.unapplied() == ("rejected",)
+
+
 async def test_steering_is_enabled_only_for_tty_or_json_stdin(tmp_path, monkeypatch, capsys):
     (tmp_path / "workspace").mkdir()
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")

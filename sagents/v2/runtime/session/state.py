@@ -47,6 +47,7 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.contracts.events import (
     EVENT_CATALOG,
+    CheckpointEventData,
     EventDurability,
     EventSource,
     EventSourceType,
@@ -1867,6 +1868,31 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
 
             if new_state in {RunState.CANCELLED, RunState.FAILED}:
                 drafts = self._interrupted_item_drafts_locked(row, new_state) + drafts
+            rejected_steers, rejection_drafts = self._prepare_steer_rejections_locked(
+                row, new_state, drafts
+            )
+            drafts = rejection_drafts + drafts
+            # Inbox appends advance event sequences without fencing the driver.
+            # Bind checkpoints to their actual position in this atomic commit.
+            if checkpoint is not None and checkpoint.state.get("execution_checkpoint") is True:
+                for offset, draft in enumerate(drafts, 1):
+                    if (draft.type == "checkpoint.committed"
+                            and isinstance(draft.data, CheckpointEventData)
+                            and draft.data.checkpoint_id == checkpoint.checkpoint_id):
+                        sequence = row.last_run_sequence + offset
+                        if (suspension is not None
+                                and suspension.checkpoint_id == checkpoint.checkpoint_id):
+                            suspension = suspension.model_copy(update={"checkpoint_sequence": sequence})
+                        checkpoint = checkpoint.model_copy(update={"run_sequence": sequence})
+                        checkpoint_draft = replace(
+                            draft, data=draft.data.model_copy(update={"run_sequence": sequence})
+                        )
+                        drafts = tuple(
+                            checkpoint_draft
+                            if index == offset - 1 else value
+                            for index, value in enumerate(drafts)
+                        )
+                        break
             events = self._prepare_events_locked(
                 row,
                 session,
@@ -1902,6 +1928,11 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 row.checkpoint_id = checkpoint.checkpoint_id
             if interaction is not None:
                 self._interactions[interaction.interaction_id] = interaction
+            if rejected_steers:
+                self._steer_inbox[run_id] = [
+                    rejected_steers.get(entry.steer_id, entry)
+                    for entry in self._steer_inbox[run_id]
+                ]
 
             self._persist_events_locked(row, session, events)
             if new_state in TERMINAL_RUN_STATES:
@@ -2834,13 +2865,19 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
 
         async with self._run_session_operation(command.run_id):
             command_key = (command.run_id, command.idempotency_key)
-            command_digest = self._digest(command.model_dump(mode="json"))
+            command_payload = command.model_dump(mode="json", exclude={"expected_revision"})
+            command_digest = self._digest(command_payload)
             previous = self._command_results.get(command_key)
             if previous is not None:
                 self._authorize_session_actor_locked(previous.run.session_id, context)
-                self._require_same_idempotent_request(
-                    self._command_digests[command_key], command_digest
-                )
+                stored_digest = self._command_digests[command_key]
+                # Old stores hashed the obsolete CAS revision. Match their
+                # original accepted request, independently of retry revisions.
+                legacy_digest = self._digest({
+                    **command_payload, "expected_revision": previous.run.revision - 1,
+                })
+                if stored_digest != legacy_digest:
+                    self._require_same_idempotent_request(stored_digest, command_digest)
                 return CommitResult(
                     run=previous.run,
                     session=previous.session,
@@ -2852,18 +2889,13 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 raise self._not_found("run.not_found", command.run_id)
             self._authorize_session_actor_locked(row.session_id, context)
             self._validate_external_input_roles(command.input, context)
-            if row.revision != command.expected_revision:
-                raise self._conflict(
-                    "run.revision_conflict",
-                    f"expected run revision {command.expected_revision}, current {row.revision}",
-                )
             if row.state != RunState.RUNNING:
                 raise self._conflict(
                     "run.invalid_transition",
                     f"steer requires running run, current {row.state.value}",
                 )
             active_turn = self._active_turn_locked(command.run_id)
-            if active_turn is not None and active_turn != command.expected_turn_id:
+            if active_turn != command.expected_turn_id:
                 raise self._conflict(
                     "steer.turn_conflict",
                     f"active turn is {active_turn!r}, not {command.expected_turn_id!r}",
@@ -2898,7 +2930,8 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 context.trace.correlation_id,
             )
             now = self._clock()
-            row.revision += 1
+            # Ordered inbox input does not invalidate an in-flight execution
+            # snapshot. Consumption still advances the execution revision.
             row.updated_at = now
             session.revision += 1
             session.updated_at = now
@@ -2945,6 +2978,8 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                     "run.revision_conflict",
                     "run changed before pending steering input could be applied",
                 )
+            if self._active_turn_locked(run_id) != turn_id:
+                raise self._conflict("steer.turn_conflict", "target Turn is no longer active")
             now = self._clock()
             applied = tuple(
                 entry.model_copy(
@@ -2984,6 +3019,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                             **input_item.metadata,
                             "steer_id": entry.steer_id,
                             "steer_inbox_sequence": entry.inbox_sequence,
+                            "steer_run_id": run_id,
                         },
                     )
                     encoded = json.dumps(
@@ -3037,6 +3073,45 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             if run_id not in self._runs:
                 raise self._not_found("run.not_found", run_id)
             return tuple(self._steer_inbox.get(run_id, ()))
+
+    def _prepare_steer_rejections_locked(
+        self, row: _RunRow, new_state: RunState, drafts: tuple[EventDraft, ...]
+    ) -> tuple[dict[str, SteerInboxEntry], tuple[EventDraft, ...]]:
+        """Settle unconsumed input with the Turn/Run that owns it."""
+        ended_turns = {
+            draft.turn_id for draft in drafts
+            if draft.type in {"turn.completed", "turn.failed"}
+        }
+        started_turns = {
+            draft.turn_id for draft in drafts if draft.type == "turn.started"
+        }
+        replacements = {}
+        rejected_drafts = []
+        now = self._clock()
+        for entry in self._steer_inbox.get(row.run_id, ()):
+            if entry.status != SteerInboxStatus.PENDING:
+                continue
+            if new_state in TERMINAL_RUN_STATES:
+                reason = f"run_{new_state.value}"
+            elif entry.expected_turn_id in ended_turns:
+                reason = "turn_ended"
+            elif started_turns and started_turns != {entry.expected_turn_id}:
+                reason = "turn_replaced"
+            else:
+                continue
+            replacements[entry.steer_id] = entry.model_copy(update={
+                "status": SteerInboxStatus.REJECTED,
+                "rejected_at": now, "rejection_reason": reason,
+            })
+            rejected_drafts.append(EventDraft(
+                type="steer.rejected", turn_id=entry.expected_turn_id,
+                data=SteeringEventData(
+                    steer_id=entry.steer_id, state="rejected",
+                    expected_turn_id=entry.expected_turn_id,
+                    inbox_sequence=entry.inbox_sequence, reason=reason,
+                ),
+            ))
+        return replacements, tuple(rejected_drafts)
 
     async def resolve_interaction(
         self, command: ReplyInteraction, context: RequestContext

@@ -39,4 +39,8 @@ agent = await app.load_agent(manifest)
 
 取消、steer、恢复和交互回复都使用明确命令；断开事件流只会 detach 当前观察者。返回的快照可能处于暂停状态，不一定是终态。
 
+`SteerRun` 向当前 Run 的活跃 Turn 追加输入，不创建新 Run，也不重置进度或预算。提交时提供 `run_id`、`expected_turn_id`、`input` 和稳定的 `idempotency_key`；旧参数 `expected_revision` 仍可传入，但不参与入队校验或幂等判断。入队推进 Session revision 和事件序列，不推进执行用的 Run revision；执行器在下一个安全模型边界原子写入消息并消费输入，仍保留执行版本校验。模型会收到中英文运行时提示，按最新要求调整后续工作并保留原任务进度；提示不写入用户消息历史。
+
+`steer.accepted` 只表示已持久化入队，`steer.applied` 表示已在安全边界纳入模型上下文。若 Turn 或 Run 在消费前结束，输入与结束提交一起标记为 `rejected` 并发出 `steer.rejected`，包含原因；不会转投下一轮。暂停保留待消费输入。HTTP 重试使用相同 `messageId`，会返回持久化的当前状态及拒绝原因。
+
 [完整可运行示例](../applications/GETTING_STARTED.md) · [Facade](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/sagent.py) · [命令](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/contracts/commands.py) · [Builder](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/builder.py)

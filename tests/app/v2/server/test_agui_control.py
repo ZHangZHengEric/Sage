@@ -59,6 +59,12 @@ def test_browser_steering_is_delivered_once_at_the_next_model_step(tmp_path):
             assert accepted.json()["data"]["state"] == "pending"
             repeated = client.post("/api/threads/live/steer", headers=headers, json=body)
             assert repeated.json()["data"] == accepted.json()["data"]
+            duplicates = [pool.submit(client.post, "/api/threads/live/steer",
+                                      headers=headers, json=body) for _ in range(4)]
+            for duplicate in duplicates:
+                response = duplicate.result(timeout=5)
+                assert response.status_code == 200, response.text
+                assert response.json()["data"] == accepted.json()["data"]
             changed = client.post("/api/threads/live/steer", headers=headers, json={**body, "text": "different"})
             assert changed.status_code == 409, changed.text
             assert client.post("/api/threads/live/steer", headers=headers, json={**body, "runId": "other"}).status_code == 404
@@ -76,6 +82,35 @@ def test_browser_steering_is_delivered_once_at_the_next_model_step(tmp_path):
         assert client.post("/api/threads/live/steer", headers=headers, json={**body, "messageId": "too-late"}).status_code == 409
         history = client.get("/api/threads/live/events?offset=0", headers=headers).json()["data"]["events"]
         assert sum(event.get("delta") == body["text"] for event in history) == 1
+
+
+def test_browser_steer_unconsumed_at_completion_has_durable_rejection(tmp_path):
+    model = GatedModel()
+    model.scripted = ScriptedModelProvider((_step(1, "已经完成"),))
+    host = make_test_service(tmp_path, model_provider=model)
+    with TestClient(create_app(service=host)) as client, ThreadPoolExecutor() as pool:
+        token = register_and_login(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        running = pool.submit(client.post, "/api/agent", headers=headers, json={
+            "threadId": "live", "runId": "live-run",
+            "messages": [{"id": "initial", "role": "user", "content": "开始"}],
+        })
+        cast('BlockingPortal', client.portal).call(model.started.wait)
+        body = {"runId": "live-run", "messageId": "last-minute", "text": "追加要求"}
+        try:
+            accepted = client.post("/api/threads/live/steer", headers=headers, json=body)
+            assert accepted.status_code == 200, accepted.text
+        finally:
+            cast('BlockingPortal', client.portal).call(model.release.set)
+        response = running.result(timeout=15)
+        assert "sage.steer.rejected" in response.text
+        assert "sage.steer.applied" not in response.text
+        replay = client.post("/api/threads/live/steer", headers=headers, json=body)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["data"] == {
+            "steer_id": accepted.json()["data"]["steer_id"],
+            "state": "rejected", "reason": "run_completed",
+        }
 
 
 def test_browser_cancel_ends_a_live_stream_without_waiting_for_the_model(tmp_path):

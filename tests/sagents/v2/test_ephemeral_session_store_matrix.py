@@ -27,7 +27,7 @@ from sagents.v2.contracts.commands import (
     SteerRun,
 )
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.events import ItemEventData, StepEventData
+from sagents.v2.contracts.events import ItemEventData, StepEventData, TurnEventData
 from sagents.v2.contracts.interactions import (
     BlockingScope,
     InteractionRequest,
@@ -914,6 +914,14 @@ async def test_concurrent_interaction_replies_have_single_winner():
 @pytest.mark.asyncio
 async def test_replay_then_live_subscription_and_detach():
     runtime, _, run_id = await running_runtime()
+    current = await runtime.get_run(run_id)
+    await runtime.session_store.commit_run(
+        run_id=run_id, expected_revision=current.revision,
+        expected_states={RunState.RUNNING}, new_state=RunState.RUNNING,
+        drafts=(EventDraft(type="turn.started", turn_id="turn_1",
+                           data=TurnEventData(state="started")),),
+        context=CONTEXT, idempotency_key="turn",
+    )
     replay = await runtime.session_store.read_events(run_id)
     stream = runtime.subscribe_events(
         EventCursor(run_id=run_id, run_sequence=len(replay) - 1)

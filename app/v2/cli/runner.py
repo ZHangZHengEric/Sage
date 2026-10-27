@@ -17,7 +17,7 @@ from sagents.v2.contracts.commands import (
     SteerRun,
 )
 from sagents.v2.contracts.common import new_id
-from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
@@ -37,8 +37,6 @@ INTERRUPT_GRACE_SECONDS = 5.0
 INTERRUPT_REASON = "user_interrupt"
 # CancelRun 是乐观 CAS；driver 每提交一次事件 revision 就会前进，撞车后重读重试的上限。
 CANCEL_CAS_ATTEMPTS = 8
-# SteerRun 同样是 CAS；运行中 revision 变得更快。
-STEER_CAS_ATTEMPTS = 6
 # ``--json`` 模式下，驱动方在 Run 进行中追加输入的帧类型。
 JSON_STEER_TYPE = "v2_steer"
 LineReader = Callable[[], Awaitable[str | None]]
@@ -388,10 +386,8 @@ class _Steerer:
         self.json_frames = json_frames
         self.turn_id: str | None = None
         self.pending: list[str] = []
-        # 已提交待 steer.accepted 事件确认的文本（FIFO，与 inbox 顺序一致）
-        self._awaiting_ack: list[str] = []
         self._accepted: dict[str, str] = {}  # steer_id -> text
-        self._settled: set[str] = set()  # applied / rejected
+        self._settled: set[str] = set()  # applied
 
     @property
     def enabled(self) -> bool:
@@ -400,7 +396,7 @@ class _Steerer:
     def unapplied(self) -> tuple[str, ...]:
         return tuple(
             text for steer_id, text in self._accepted.items() if steer_id not in self._settled
-        ) + tuple(self._awaiting_ack) + tuple(self.pending)
+        ) + tuple(self.pending)
 
     async def read_line(self) -> str | None:
         assert self._read_line is not None
@@ -413,10 +409,10 @@ class _Steerer:
             for text in pending:
                 asyncio.ensure_future(self.submit(text))
         elif event.type == "steer.accepted":
-            text = self._awaiting_ack.pop(0) if self._awaiting_ack else ""
-            self._accepted[event.data.steer_id] = text
-        elif event.type in {"steer.applied", "steer.rejected"}:
+            self._accepted.setdefault(event.data.steer_id, "")
+        elif event.type == "steer.applied":
             self._settled.add(event.data.steer_id)
+        # Rejected input remains unapplied and is reported at Run completion.
 
     def parse(self, line: str) -> str | None:
         """把一行 stdin 解释成 steer 文本；不是 steer 的输入给出提示并丢弃。"""
@@ -449,36 +445,28 @@ class _Steerer:
         if text is not None:
             await self.submit(text)
 
-    async def submit(self, text: str, *, attempts: int = STEER_CAS_ATTEMPTS) -> bool:
+    async def submit(self, text: str) -> bool:
         if self.turn_id is None:
             # Turn 还没开始（run.accepted/queued 阶段）：等 turn.started 再发。
             self.pending.append(text)
             return False
         runtime = self.agent.runtime
-        receipt = None
-        for _ in range(attempts):
-            current = await runtime.get_run(self.run_id)
-            if current.state in TERMINAL_RUN_STATES:
-                self._report("rejected", text, f"run is already {current.state.value}")
-                return False
-            receipt = await runtime.steer_run(
-                SteerRun(
-                    run_id=self.run_id,
-                    expected_revision=current.revision,
-                    expected_turn_id=self.turn_id,
-                    input=(InputItem(role="user", content=(TextBlock(text=text),)),),
-                    idempotency_key=new_id("cli_steer"),
-                ),
-                self.context,
-            )
-            if receipt.error is None:
-                self._awaiting_ack.append(text)
-                self._report("accepted", text, None)
-                return True
-            if receipt.error.category != ErrorCategory.CONFLICT:
-                break
-        code = receipt.error.code if receipt is not None and receipt.error else "?"
-        self._report("rejected", text, code)
+        receipt = await runtime.steer_run(
+            SteerRun(
+                run_id=self.run_id,
+                expected_turn_id=self.turn_id,
+                input=(InputItem(role="user", content=(TextBlock(text=text),)),),
+                idempotency_key=new_id("cli_steer"),
+            ),
+            self.context,
+        )
+        if receipt.error is None:
+            # Receipts and events can arrive in either order. Match by durable
+            # ID rather than a FIFO shared by concurrent submissions.
+            self._accepted[receipt.result["steer_id"]] = text
+            self._report("accepted", text, None)
+            return True
+        self._report("rejected", text, receipt.error.code)
         return False
 
     def _report(self, status: str, text: str, detail: str | None) -> None:

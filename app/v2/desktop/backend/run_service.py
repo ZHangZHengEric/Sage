@@ -483,7 +483,6 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         result = await self.runtime.steer_run(
             SteerRun(
                 run_id=run_id,
-                expected_revision=run.revision,
                 expected_turn_id=turn_id,
                 input=(InputItem(role="user", content=message_content),),
                 idempotency_key=new_id("steer"),

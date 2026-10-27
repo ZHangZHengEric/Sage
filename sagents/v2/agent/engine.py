@@ -1579,7 +1579,12 @@ class AgentLoopEngine:
                     ModelMessage(
                         role=item.role,
                         content=item.content,
-                        metadata=item.metadata,
+                        metadata={
+                            **item.metadata,
+                            "steer_id": entry.steer_id,
+                            "steer_inbox_sequence": entry.inbox_sequence,
+                            "steer_run_id": run.run_id,
+                        },
                     )
                     for entry in claimed.entries
                     for item in entry.input

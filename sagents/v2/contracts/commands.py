@@ -114,12 +114,16 @@ class CancelRun(RunCommand):
     reason: str = "user_requested"
 
 
-class SteerRun(RunCommand):
-    """Queue model-visible input for the next safe Step of the active Turn."""
+class SteerRun(StrictModel):
+    """Append input to an active Turn, independently of execution revisions."""
 
+    run_id: Identifier
+    idempotency_key: Identifier
     expected_turn_id: Identifier
     input: tuple[InputItem, ...]
     mode: str = "queue_next_step"
+    # Accepted for older callers; inbox appends do not use execution CAS.
+    expected_revision: int | None = Field(default=None, ge=0)
 
 
 class SteerInboxStatus(str, Enum):
@@ -138,6 +142,8 @@ class SteerInboxEntry(StrictModel):
     status: SteerInboxStatus = SteerInboxStatus.PENDING
     created_at: datetime
     applied_at: datetime | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
 
 
 class ReplyInteraction(RunCommand):

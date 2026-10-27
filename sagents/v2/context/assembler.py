@@ -41,6 +41,7 @@ from sagents.v2.context.session_history import (
 )
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
 from sagents.v2.skill.tags import strip_skill_tags
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.runtime.observability.logs import get_logger
 
 
@@ -190,6 +191,16 @@ class DefaultContextAssembler:
         """
 
         segments = []
+        latest_user = next((message for message in reversed(ledger) if is_user_request(message)), None)
+        if (run_id is not None and latest_user is not None
+                and latest_user.metadata.get("steer_id")
+                and latest_user.metadata.get("steer_run_id", latest_user.metadata.get("source_run_id")) == run_id):
+            segments.append(ContextSegment(
+                segment_id="steering_guidance",
+                content=prompt_text("steering", run_prompt_language(command.config.metadata)),
+                stability=ContextStability.STABLE,
+                priority=-170,
+            ))
         for provider in self.providers:
             ledger_segments = getattr(provider, "segments_for_ledger", None)
             segments.extend(

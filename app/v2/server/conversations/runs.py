@@ -106,8 +106,8 @@ class RunService:
             ))
         inputs = (InputItem(role="user", content=(TextBlock(text=content),),
                             metadata={"web_message_id": message_id}),)
-        # HTTP retries must reuse the accepted entry even after its Run revision
-        # advances or completes; reconstructing a CAS command would change it.
+        # Report the durable outcome on replay, including input left unapplied
+        # when its Turn/Run ended. The store enforces concurrent idempotency.
         entries = await self.application.runtime.session_store.list_steers(run_id)
         for entry in entries:
             if any(item.metadata.get("web_message_id") == message_id for item in entry.input):
@@ -116,7 +116,10 @@ class RunService:
                         code="server.conversations.steer.conflict", category=ErrorCategory.CONFLICT,
                         message="messageId is already bound to different input",
                     ))
-                return {"steer_id": entry.steer_id, "state": entry.status.value}
+                result = {"steer_id": entry.steer_id, "state": entry.status.value}
+                if entry.rejection_reason is not None:
+                    result["reason"] = entry.rejection_reason
+                return result
         events = await self.session_access.read_events(run_id, context)
         turn = next((event.turn_id for event in reversed(events) if event.type == "turn.started"), None)
         if run.state != RunState.RUNNING or turn is None:
@@ -125,7 +128,7 @@ class RunService:
                 message="Run is no longer accepting supplemental input",
             ))
         receipt = await self.application.runtime.steer_run(SteerRun(
-            run_id=run_id, expected_revision=run.revision, expected_turn_id=turn,
+            run_id=run_id, expected_turn_id=turn,
             idempotency_key=f"web-steer:{hashlib.sha256(message_id.encode()).hexdigest()}", input=inputs,
         ), context)
         _accepted(receipt)

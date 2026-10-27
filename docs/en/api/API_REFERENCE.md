@@ -39,4 +39,8 @@ Use a new idempotency key for each logical request, and reuse it only when retry
 
 Cancellation, steering, resumption, and interaction replies are explicit commands; disconnecting an event stream only detaches that observer. A snapshot may be suspended rather than terminal.
 
+`SteerRun` appends input to the active Turn of an existing Run without creating a Run or resetting progress or budgets. Supply `run_id`, `expected_turn_id`, `input`, and a stable `idempotency_key`. The legacy `expected_revision` field is accepted but excluded from admission and idempotency checks. Enqueue advances the Session revision and event sequences, leaving the execution Run revision unchanged. At the next safe model boundary, the driver atomically consumes input and persists its messages, retaining execution revision checks. Localized English/Chinese runtime guidance tells the model to apply updated requirements while preserving task progress; this guidance is not stored in user message history.
+
+`steer.accepted` confirms durable enqueue; `steer.applied` confirms incorporation into model context at a safe boundary. Input left pending when its Turn or Run ends is atomically marked `rejected` with a reason and a `steer.rejected` event; it is never forwarded to another Turn. Pausing retains pending input. HTTP retries use the same `messageId` and return the current durable status and rejection reason.
+
 [Complete runnable example](../applications/GETTING_STARTED.md) · [Facade](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/sagent.py) · [Commands](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/contracts/commands.py) · [Builder](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/builder.py)

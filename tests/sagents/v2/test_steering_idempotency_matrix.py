@@ -4,12 +4,15 @@ from typing import cast
 
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.contracts.errors import RuntimeErrorInfo
+from sagents.v2.contracts.events import TurnEventData
+from sagents.v2.runtime.session.contracts import EventDraft
 
 import asyncio
 
 import pytest
 
 from sagents.v2.agent import AgentLoopEngine
+from sagents.v2.agent.state import AgentLoopCheckpointCodec
 from sagents.v2.model import (
     ModelCapabilities,
     ModelEventKind,
@@ -103,6 +106,13 @@ async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically():
         context=CONTEXT,
         idempotency_key="execute",
     )
+    running = (await runtime.session_store.commit_run(
+        run_id=handle.run_id, expected_revision=running.revision,
+        expected_states={RunState.RUNNING}, new_state=RunState.RUNNING,
+        drafts=(EventDraft(type="turn.started", turn_id="turn_1",
+                           data=TurnEventData(state="started")),),
+        context=CONTEXT, idempotency_key="turn",
+    )).run
     first = await runtime.steer_run(
         SteerRun(
             run_id=handle.run_id,
@@ -236,6 +246,12 @@ async def test_agent_loop_applies_steer_at_next_safe_model_boundary():
     completed = await executing
     assert completed.state == RunState.COMPLETED
     assert any(
+        message.role == "system"
+        and "latest user input was received while" in block.text
+        for message in model.requests[1].messages
+        for block in message.content if isinstance(block, TextBlock)
+    )
+    assert any(
         message.role == "user"
         and message.content
         and cast(TextBlock, message.content[0]).text == "new direction"
@@ -244,3 +260,10 @@ async def test_agent_loop_applies_steer_at_next_safe_model_boundary():
     assert [
         entry.status for entry in await getattr(runtime.session_store, 'list_steers')(handle.run_id)
     ] == [SteerInboxStatus.APPLIED]
+    checkpoint = await runtime.session_store.get_checkpoint(completed.checkpoint_id)
+    checkpoint_state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+    prefix = await loop.ledger_rebuilder.rebuild(
+        await runtime.session_store.get_start_command(handle.run_id),
+        run_id=handle.run_id, through_run_sequence=checkpoint.run_sequence,
+    )
+    assert checkpoint_state.ledger_digest == loop._ledger_digest(prefix)

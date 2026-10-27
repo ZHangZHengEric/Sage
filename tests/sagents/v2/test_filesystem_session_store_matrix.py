@@ -1071,6 +1071,8 @@ async def test_suspended_approval_resumes_after_store_process_reopen(
 
 @pytest.mark.asyncio
 async def test_steer_inbox_and_claim_cursor_survive_filesystem_restarts(tmp_path):
+    from sagents.v2.contracts.events import TurnEventData
+
     path = tmp_path / "runtime.db"
     repository = FilesystemSessionStore(path)
     runtime = HarnessRuntime(cast('SessionStore', repository))
@@ -1081,6 +1083,13 @@ async def test_steer_inbox_and_claim_cursor_survive_filesystem_restarts(tmp_path
         context=CONTEXT,
         idempotency_key="start_execution",
     )
+    running = (await repository.commit_run(
+        run_id=handle.run_id, expected_revision=running.revision,
+        expected_states={RunState.RUNNING}, new_state=RunState.RUNNING,
+        drafts=(EventDraft(type="turn.started", turn_id="turn_1",
+                           data=TurnEventData(state="started")),),
+        context=CONTEXT, idempotency_key="turn",
+    )).run
     receipt = await runtime.steer_run(
         SteerRun(
             run_id=handle.run_id,
