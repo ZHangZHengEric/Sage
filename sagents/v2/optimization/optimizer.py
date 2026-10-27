@@ -55,6 +55,8 @@ from sagents.v2.optimization.contracts import (
 from sagents.v2.optimization.runner import OptimizationRunner
 from sagents.v2.optimization.generator import AgentPackageTestGenerator
 from sagents.v2.optimization.principles import (
+    EVALUATION_RECORD_GUIDE,
+    TUNING_RECORD_GUIDE,
     EVALUATION_PRINCIPLES,
     REVIEW_PRINCIPLES,
     TUNING_PRINCIPLES,
@@ -141,8 +143,8 @@ class AgentPackageOptimizer:
         self.require_experiment = require_experiment
         self.runner = runner
         self.user_simulator = user_simulator
-        self.evaluator = with_principles(evaluator, EVALUATION_PRINCIPLES)
-        self.tuner = with_principles(tuner, TUNING_PRINCIPLES)
+        self.evaluator = with_principles(evaluator, EVALUATION_PRINCIPLES, record_guide=EVALUATION_RECORD_GUIDE)
+        self.tuner = with_principles(tuner, TUNING_PRINCIPLES, record_guide=TUNING_RECORD_GUIDE)
         # Candidate validation is deterministic by default. A host may explicitly
         # opt into an additional semantic reviewer; never infer one from evaluator.
         self.reviewer = with_principles(reviewer, REVIEW_PRINCIPLES) if reviewer is not None else None
@@ -800,19 +802,14 @@ class AgentPackageOptimizer:
                 model_grade = await ask(
                     "evaluation",
                     self.evaluator,
-                    "Grade whether the ORIGINAL task goal has been achieved using the fixed rubric. "
-                    "Use 0..1; partial progress is not completed success. A correct abstention or "
-                    "clarification is success only when the fixed rubric explicitly requires it. "
-                    "Use the full conversation when provided; do not redefine success mid-dialogue. "
-                    "When reference_answer is supplied, use it with the fixed rubric as evaluator-only "
-                    "ground truth; never forward it to the target or dialogue driver. "
-                    "Separately provide diagnosis.next_action and diagnosis.next_verification: decide what should be verified next, "
-                    "rather than producing a comprehensive flaw checklist. Separate agent-controllable mechanisms from "
-                    "environment, user simulation, scoring and infrastructure uncertainty. Preserve counterevidence "
-                    "and successful behaviors; do not force a repair without a supported alternative. Explain concrete root causes and recommendations for "
-                    "instructions, Skills, tools or procedure, cite evidence indexes in execution, "
-                    "distinguish confirmed facts from hypotheses, and describe evidence coverage. "
-                    "Do not invent flaws in a successful execution.",
+                    (
+                        'Grade whether the ORIGINAL task goal has been achieved using the fixed rubric and complete '
+                        'supplied execution. First set score (0..1), passed and rationale independently of '
+                        'optimization advice. Use reference_answer as evaluator-only ground truth when supplied. Then'
+                        ' provide a concise diagnosis: the most useful next verification, supported findings, '
+                        'protected behaviors and uncertainties. Cite execution indexes; do not invent a repair for a '
+                        'successful execution.'
+                    ),
                     {
                         "goal": goal,
                         "case": case.model_dump(mode="json"),
@@ -1879,41 +1876,24 @@ class AgentPackageOptimizer:
                             "tuning",
                             tuning_agent,
                             PACKAGE_EDIT_TASK if edit_package_files else (
-                            "Propose a single-mechanism experiment within constraints. Include experiment with the retained parent_hash, "
-                            "applicability, change_locations, existing_rule_gap, expected_observation, support_condition, "
-                            "falsification_condition, inconclusive_condition, measured training_case_ids, protection_case_ids, "
-                            "protected_behaviors and risks. Declare these BEFORE measurement, never after seeing candidate scores. "
-                            "Several supporting edits may serve the same mechanism; split independent mechanisms into later rounds. "
-                            "If evidence is insufficient, return an unchanged proposal instead of inventing a repair. "
-                            "Read accumulated tuning_experience FIRST, then training_diagnosis priorities and successful-vs-failed trial contrasts. "
-                            "Return new reusable lessons and uncertainties in experience_notes, outside production files. "
-                            "then inspect individual cases only where necessary. Convert successful procedures "
-                            "When training_evidence is available, prioritize mixed and failed groups, read their analysis files "
-                            "and recent rejected_attempts, compare regressed traces with their retained-parent links, "
-                            "and use file_read on trial execution files linked by each case index only as needed. Successful cases are safeguards. "
-                            "into reproducible capabilities, not case-specific scripts. "
-                            "system_prompt supplies the COMPLETE replacement production system prompt, "
-                            "not an appendix. Consolidate the retained candidate's useful behavior, "
-                            "remove redundancy and resolve conflicts while preserving original responsibilities, "
-                            "business policy and permissions in meaning. The baseline snapshot stays immutable. "
-                            "Do not use deprecated instruction_guidance for new proposals. files maps allowed bundled paths "
-                            "to replacement content (explicit creatable paths can add new files); "
-                            "budgets maps allowed budget fields to values. tools/skills, when "
-                            "enabled, replace the full target allowlist; only add host candidate names. "
-                            "When allow_tool_creation is enabled, tool_definitions can create or revise "
-                            "pure tools named rsi_<name>. Each has description, object input_schema, "
-                            "and expression. Expressions are JSON literals/objects/arrays, {var: 'field.path'} "
-                            "or {op: name, args: [...]}. Ops: if (lazy, three args), and/or/not, "
-                            "eq/ne, lt/lte/gt/gte, add/sub/mul/div, in, concat, coalesce. "
-                            "Collection ops: filter/map/sort take [array, expression] with var item or item.field "
-                            "for the current element; sort is ascending. length/sum take [array]; at takes [array,index]. "
-                            "Arrays are limited to 256 elements and execution to 20000 expression steps. "
-                            "concat accepts strings only; construct arrays with literals and lazy if branches. "
-                            "No code, IO or external side effects. Include new names in tools to enable them. "
-                            "When allow_skill_creation is enabled, skill_definitions maps new lowercase-hyphen "
-                            "names to complete reusable SKILL.md content; include names in skills to enable them. "
-                            "Use short discoverable descriptions and instructions explaining when to load the skill. "
-                            "Never change goals, permissions or evaluation standards."),
+                            (
+                                'Propose a single-mechanism experiment within constraints using the supplied training '
+                                'evidence and tuning_experience. This is STRUCTURED PATCH mode: return the requested JSON; do'
+                                ' not edit staged files. Include experiment for changed candidates and new reusable '
+                                'experience_notes. If evidence is insufficient, omit change fields and explain the next '
+                                'measurement. system_prompt is the COMPLETE replacement prompt, not an appendix; do not use '
+                                'deprecated instruction_guidance. files maps granted paths to complete replacement content; '
+                                'explicit creatable paths may add files. budgets maps allowed fields. tools/skills replace '
+                                'target allowlists using approved candidate names. When granted, skill_definitions maps '
+                                'lowercase-hyphen names to complete SKILL.md resources; include their names in skills. When '
+                                'granted, tool_definitions creates/revises pure rsi_<name> tools with description, object '
+                                'input_schema and expression; include names in tools. Expressions use JSON literals, {var: '
+                                '"field.path"}, or {op: name, args: [...]}; ops: if (lazy, 3 args), and/or/not, '
+                                'eq/ne/lt/lte/gt/gte, add/sub/mul/div, in/concat/coalesce, filter/map/sort (item.field), '
+                                'length/sum and at. concat accepts strings; sort is ascending. Arrays are limited to 256 '
+                                'elements and execution to 20000 steps; no code, IO or external effects. Follow System '
+                                'principles for preservation, experiment design and Skill quality.'
+                            )),
                             {
                                 "goal": goal,
                                 "min_latency_improvement": min_latency_improvement,

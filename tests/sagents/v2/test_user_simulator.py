@@ -261,7 +261,9 @@ async def test_generated_cases_request_opening_background_and_explicit_conversat
         designer=OptimizationAgent(package=bundle('evaluator'), agent_id='assistant'))
     generated = await generator.generate_with_record(bundle(), context=context(), max_cases=2)
     payload = json.loads(generated.call.request)
-    text = payload['task']
-    assert 'actual first user message' in text and 'Always explicitly set mode' in text
-    assert 'dialogue_completion=user' in text and 'user_context' in text
+    instructions = generated.designer.package.resolved_manifest().agents['assistant'].instructions.inline
+    assert 'actual first user message' in instructions and 'Explicitly' in instructions
+    assert 'single_turn' in instructions and 'dialogue_completion=user' in instructions
+    assert 'user_context' in instructions
+    assert 'actual first user message' not in payload['task']
     assert not runner.target_hashes

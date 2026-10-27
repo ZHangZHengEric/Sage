@@ -53,8 +53,7 @@ class DefaultUserSimulator(UserSimulator):
 
     async def reply(self, request):
         system = DIALOGUE_USER_PRINCIPLES + '\nReturn one JSON object matching response_schema. '
-        system += ('When ending, specify stop_reason=completed, transferred or out_of_scope. '
-                   'Stopping means the user is done, not that the agent earned a passing score.')
+        system += ('When continuing, provide a nonblank message and no stop_reason. When stopping, provide an empty message and stop_reason=completed, transferred or out_of_scope. Always provide a nonblank rationale.')
         if self.instructions:
             system += '\n\nUser simulation instructions:\n' + self.instructions
         payload = {'task': 'Continue this test as the user.', 'data': request.model_dump(mode='json'),

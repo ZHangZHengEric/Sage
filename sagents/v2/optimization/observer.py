@@ -18,7 +18,7 @@ from sagents.v2.optimization.contracts import (
     OptimizationDialogueReply, OptimizationGrade, OptimizationTestSuite, case_prompt_identity,
 )
 from sagents.v2.optimization.audit import generated_tool_audit
-from sagents.v2.optimization.principles import EVALUATION_PRINCIPLES, with_principles, dialogue_user
+from sagents.v2.optimization.principles import EVALUATION_RECORD_GUIDE, EVALUATION_PRINCIPLES, with_principles, dialogue_user
 from sagents.v2.optimization.diagnostics import execution_configuration
 
 
@@ -79,7 +79,7 @@ class IsolatedTestEvaluator:
         self.call_retries = call_retries
         self.checkpoint_binding_id = checkpoint_binding_id
         self.runner = runner
-        self.evaluator = with_principles(evaluator, EVALUATION_PRINCIPLES)
+        self.evaluator = with_principles(evaluator, EVALUATION_PRINCIPLES, record_guide=EVALUATION_RECORD_GUIDE)
         self.driver = dialogue_user(driver, preserve_instructions=True)
         self.context, self.goal, self.timeout = context, goal, timeout
         self.require_clean_generated_tools = require_clean_generated_tools

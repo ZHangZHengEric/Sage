@@ -27,5 +27,12 @@ async def test_host_execution_semantics_reach_internal_roles_without_changing_ba
             assert 'Host target execution semantics:' in instructions
             assert 'sage.agent.continuation.deterministic' in instructions
             assert 'separate tool/model steps are not separate user turns' in instructions
+            assert 'Use reusable improvements' not in instructions
+            if role == 'tuner':
+                assert 'Use training evidence to improve' in instructions
+            elif role == 'evaluator':
+                assert 'Independently grade or diagnose' in instructions
+            else:
+                assert 'Design only the requested test cases' in instructions
     finally:
         await service.close()

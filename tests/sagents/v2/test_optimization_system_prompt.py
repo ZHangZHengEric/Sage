@@ -114,21 +114,42 @@ def test_skill_resource_limits_apply_to_complete_candidate(field, limit, match):
 
 
 @pytest.mark.parametrize('role', ['evaluator', 'tuner', 'reviewer', 'suite_reviewer', 'test_designer'])
-def test_internal_roles_share_separate_execution_file_contract_without_mutating_original(role):
-    from sagents.v2.optimization.principles import RECORD_FORMAT_GUIDE
+def test_internal_roles_receive_only_their_evidence_protocol_without_mutation(role):
+    from sagents.v2.optimization.principles import (
+        EVALUATION_RECORD_GUIDE, TUNING_RECORD_GUIDE, RECORD_FORMAT_GUIDE,
+    )
+    from sagents.v2.optimization.generator import AgentPackageTestGenerator
     runner = Runner()
     engine = optimizer(runner)
     configured = getattr(engine, role)
     before = configured.model_dump_json()
     if role == 'test_designer':
-        from sagents.v2.optimization.generator import AgentPackageTestGenerator
         configured = AgentPackageTestGenerator(runner=runner, designer=configured).designer
         assert engine.test_designer.model_dump_json() == before
     instructions = configured.package.resolved_manifest().agents[configured.agent_id].instructions.inline
-    assert RECORD_FORMAT_GUIDE in instructions
-    assert 'execution-001.json and assessment-001.json' in instructions
-    assert 'comparison.json' in instructions
-    assert 'No role may change tests, scorer or permissions' in instructions
+    if role == 'evaluator':
+        assert EVALUATION_RECORD_GUIDE in instructions
+        assert TUNING_RECORD_GUIDE not in instructions
+        assert 'recent rejected attempts' not in instructions
+    elif role == 'tuner':
+        assert TUNING_RECORD_GUIDE in instructions
+        assert EVALUATION_RECORD_GUIDE not in instructions
+        assert 'file mode writes only the designated assessment' not in instructions
+    else:
+        assert RECORD_FORMAT_GUIDE not in instructions
+        assert 'execution-001.json' not in instructions
+        assert 'comparison.json' not in instructions
+    assert 'empty patch' not in instructions
+
+
+def test_explicit_evidence_protocol_is_optional_and_does_not_modify_sdk_base():
+    from sagents.v2.optimization.principles import with_principles, DESIGN_PRINCIPLES
+    from sagents.v2.optimization.contracts import OptimizationAgent
+    configured = OptimizationAgent(package=bundle('designer'), agent_id='assistant')
+    before = configured.model_dump_json()
+    result = with_principles(configured, DESIGN_PRINCIPLES)
+    assert configured.model_dump_json() == before
+    assert result.package.resolved_manifest().agents['assistant'].instructions.inline.endswith(DESIGN_PRINCIPLES)
 
 
 def test_dialogue_driver_only_receives_user_visible_history_not_evaluation_files():
@@ -139,3 +160,36 @@ def test_dialogue_driver_only_receives_user_visible_history_not_evaluation_files
     assert instructions == DIALOGUE_USER_PRINCIPLES
     assert RECORD_FORMAT_GUIDE not in instructions
     assert 'internal tool results, scores' in instructions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('split,final,expected,absent', [
+    ('training', False, 'Challenge the CURRENT agent', 'Design validation questions independently'),
+    ('validation', False, 'Design validation questions independently', 'Challenge the CURRENT agent'),
+    ('test', False, 'independent human-only observations', 'Challenge the CURRENT agent'),
+    (None, True, 'untouched FINAL suite', 'Challenge the CURRENT agent'),
+])
+async def test_designer_request_contains_only_the_requested_split_guidance(split, final, expected, absent):
+    from sagents.v2.optimization.generator import AgentPackageTestGenerator
+    from sagents.v2.optimization.contracts import OptimizationAgent, OptimizationCase
+
+    class DesignerRunner:
+        async def run(self, package, agent_id, content, ctx):
+            self.request = json.loads(content)
+            actual_split = 'final' if final else split
+            return OptimizationObservation(state='completed', output=json.dumps({'cases': [
+                OptimizationCase(id='one', input='Convert 3 km to meters', rubric='3000 m',
+                                 split=actual_split).model_dump(mode='json')]}))
+
+    runner = DesignerRunner()
+    generator = AgentPackageTestGenerator(runner=runner,
+        designer=OptimizationAgent(package=bundle('designer'), agent_id='assistant'))
+    if final:
+        await generator.generate_final_with_record(bundle(), context=context(), max_cases=1)
+    else:
+        await generator.generate_split_with_record(bundle(), context=context(), split=split,
+                                                   case_count=1, max_cases=1)
+    assert expected in runner.request['task']
+    assert absent not in runner.request['task']
+    assert runner.request['response_schema']['title'] in {'OptimizationCaseBatch', 'OptimizationFinalSuite'}
+    assert set(runner.request) == {'task', 'instructions', 'data', 'response_schema'}

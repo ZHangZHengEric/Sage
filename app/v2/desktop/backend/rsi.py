@@ -1195,7 +1195,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 target_execution_context['environment_completion'] = 'A successful bound case tool result with done=true ends execution before another model call; this is not proof of a passing score.'
             # Describe the host's actual default/explicit selection to internal
             # roles only. The selected target package and its baseline stay intact.
-            execution_guidance = "\nHost target execution semantics: " + json.dumps(target_execution_context, ensure_ascii=False)
+            from sagents.v2.optimization.principles import desktop_role_instructions
             for role in (
                 "evaluator",
                 "tuner",
@@ -1207,7 +1207,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 definition = manifest.agents[identity].model_copy(
                     update={
                         "instructions": Instructions(
-                            inline=(request.user_simulator_instructions or "") if role == "user_simulator" else f"You are the independent RSI {role}. Follow the supplied JSON schema. Preserve the original agent goal. Use reusable improvements; never memorize test answers." + execution_guidance
+                            inline=(request.user_simulator_instructions or "") if role == "user_simulator" else desktop_role_instructions(role, target_execution_context)
                         ),
                     }
                 )

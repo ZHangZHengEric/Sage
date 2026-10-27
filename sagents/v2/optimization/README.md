@@ -900,3 +900,27 @@ Single-turn native loop-guard episodes can be graded from complete bound tool
 receipts while retaining their genuine suspended Run state. See
 [native episode boundaries](NATIVE_EPISODES.md) for evidence checks, selection,
 independent tests, and atomic private-evidence recovery.
+
+### Internal prompt responsibilities
+
+Internal requests retain the JSON `task` / `instructions` / `data` /
+`response_schema` envelope and existing response validation. System text owns the
+role's stable decision rules; the request owns its current mode, evidence,
+authorized edit coordinates and output contract.
+
+- Evaluators receive evaluation evidence semantics, grade before diagnosing when
+  asked to score, and preserve an external authoritative grade when diagnosing it.
+- Tuners receive training evidence navigation. File mode changes only the staged
+  package and returns `OptimizationEditSummary`; structured mode returns a patch.
+  An unchanged candidate is valid in either mode. Experience stays separate from
+  production instructions; validation measurements remain host-only.
+- Designers receive design principles, not execution-file navigation. Generation
+  includes only the requested split's task guidance.
+- Optional candidate/suite reviewers receive their review principles without an
+  evaluator/tuner file protocol. Default simulated users retain their independent
+  visible-conversation request and never receive evaluation references or scores.
+
+SDK-configured role bases are preserved. Desktop adds a distinct purpose for each
+internal role plus the actual target continuation semantics. These are prompt
+organization changes, not new scores, permissions, acceptance rules or guarantees
+of model-quality improvement.
