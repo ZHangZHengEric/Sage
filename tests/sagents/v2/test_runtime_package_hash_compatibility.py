@@ -15,6 +15,10 @@ def test_runtime_defaults_preserve_legacy_package_hash_with_dependencies():
     payload = package.model_dump(mode="json")
 
     def legacy(value):
+        # These nullable keys were always serialized by the pre-retirement schema.
+        for budgets in (value["manifest"]["policies"]["budgets"],
+                        *(agent["budgets"] for agent in value["manifest"]["agents"].values())):
+            budgets.update(system_tokens=None, protected_recent_tokens=None)
         runtime = value["manifest"]["runtime"]
         for name in ("start_workers", "check_readiness", "state_root"):
             runtime.pop(name, None)

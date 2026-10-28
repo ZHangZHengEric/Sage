@@ -182,7 +182,7 @@ Skill 名称应对应实际实现的可复用能力，使用简洁的“小写�
 
 效率模式保留原始质量成绩、诊断与通过状态，另算选版分 `质量 × (1 - 权重 + 权重 / (1 + 用量 / 参考量))`；默认效率权重 0.2，参考量分别为 1 个宿主报告的费用单位、60 秒、10000 个输入与输出 token，可由 SDK/API 配置并随恢复指纹冻结。质量为零不能靠便宜获得分数。这些显式选择的模式允许质量与效率折中，达标和稳定成功仍按质量与通过状态检查；同题选版及重复试验沿用原有权重和聚合方式。报告分别保存 `grade.score`、`objective_score`、`score_metrics` 和轮次的选版分变化；人看的 test 仍测质量。选择费用模式但没有实际费用数据时明确失败，不把未知费用算作零。外部评分器也可以提供质量成绩，再由宿主按所选内置模式计算选版分。
 
-未选择评分器时，由内部 eval 评分并分析执行。选择自定义 Python 评分器后，所有规则判定、模型评判及数字分数由 `score(request)` 内部完成，框架仅传入标准数据与执行证据并验证返回协议，提供可直接使用的 ModelProvider 代理供评分器自主调用，底层复用 Sage 的模型适配与并发预算，但不提供模型代评通道。eval 继续分析完整执行的原因、优点、不稳定路径及改进建议，不能改变评分器的分数或通过状态。评分器的异常、超时或明确不适用均不能回退到内部评分。数字分数用于选版与收敛；test 仍仅供人观察。格式与示例见 [数据集及评分器协议](../../../evaluation_datasets/README.md)。
+未选择评分器时，由内部 eval 评分并分析执行。选择自定义 Python 评分器后，所有规则判定、模型评判及数字分数由 `score(request)` 内部完成，框架仅传入标准数据与执行证据并验证返回协议，提供可直接使用的 ModelProvider 代理供评分器自主调用，底层复用 Sage 的模型适配与并发预算，但不提供模型代评通道。eval 继续分析完整执行的原因、优点、不稳定路径及改进建议，不能改变评分器的分数或通过状态。评分器的异常、超时或明确不适用均不能回退到内部评分。数字分数用于选版与收敛；test 仍仅供人观察。格式与示例见 [数据集及评分器协议](https://github.com/ZHangZHengEric/Sage/blob/main/evaluation_datasets/README.md)。
 
 同名 Python 文件按源码哈希区分版本，不覆盖历史实验绑定的评分器。内容相同的重复导入复用原版本；内容变化则新建版本并自动选中。选择列表用短哈希区分同名条目，显示首次导入时间、自测状态及同名最新版本标记；旧记录未保存时间时明确显示“导入时间未记录”。重复导入旧内容不改变首次时间，也不把它重新排序成最新版本。
 
@@ -212,7 +212,7 @@ Desktop 的隔离训练调用发生超时或执行异常后，从审计断点自
 页面“模拟用户”默认使用 RSI 内置实现；可点击“导入模拟用户”单独上传 Python，再从列表选择。
 与评分器一样按用户、Agent、源码与依赖绑定版本；历史实验保留自己的选择。
 Python 模块与内置自定义指令二选一。tau 的实现位于
-[`evaluation_datasets/tau_bench/user_simulator.py`](../../../evaluation_datasets/tau_bench/user_simulator.py)。
+[`evaluation_datasets/tau_bench/user_simulator.py`](https://github.com/ZHangZHengEric/Sage/blob/main/evaluation_datasets/tau_bench/user_simulator.py)。
 
 模块导出 `reply(request)` 或 `USER_SIMULATOR` 基类实例，返回标准 `can_continue`、
 `message`、`rationale`，停止时必须包含 `stop_reason`；可选 `state` 只在当前对话内传递。
@@ -220,7 +220,7 @@ Python 模块与内置自定义指令二选一。tau 的实现位于
 本轮共享并发预算，不收到远程密钥。导入必须有继续和停止自测；模型自测使用录制响应，
 导入不启动 RSI，不访问真实模型。使用 `dialogue_completion=user` 时，模拟用户结束或
 轮次耗尽后才评分，结束本身不表示通过。协议、可上传示例及 ModelProvider 用法见
-[完整说明](../../../sagents/v2/optimization/USER_SIMULATORS.md)。
+[完整说明](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/USER_SIMULATORS.md)。
 
 ### 下一步验证与机制实验
 

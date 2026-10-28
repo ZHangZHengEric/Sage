@@ -70,8 +70,9 @@ def test_retired_estimated_budgets_load_but_are_never_enforced_or_reported():
     ceiling = resolved.policy_ceilings[agent_id].model_dump()
     assert "max_system_tokens" not in ceiling
     assert "protected_recent_tokens" not in ceiling
-    # Packages that never set them keep their revision identity.
-    assert resolved.manifest_hash == plain.manifest_hash
+    # Historical identity still distinguishes archives with explicit old values.
+    # It is not a runtime limit and must not invalidate previously saved Runs.
+    assert resolved.manifest_hash != plain.manifest_hash
     # Saved revisions and host budgets written before retirement still load.
     legacy = {**ceiling, "max_system_tokens": 16384, "protected_recent_tokens": None}
     assert PolicyCeiling.model_validate(legacy).model_dump() == ceiling

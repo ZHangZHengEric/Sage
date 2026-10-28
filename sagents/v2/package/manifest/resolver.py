@@ -7,7 +7,7 @@ import json
 from typing import Any, Literal
 
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
-from pydantic import Field, model_validator
+from pydantic import Field, PrivateAttr, model_validator, model_serializer
 
 from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.common import Identifier, StrictModel, VerbatimText
@@ -20,7 +20,8 @@ from sagents.v2.package.manifest.root import (
     PluginDeclaration,
     SageManifest,
 )
-from sagents.v2.package.manifest.runtime import RETIRED_BUDGET_FIELDS, RuntimeConfig
+from sagents.v2.package.manifest.runtime import RuntimeConfig
+from sagents.v2.package.manifest.legacy_budgets import historical_budget_payload, historical_policy_values
 
 
 class ResolvedAgent(StrictModel):
@@ -51,6 +52,7 @@ class ResolvedAgent(StrictModel):
 
 
 class PolicyCeiling(StrictModel):
+    _legacy_hash_values: dict = PrivateAttr(default_factory=dict)
     allowed_tools: frozenset[str] = frozenset()
     allowed_skills: frozenset[str] = frozenset()
     allowed_model_routes: frozenset[str] = frozenset()
@@ -59,6 +61,17 @@ class PolicyCeiling(StrictModel):
     max_output_tokens: int | None = None
     max_total_tokens: int | None = None
     deadline_seconds: float | None = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def preserve_archive_identity(cls, value, handler):
+        ceiling = handler(value)
+        if isinstance(value, dict):
+            ceiling._legacy_hash_values = {
+                key: value.get(key)
+                for key in ("max_system_tokens", "protected_recent_tokens")
+            }
+        return ceiling
 
     @model_validator(mode="before")
     @classmethod
@@ -87,6 +100,17 @@ class ResolvedSageManifest(StrictModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     credentials: dict[Identifier, CredentialDeclaration] = Field(default_factory=dict)
     interfaces: dict[Identifier, InterfaceDeclaration] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize_archive_identity(self, handler):
+        payload = handler(self)
+        # Compiled graph digests and recovery archives included the old ceilings.
+        # Serialize their provenance here; PolicyCeiling itself stays clean.
+        for key, ceiling in payload.get("policy_ceilings", {}).items():
+            values = self.policy_ceilings[key]._legacy_hash_values
+            ceiling.update({name: values.get(name) for name in (
+                "max_system_tokens", "protected_recent_tokens")})
+        return payload
 
 
 class CompositionResolver:
@@ -205,19 +229,14 @@ class CompositionResolver:
                     global_budget.wall_time_seconds,
                 ),
             )
+            ceilings[agent_id]._legacy_hash_values = historical_policy_values(manifest, agent_id)
 
         payload = manifest.model_dump(mode="json", exclude={"environments"})
         # Preserve pre-field hashes for packages that do not opt in.
         for definition in payload["agents"].values():
             if not definition.get("preload_skills"):
                 definition.pop("preload_skills", None)
-        # Retired budget fields stay in the digest as null, so packages keep
-        # their revision identity whether or not they still set them.
-        for budgets in (
-            payload["policies"]["budgets"],
-            *(definition["budgets"] for definition in payload["agents"].values()),
-        ):
-            budgets.update(dict.fromkeys(RETIRED_BUDGET_FIELDS))
+        historical_budget_payload(payload)
         payload["models"] = catalog.model_dump(mode="json")
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

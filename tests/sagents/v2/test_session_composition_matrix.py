@@ -13,6 +13,8 @@ from sagents.v2.runtime.session.journal import (
     SessionRowSnapshot,
     SessionStateDeltaMutation,
 )
+from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
+from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
 
 
 def aggregate(revision: int = 1) -> SessionAggregate:
@@ -45,17 +47,21 @@ async def test_public_session_stores_use_composition_not_state_store_inheritance
     await filesystem.close()
 
 
-@pytest.mark.parametrize("kind", ["memory", "filesystem"])
+@pytest.mark.parametrize("kind", ["memory", "filesystem", "mysql", "redis-mysql"])
 @pytest.mark.parametrize(
     "attribute",
     ["read_events", "export_session_state", "_persistence_can_fail", "temporary_probe"],
 )
 async def test_store_facades_restore_temporary_attribute_overrides(tmp_path, kind, attribute):
-    store = (
-        EphemeralSessionStore()
-        if kind == "memory"
-        else FilesystemSessionStore(tmp_path / "sessions")
-    )
+    # SQL/Redis constructors are lazy; exercising real facades needs no servers.
+    if kind == "memory":
+        store = EphemeralSessionStore()
+    elif kind == "filesystem":
+        store = FilesystemSessionStore(tmp_path / "sessions")
+    elif kind == "mysql":
+        store = MysqlSessionStore("mysql://test:test@localhost/test")
+    else:
+        store = RedisMysqlSessionStore("mysql://test:test@localhost/test", redis_url="redis://localhost/0")
     original = getattr(store, attribute, None)
     try:
         with pytest.MonkeyPatch.context() as patch:

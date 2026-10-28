@@ -509,6 +509,8 @@ def test_legacy_bundle_content_hash_is_stable(with_dependency):
     )
     legacy_payload = bundle.model_dump(mode="json")
     def remove_new_field(value):
+        from sagents.v2.package.manifest.legacy_budgets import historical_budget_payload
+        historical_budget_payload(value["manifest"])
         for agent in value["manifest"]["agents"].values():
             agent.pop("preload_skills", None)
         for dependency in value.get("dependencies", {}).values():
@@ -555,6 +557,8 @@ async def test_legacy_package_can_be_read_and_saved_under_original_immutable_ref
     definition = manifest.agents["root"].model_copy(update={"preload_skills": ()})
     manifest = manifest.model_copy(update={"agents": {"root": definition}})
     payload = AgentPackageBundle(manifest=manifest).model_dump(mode="json")
+    from sagents.v2.package.manifest.legacy_budgets import historical_budget_payload
+    historical_budget_payload(payload["manifest"])
     for agent in payload["manifest"]["agents"].values():
         agent.pop("preload_skills", None)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator, model_serializer
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.package.manifest.agents import AgentDefinition, ApplicationEntrypoint
@@ -54,6 +54,8 @@ class TestDeclaration(StrictModel):
 
 
 class SageManifest(StrictModel):
+    # Not configuration: only whole-manifest archives retain historical hash inputs.
+    _legacy_budget_values: dict = PrivateAttr(default_factory=dict)
     schema_version: Literal["sage/v2"] = "sage/v2"
     kind: Literal["application", "agent-package"] = "agent-package"
     metadata: ManifestMetadata
@@ -66,6 +68,22 @@ class SageManifest(StrictModel):
     interfaces: dict[Identifier, InterfaceDeclaration] = Field(default_factory=dict)
     tests: TestDeclaration = Field(default_factory=TestDeclaration)
     environments: dict[Identifier, dict[str, Any]] = Field(default_factory=dict)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def preserve_legacy_budget_identity(cls, value, handler):
+        from sagents.v2.package.manifest.legacy_budgets import legacy_budget_values
+
+        manifest = handler(value)
+        if isinstance(value, dict):
+            manifest._legacy_budget_values = legacy_budget_values(value)
+        return manifest
+
+    @model_serializer(mode="wrap")
+    def serialize_legacy_budget_identity(self, handler):
+        from sagents.v2.package.manifest.legacy_budgets import restore_legacy_budget_values
+
+        return restore_legacy_budget_values(handler(self), self._legacy_budget_values)
 
     @field_validator("plugins", mode="before")
     @classmethod

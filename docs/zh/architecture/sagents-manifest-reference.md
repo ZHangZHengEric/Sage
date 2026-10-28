@@ -219,6 +219,8 @@ tool_approval:
 
 `system_tokens` 与 `protected_recent_tokens` 已退役：它们依赖本地 token 估算，而 v2 只以模型回报的用量为准。旧配置仍可加载，但这两项会被忽略并记录 `manifest.budget.retired_field` 告警，不参与限制，也不出现在请求元数据中。最近历史按完整对话单元保护（`protected_recent_units`）；system 部分的实际体积见请求元数据 `request_budget.system_characters`。
 
+SDK 的 `max_system_tokens` 参数也已删除：请从 `DefaultContextAssembler(...)` 调用中移除该参数，不提供替代的系统 Token 限制；实际输入上限使用 `input_tokens`。旧预算的非空原值仅保留在完整包和已解析执行图的归档中，用于维持原有摘要、不可变包引用及暂停 Run/checkpoint 的恢复；运行时预算对象与生成的配置 schema 均不暴露它们。主动清理已有包中的这些历史原值会改变包身份，请为此发布新的包版本。提示词、工具、模型绑定和实际预算发生变化时，原有恢复兼容性检查仍会拒绝执行。
+
 Package 与 Agent 两层都设置时，取非空值中的较小值形成策略上限；还受宿主与单次运行限制。Agent 的 max_steps 未设置时，解析器还读取 entrypoint.config.max_steps；新配置请统一写 budgets.max_steps，避免同一项多处定义。不要把 null 当成服务保证无限执行，也不要把预算超时当成 HTTP 观察流超时。
 
 ```yaml

@@ -183,7 +183,7 @@ Each repetition records full-Session input, output, cached-input and reasoning t
 
 Efficiency selection uses `quality × (1 - weight + weight / (1 + usage / reference))`, default weight 0.2 and references of one host-reported cost unit, 60 seconds, or 10000 input/output tokens. SDK/API configuration is frozen into the recovery fingerprint. Zero quality cannot gain points by being cheap. Explicit efficiency modes permit tradeoffs, but goals and stability still use quality and pass state. Shared-case weights and repeat aggregation remain unchanged. Reports retain `grade.score`, `objective_score`, `score_metrics`, and round-level selection deltas; human-only test measures quality. Cost mode fails when real cost data is unavailable. External scorers can provide quality before the host applies the chosen efficiency mode.
 
-Without a custom scorer, internal eval grades and diagnoses. With a Python scorer, `score(request)` owns rule checks, model judging, and numeric grades. The framework supplies standard data and evidence, validates the result, and offers a direct ModelProvider proxy using Sage adapters and concurrency budgets, without a separate host model-grading route. Eval still analyzes causes, strengths, unstable paths, and improvements but cannot change scores or pass states. Exceptions, timeouts, or explicit nonapplicability never fall back to internal scoring. Numeric scores drive selection/convergence, while test remains human-only. See the [dataset and scorer protocol](../../../evaluation_datasets/README.md).
+Without a custom scorer, internal eval grades and diagnoses. With a Python scorer, `score(request)` owns rule checks, model judging, and numeric grades. The framework supplies standard data and evidence, validates the result, and offers a direct ModelProvider proxy using Sage adapters and concurrency budgets, without a separate host model-grading route. Eval still analyzes causes, strengths, unstable paths, and improvements but cannot change scores or pass states. Exceptions, timeouts, or explicit nonapplicability never fall back to internal scoring. Numeric scores drive selection/convergence, while test remains human-only. See the [dataset and scorer protocol](https://github.com/ZHangZHengEric/Sage/blob/main/evaluation_datasets/README.md).
 
 Python files with the same name are versioned by source hash, never overwriting scorers bound to historical experiments. Importing identical content reuses the existing version; changed content creates and selects a new version. The selection list distinguishes same-name entries by short hash and shows first import time, self-test status, and a latest-version marker; old records without a time show "import time not recorded". Reimporting old content neither changes its first import time nor reorders it as the latest version.
 
@@ -209,14 +209,14 @@ User background goes only to the simulated user; grading rules and reference ans
 The **User simulator** page uses the built-in RSI implementation by default; **Import user simulator** uploads Python separately for selection from the list.
 Like scorers, versions bind to user, Agent, source, and dependencies; historical experiments keep their own selection.
 A Python module and built-in custom instructions are mutually exclusive. The tau implementation is in
-[`evaluation_datasets/tau_bench/user_simulator.py`](../../../evaluation_datasets/tau_bench/user_simulator.py).
+[`evaluation_datasets/tau_bench/user_simulator.py`](https://github.com/ZHangZHengEric/Sage/blob/main/evaluation_datasets/tau_bench/user_simulator.py).
 
 A module exports `reply(request)` or a `USER_SIMULATOR` base-class instance returning standard `can_continue`,
 `message`, and `rationale`, with `stop_reason` required when stopping; optional `state` is passed only within the current conversation.
 It calls the current RSI internal model through `user_simulator_runtime.get_model_provider()`, sharing global and
 per-round concurrency budgets without receiving remote keys. Import requires continue and stop self-tests; model self-tests use recorded responses,
 and import neither starts RSI nor calls real models. With `dialogue_completion=user`, scoring happens only after the simulator ends or
-turns run out, and ending does not by itself mean passing. See the [complete guide](../../../sagents/v2/optimization/USER_SIMULATORS.md)
+turns run out, and ending does not by itself mean passing. See the [complete guide](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/USER_SIMULATORS.md)
 for the protocol, uploadable examples, and ModelProvider usage.
 
 ### Next-step verification and mechanism experiments
