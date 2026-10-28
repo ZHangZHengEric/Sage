@@ -10,11 +10,12 @@ class SageHttpAgent extends HttpAgent {
   /** The answer the next run carries, or null when it starts fresh work. */
   answer = null
   agentPackage = null
+  notificationConnectionId = ''
 
   requestInit(input) {
     const init = super.requestInit(input)
     if (!this.answer) {
-      return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId, ...(this.agentPackage ? { agent_package: this.agentPackage } : {}) }) }
+      return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId, ...(this.notificationConnectionId ? { notification_connection_id: this.notificationConnectionId } : {}), ...(this.agentPackage ? { agent_package: this.agentPackage } : {}) }) }
     }
     // The resume endpoint takes an answer, not a Run: which of the pending
     // question's decisions this is, plus the run id of the stream it opens.
@@ -82,10 +83,11 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
   return agent
 }
 
-export async function runAgui(agent, { threadId, runId, message, agentId = '', agentPackage = null }) {
+export async function runAgui(agent, { threadId, runId, message, agentId = '', agentPackage = null, notificationConnectionId = '' }) {
   agent.headers = { Authorization: `Bearer ${getToken()}` }
   agent.threadId = threadId
   agent.agentPackage = agentPackage
+  agent.notificationConnectionId = notificationConnectionId
   agent.url = agentPackage ? '/api/agent-package' : AGENT_URL
   agent.addMessage(message)
   return agent.runAgent({

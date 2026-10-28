@@ -8,6 +8,7 @@ import AguiTranscript from '../components/AguiTranscript.vue'
 import WorkspacePanel from '../components/WorkspacePanel.vue'
 import AppIcon from '../components/AppIcon.vue'
 import ChatSkillInput from '../components/ChatSkillInput.vue'
+import IMNotificationSelect from '../components/IMNotificationSelect.vue'
 const workspaceOpen = ref(false)
 import { useRoute, useRouter } from 'vue-router'
 const route = useRoute(), router = useRouter()
@@ -18,6 +19,7 @@ const threads = ref([])
 const threadId = ref('')
 const text = ref('')
 const selectedSkills = ref([])
+const notificationConnectionId = ref('')
 const userMessage = computed(() => [...selectedSkills.value.map(name => `<skill>${name}</skill>`), text.value.trim()].filter(Boolean).join(' '))
 const historyEvents = shallowRef([]), historyOffset = ref(0), historyTotal = ref(0), historyLoading = ref(false)
 let historyRevision = 0
@@ -170,6 +172,7 @@ function applyThreadAgent(id) {
 
 async function openThread(id) {
   selectedSkills.value = []
+  notificationConnectionId.value = ''
   agent.value?.abortRun?.()
   bindAgent()
   waitingForDecisionReplay = false
@@ -230,6 +233,7 @@ async function loadHistory() {
 
 function startNew() {
   selectedSkills.value = []
+  notificationConnectionId.value = ''
   agent.value?.abortRun?.()
   bindAgent()
   waitingForDecisionReplay = false
@@ -276,6 +280,7 @@ async function send() {
       message,
       agentId: selectedAgentId.value,
       agentPackage: agentPackage.value,
+      notificationConnectionId: notificationConnectionId.value,
     })
     if (revision !== historyRevision) return
     await loadThreads()
@@ -474,6 +479,7 @@ onUnmounted(() => {
               :agent-id="selectedAgentId" :agent-package="agentPackage" :disabled="initializing || !agentAvailable"
               :placeholder="composerPlaceholder" @keydown="inputKeydown" />
             <div class="conversation-composer-tools">
+              <div class="conversation-destinations">
               <label v-if="!initializing && agentAvailable" class="conversation-agent" :class="{ locked: agentLocked }">
                 <AppIcon :name="agentLocked ? 'lock' : 'agent'" /><span class="sr-only">智能体</span>
                 <span class="conversation-agent-field">
@@ -486,6 +492,8 @@ onUnmounted(() => {
                   <AppIcon v-if="!agentLocked" name="chevron" class="conversation-agent-chevron" />
                 </span>
               </label>
+              <IMNotificationSelect v-if="!initializing && agentAvailable" v-model="notificationConnectionId" :disabled="pending || stopping" />
+              </div>
               <button v-if="pending && !userMessage" class="send" type="button" :disabled="stopping || supplementing || !streamStarted" :aria-label="stopping ? '正在终止' : '终止'" :title="stopping ? '正在终止' : '终止'" @click="stop">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
               </button>
@@ -512,7 +520,8 @@ onUnmounted(() => {
 .conversation-page .composer { background: var(--card); border-radius: var(--radius-card); padding: 14px; box-shadow: 0 2px 8px var(--shadow-color); }
 .conversation-page .composer :deep(textarea) { min-height: 54px; padding: 5px 4px; font-size: 14px; }
 .conversation-composer-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.conversation-agent { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: calc(100% - 48px); padding: 0 6px; border-radius: var(--radius); color: var(--muted-foreground); }
+.conversation-destinations { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; flex: 1; }
+.conversation-agent { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 0 6px; border-radius: var(--radius); color: var(--muted-foreground); }
 .conversation-agent:not(.locked):has(select:enabled):hover { background: var(--muted); }
 .conversation-agent-field { position: relative; min-width: 0; max-width: 200px; }
 .conversation-agent-size { display: block; min-width: 0; padding: 4px 24px 4px 2px; overflow: hidden; white-space: nowrap; font-size: 12px; line-height: 24px; visibility: hidden; }

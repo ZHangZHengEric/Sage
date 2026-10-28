@@ -13,7 +13,7 @@ from app.v2.server.runtime.policy import (
 )
 from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
-from sagents.v2.contracts.items import MessageItemData, TextBlock, Visibility
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 from sagents.v2.runtime.extensions import (
     CapabilityRequirement,
@@ -23,9 +23,10 @@ from sagents.v2.runtime.extensions import (
     ExtensionScopeContext,
 )
 from sagents.v2.runtime.observability.logs import get_logger
-from .contracts import GRANT_KEY, DeliveryError
+from .contracts import GRANT_KEY, NOTIFY_KEY, DeliveryError
 from .credentials import IMCredentials
 from .feishu import FeishuConfig, registration
+from .notifications import IMNotifications, final_text
 from .orm import BindingRow, DeliveryRow, InboxRow
 from .repository import IMStore, error
 
@@ -36,6 +37,7 @@ class IMService:
     def __init__(self, host):
         self.host = host
         self.store = IMStore(host.database)
+        self.notifications = IMNotifications(self)
         self.credentials = None
         self._credential_errors = {}
         self.worker = uuid4().hex
@@ -320,6 +322,7 @@ class IMService:
                         },
                     )
                     await self._input_error(row, "processing_unavailable", retry=True)
+            await self.notifications.tick(conn, self.worker)
             await self._send(conn)
             if cleanup:
                 await self.store.cleanup(conn.id, self.worker)
@@ -440,6 +443,7 @@ class IMService:
                     resolved_spec_hash=self.host.application.composition_hash,
                     idempotency_key="im_" + row.message_key,
                 )
+                command = await self.notifications.bind(command, conn.owner_id, conn.id, binding_id=row.binding_id)
                 await self.store.change_inbox(
                     row, self.worker, command=command.model_dump(mode="json")
                 )
@@ -505,6 +509,11 @@ class IMService:
                 session_id=row.session_id,
                 label="im",
             )
+        if NOTIFY_KEY in command.config.metadata:
+            await self.notifications.observe(command, conn.owner_id, self.worker)
+            if run.state in TERMINAL_RUN_STATES:
+                await self.store.project(row, self.worker, "final", "", final=True)
+            return
         if run.state == RunState.SUSPENDED:
             suspension = await access.get_suspension(run.suspension_id, context)
             await self.store.project(
@@ -516,30 +525,7 @@ class IMService:
             )
         elif run.state in TERMINAL_RUN_STATES:
             result = await access.get_run_result(row.run_id, context)
-            text = ""
-            if run.state == RunState.COMPLETED:
-                for item in reversed(result.final_items):
-                    if (
-                        item.visibility == Visibility.PUBLIC
-                        and isinstance(item.data, MessageItemData)
-                        and item.data.role == "assistant"
-                    ):
-                        text = "".join(
-                            block.text
-                            for block in item.data.content
-                            if isinstance(block, TextBlock)
-                        )
-                        if text.strip():
-                            break
-                if len(text) > 20000:
-                    text = text[:20000] + "\n完整结果：" + self.link(row.session_id)
-                text = text or "任务已完成：" + self.link(row.session_id)
-            else:
-                text = (
-                    "任务已取消。"
-                    if run.state == RunState.CANCELLED
-                    else "任务执行失败，请在 Sage 中查看：" + self.link(row.session_id)
-                )
+            text = final_text(run, result, self.link(row.session_id))
             await self.store.project(row, self.worker, "final", text, final=True)
 
     async def _send(self, conn):
@@ -556,6 +542,9 @@ class IMService:
                 await self.host.users.get_by_id(conn.owner_id) is None
                 or await self.host.catalog.agent_owner(conn.agent_id) != conn.owner_id
             ):
+                await self.store.finish_delivery(row, self.worker, "superseded")
+                return
+            if not await self.notifications.authorize_delivery(row):
                 await self.store.finish_delivery(row, self.worker, "superseded")
                 return
             receipt = await (await self.channel(conn)).send(

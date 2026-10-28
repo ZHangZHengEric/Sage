@@ -6,6 +6,21 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 GRANT_KEY = "server_v2.im"
+NOTIFY_KEY = "server_v2.im_notify"
+
+
+class NotificationRoute(BaseModel):
+    """Server-issued, frozen destination; never accepted as model arguments."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    owner_id: str
+    agent_id: str
+    connection_id: str
+    binding_id: str
+    generation: int = Field(ge=1)
+    auth_epoch: int = Field(ge=1)
+    sender_id: str
+    chat_id: str
 
 
 class PrivateMessage(BaseModel):

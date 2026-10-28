@@ -421,6 +421,9 @@ class RunService:
                 if self.host.im is None or not await self.host.im.authorize_run(command):
                     raise SageV2Error(RuntimeErrorInfo(code="server.im.grant_revoked",
                         category=ErrorCategory.AUTHORIZATION, message="IM authorization was revoked"))
+            from app.v2.server.im.contracts import NOTIFY_KEY
+            if NOTIFY_KEY in command.config.metadata:
+                await self.host.im.notifications.track(command, user_id)
             loaded = await self._load_run_agent(command, user_id)
             command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
             with log_duration(LOGGER, "server.run.accepted", "运行接纳结束",

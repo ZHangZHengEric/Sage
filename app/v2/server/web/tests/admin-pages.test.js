@@ -1307,3 +1307,22 @@ test('IM detail displays unavailable credentials and allows a recovery check', a
   assert.match(html, /role="alert">请恢复密钥备份/)
   assert.match(html, /测试凭据/)
 })
+
+test('chat IM notification selector uses only personal ready connections and clears revoked targets', async t => {
+  const { api, mount } = await setup(t, 'IMNotificationSelect', 'components')
+  let connections = [
+    { id: 'own', name: 'My IM', enabled: true, paired: true, credentials_error: '' },
+    { id: 'unpaired', name: 'Unpaired', enabled: true, paired: false },
+    { id: 'disabled', name: 'Disabled', enabled: false, paired: true },
+    { id: 'broken', name: 'Broken', enabled: true, paired: true, credentials_error: 'bad key' },
+    { id: 'foreign', name: 'Foreign', enabled: true, paired: true, _owner: { user_id: 'other' } },
+  ]
+  t.mock.method(api, 'imConnections', async () => ({ items: connections }))
+  const selected = []
+  const state = await mount({ modelValue: 'own', 'onUpdate:modelValue': value => selected.push(value) })
+  assert.deepEqual(state.connections.map(row => row.id), ['own'])
+  connections = []
+  await state.load()
+  assert.deepEqual(selected, [''])
+  assert.equal(api.imConnections.mock.calls[0].arguments.length, 0)
+})

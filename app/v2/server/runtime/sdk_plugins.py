@@ -119,9 +119,15 @@ def server_registrations(host):
             return run.command
         scoped = tuple(ScopedExternalTools(value, {run.command.agent_id: type("Grant", (), {"tools": names})()},
                                           command_reader=command_reader) for value in providers)
+        providers = list(scoped)
+        from app.v2.server.im.contracts import NOTIFY_KEY
+        if NOTIFY_KEY in command.config.metadata and not run.command.parent_run_id and run.command.invocation_mode != "plan":
+            from app.v2.server.im.tools import IMNotificationTools
+            from sagents.v2.tool import DecoratedToolProvider
+            providers.append(DecoratedToolProvider(IMNotificationTools(host.im.notifications, command, run.run_id)))
         class Tools:
-            catalog = CompositeToolCatalog(scoped) if scoped else InMemoryToolCatalog(())
-            executor = CompositeToolExecutor(scoped) if scoped else InMemoryToolExecutor({}, {})
+            catalog = CompositeToolCatalog(tuple(providers)) if providers else InMemoryToolCatalog(())
+            executor = CompositeToolExecutor(tuple(providers)) if providers else InMemoryToolExecutor({}, {})
         return Tools()
 
     async def policy(context, deps):
@@ -157,6 +163,7 @@ def server_registrations(host):
 
         return server_tool_policy(host.agent_management, execution_policy=admitted,
                                   current_policy=current, run_policy=member_policy if member_grants else None,
+                                  notification_enabled="server_v2.im_notify" in command.config.metadata and not run.command.parent_run_id,
                                   machine_invocation=key_id is not None or "server_v2.im" in command.config.metadata)
 
     async def self_configuration(context, deps):

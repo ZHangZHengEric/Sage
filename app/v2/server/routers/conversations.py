@@ -83,6 +83,7 @@ async def run_agent(
     stream = await service.start(
         body.to_agui(), user_id=caller.user_id,
         agent_id=caller.agent_id, last_event_id=last_event_id, api_key=caller.api_key,
+        notification_connection_id=body.notification_connection_id,
     )
     return StreamingResponse(
         stream,
@@ -101,7 +102,7 @@ class PackageRunBody(AgentRunBody):
     agent_package: AgentPackageBundle
 
     def to_agui(self):
-        payload = self.model_dump(exclude={"session_id", "agent_package"})
+        payload = self.model_dump(exclude={"session_id", "agent_package", "notification_connection_id"})
         payload["forwardedProps"] = {**self.forwardedProps,
             "agentId": self.agent_package.manifest.entrypoint.agent}
         return RunAgentInput.model_validate(payload)
@@ -115,6 +116,7 @@ async def run_agent_package(body: PackageRunBody, request: Request,
     await result(management.authorize_package("run", body.agent_package, context))
     stream = await service.start(body.to_agui(), user_id=user.user_id,
         package=body.agent_package,
+        notification_connection_id=body.notification_connection_id,
         last_event_id=(request.headers.get("last-event-id") or "").strip() or None)
     return StreamingResponse(stream, media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
@@ -375,7 +377,7 @@ class ExternalRunBody(AgentRunBody):
     runtimeContext: dict = Field(default_factory=dict)
 
     def to_agui(self) -> RunAgentInput:
-        return RunAgentInput.model_validate(self.model_dump(exclude={"runtimeContext", "session_id"}))
+        return RunAgentInput.model_validate(self.model_dump(exclude={"runtimeContext", "session_id", "notification_connection_id"}))
 
 
 class InteractionReply(BaseModel):
@@ -456,6 +458,7 @@ async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
                                  agent_id=caller.agent_id, api_key=caller.api_key,
                                  workspace_directory=workspace_path,
                                  runtime_context=body.runtimeContext,
+                                 notification_connection_id=body.notification_connection_id,
                                  last_event_id=last_event_id)
     return StreamingResponse(stream, media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no",

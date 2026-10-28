@@ -296,7 +296,8 @@ class ConversationService:
 
     async def start(self, request, *, user_id: str, last_event_id: str | None = None,
                     agent_id: str | None = None, workspace_directory: str | None = None,
-                    runtime_context: dict | None = None, package=None, api_key=None):
+                    runtime_context: dict | None = None, package=None, api_key=None,
+                    notification_connection_id: str | None = None):
         started_at = perf_counter()
         performance_started_at = utc_now()
         logger = StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=get_request_id())
@@ -309,6 +310,8 @@ class ConversationService:
             except ValueError as exc:
                 raise _error("invalid_workspace_path", "invalid workspace directory") from exc
         workspace_user_id = user_id
+        if notification_connection_id and api_key is not None and api_key.owner_user_id != user_id:
+            raise _error("notification_forbidden", "IM 通知仅支持凭证持有人本人的任务", ErrorCategory.AUTHORIZATION)
         stream_thread_id = stream_run_id = None
         if agent_id is not None:
             stream_thread_id, stream_run_id = request.thread_id, request.run_id
@@ -366,6 +369,8 @@ class ConversationService:
         if command.agent_id != admitted.agent_id:
             command = command.model_copy(update={"agent_id": admitted.agent_id})
             agent_id = admitted.agent_id
+        if notification_connection_id is not None:
+            command = await self.runs.host.im.notifications.bind(command, user_id, notification_connection_id)
         if stream_run_id is not None:
             # Freeze retries to their original admitted command. Upgrades must
             # not change its idempotency digest or silently accept new input.
@@ -374,10 +379,11 @@ class ConversationService:
             if previous is not None:
                 _, stored = previous
                 old_context = dict(stored.config.metadata.get("system_context") or {})
-                new_context = dict(runtime_context or {})
+                new_context = dict(command.config.metadata.get("system_context") or {})
                 old_context.pop("session_id", None)
                 new_context.pop("session_id", None)
                 if (stored.input != command.input or stored.agent_id != command.agent_id
+                        or stored.config.metadata.get("server_v2.im_notify") != command.config.metadata.get("server_v2.im_notify")
                         or stored.config.metadata.get("server_v2.external.workspace_path") != workspace_directory
                         or old_context != new_context):
                     raise _error("idempotency_conflict", "runId is already bound to a different request", ErrorCategory.CONFLICT)

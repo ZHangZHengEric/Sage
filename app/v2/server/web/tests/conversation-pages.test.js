@@ -107,8 +107,10 @@ test('new chat preserves drafts when configuration fails, disables sends without
   state.inputKeydown({ key: 'Enter', isComposing: true, preventDefault() { prevented = true } })
   assert.equal(prevented, false); assert.equal(fetch.mock.calls.length, 0)
   state.selectedSkills = ['wishseen-project', 'review']
+  state.notificationConnectionId = 'im_mine'
   await state.send()
   assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(JSON.parse(fetch.mock.calls[0].arguments[1].body).notification_connection_id, 'im_mine')
   assert.equal(state.isStart, false); assert.equal(state.agentLocked, true)
   assert.equal(state.text, '')
   assert.equal(JSON.parse(fetch.mock.calls[0].arguments[1].body).messages[0].content, '<skill>wishseen-project</skill> <skill>review</skill> 保留这段草稿')
@@ -119,6 +121,7 @@ test('new chat preserves drafts when configuration fails, disables sends without
   assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).messages.at(-1).content, '<skill>wishseen-project</skill>')
   state.selectedSkills = ['review']
   state.startNew()
+  assert.equal(state.notificationConnectionId, '')
   assert.deepEqual(state.selectedSkills, [])
 })
 

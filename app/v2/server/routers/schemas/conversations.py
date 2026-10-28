@@ -8,6 +8,7 @@ from app.v2.server.conversations.agui.mapping import resolve_session_id
 from sagents.v2.contracts.errors import SageV2Error
 
 class AgentRunBody(BaseModel):
+    notification_connection_id: str | None = Field(default=None, min_length=1, max_length=64)
     session_id: str | None = None
     threadId: str | None = None
     runId: str
@@ -29,7 +30,7 @@ class AgentRunBody(BaseModel):
         return self
 
     def to_agui(self) -> RunAgentInput:
-        return RunAgentInput.model_validate(self.model_dump(exclude={"session_id"}))
+        return RunAgentInput.model_validate(self.model_dump(exclude={"session_id", "notification_connection_id"}))
 
 class ThreadResumeBody(BaseModel):
     """One answer to the question a thread is waiting on.

@@ -360,7 +360,8 @@ class IMStore:
     async def deliveries(self, cid, *, after=0, limit=50, unresolved=False):
         async with self.database.session() as db:
             stmt = select(DeliveryRow).where(
-                DeliveryRow.connection_id == cid, DeliveryRow.id > after
+                DeliveryRow.connection_id == cid, DeliveryRow.id > after,
+                DeliveryRow.state.not_in(["prepared", "projected"]),
             )
             if unresolved:
                 stmt = stmt.where(DeliveryRow.state.in_(["failed", "unknown"]))
@@ -383,6 +384,6 @@ class IMStore:
                 delete(DeliveryRow).where(
                     DeliveryRow.connection_id == cid,
                     DeliveryRow.created_at < cutoff,
-                    DeliveryRow.state.in_(["platform_accepted", "superseded"]),
+                    DeliveryRow.state.in_(["platform_accepted", "superseded", "projected"]),
                 )
             )

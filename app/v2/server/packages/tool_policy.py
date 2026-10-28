@@ -12,11 +12,14 @@ from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 from app.v2.server.runtime.policy import ExecutionPolicy, intersect_policies
 
 
-def server_tool_policy(management, *, execution_policy=None, current_policy=None, run_policy=None, machine_invocation=False):
+def server_tool_policy(management, *, execution_policy=None, current_policy=None, run_policy=None, machine_invocation=False, notification_enabled=False):
     names = {item.name for item in AgentManagementToolPlugin(management).definitions} if management is not None else set()
     configured = execution_policy or ExecutionPolicy()
 
     def assess(context):
+        if notification_enabled and context.definition.name == "im_notify":
+            return ToolOperationAssessment(action=ToolPolicyAction.ALLOW,
+                reason="The owner already selected this personal IM notification destination")
         if configured.shell == "sandboxed" and context.definition.name in {
             "file_write", "file_update", "apply_patch", "kill_shell",
         }:
@@ -66,7 +69,7 @@ def server_tool_policy(management, *, execution_policy=None, current_policy=None
                 effective = intersect_policies(effective, member)
             # Rebuild with the complete effective configuration in the audit hash.
             policy = server_tool_policy(management, execution_policy=effective,
-                machine_invocation=machine_invocation).with_approval_config(self.tool_approval) if effective != configured else self
+                machine_invocation=machine_invocation, notification_enabled=notification_enabled).with_approval_config(self.tool_approval) if effective != configured else self
             decision = await DefaultToolPolicy.decide(policy, context)
             # Explicit shell grants requiring confirmation remain a ceiling,
             # even when the Agent prefers automatic tool approval.

@@ -82,3 +82,5 @@ class DeliveryRow(Base):
     receipt: Mapped[str] = mapped_column(String(192), default="")
     error: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[float] = mapped_column(Float)
+    # A prepared Run notification is an outbox intent, not an inbound IM event.
+    run_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)

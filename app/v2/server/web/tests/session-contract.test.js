@@ -66,3 +66,25 @@ test('Package and catalog runs use the same AG-UI client and keep the selected s
   assert.equal(requests[1].body.agent_package, undefined)
   assert.equal(requests[1].body.forwardedProps.agentId, 'saved-agent')
 })
+
+test('IM notification destination is explicit per Run and never carried into the next unselected Run', async t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => 'token' } })
+  t.after(() => previous ? Object.defineProperty(globalThis, 'localStorage', previous) : delete globalThis.localStorage)
+  const requests = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const body = JSON.parse(init.body); requests.push(body)
+    return new Response([
+      { type: 'RUN_STARTED', threadId: body.threadId, runId: body.runId },
+      { type: 'RUN_FINISHED', threadId: body.threadId, runId: body.runId },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+  })
+  const agent = createAguiAgent()
+  await runAgui(agent, { threadId: 'notify', runId: 'n1', notificationConnectionId: 'im_mine',
+    message: { id: 'm1', role: 'user', content: 'prepare report' } })
+  await runAgui(agent, { threadId: 'ordinary', runId: 'n2',
+    message: { id: 'm2', role: 'user', content: 'ordinary chat' } })
+  assert.equal(requests[0].notification_connection_id, 'im_mine')
+  assert.equal(requests[0].forwardedProps.notification_connection_id, undefined)
+  assert.equal(requests[1].notification_connection_id, undefined)
+})
