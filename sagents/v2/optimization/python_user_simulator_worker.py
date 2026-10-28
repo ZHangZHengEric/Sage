@@ -30,7 +30,9 @@ def invoke(module, request):
 
 def main():
     path = Path(sys.argv[1]).resolve()
-    capture = DependencyCapture(path)
+    from sagents.v2.optimization.scorer_dependencies import worker_request
+    verified_request = worker_request()
+    capture = DependencyCapture(path, bind_runtime='--bind-runtime' in sys.argv[2:])
     spec = importlib.util.spec_from_file_location('_sage_imported_user_simulator', path)
     module = importlib.util.module_from_spec(spec)
     with redirect_stdout(sys.stderr):
@@ -64,7 +66,8 @@ def main():
             if contract is not None:
                 output['user_simulator_contract'] = contract
         else:
-            request = UserSimulationRequest.model_validate_json(sys.stdin.buffer.readline(32 * 1024 * 1024 + 1))
+            request = (UserSimulationRequest.model_validate(verified_request) if verified_request is not None
+                else UserSimulationRequest.model_validate_json(sys.stdin.buffer.readline(32 * 1024 * 1024 + 1)))
             output = invoke(module, request).model_dump(mode='json')
     dependencies = capture.finish(module, declaration='USER_SIMULATOR_DEPENDENCIES')
     sys.stdout.write(json.dumps({'payload': output, 'dependency_manifest': dependencies}))

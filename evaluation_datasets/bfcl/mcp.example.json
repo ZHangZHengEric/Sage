@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "BFCL": {
-      "command": "/absolute/path/Sage/.venv/bin/python",
+      "command": "/absolute/path/Sage/evaluation_datasets/bfcl/.venv/bin/python",
       "args": [
         "-m",
         "evaluation_datasets.bfcl.mcp_server",

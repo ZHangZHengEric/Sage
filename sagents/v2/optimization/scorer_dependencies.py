@@ -43,23 +43,33 @@ def _ignored(path):
 def _members(root):
     if not root.is_dir():
         raise ScorerDependencyError('frozen scorer dependencies changed')
-    return sorted(p.relative_to(root).as_posix() for p in root.rglob('*')
-        if not _ignored(p.relative_to(root)) and p.is_file())
+    members = []
+    for directory, directories, files in os.walk(root):
+        relative = Path(directory).relative_to(root)
+        directories[:] = [name for name in directories if not _ignored(relative / name)]
+        members.extend((relative / name).as_posix() for name in files
+            if not _ignored(relative / name) and (Path(directory) / name).is_file())
+    return sorted(members)
 
 
-def _environment():
+def _environment(*, bind_runtime=False):
     versions = sorted({(d.metadata['Name'].lower().replace('_', '-'), d.version)
         for d in importlib.metadata.distributions() if d.metadata.get('Name')})
-    return {'python': sys.version, 'platform': sys.platform, 'distributions': [list(v) for v in versions]}
+    result = {'python': sys.version, 'platform': sys.platform, 'distributions': [list(v) for v in versions]}
+    if bind_runtime:
+        result['executable'] = os.path.abspath(sys.executable)
+    return result
 
 
-def verify_dependencies(manifest):
+def verify_dependencies(manifest, *, check_environment=True):
     """Check membership as well as hashes: a newly added module can change imports."""
     try:
         content = {k: v for k, v in manifest.items() if k != 'binding'}
         if manifest.get('protocol') != PROTOCOL or _binding(content) != manifest['binding']:
             raise ScorerDependencyError('frozen scorer dependencies changed')
-        if manifest['environment'] != _environment():
+        if check_environment and manifest['environment'] != _environment(
+            bind_runtime='executable' in manifest['environment']
+        ):
             raise ScorerDependencyError('frozen scorer dependencies changed')
         for root, members in manifest['trees'].items():
             if _members(Path(root)) != members:
@@ -82,8 +92,9 @@ def verify_capture(expected, observed):
 
 
 class DependencyCapture:
-    def __init__(self, entry):
+    def __init__(self, entry, *, bind_runtime=False):
         self.entry = Path(entry).resolve()
+        self.bind_runtime = bind_runtime
         self.files = {}
         self.active, self.hashing = True, False
         # Installed libraries are version-bound rather than hashing large native
@@ -166,5 +177,14 @@ class DependencyCapture:
             if _digest(Path(name)) != digest:
                 raise ScorerDependencyError('frozen scorer dependencies changed')
         result = {'protocol': PROTOCOL, 'files': dict(sorted(self.files.items())),
-            'trees': trees, 'environment': _environment()}
+            'trees': trees, 'environment': _environment(bind_runtime=self.bind_runtime)}
         return {**result, 'binding': _binding(result)}
+
+
+def worker_request():
+    """Verify a selected interpreter before importing or invoking scorer code."""
+    if '--verify-dependencies' not in sys.argv[2:]:
+        return None
+    envelope = json.loads(sys.stdin.buffer.readline(64 * 1024 * 1024 + 1))
+    verify_dependencies(envelope['dependencies'])
+    return envelope['request']

@@ -100,3 +100,42 @@ async def test_early_worker_import_failure_with_large_input_is_typed_not_broken_
     with pytest.raises(ScorerExecutionError, match='ImportError') as caught:
         await module.score(large)
     assert 'private credential' not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_selected_venv_is_preserved_and_environment_drift_is_rejected_before_import(tmp_path):
+    import sysconfig
+    import venv
+    from pathlib import Path
+    runtime = tmp_path / ".venv"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    site = next(runtime.rglob('site-packages'))
+    repository = Path(__file__).resolve().parents[3]
+    (site / 'test-runtime.pth').write_text(str(repository) + '\n' + sysconfig.get_path('purelib') + '\n')
+    marker = tmp_path / 'imported.txt'
+    source = f"from pathlib import Path\nPath({str(marker)!r}).write_text('imported')\n" + """def score(request):
+    import sys
+    return {'grade': {'score': 1, 'passed': True, 'rationale': 'Selected runtime'}, 'details': {'python': sys.executable}}
+"""
+    source += 'SCORER_TEST_CASES = ' + repr([{'request': request().model_dump(mode='json'), 'expected_score': 1, 'expected_passed': True}])
+    module = scorer(tmp_path, source, timeout=20)
+    executable = runtime / ('Scripts/python.exe' if __import__('os').name == 'nt' else 'bin/python')
+    module = PythonExecutionScorer(path=module.path, source_hash=module.source_hash,
+        descriptor=module.descriptor, python_executable=str(executable), timeout=20)
+    await module.validate()
+    assert module.dependency_manifest['environment']['executable'] == str(executable)
+    assert (await module.score(request())).details['python'] == str(executable)
+    marker.unlink()
+    metadata = site / 'changed_runtime-1.0.dist-info'
+    metadata.mkdir()
+    (metadata / 'METADATA').write_text('Metadata-Version: 2.1\nName: changed-runtime\nVersion: 1.0\n')
+    with pytest.raises(ScorerExecutionError, match='dependencies changed'):
+        await module.score(request())
+    assert not marker.exists(), 'Environment verification must run before importing scorer code'
+
+
+def test_missing_selected_python_does_not_fall_back_to_the_host(tmp_path):
+    module = scorer(tmp_path, "def score(request): return {}")
+    with pytest.raises(ValueError, match='virtual environment'):
+        PythonExecutionScorer(path=module.path, source_hash=module.source_hash,
+            descriptor=module.descriptor, python_executable=str(tmp_path / 'missing-python'))

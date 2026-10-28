@@ -14,6 +14,7 @@ import 'rsi_activity.dart';
 import 'rsi_diff.dart';
 import 'rsi_scorer_guide.dart';
 import '../state/workspace_controller.dart';
+import '../services/scorer_import.dart';
 
 class RsiScreen extends StatefulWidget {
   const RsiScreen({
@@ -1017,9 +1018,14 @@ class _RsiScreenState extends State<RsiScreen> {
       ],
     );
     if (file == null) return;
+    final python = await scorerPythonExecutable(file.path);
     final module = await widget.controller.importRsiUserSimulator(
       widget.agentId,
-      {'name': file.name, 'source': await file.readAsString()},
+      {
+        'name': file.name,
+        'source': await file.readAsString(),
+        'python_executable': ?python,
+      },
     );
     if (mounted) selectUserSimulator(module);
   });
@@ -1074,9 +1080,11 @@ class _RsiScreenState extends State<RsiScreen> {
       ],
     );
     if (file == null) return;
+    final python = await scorerPythonExecutable(file.path);
     final plan = await widget.controller.importRsiScorer(widget.agentId, {
       'name': file.name,
       'source': await file.readAsString(),
+      'python_executable': ?python,
     });
     if (mounted) selectScorer(plan);
   });

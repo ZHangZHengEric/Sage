@@ -1,0 +1,5 @@
+{
+  "format_version": "sage.rsi.scorer-runtime/v1",
+  "python": ".venv/bin/python",
+  "python_windows": ".venv/Scripts/python.exe"
+}

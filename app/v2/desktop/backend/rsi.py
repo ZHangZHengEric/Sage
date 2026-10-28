@@ -509,7 +509,8 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(scorer.source)
         descriptor = ScorerDescriptor(id=identity, name=scorer.name, version=source_hash)
-        checker = PythonExecutionScorer(path=path, source_hash=source_hash, descriptor=descriptor, timeout=10)
+        checker = PythonExecutionScorer(path=path, source_hash=source_hash, descriptor=descriptor, timeout=10,
+            python_executable=scorer.python_executable)
         try:
             validation = await checker.validate()
         except (TimeoutError, RuntimeError, ValueError) as exc:
@@ -523,6 +524,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             value = self.rsi_store.get(identity, user_id, agent_id, "scorer")
         except ValueError:
             value = {"validation": validation, "id": identity, "name": scorer.name, "source_hash": source_hash,
+                     "python_executable": checker.python_executable,
                      "dependency_manifest": dependencies, "binding_hash": binding,
                      "created_at": utc_now().isoformat(), "path": str(path), "descriptor": descriptor.model_dump(mode="json")}
             self.rsi_store.put(value, user_id, agent_id, "scorer")
@@ -556,8 +558,11 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             if digest != stored["source_hash"] or selection.descriptor.model_dump(mode="json") != stored["descriptor"]:
                 raise ValueError("frozen scorer source changed")
             dependencies = stored.get("dependency_manifest")
+            runtime = stored.get("python_executable")
+            if runtime and (dependencies is None or dependencies['environment'].get('executable') != os.path.abspath(runtime)):
+                raise ValueError("frozen scorer Python runtime changed; reimport the scorer")
             if dependencies is not None:
-                verify_dependencies(dependencies)
+                verify_dependencies(dependencies, check_environment=stored.get("python_executable") is None)
             binding = dependency_binding(digest, dependencies)
             if stored.get("binding_hash", binding) != binding:
                 raise ValueError("frozen scorer dependencies changed")
@@ -1548,6 +1553,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 value["scorer_model_transport"] = "sage-model-provider"
                 scorer = PythonExecutionScorer(path=stored["path"], source_hash=stored["source_hash"],
                     descriptor=selection.descriptor, model_api_factory=scorer_gateway.bind,
+                    python_executable=stored.get("python_executable"),
                     dependency_manifest=stored.get("dependency_manifest"))
             elif request.scorer is not None and request.scorer.mode == "mcp":
                 selection = await self._rsi_scorer_selection(request, user, identity)
@@ -1570,6 +1576,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 await user_gateway.start()
                 optimizer.user_simulator = PythonUserSimulator(path=user_module["path"],
                     source_hash=user_module["source_hash"], descriptor=user_module["descriptor"],
+                    python_executable=user_module.get("python_executable"),
                     dependency_manifest=user_module["dependency_manifest"], model_api_factory=user_gateway.bind)
                 value["user_simulator"] = {"mode": "python", "id": user_module["id"],
                     "descriptor": user_module["descriptor"]}

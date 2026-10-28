@@ -38,6 +38,7 @@ class ScorerSelection(StrictModel):
 class ScorerImport(StrictModel):
     name: str = Field(min_length=1, max_length=255)
     source: str = Field(min_length=1, max_length=1024 * 1024)
+    python_executable: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @model_validator(mode='after')
     def validate_source(self):

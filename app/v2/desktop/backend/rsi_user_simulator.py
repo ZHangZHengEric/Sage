@@ -18,6 +18,7 @@ PUBLIC = ('id', 'name', 'source_hash', 'descriptor', 'validation', 'created_at')
 class UserSimulatorImport(StrictModel):
     name: str = Field(min_length=1, max_length=255)
     source: str = Field(min_length=1, max_length=1024 * 1024)
+    python_executable: str | None = Field(default=None, min_length=1, max_length=4096)
 
     @model_validator(mode='after')
     def valid_entry(self):
@@ -51,7 +52,8 @@ class DesktopUserSimulatorMixin:
             with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                 stream.write(module.source)
         checker = PythonUserSimulator(path=path, source_hash=digest,
-            descriptor=UserSimulatorDescriptor(id='validation', name=module.name, version=digest), timeout=10)
+            descriptor=UserSimulatorDescriptor(id='validation', name=module.name, version=digest), timeout=10,
+            python_executable=module.python_executable)
         try:
             validation = await checker.validate()
         except (RuntimeError, TimeoutError, ValueError) as error:
@@ -66,6 +68,7 @@ class DesktopUserSimulatorMixin:
             value = dict(id=identity, name=module.name, path=str(path), source_hash=digest,
                 descriptor=descriptor.model_dump(mode='json'), validation=validation,
                 dependency_manifest=checker.dependency_manifest, binding_hash=binding,
+                python_executable=checker.python_executable,
                 created_at=utc_now().isoformat())
             self.rsi_store.put(value, user_id, agent_id, 'user_simulator')
         return {key: value[key] for key in PUBLIC}
@@ -83,7 +86,10 @@ class DesktopUserSimulatorMixin:
         digest = hashlib.sha256(Path(stored['path']).read_bytes()).hexdigest()
         if digest != stored['source_hash']:
             raise ValueError('frozen user simulator source changed')
-        verify_dependencies(stored['dependency_manifest'])
+        runtime = stored.get('python_executable')
+        if runtime and stored['dependency_manifest']['environment'].get('executable') != os.path.abspath(runtime):
+            raise ValueError('frozen user simulator Python runtime changed; reimport the simulator')
+        verify_dependencies(stored['dependency_manifest'], check_environment=runtime is None)
         binding = dependency_binding(digest, stored['dependency_manifest'])
         if (binding != stored['binding_hash'] or stored['descriptor']['version'] != binding
                 or request.user_simulator_binding_id not in {None, binding}):
