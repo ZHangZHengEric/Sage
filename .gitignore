@@ -172,6 +172,8 @@ celerybeat.pid
 env/
 venv/
 ENV/
+!evaluation_datasets/alfworld/vendor/alfworld/env/
+!evaluation_datasets/alfworld/vendor/alfworld/env/*.py
 !app/v1/deploy/k8s/env/
 !app/v1/deploy/k8s/env/*.env.example
 env.bak/

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ALFWorld": {
-      "command": "/absolute/path/Sage/.venv/bin/python",
+      "command": "/absolute/path/Sage/evaluation_datasets/alfworld/.venv/bin/python",
       "args": [
         "-m",
         "evaluation_datasets.alfworld.mcp_server",

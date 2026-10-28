@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ScienceWorld": {
-      "command": "/absolute/path/Sage/.venv/bin/python",
+      "command": "/absolute/path/Sage/evaluation_datasets/scienceworld/.venv/bin/python",
       "args": [
         "-m",
         "evaluation_datasets.scienceworld.mcp_server",

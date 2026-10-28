@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ToolSandbox": {
-      "command": "/absolute/path/Sage/.venv/bin/python",
+      "command": "/absolute/path/Sage/evaluation_datasets/toolsandbox/.venv/bin/python",
       "args": [
         "-m",
         "evaluation_datasets.toolsandbox.mcp_server",

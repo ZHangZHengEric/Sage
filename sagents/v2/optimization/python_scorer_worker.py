@@ -30,10 +30,12 @@ def invoke(function, request):
 def main():
     path = Path(sys.argv[1]).resolve()
     validating = '--validate' in sys.argv[2:]
+    from sagents.v2.optimization.scorer_dependencies import worker_request
+    verified_request = worker_request()
     capture = None
     if '--capture-dependencies' in sys.argv[2:]:
         from sagents.v2.optimization.scorer_dependencies import DependencyCapture
-        capture = DependencyCapture(path)
+        capture = DependencyCapture(path, bind_runtime='--bind-runtime' in sys.argv[2:])
     spec = importlib.util.spec_from_file_location('_sage_imported_scorer', path)
     module = importlib.util.module_from_spec(spec)
     # Module diagnostics must not corrupt the JSON result channel.
@@ -84,7 +86,8 @@ def main():
                 metadata['scoring_contract'] = contract
             output = json.dumps(metadata)
         else:
-            request = ScoringRequest.model_validate_json(sys.stdin.buffer.readline(32 * 1024 * 1024 + 1))
+            request = (ScoringRequest.model_validate(verified_request) if verified_request is not None
+                else ScoringRequest.model_validate_json(sys.stdin.buffer.readline(32 * 1024 * 1024 + 1)))
             output = invoke(function, request).wire_json()
     if capture is not None:
         dependencies = capture.finish(module)

@@ -22,7 +22,7 @@ class PythonExecutionScorer:
     worker_module = "sagents.v2.optimization.python_scorer_worker"
 
     def __init__(self, *, path, source_hash, descriptor, timeout=120, model_api=None, model_api_factory=None,
-                 dependency_manifest=None):
+                 dependency_manifest=None, python_executable=None):
         self.path = Path(path).resolve()
         self.source_hash = source_hash
         self.descriptor = self.descriptor_type.model_validate(descriptor)
@@ -30,6 +30,15 @@ class PythonExecutionScorer:
         self.model_api = ScorerModelAPI.model_validate(model_api) if model_api is not None else None
         self.model_api_factory = model_api_factory
         self.dependency_manifest = dependency_manifest
+        self.python_executable = None
+        if python_executable is not None:
+            interpreter = Path(python_executable).expanduser()
+            if not interpreter.is_absolute() or not interpreter.is_file() or not os.access(interpreter, os.X_OK):
+                raise ValueError('Scorer Python must be an existing absolute executable; create its virtual environment first')
+            # Resolving a venv symlink would select the base Python instead.
+            self.python_executable = os.path.abspath(interpreter)
+            if dependency_manifest is not None and dependency_manifest['environment'].get('executable') != self.python_executable:
+                raise ValueError('frozen scorer Python runtime changed; reimport the scorer')
         if model_api is not None and model_api_factory is not None:
             raise ValueError("Choose an explicit model API or a runtime API factory")
 
@@ -55,7 +64,7 @@ class PythonExecutionScorer:
             raise ScorerExecutionError('frozen scorer source changed')
         try:
             if self.dependency_manifest is not None:
-                verify_dependencies(self.dependency_manifest)
+                verify_dependencies(self.dependency_manifest, check_environment=self.python_executable is None)
         except ScorerDependencyError as error:
             raise ScorerExecutionError(str(error)) from error
         # Do not inherit model credentials from the Desktop process environment.
@@ -65,9 +74,15 @@ class PythonExecutionScorer:
         # Import self-tests receive no live API and cannot bill the chosen model.
         if not validate and model_api is not None:
             environment[MODEL_API_ENV] = model_api.worker_environment()
-        process = await asyncio.create_subprocess_exec(sys.executable, '-I', '-m',
+        verify_in_worker = self.python_executable is not None and self.dependency_manifest is not None
+        if verify_in_worker:
+            payload = json.dumps({'request': json.loads(payload) if payload else None,
+                                  'dependencies': self.dependency_manifest}).encode()
+        process = await asyncio.create_subprocess_exec(self.python_executable or sys.executable, '-I', '-m',
             self.worker_module, str(self.path),
             '--capture-dependencies', *(['--validate'] if validate else []),
+            *(['--bind-runtime'] if self.python_executable else []),
+            *(['--verify-dependencies'] if verify_in_worker else []),
             cwd=self.path.parent, env=environment,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=4 * 1024 * 1024 + 1)
@@ -104,9 +119,9 @@ class PythonExecutionScorer:
                         try:
                             if self.dependency_manifest is not None:
                                 verify_capture(self.dependency_manifest, observed)
-                                verify_dependencies(self.dependency_manifest)
+                                verify_dependencies(self.dependency_manifest, check_environment=self.python_executable is None)
                             else:
-                                verify_dependencies(observed)
+                                verify_dependencies(observed, check_environment=self.python_executable is None)
                         except ScorerDependencyError as error:
                             raise ScorerExecutionError(str(error)) from error
                         self.dependency_manifest = self.dependency_manifest or observed

@@ -342,3 +342,30 @@ async def test_user_completed_dialogues_score_once_in_native_train_dev_and_human
         assert 'PRIVATE HUMAN TEST SCENARIO' not in json.dumps(run['result']['report']['agent_calls'])
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_imported_scorer_persists_selected_python_and_keeps_host_versions_independent(tmp_path, monkeypatch):
+    import sys
+    from sagents.v2.optimization.python_scorer import PythonExecutionScorer
+    service, agent = await setup_service(tmp_path, monkeypatch, RsiModel())
+    code = "def score(request):\n return {'score': .8, 'passed': True, 'rationale': 'Explicit Python'}\n"
+    code += 'SCORER_TEST_CASES = ' + repr([{'request': scoring_request().model_dump(mode='json'), 'expected_score': .8, 'expected_passed': True}])
+    try:
+        host = await service.import_rsi_scorer(agent, ScorerImport(name='score.py', source=code), 'alice')
+        selected = await service.import_rsi_scorer(agent, ScorerImport(name='score.py', source=code, python_executable=sys.executable), 'alice')
+        assert selected['id'] != host['id']
+        stored = service.rsi_store.get(selected['id'], 'alice', agent, 'scorer')
+        assert stored['python_executable'] == sys.executable
+        assert stored['dependency_manifest']['environment']['executable'] == sys.executable
+        selection = await service._rsi_scorer_selection(start_request().model_copy(update={
+            'scorer': ScorerSelection(mode='python', module_id=selected['id'], descriptor=selected['descriptor']),
+        }), 'alice', agent)
+        assert selection.binding_id == stored['binding_hash']
+        restored = PythonExecutionScorer(path=stored['path'], source_hash=stored['source_hash'],
+            descriptor=stored['descriptor'], python_executable=stored['python_executable'],
+            dependency_manifest=stored['dependency_manifest'])
+        assert (await restored.score(scoring_request())).grade.score == .8
+        assert 'python_executable' not in selected
+    finally:
+        await service.close()

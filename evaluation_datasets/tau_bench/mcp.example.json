@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "TauRetail": {
+      "command": "/absolute/path/Sage/evaluation_datasets/tau_bench/.venv/bin/python",
+      "args": [
+        "-m",
+        "evaluation_datasets.tau_bench.mcp_server",
+        "--state",
+        "/absolute/path/sage/runtime/tau-retail.sqlite3"
+      ],
+      "env": {
+        "PYTHONPATH": "/absolute/path/Sage",
+        "SAGE_RSI_CASE_PROTOCOL": "sage.rsi.case/v1"
+      }
+    }
+  }
+}

@@ -141,3 +141,33 @@ async def test_uploaded_python_is_used_by_native_training_dev_and_human_test(tmp
         assert result['test_observations'] and all(r['status'] == 'completed' for r in result['test_observations'])
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_imported_user_persists_selected_python_and_rejects_runtime_rebinding(tmp_path, monkeypatch):
+    import sys
+    from app.v2.desktop.backend.rsi_user_simulator import UserSimulatorImport
+    from sagents.v2.optimization.python_user_simulator import PythonUserSimulator
+    from tests.sagents.v2.test_user_simulator import source, request as simulation_request
+    service, agent = await setup_service(tmp_path, monkeypatch, RsiModel())
+    try:
+        module = UserSimulatorImport(name='user.py', source=source())
+        host = await service.import_rsi_user_simulator(agent, module, 'alice')
+        selected = await service.import_rsi_user_simulator(agent,
+            module.model_copy(update={'python_executable': sys.executable}), 'alice')
+        assert host['id'] != selected['id']
+        selection_request = RsiStart(goal='Test', request_id='selected', user_simulator_id=selected['id'])
+        stored = service._rsi_user_simulator_selection(selection_request, 'alice', agent)
+        assert stored['python_executable'] == sys.executable
+        assert stored['dependency_manifest']['environment']['executable'] == sys.executable
+        runtime = PythonUserSimulator(path=stored['path'], source_hash=stored['source_hash'],
+            descriptor=stored['descriptor'], dependency_manifest=stored['dependency_manifest'],
+            python_executable=stored['python_executable'])
+        assert (await runtime.reply(simulation_request())).can_continue
+        assert 'python_executable' not in selected
+        stored['python_executable'] = '/different/python'
+        service.rsi_store.put(stored, 'alice', agent, 'user_simulator')
+        with pytest.raises(ValueError, match='Python runtime changed'):
+            service._rsi_user_simulator_selection(selection_request, 'alice', agent)
+    finally:
+        await service.close()
