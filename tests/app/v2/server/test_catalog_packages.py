@@ -343,6 +343,10 @@ async def test_external_scope_survives_database_reload_and_old_refs_remain_valid
     assert next(a for a in loaded.agents if a.id == agent.id).external_tools == []
     # Simulate the serialized bundle before external_tools existed.
     old = cast('AgentPackageBundle', disabled.package).model_dump(mode='json')
+    # The historical schema always emitted these null budget fields.
+    for budgets in (old['manifest']['policies']['budgets'],
+                    *(definition['budgets'] for definition in old['manifest']['agents'].values())):
+        budgets.update(system_tokens=None, protected_recent_tokens=None)
     for definition in old['manifest']['agents'].values():
         if not definition.get('preload_skills'):
             definition.pop('preload_skills', None)
