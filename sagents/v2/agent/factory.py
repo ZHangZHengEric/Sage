@@ -273,12 +273,6 @@ class AgentCompositionFactory:
         ]
         candidates = candidates or [32_768]
         context_budget = ContextBudget(
-            max_system_tokens=ceiling.max_system_tokens or 16_384,
-            protected_recent_tokens=(
-                ceiling.protected_recent_tokens
-                if ceiling.protected_recent_tokens is not None
-                else 8_192
-            ),
             max_input_tokens=min(int(value) for value in candidates),
             reserve_output_tokens=int(
                 request_defaults.get("max_output_tokens")
@@ -288,7 +282,6 @@ class AgentCompositionFactory:
             ),
         )
         return DefaultContextAssembler(
-            max_system_tokens=ceiling.max_system_tokens or 16_384,
             developer_instructions=(
                 agent.instructions
                 if developer_instructions is None

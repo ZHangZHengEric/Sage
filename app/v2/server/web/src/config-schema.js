@@ -15,7 +15,7 @@ export const labels = {
   instructions: '系统提示词', inline: '提示词内容', path: '文件路径', mode: '模式', subagents: '子智能体',
   tools: '工具', skills: '技能', budgets: '预算', memory: '记忆', sandbox: '沙箱', network: '网络',
   tool_approval: '工具审批', default: '默认', recall: '自动召回', auto_write: '自动写入', scope: '作用域',
-  max_steps: '最大步数', input_tokens: '输入 Token', system_tokens: '系统 Token', protected_recent_tokens: '保留近期 Token',
+  max_steps: '最大步数', input_tokens: '输入 Token',
   output_tokens: '输出 Token', total_tokens: '总 Token', wall_time_seconds: '运行时间（秒）',
   provider: '协议', plugin: '插件', base_url: 'API 地址', credential: '凭据', model: '模型',
   request: '请求参数', limits: '模型限制', capabilities: '能力', capability_profile: '能力探测档案',

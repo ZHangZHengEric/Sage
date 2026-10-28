@@ -221,11 +221,11 @@ policies currently contains budgets only. policies.budgets and agents.main.budge
 | --- | --- | --- | --- |
 | `max_steps` | positive integer / null | steps | Agent step ceiling |
 | `input_tokens` | positive integer / null | tokens | Input-context usage threshold |
-| `system_tokens` | positive integer / null | tokens | System reserve |
-| `protected_recent_tokens` | nonnegative integer / null | tokens | Recent-history reserve; permits zero |
 | `output_tokens` | positive integer / null | tokens | Output budget |
 | `total_tokens` | positive integer / null | tokens | Total token budget |
 | `wall_time_seconds` | positive number / null | seconds | Execution wall-time budget |
+
+`system_tokens` and `protected_recent_tokens` are retired: they relied on local token estimation, while v2 trusts only provider-reported usage. Existing configs still load, but both fields are ignored with a `manifest.budget.retired_field` warning; they bound nothing and are not echoed in request metadata. Recent history is protected by complete conversation units (`protected_recent_units`); the actual size of the system part is reported as `request_budget.system_characters` in request metadata.
 
 When Package and Agent both set a bound, the smaller non-null value forms the policy ceiling, also constrained by host and Run limits. If Agent max_steps is omitted, the resolver also reads entrypoint.config.max_steps; new configs should use budgets.max_steps consistently. null does not guarantee unlimited service, and execution budgets differ from HTTP observation timeouts.
 

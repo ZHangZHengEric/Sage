@@ -141,6 +141,9 @@ def test_manifest_resolution_and_legacy_hash_compatibility():
     payload = legacy.model_dump(mode="json", exclude={"environments"})
     for definition in payload["agents"].values():
         definition.pop("preload_skills")
+    from sagents.v2.package.manifest.runtime import RETIRED_BUDGET_FIELDS
+    for budgets in (payload["policies"]["budgets"], *(d["budgets"] for d in payload["agents"].values())):
+        budgets.update(dict.fromkeys(RETIRED_BUDGET_FIELDS))
     from sagents.v2.model.catalog import ModelCatalogConfig
     payload["models"] = ModelCatalogConfig().model_dump(mode="json")
     expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

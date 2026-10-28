@@ -147,6 +147,14 @@ class DefaultAgentStepRequestBuilder:
                     else None,
                     "canonical_message_count": len(messages),
                     "projected_message_count": len(prepared_messages),
+                    # Exact, not a token estimate: lets hosts watch Skill and
+                    # role prompt growth without a local tokenizer.
+                    "system_characters": sum(
+                        len(getattr(block, "text", ""))
+                        for message in prepared_messages
+                        if message.role in {"system", "developer"}
+                        for block in message.content
+                    ),
                     "accounting_method": "provider_reported",
                 },
                 "tool_selection": {

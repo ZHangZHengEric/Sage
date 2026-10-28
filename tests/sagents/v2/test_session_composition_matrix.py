@@ -45,16 +45,26 @@ async def test_public_session_stores_use_composition_not_state_store_inheritance
     await filesystem.close()
 
 
-@pytest.mark.parametrize("attribute", ["read_events", "export_session_state", "temporary_probe"])
-async def test_filesystem_store_restores_temporary_attribute_overrides(tmp_path, attribute):
-    store = FilesystemSessionStore(tmp_path / "sessions")
+@pytest.mark.parametrize("kind", ["memory", "filesystem"])
+@pytest.mark.parametrize(
+    "attribute",
+    ["read_events", "export_session_state", "_persistence_can_fail", "temporary_probe"],
+)
+async def test_store_facades_restore_temporary_attribute_overrides(tmp_path, kind, attribute):
+    store = (
+        EphemeralSessionStore()
+        if kind == "memory"
+        else FilesystemSessionStore(tmp_path / "sessions")
+    )
     original = getattr(store, attribute, None)
-    replacement = object()
     try:
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(store, attribute, replacement, raising=original is not None)
-            assert getattr(store, attribute) is replacement
+            for replacement in (object(), object()):
+                patch.setattr(store, attribute, replacement, raising=original is not None)
+                assert getattr(store, attribute) is replacement
+                assert getattr(store._coordinator, attribute) is replacement
         assert getattr(store, attribute, None) == original
+        assert getattr(store._coordinator, attribute, None) == original
     finally:
         await store.close()
 

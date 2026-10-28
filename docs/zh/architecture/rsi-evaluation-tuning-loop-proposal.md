@@ -3,7 +3,10 @@ layout: default
 title: RSI 评测与调优闭环改进方案（讨论稿）
 parent: 架构
 lang: zh
+ref: v2-detail-rsi-evaluation-tuning-loop-proposal
 ---
+
+{% include lang_switcher.html %}
 
 # RSI 评测与调优闭环改进方案
 

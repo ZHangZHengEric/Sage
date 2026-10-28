@@ -6,6 +6,8 @@ inside this package. Session contracts and shared state rules remain in session.
 
 from typing import Any
 
+from sagents.v2.runtime.session.plugins._shared.facade import CoordinatorFacade
+
 from .state import (
     _MysqlSessionState,
     SessionStoreCorruptionError,
@@ -18,7 +20,7 @@ class _MysqlSessionStoreMeta(type):
         return getattr(_MysqlSessionState, name)
 
 
-class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
+class MysqlSessionStore(CoordinatorFacade, metaclass=_MysqlSessionStoreMeta):
     """Composed durable MySQL SessionStore facade."""
 
     plugin_id = "sage.session.mysql"
@@ -32,15 +34,6 @@ class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
         await self._coordinator._ensure_ready()
         from sagents.v2.runtime.session.plugins import session_storage_providers
         return session_storage_providers(self)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._coordinator, name)
-
-    def __setattr__(self, name, value):
-        if name == "_coordinator":
-            object.__setattr__(self, name, value)
-        else:
-            setattr(self._coordinator, name, value)
 
 
 __all__ = ["MysqlSessionStore", "SessionStoreCorruptionError", "parse_mysql_dsn"]
