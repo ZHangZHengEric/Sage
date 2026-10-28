@@ -169,6 +169,12 @@ class IMNotifications:
                     attributes={"connection_id": conn.id, "notification_id": record.id},
                 )
                 await self.store.defer(record, worker)
+        # A resolved approval or revoked grant no longer needs delivery, even
+        # when its old failed/unknown message would otherwise block the chat.
+        # Valid unknown sends remain untouched and still require user action.
+        for record in await self.store.blocked_deliveries(conn.id):
+            if not await self.authorize_delivery(record):
+                await self.store.retire(record, worker)
 
     async def observe(self, command, owner, worker):
         """IM ingress already observed a transition; project it without poll delay."""

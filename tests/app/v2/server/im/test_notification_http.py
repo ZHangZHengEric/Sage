@@ -1,6 +1,7 @@
 """Interactive and scheduler callers select only the owner's paired IM route."""
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.v2.server.main import create_app
 from tests.app.v2.server.conftest import make_test_service, scripted_hello
@@ -177,3 +178,84 @@ def test_scheduler_key_revocation_suppresses_pending_notification(
         for _ in range(3):
             client.portal.call(host.im.tick)
         assert ("oc_dm", "hello") not in sent
+
+
+@pytest.mark.parametrize("outcome", ["failed", "unknown"])
+def test_revoked_scheduler_delivery_does_not_block_a_fresh_authorized_run(
+    tmp_path, feishu_creation_probe, outcome
+):
+    from app.v2.server.im.contracts import DeliveryError
+
+    host = make_test_service(
+        tmp_path,
+        model_provider=scripted_hello(2),
+        public_base_url="https://sage.example",
+        log_level="warning",
+    )
+    with TestClient(create_app(host)) as client:
+        host.im.pause()
+        owner, uid, agent, cid, _ = setup_route(host, client)
+        client.portal.call(host.im.tick)  # Pairing acknowledgment precedes notices.
+        channel = client.portal.call(
+            host.im.channel, client.portal.call(host.im.store.get, cid)
+        )
+
+        async def unavailable(chat, text, delivery_id):
+            raise DeliveryError(outcome, "fixture_send_failure")
+
+        channel.send = unavailable
+
+        def issue():
+            return client.post(
+                "/api/keys",
+                headers=owner,
+                json={
+                    "agent_id": agent,
+                    "name": "scheduler",
+                    "scopes": ["a2a:invoke", "a2a:read"],
+                },
+            ).json()["data"]
+
+        def run(key, request):
+            response = client.post(
+                f"/api/agents/{agent}/runs",
+                headers={
+                    "Authorization": "Bearer " + key["api_key"],
+                    "SAGE-TENANT-ID": uid,
+                },
+                json={
+                    **_run_input("scheduled-" + request, request),
+                    "notification_connection_id": cid,
+                },
+            )
+            assert response.status_code == 200, response.text
+            for _ in range(3):
+                client.portal.call(host.im.tick)
+
+        old_key = issue()
+        run(old_key, "old-request")
+        blocked = next(
+            row
+            for row in client.portal.call(host.im.store.deliveries, cid)
+            if row.state == outcome
+        )
+        assert (
+            client.delete("/api/keys/" + old_key["key_id"], headers=owner).status_code
+            == 200
+        )
+        sent = []
+
+        async def send(chat, text, delivery_id):
+            sent.append((chat, text, delivery_id))
+            return "receipt-" + delivery_id
+
+        channel.send = send
+        run(issue(), "fresh-request")
+        assert len(sent) == 1 and sent[0][:2] == ("oc_dm", "hello")
+        assert sent[0][2] != blocked.source_key[:32]
+        current = next(
+            row
+            for row in client.portal.call(host.im.store.deliveries, cid)
+            if row.id == blocked.id
+        )
+        assert current.state == "superseded" and current.text == ""

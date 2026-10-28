@@ -142,6 +142,31 @@ class NotificationStore:
                 ).all()
             )
 
+    async def blocked_deliveries(self, cid):
+        async with self.database.session() as db:
+            return list(
+                (
+                    await db.scalars(
+                        select(DeliveryRow)
+                        .where(
+                            DeliveryRow.connection_id == cid,
+                            DeliveryRow.state.in_(["failed", "unknown"]),
+                            DeliveryRow.run_context.is_not(None),
+                        )
+                        .order_by(DeliveryRow.id)
+                        .limit(100)
+                    )
+                ).all()
+            )
+
+    async def retire(self, record, worker):
+        async with self.store.locked(record.connection_id, worker=worker) as (db, _):
+            current = await db.get(DeliveryRow, record.id)
+            # A concurrent manual retry/discard must win over this stale view.
+            if current.revision == record.revision and current.state == record.state:
+                current.state, current.text = "superseded", ""
+                current.revision += 1
+
     async def defer(self, record, worker, run_id="", *, delay=0.5):
         async with self.store.locked(record.connection_id, worker=worker) as (db, conn):
             current = await db.get(DeliveryRow, record.id)
@@ -177,6 +202,13 @@ class NotificationStore:
             info = {**current.run_context, "run_id": run_id}
             route = NotificationRoute.model_validate(info["route"])
             if not abandon and await self.valid(db, conn, route):
+                if purpose.startswith("interaction:"):
+                    if info.get("last_interaction_purpose") == purpose:
+                        current.next_attempt = time.time() + 0.5
+                        return
+                    # Keep active suspension dedupe after delivery retention.
+                    # The marker and all message parts commit in this transaction.
+                    info["last_interaction_purpose"] = purpose
                 # Read the draft under the same lock as terminal projection. A
                 # worker may have read its snapshot before the tool committed.
                 content = current.text if completed and current.text else text

@@ -1245,6 +1245,10 @@ class AgentLoopEngine:
                 if result is None:
                     return run
             else:
+                if resolution.decision == "cancel":
+                    return await self._cancel_resolved_interaction(
+                        run, interaction_id, context
+                    )
                 approved = resolution.decision.startswith("approve")
                 current_policy = None
                 if approved:
@@ -1383,19 +1387,9 @@ class AgentLoopEngine:
             )
             if interaction.interaction_type == InteractionType.USER_INPUT:
                 if resolution.decision == "cancel":
-                    await self.runtime.cancel_run(
-                        CancelRun(
-                            run_id=run.run_id,
-                            expected_revision=run.revision,
-                            idempotency_key=(
-                                f"interaction-cancel:{interaction.interaction_id}"
-                            ),
-                            reason="interaction_cancelled",
-                        ),
-                        context,
+                    return await self._cancel_resolved_interaction(
+                        run, interaction.interaction_id, context
                     )
-                    await self._release_run_resources(run.run_id)
-                    return await self.runtime.get_run(run.run_id)
                 try:
                     input_items = self._interaction_input_items(
                         resolution.payload,
@@ -4708,6 +4702,25 @@ class AgentLoopEngine:
         )
         await self._release_run_resources(run.run_id)
         return failed
+
+    async def _cancel_resolved_interaction(self, run, interaction_id, context):
+        while run.state not in TERMINAL_RUN_STATES:
+            receipt = await self.runtime.cancel_run(
+                CancelRun(
+                    run_id=run.run_id,
+                    expected_revision=run.revision,
+                    idempotency_key=f"interaction-cancel:{interaction_id}",
+                    reason="interaction_cancelled",
+                ),
+                context,
+            )
+            if receipt.error is not None and receipt.error.code != "run.revision_conflict":
+                raise SageV2Error(receipt.error)
+            # A concurrent pause/steer may advance the revision after resume.
+            # The accepted cancellation decision still applies to this Run.
+            run = await self.runtime.get_run(run.run_id)
+        await self._release_run_resources(run.run_id)
+        return run
 
     async def _release_run_resources(self, run_id: str) -> None:
         """Best-effort cleanup after the durable Run reached a terminal state."""
