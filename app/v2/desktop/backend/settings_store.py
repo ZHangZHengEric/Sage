@@ -1,9 +1,34 @@
 """Read persisted Desktop settings and upgrade removed built-in choices once."""
 
 import json
+import sqlite3
 from pathlib import Path
 
 from .schemas import DesktopV2Settings
+
+
+def _mark_legacy_rsi_projects(raw: dict, runtime_root: Path) -> bool:
+    projects = [project for project in raw.get("projects", ()) if "source" not in project]
+    database = runtime_root / "rsi.sqlite3"
+    if not projects or not database.is_file():
+        return False
+    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(records)")}
+        if not columns:
+            return False
+        document = "summary" if "summary" in columns else "body"
+        rows = db.execute(
+            f"SELECT json_extract({document}, '$.workspace_id'), "
+            f"json_extract({document}, '$.workspace_path') FROM records WHERE kind='run'"
+        ).fetchall()
+    identities = {identity for identity, _ in rows if identity}
+    paths = {str(Path(path).expanduser().resolve()) for _, path in rows if path}
+    changed = False
+    for project in projects:
+        experiment = project.get("id") in identities or str(Path(project["path"]).expanduser().resolve()) in paths
+        project["source"] = "rsi" if experiment else "user"
+        changed = True
+    return changed
 
 
 def read_desktop_settings(path: Path) -> DesktopV2Settings:
@@ -12,7 +37,7 @@ def read_desktop_settings(path: Path) -> DesktopV2Settings:
     raw = json.loads(path.read_text(encoding="utf-8"))
     selections = raw.setdefault("component_selections", {})
     configs = raw.setdefault("component_configs", {})
-    changed = False
+    changed = _mark_legacy_rsi_projects(raw, path.parent.resolve())
     compactor = "context.unit-compactor"
     if compactor in selections or compactor in configs:
         if selections.get(compactor, "sage.context.unit-compactor.reference") not in {

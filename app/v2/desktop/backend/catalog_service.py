@@ -842,7 +842,7 @@ class DesktopCatalogServiceMixin:
         self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
-            if any(run["status"] in {"queued", "running"} for run in self.rsi_store.list(user_id, agent_id, "run")):
+            if any(run["status"] in {"queued", "running"} for run in self.rsi_store.summaries(user_id, agent_id, "run")):
                 raise ValueError("Cancel RSI before deleting this Agent")
             values = await self.catalog.list_agents(user_id)
             replacement = next(
@@ -850,6 +850,32 @@ class DesktopCatalogServiceMixin:
             )
             if replacement is None:
                 raise ValueError("Cannot delete the only agent")
+            runs = self.rsi_store.summaries(user_id, agent_id, "run")
+            if any(
+                (task := self._rsi_tasks.get(run["id"])) is not None and not task.done()
+                for run in runs
+            ):
+                raise ValueError("Cancel RSI before deleting this Agent")
+            for run in runs:
+                run_id = run["id"]
+                if not run_id or not all(c.isalnum() or c in "_-" for c in run_id):
+                    raise ValueError("Invalid RSI run directory identity")
+                directory = self.runtime_root / "rsi" / run_id
+                if directory.is_symlink():
+                    directory.unlink()
+                elif directory.exists():
+                    await asyncio.to_thread(shutil.rmtree, directory)
+                self._rsi_usage_readers.pop(run_id, None)
+                self._rsi_tasks.pop(run_id, None)
+                self._rsi_cursors = {key: value for key, value in self._rsi_cursors.items() if key[0] != run_id}
+            scope = hashlib.sha256(f"{user_id}\0{agent_id}".encode()).hexdigest()
+            for category in ("rsi-scorers", "rsi-user-simulators"):
+                directory = self.runtime_root / category / scope
+                if directory.is_symlink():
+                    directory.unlink()
+                elif directory.exists():
+                    await asyncio.to_thread(shutil.rmtree, directory)
+            await asyncio.to_thread(self.rsi_store.delete_agent, user_id, agent_id)
             if agent.is_default:
                 await self.catalog.save_agent(
                     replacement.model_copy(update={"is_default": True})
@@ -858,9 +884,22 @@ class DesktopCatalogServiceMixin:
 
             async with self._settings_update_lock:
                 settings = await self.get_settings()
+                removed_workspaces = {
+                    (self.runtime_root / "rsi" / run["id"] / "workspace").resolve()
+                    for run in runs
+                }
+                projects = [
+                    project for project in settings.projects
+                    if Path(project.path).expanduser().resolve() not in removed_workspaces
+                ]
+                updates = {}
+                if projects != settings.projects:
+                    updates["projects"] = projects
                 if settings.default_agent_id == agent_id:
+                    updates["default_agent_id"] = replacement.agent_id
+                if updates:
                     await self._save_settings_unlocked(
-                        settings.model_copy(update={"default_agent_id": replacement.agent_id})
+                        settings.model_copy(update=updates)
                     )
             return await self.list_agents(user_id)
 

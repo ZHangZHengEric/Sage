@@ -104,7 +104,7 @@ class DesktopOptimizationMirror:
             async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
                 response = await client.post(endpoint + "/api/v2/projects",
                     headers={"Authorization": "Bearer " + registry["auth_token"]},
-                    json={"name": f"RSI · {self.agent.name} · {self.run_id[-8:]}", "path": str(path)})
+                    json={"name": f"RSI · {self.agent.name} · {self.run_id[-8:]}", "path": str(path), "source": "rsi"})
                 response.raise_for_status()
                 project = response.json()["data"]
                 if Path(project["path"]).resolve() != path:

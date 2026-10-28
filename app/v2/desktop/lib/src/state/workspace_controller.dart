@@ -191,7 +191,7 @@ class WorkspaceController extends ChangeNotifier {
 
   List<WorkspaceGroup> get projectGroups => [
     for (final group in groups)
-      if (group.project != null) group,
+      if (group.project != null && !group.project!.isRsi) group,
   ];
 
   List<Conversation> get agentWorkspaceConversations =>
@@ -274,10 +274,19 @@ class WorkspaceController extends ChangeNotifier {
     return references;
   }
 
+  bool conversationAgentDeleted(Conversation conversation) =>
+      conversation.agentId.isNotEmpty &&
+      !agents.any((agent) => agent.id == conversation.agentId);
+
+  bool get selectedConversationAgentDeleted =>
+      selectedConversation != null &&
+      conversationAgentDeleted(selectedConversation!);
+
   bool get canSend {
     final conversation = selectedConversation;
     if (loading ||
         viewingSubSession ||
+        selectedConversationAgentDeleted ||
         selectedAgentId.isEmpty ||
         conversation == null) {
       return false;
@@ -414,7 +423,9 @@ class WorkspaceController extends ChangeNotifier {
       await _hydrateOpenUi();
       _startStudioPolling();
       await _hydrateSessionTrees();
-    } on Object catch (exception) {
+    } on Object catch (exception, stackTrace) {
+      debugPrint('Sage Desktop v2 initialization failed: $exception');
+      debugPrintStack(stackTrace: stackTrace);
       error = exception.toString();
     } finally {
       loading = false;
@@ -457,6 +468,9 @@ class WorkspaceController extends ChangeNotifier {
   void createConversation({bool notify = true}) {
     selectedStudioId = '';
     selectedStudioMemberId = '';
+    if (!agents.any((agent) => agent.id == selectedAgentId)) {
+      selectedAgentId = _initialAgentId();
+    }
     final conversation = Conversation(
       id: _id('conversation'),
       agentId: selectedAgentId,
@@ -549,6 +563,7 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectAgent(String id) async {
+    if (selectedConversationAgentDeleted) return;
     if (id == selectedAgentId || !agents.any((value) => value.id == id)) return;
     selectedAgentId = id;
     final conversation = selectedConversation;
@@ -561,7 +576,7 @@ class WorkspaceController extends ChangeNotifier {
 
   void _adoptConversationAgent() {
     final value = selectedConversation?.agentId ?? '';
-    if (agents.any((agent) => agent.id == value)) selectedAgentId = value;
+    if (value.isNotEmpty) selectedAgentId = value;
   }
 
   Future<void> refreshSkills() async {
@@ -1311,17 +1326,7 @@ class WorkspaceController extends ChangeNotifier {
       if (selectedAgentId == agentId) {
         selectedAgentId = replacement.id;
       }
-      for (final entry in _conversations.entries) {
-        // A Studio membership must never silently switch to another Agent.
-        if (studios.any((studio) => studio.id == entry.key)) continue;
-        final values = entry.value;
-        for (final conversation in values) {
-          if (conversation.agentId == agentId &&
-              conversation.status == RunStatus.idle) {
-            conversation.agentId = replacement.id;
-          }
-        }
-      }
+      _adoptConversationAgent();
       if (settings.defaultAgentId == agentId) {
         settings = settings.copyWith(defaultAgentId: replacement.id);
       }
@@ -1945,6 +1950,7 @@ class WorkspaceController extends ChangeNotifier {
     final conversation = selectedConversation;
     return conversation != null &&
         !viewingSubSession &&
+        !conversationAgentDeleted(conversation) &&
         selectedStudio == null &&
         conversation.status == RunStatus.completed &&
         conversation.runId == surface['run_id'] &&
@@ -2093,6 +2099,7 @@ class WorkspaceController extends ChangeNotifier {
         : List<ChatMessageContent>.of(content);
     if (conversation == null ||
         viewingSubSession ||
+        conversationAgentDeleted(conversation) ||
         (prompt.isEmpty &&
             !structuredContent.any((part) => part.isReference)) ||
         selectedAgentId.isEmpty) {
@@ -3207,6 +3214,7 @@ class WorkspaceController extends ChangeNotifier {
     final pending = conversation.pendingPlanExecution;
     if (_disposed ||
         pending == null ||
+        conversationAgentDeleted(conversation) ||
         conversation.status != RunStatus.completed ||
         conversation.runId != pending['plan_run_id'] ||
         !_startingApprovedPlans.add(conversation.id)) {

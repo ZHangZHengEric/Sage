@@ -108,6 +108,25 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         )
         try:
             request = await self._normalize_desktop_fork_request(request, user_id)
+            if request.session_id:
+                try:
+                    previous = await self.session_access.latest_session_start_command(
+                        request.session_id, self._context(user_id)
+                    )
+                except SageV2Error as exc:
+                    if exc.info.code not in {"session.not_found", "session_not_found"}:
+                        raise
+                else:
+                    if previous is not None:
+                        previous_agent = previous.config.metadata.get("agent_runtime", {}).get("agent_id", previous.agent_id)
+                        if await self.catalog.get_agent(previous_agent, user_id) is None:
+                            raise SageV2Error(RuntimeErrorInfo(
+                                code="desktop.session_agent_deleted",
+                                message_key="error.desktop.session_agent_deleted",
+                                category=ErrorCategory.CONFLICT,
+                                message="This Session's Agent has been deleted; conversation is read-only",
+                                safe_to_resume=False,
+                            ))
             environment = await self._capture_run_environment(request, user_id)
             agent = environment.agents[request.agent_id]
             provider = environment.provider(agent)

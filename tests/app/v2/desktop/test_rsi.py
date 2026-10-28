@@ -241,6 +241,7 @@ async def test_desktop_tuner_reads_training_evidence_without_granting_target_fil
         assert run['status'] == 'completed', run
         assert model.reads == 1
         workspace = await service.workspace_root(run['workspace_id'], agent_id)
+        assert next(p for p in (await service.get_settings()).projects if p.id == run['workspace_id']).source == 'rsi'
         assert str(workspace) == run['workspace_path']
         assert workspace == service.runtime_root / 'rsi' / started['id'] / 'workspace'
         assert (workspace / 'iterations/round-001/editor/evidence/training-evidence/index.json').exists()
