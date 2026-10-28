@@ -12,8 +12,8 @@ from sagents.v2.optimization.contracts import (
 from sagents.v2.optimization.observer import (
     HumanTestObserver,
     IsolatedTestEvaluator,
-    _measurement_retry,
-    _MEASUREMENT_IDENTITY,
+    current_measurement_identity,
+    record_measurement_retry,
 )
 
 
@@ -119,7 +119,7 @@ def resumable_human_test_observer(*, completed_records=(), **kwargs):
     observer = None
 
     async def evaluate(package, case):
-        identity = _MEASUREMENT_IDENTITY.get()
+        identity = current_measurement_identity()
         if identity is None:
             raise ValueError("human checkpoint execution has no measurement identity")
         checkpoint_round, trial = identity
@@ -237,7 +237,7 @@ class RecoveringIsolatedTestEvaluator(IsolatedTestEvaluator):
                 failure = getattr(error, "rsi_failure_metadata", {})
                 if failure.get("code") != "evaluation.invalid_record" or attempt == 2:
                     raise
-                _measurement_retry("dialogue_format")
+                record_measurement_retry("dialogue_format")
                 data = {"original_data": source, "validation_error": str(error)[:6000]}
                 task = (
                     "Return valid JSON matching response_schema using original_data as "

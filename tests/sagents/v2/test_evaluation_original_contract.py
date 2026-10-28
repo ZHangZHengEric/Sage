@@ -2,6 +2,7 @@ import json
 import pytest
 from sagents.v2.optimization.contracts import OptimizationGrade
 from sagents.v2.optimization.diagnostics import diagnose_scored_execution
+from sagents.v2.optimization.principles import EVALUATION_PRINCIPLES
 from sagents.v2.optimization.runner import OPTIMIZATION_TRIAL
 from tests.sagents.v2.test_optimization_diagnostics import DiagnosticRunner, diagnosis
 from tests.sagents.v2.test_package_optimizer import bundle, context, optimizer, suite
@@ -34,9 +35,11 @@ async def test_fixed_grade_diagnosis_distinguishes_original_contract_without_dup
     assert data["original_policy"] == (original if changed else None)
     assert data["policy"] == policy and "Evaluator-only" in data["case"]["user_context"]
     assert result.score == 0 and not result.passed
-    assert "self-imposed limitation" in requests[0]["task"]
-    assert "bounded, testable" in requests[0]["task"]
-    assert "not a violation or a proven fix" in requests[0]["task"]
+    assert "distinguish original_policy from candidate policy" in requests[0]["task"]
+    principles = " ".join(EVALUATION_PRINCIPLES.split())
+    assert "cannot redefine success or become immutable authority" in principles
+    assert "not target knowledge or user consent" in principles
+    assert "lawful workflow hypothesis, not a proven fix" in principles
 
 
 @pytest.mark.asyncio

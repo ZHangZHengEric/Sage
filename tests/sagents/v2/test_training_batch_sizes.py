@@ -19,16 +19,20 @@ async def test_generated_training_uses_independent_initial_and_increment_sizes()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('pool_size,increment,expected,generated', [(8, 2, 6, []), (3, 2, 6, [1, 2]), (8, 0, 2, [])])
+@pytest.mark.parametrize('pool_size,increment,expected,generated', [(8, 2, 6, []), (3, 2, 3, []), (8, 0, 2, [])])
 async def test_imported_pool_is_consumed_in_order_before_designer(pool_size, increment, expected, generated):
     runner = AdaptiveRunner()
     pool = [OptimizationCase(id=f'pool-{i}', input=f'Conversion {i}', rubric='Correct conversion') for i in range(pool_size)]
     dev = OptimizationCase(id='dev', input='Independent conversion', rubric='Correct conversion', split='validation')
+    events = []
     result = await optimizer(runner).optimize(
         bundle(), context=context(), goal="Conversions", rounds=2,
         suite=OptimizationSuite(cases=(*pool, dev)), validation_case_count=1,
-        initial_training_case_count=2, training_cases_per_round=increment,
+        initial_training_case_count=2, training_cases_per_round=increment, on_event=events.append,
     )
+    # An imported dataset is never topped up with generated questions.
+    exhausted = any(e['event'] == 'training_pool_exhausted' for e in events)
+    assert exhausted == (increment > 0 and pool_size < 2 + 2 * increment)
     training = [c for c in result.report.suite.cases if c.split == 'training']
     assert len(training) == expected
     assert [c.id for c in training[:min(pool_size, expected)]] == [c.id for c in pool[:expected]]
@@ -41,11 +45,15 @@ async def test_no_change_round_still_measures_new_training_cases(monkeypatch):
     runner = AdaptiveRunner(proposals=[{'rationale': 'No change is justified'}, {'rationale': 'No change is justified'}])
     pool = [OptimizationCase(id=f'pool-{i}', input=f'Conversion {i}', rubric='Correct') for i in range(3)]
     dev = OptimizationCase(id='dev', input='Independent conversion', rubric='Correct', split='validation')
+    events = []
     result = await optimizer(runner).optimize(bundle(), context=context(), goal='Conversions', rounds=2,
         suite=OptimizationSuite(cases=(*pool, dev)), validation_case_count=1,
-        initial_training_case_count=1, training_cases_per_round=1)
+        initial_training_case_count=1, training_cases_per_round=1, on_event=events.append)
     assert [len(row.evaluation.cases) for row in result.report.rounds] == [3, 4]
-    assert all(not row.evaluation_reused for row in result.report.rounds)
+    # New cases run on the retained version first; an unchanged proposal reuses that measurement.
+    challenges = [e['data'] for e in events if e['event'] == 'training_challenge_completed']
+    assert [[c['case']['id'] for c in d['evaluation']['cases']] for d in challenges] == [['pool-1'], ['pool-2']]
+    assert all(row.evaluation_reused for row in result.report.rounds)
 
 
 @pytest.mark.asyncio
@@ -76,7 +84,8 @@ async def test_new_failures_reach_next_tuning_and_current_human_metadata_without
     assert len(result.report.baseline.cases)==2
     assert [len(r.evaluation.cases) for r in result.report.rounds]==([3,4] if grow else [2,2])
     assert [len(r['development_cases']) for r in observer.records]==([2,3,4] if grow else [2,2,2])
-    assert len(runner.sent)==(9 if grow else 2)
+    assert sorted(runner.sent)==sorted(['Conversion 0','Independent conversion',
+        *(['Conversion 1','Conversion 2'] if grow else [])])
     requests=[json.loads(s)['data'] for name,s in runner.requests if name=='test.tuner']
     assert 'PRIVATE TEST' not in json.dumps(requests)
     if grow:
