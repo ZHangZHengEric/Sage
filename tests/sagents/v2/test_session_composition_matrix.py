@@ -45,6 +45,20 @@ async def test_public_session_stores_use_composition_not_state_store_inheritance
     await filesystem.close()
 
 
+@pytest.mark.parametrize("attribute", ["read_events", "export_session_state", "temporary_probe"])
+async def test_filesystem_store_restores_temporary_attribute_overrides(tmp_path, attribute):
+    store = FilesystemSessionStore(tmp_path / "sessions")
+    original = getattr(store, attribute, None)
+    replacement = object()
+    try:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(store, attribute, replacement, raising=original is not None)
+            assert getattr(store, attribute) is replacement
+        assert getattr(store, attribute, None) == original
+    finally:
+        await store.close()
+
+
 def test_session_aggregate_applies_typed_mutation_without_io():
     current = aggregate()
     mutation = SessionStateDeltaMutation(

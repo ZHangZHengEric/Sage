@@ -109,8 +109,9 @@ def test_session_download_never_exports_business_aggregate(client, service, monk
     assert client.post("/api/agent", json=_run_input(), headers=alice).status_code == 200
     store = service.conversations.application.entrypoint().runtime.session_store
     export = AsyncMock(side_effect=AssertionError("business aggregate must not be exported"))
+    read_events = AsyncMock(side_effect=AssertionError("business events must not be read"))
     monkeypatch.setattr(store, "export_session_state", export)
-    monkeypatch.setattr(store, "read_events", AsyncMock(side_effect=AssertionError("business events must not be read")))
+    monkeypatch.setattr(store, "read_events", read_events)
     admin_token = client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"}).json()["data"]["access_token"]
     response = client.get("/api/threads/thread-1/download", headers={"Authorization": f"Bearer {admin_token}"})
     assert response.status_code == 200
@@ -118,6 +119,7 @@ def test_session_download_never_exports_business_aggregate(client, service, monk
         assert "thread-1/models.json" in archive.namelist()
         assert "thread-1/state.json" not in archive.namelist()
     export.assert_not_called()
+    read_events.assert_not_called()
 
 
 def test_workspace_honors_persisted_external_project_binding(client, service, monkeypatch):

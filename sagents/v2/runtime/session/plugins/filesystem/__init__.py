@@ -2425,6 +2425,12 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
         else:
             setattr(self._coordinator, name, value)
 
+    def __delattr__(self, name) -> None:
+        if name == "_coordinator":
+            object.__delattr__(self, name)
+        else:
+            delattr(self._coordinator, name)
+
 
 class _SnapshotCodec(_FilesystemSessionState):
     # Reuse the canonical schema/checksum/journal decoder, not writer lifecycle.
