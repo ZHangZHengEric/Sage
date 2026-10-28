@@ -1,18 +1,23 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentBudgetPlaceholder } from '../src/agent-presentation.js'
+import { agentBudgetPlaceholder, budgetFields } from '../src/agent-presentation.js'
 import { modelFieldPlaceholder } from '../src/model-presentation.js'
 
 test('budget placeholders resolve inherited ceilings and the selected model without filling the form', () => {
   const form = { model_id: 'chosen', budgets: {} }
   const models = [{ id: 'chosen', protocol: 'anthropic-messages', limits: { context_window: 200000 }, request: {} }]
-  const defaults = { budgets: { max_steps: 18, input_tokens: 64000, protected_recent_tokens: 0 }, entrypoint: { config: { max_steps: 40 } } }
+  const defaults = { budgets: { max_steps: 18, input_tokens: 64000 }, entrypoint: { config: { max_steps: 40 } } }
   assert.equal(agentBudgetPlaceholder('max_steps', form, models, defaults), '18（系统默认）')
   assert.equal(agentBudgetPlaceholder('input_tokens', form, models, defaults), '64,000（系统默认）')
-  assert.equal(agentBudgetPlaceholder('protected_recent_tokens', form, models, defaults), '0（系统默认）')
   assert.equal(agentBudgetPlaceholder('output_tokens', form, models, defaults), '4,096（系统默认）')
   assert.deepEqual(form.budgets, {})
   assert.deepEqual(models[0].request, {})
+})
+
+test('retired token sub-budgets are not offered as editable limits', () => {
+  const keys = budgetFields.map(field => field.key)
+  assert.ok(!keys.includes('system_tokens'))
+  assert.ok(!keys.includes('protected_recent_tokens'))
 })
 
 test('blank model selection follows the default model and request budget respects probe limits', () => {

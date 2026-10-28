@@ -684,7 +684,7 @@ async def test_excluded_tool_pairs_do_not_consume_reduction_budget(
         expected = (instruction, old, old, latest)
     assembler = DefaultContextAssembler(
         budget=ContextBudget(
-            max_input_tokens=500, max_messages=len(expected), protected_recent_tokens=0
+            max_input_tokens=500, max_messages=len(expected)
         ),
         reducer=PersistentSummaryContextReducer(
             InMemoryConversationSummaryStore(), summarizer=Summary()
@@ -750,7 +750,7 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
     summarizer = Summary()
     assembler = DefaultContextAssembler(
         budget=ContextBudget(
-            max_input_tokens=500, max_messages=2, protected_recent_tokens=0
+            max_input_tokens=500, max_messages=2
         ),
         reducer=PersistentSummaryContextReducer(
             store, summarizer=summarizer, summary_target_tokens=32

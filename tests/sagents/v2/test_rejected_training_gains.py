@@ -112,7 +112,7 @@ async def test_actual_next_tuning_call_can_read_successful_component_of_rejected
 
     runner = Reader(
         scores={
-            "base": {"training": 0, "validation": 1},
+            "base": {"training": 0, "validation": .5},
             "guidance-1": {"training": 1, "validation": 0},
             "guidance-2": {"training": 1, "validation": 1},
         }

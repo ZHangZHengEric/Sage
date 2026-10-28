@@ -184,14 +184,37 @@ class RuntimeConfig(StrictModel):
         return value if isinstance(value, tuple) else (value,)
 
 
+# Token sub-budgets that needed local estimation, which V2 no longer performs.
+# Accepted so existing manifests still load, but never enforced or reported.
+RETIRED_BUDGET_FIELDS = ("system_tokens", "protected_recent_tokens")
+
+
+def retire_budget_fields(value):
+    if not isinstance(value, dict):
+        return value
+    retired = sorted(key for key in RETIRED_BUDGET_FIELDS if value.get(key) is not None)
+    if retired:
+        from sagents.v2.runtime.observability.logs import get_logger
+
+        get_logger(__name__).warning(
+            "manifest.budget.retired_field",
+            "Ignoring retired budget fields; V2 does not estimate token sub-budgets",
+            attributes={"fields": retired},
+        )
+    return {key: item for key, item in value.items() if key not in RETIRED_BUDGET_FIELDS}
+
+
 class BudgetConfig(StrictModel):
     max_steps: int | None = Field(default=None, gt=0)
     input_tokens: int | None = Field(default=None, gt=0)
-    system_tokens: int | None = Field(default=None, gt=0)
-    protected_recent_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, gt=0)
     total_tokens: int | None = Field(default=None, gt=0)
     wall_time_seconds: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_estimated_budgets(cls, value):
+        return retire_budget_fields(value)
 
 
 class PolicyConfig(StrictModel):

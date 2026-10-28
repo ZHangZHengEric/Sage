@@ -60,7 +60,6 @@ def test_host_context_applies_route_and_policy_budget(
         update={
             "max_input_tokens": ceiling,
             "max_output_tokens": None,
-            "protected_recent_tokens": 0,
         }
     )
     context = AgentCompositionFactory(
@@ -70,7 +69,6 @@ def test_host_context_applies_route_and_policy_budget(
         cast('ContextBudget', context.budget).max_input_tokens,
         cast('ContextBudget', context.budget).reserve_output_tokens,
     ) == expected
-    assert cast('ContextBudget', context.budget).protected_recent_tokens == 0
 
 
 @pytest.mark.asyncio

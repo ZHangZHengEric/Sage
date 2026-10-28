@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Protocol
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.common import Identifier, StrictModel
@@ -49,10 +49,18 @@ class ContextBudget(StrictModel):
     reserve_output_tokens: int = Field(default=0, ge=0)
     reserve_input_tokens: int = Field(default=0, ge=0)
     max_messages: int | None = Field(default=None, gt=0)
-    # Legacy manifest fields, retained for deserialization only. No estimation.
-    max_system_tokens: int = Field(default=16_384, gt=0)
-    # Legacy manifest field; history protection uses complete conversation units.
-    protected_recent_tokens: int = Field(default=8_192, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_estimated_budgets(cls, value):
+        # No estimation; history protection uses complete conversation units.
+        if isinstance(value, dict):
+            return {
+                key: item
+                for key, item in value.items()
+                if key not in {"max_system_tokens", "protected_recent_tokens"}
+            }
+        return value
 
 
 class ContextRequestReservation(StrictModel):

@@ -118,14 +118,27 @@ class OptimizationConstraints(StrictModel):
         Literal[
             "max_steps",
             "input_tokens",
-            "system_tokens",
-            "protected_recent_tokens",
             "output_tokens",
             "total_tokens",
             "wall_time_seconds",
         ],
         ...,
     ] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_estimated_budget_fields(cls, value):
+        from sagents.v2.package.manifest.runtime import RETIRED_BUDGET_FIELDS
+
+        if isinstance(value, dict) and isinstance(value.get("editable_budget_fields"), (list, tuple)):
+            return {
+                **value,
+                "editable_budget_fields": tuple(
+                    field for field in value["editable_budget_fields"]
+                    if field not in RETIRED_BUDGET_FIELDS
+                ),
+            }
+        return value
 
 
 class OptimizationExperiment(StrictModel):

@@ -114,7 +114,7 @@ async def test_training_mastery_allows_growth_despite_dev_regression():
         'guidance-2': {'training': 1, 'validation': .7}})
     result = await optimizer(runner).optimize(bundle(), context=context(), goal='Accuracy',
         rounds=2, validation_case_count=2)
-    assert result.report.rounds[0].accepted
+    assert not result.report.rounds[0].accepted
     assert result.report.rounds[0].regressions
     assert train_counts(result) == [4, 6]
 

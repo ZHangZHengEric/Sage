@@ -13,6 +13,7 @@ from sagents.v2.contracts.events import (
     EventDurability, EventSource, EventSourceType, ProtocolEventData, RuntimeEvent,
 )
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.runtime.session.plugins._shared.facade import CoordinatorFacade
 from sagents.v2.runtime.distributed.redis_coordination import (
     RedisGuard, active_worker_fence, coordination_error, watch_fence,
 )
@@ -334,7 +335,7 @@ class _RedisMysqlSessionState(_RedisMysqlPersistence):
         self._closed = True
 
 
-class RedisMysqlSessionStore:
+class RedisMysqlSessionStore(CoordinatorFacade):
     plugin_id = "sage.session.redis-mysql"
     name = "Redis + MySQL SessionStore"
     description = "Multi-instance Session state, subscriptions and MySQL archival."
@@ -347,9 +348,3 @@ class RedisMysqlSessionStore:
         await self._coordinator.list_dispatchable_runs()
         from sagents.v2.runtime.session.plugins import session_storage_providers
         return session_storage_providers(self)
-
-    def __getattr__(self, name):
-        return getattr(self._coordinator, name)
-
-    def __setattr__(self, name, value):
-        setattr(self._coordinator, name, value)
