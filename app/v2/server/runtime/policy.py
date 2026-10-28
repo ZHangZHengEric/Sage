@@ -64,7 +64,10 @@ def server_ceiling(settings) -> ExecutionPolicy:
 
 
 async def live_execution_policy(command, *, users, keys, catalog, settings, user_id, catalog_agent_id=None,
-                                package_authorizer=None, context=None):
+                                package_authorizer=None, context=None, ingress_authorizer=None):
+    if "server_v2.im" in command.config.metadata:
+        if ingress_authorizer is None or not await ingress_authorizer(command):
+            return None
     key_id, frozen = frozen_execution(command, catalog_agent_id=catalog_agent_id)
     raw = command.config.metadata.get(EXECUTION_METADATA_KEY)
     source_agent_id = catalog_agent_id or (raw["agent_id"] if raw is not None else command.agent_id)

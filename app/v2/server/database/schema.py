@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import inspect
 
+from app.v2.server.im import orm as _im_orm  # noqa: F401
 from app.v2.server.database import Database
 from app.v2.server.database.base import Base
 from app.v2.server.identity import orm as _identity_orm  # noqa: F401

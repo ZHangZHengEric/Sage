@@ -12,7 +12,7 @@ ref: v2-architecture-SERVER_V2_IM_PLUGIN_DESIGN
 
 # Sage Server V2 IM Plugin Design
 
-Status: design proposal, not implemented. Research date: 2026-10-22.
+Status: Feishu P0 is implemented; see the [IM setup guide](../../../app/v2/server/im/README.md) for local validation and setup. Other platforms, groups, and extensions remain proposals. Research date: 2026-10-22.
 
 Add a shared IM Gateway to ServerHost and load platform adapters through existing ExtensionRegistration / ExtensionHost contracts. All conversations enter existing RunAdmission, RunService, and Sage Sessions. Connections, routing, and delivery are server product capabilities; Agent loops, tools, approval state, and history remain owned by the existing framework.
 

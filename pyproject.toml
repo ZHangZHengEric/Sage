@@ -45,6 +45,7 @@ otel = [
   "opentelemetry-exporter-otlp>=1.20.0",
 ]
 server = [
+  "cryptography>=44.0.0",
   "ag-ui-protocol==0.1.19",
   "fastapi>=0.115.2",
   "uvicorn[standard]>=0.24.0",

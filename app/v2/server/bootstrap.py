@@ -120,6 +120,7 @@ class ServerHost:
         self.conversations: ConversationService | None = None
         self.admin: AdminService | None = None
         self.a2a: A2AService | None = None
+        self.im = None
 
     @property
     def application(self) -> SAgentApplication:
@@ -319,6 +320,9 @@ class ServerHost:
                 job_runtime=self.application.service("execution.job-runtime"),
             )
             self.package_queries = self.agent_management.queries
+            from app.v2.server.im.service import IMService
+            self.im = IMService(self)
+            await self.im.start()
             await self.application.service("execution.dispatcher").start()
             self._track(
                 asyncio.create_task(
@@ -346,6 +350,8 @@ class ServerHost:
 
     async def close(self) -> None:
         self._background_closing = True
+        if self.im is not None:
+            await self.im.close()
         await self.identity.close()
         while self._tasks:
             pending = tuple(self._tasks)
@@ -366,6 +372,7 @@ class ServerHost:
         if self._application is not None:
             await self._application.close()
         self._application = None
+        self.im = None
         self.observability = None
         self.log_sink = None
         self.execution.sandbox_provider = None

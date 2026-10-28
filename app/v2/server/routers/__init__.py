@@ -9,6 +9,7 @@ from . import (
     conversations,
     files,
     health,
+    im,
     mcp,
     models,
     observability,
@@ -23,6 +24,7 @@ _LOGGER = get_logger(__name__)
 
 def register_routers(app: FastAPI, *, jaeger: bool = False) -> None:
     app.include_router(health.router)
+    app.include_router(im.router)
     app.include_router(observability.performance_router)
     app.include_router(observability.console_router)
     app.include_router(auth.router)

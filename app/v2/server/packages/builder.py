@@ -18,13 +18,16 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 
 class CatalogPackageModel:
-    def __init__(self, catalog, execution, user_id, routes, *, snapshot=None):
+    def __init__(self, catalog, execution, user_id, routes, *, snapshot=None, authorize=None):
         self.catalog, self.execution = catalog, execution
         self.user_id, self.routes = user_id, routes
         self.snapshot = snapshot
+        self.authorize = authorize
 
     @asynccontextmanager
     async def provider(self, binding):
+        if self.authorize is not None:
+            await self.authorize()
         catalog = self.snapshot if self.snapshot is not None else await self.catalog.editor_catalog(self.user_id)
         route = self.routes.get(binding) or self.routes.get("primary")
         selected = route.credential.removeprefix("server-model:") if route and route.credential else "default"

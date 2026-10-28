@@ -324,3 +324,7 @@ python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill
 ```
 
 回填只提取时间字段，幂等写入；不能凭历史数据补造缺失的初始化边界。
+
+## 飞书 IM 接入
+
+飞书 P0 通过事件 Webhook 接入，支持本人配对、文本私聊、`/new`、`/stop`、现有 Sage 审批链接和持久收发恢复。平台适配器由现有 ExtensionHost 加载，执行复用 RunAdmission、RunService 与 SessionStore。管理员通过 `/api/im/connections` 配置连接，owner 经配对使用；凭据只保存环境变量引用。部署与联调见 [IM 接入说明](im/README.md)。

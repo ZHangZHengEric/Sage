@@ -12,7 +12,7 @@ ref: v2-architecture-SERVER_V2_IM_PLUGIN_DESIGN
 
 # Sage Server V2 IM 插件功能设计
 
-状态：设计提案，尚未实现。调研日期：2026-10-22。
+状态：飞书 P0 已实现，本地验证范围与接入方式见 [IM 接入说明](../../../app/v2/server/im/README.md)；其余平台、群聊和扩展能力仍为设计提案。调研日期：2026-10-22。
 
 建议在 ServerHost 中增加统一 IM Gateway，通过现有 ExtensionRegistration / ExtensionHost 加载平台适配器；所有 IM 对话进入现有 RunAdmission、RunService 和 Sage Session。连接、路由、投递是服务端产品能力，Agent loop、工具执行、审批状态和对话历史继续由现有框架管理。
 

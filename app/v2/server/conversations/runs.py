@@ -257,7 +257,8 @@ class RunService:
             live = await live_execution_policy(command, users=self.users, keys=self.keys, catalog=self.catalog,
                 settings=self.settings, user_id=context.actor.principal_id,
                 package_authorizer=self.host.agent_management.authorize_package if self.host is not None else None,
-                context=context)
+                context=context, ingress_authorizer=self.host.im.authorize_run
+                if self.host is not None and self.host.im is not None else None)
             if live is None:
                 raise SageV2Error(RuntimeErrorInfo(code="server.execution_grant.forbidden",
                     category=ErrorCategory.AUTHORIZATION, message="The originating execution grant is no longer valid"))
@@ -416,6 +417,10 @@ class RunService:
                 session_id=session_id, agent_id=command.agent_id,
                 lock_wait_ms=round((perf_counter() - started) * 1000, 3))
             application = self.application
+            if "server_v2.im" in command.config.metadata:
+                if self.host.im is None or not await self.host.im.authorize_run(command):
+                    raise SageV2Error(RuntimeErrorInfo(code="server.im.grant_revoked",
+                        category=ErrorCategory.AUTHORIZATION, message="IM authorization was revoked"))
             loaded = await self._load_run_agent(command, user_id)
             command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
             with log_duration(LOGGER, "server.run.accepted", "运行接纳结束",

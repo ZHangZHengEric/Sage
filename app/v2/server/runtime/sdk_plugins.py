@@ -80,7 +80,11 @@ def server_registrations(host):
         from app.v2.server.packages.builder import CatalogPackageModel
         run, command, frozen, user = await run_inputs(host, context, deps)
         routes = {key: ModelRoute.model_validate(value) for key, value in context.agent_configuration["model_routes"].items()}
-        return CatalogPackageModel(host.catalog_store, host.execution, user, routes)
+        async def authorize():
+            if host.im is None or not await host.im.authorize_run(command):
+                raise PermissionError("IM authorization was revoked")
+        return CatalogPackageModel(host.catalog_store, host.execution, user, routes,
+            authorize=authorize if "server_v2.im" in command.config.metadata else None)
 
     async def skills(context, deps):
         from app.v2.server.skills.runtime import CatalogSkillProvider
@@ -133,7 +137,8 @@ def server_registrations(host):
         async def current():
             return await live_execution_policy(command, users=host.users, keys=host.credentials.keys,
                 catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id,
-                package_authorizer=host.agent_management.authorize_package, context=run.context)
+                package_authorizer=host.agent_management.authorize_package, context=run.context,
+                ingress_authorizer=host.im.authorize_run if host.im is not None else None)
         member_grants = command.config.metadata[EXECUTION_METADATA_KEY].get("agents", {})
 
         async def member_policy(run_id):
@@ -152,7 +157,7 @@ def server_registrations(host):
 
         return server_tool_policy(host.agent_management, execution_policy=admitted,
                                   current_policy=current, run_policy=member_policy if member_grants else None,
-                                  machine_invocation=key_id is not None)
+                                  machine_invocation=key_id is not None or "server_v2.im" in command.config.metadata)
 
     async def self_configuration(context, deps):
         import json
@@ -162,7 +167,8 @@ def server_registrations(host):
         from app.v2.server.storage.workspaces import workspace_user
         run, command, frozen, user = await run_inputs(host, context, deps)
         key_id, admitted = frozen_execution(command, catalog_agent_id=frozen.agent.id)
-        if run.command.parent_run_id or command.invocation_mode == "plan" or key_id is not None or admitted.shell == "deny":
+        if (run.command.parent_run_id or command.invocation_mode == "plan" or key_id is not None
+                or "server_v2.im" in command.config.metadata or admitted.shell == "deny"):
             return None
         async def authorize(request, request_context):
             if (request_context.actor.principal_id != user or request_context.actor.tenant_id != user
