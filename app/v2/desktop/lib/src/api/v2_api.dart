@@ -35,7 +35,17 @@ class SageApiException implements Exception {
 class V2ApiClient {
   V2ApiClient({Uri? baseUri, HttpClient? httpClient, this.authToken})
     : baseUri = baseUri ?? Uri.parse('http://127.0.0.1:0'),
-      _http = httpClient ?? HttpClient();
+      _http = httpClient ?? _createHttpClient();
+
+  static HttpClient _createHttpClient() => HttpClient()
+    ..findProxy = (uri) {
+      // Sidecar capabilities must stay on this machine, even when the shell
+      // enables a proxy without setting NO_PROXY for loopback addresses.
+      final host = uri.host;
+      final address = InternetAddress.tryParse(host);
+      if (host == 'localhost' || address?.isLoopback == true) return 'DIRECT';
+      return HttpClient.findProxyFromEnvironment(uri);
+    };
 
   Uri baseUri;
   final HttpClient _http;

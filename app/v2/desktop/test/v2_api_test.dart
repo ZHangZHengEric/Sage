@@ -15,6 +15,49 @@ class _NamedUploadFile extends XFile {
 }
 
 void main() {
+  test('sidecar requests bypass an inherited proxy', () async {
+    final proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final sidecar = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => proxy.close(force: true));
+    addTearDown(() => sidecar.close(force: true));
+    var proxyRequests = 0;
+    proxy.listen((request) async {
+      proxyRequests++;
+      request.response.statusCode = HttpStatus.badGateway;
+      await request.response.close();
+    });
+    sidecar.listen((request) async {
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        'Bearer local-token',
+      );
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'code': 0,
+          'data': {'active_clients': 0, 'shutdown_requested': true},
+        }),
+      );
+      await request.response.close();
+    });
+    final overrides = _ProxyHttpOverrides(proxy.port);
+    await HttpOverrides.runWithHttpOverrides(() async {
+      final api = V2ApiClient(
+        baseUri: Uri.parse('http://127.0.0.1:${sidecar.port}'),
+        authToken: 'local-token',
+      );
+      try {
+        expect(
+          (await api.shutdownRuntimeIfIdle())['shutdown_requested'],
+          isTrue,
+        );
+        expect(proxyRequests, 0);
+      } finally {
+        api.close();
+      }
+    }, overrides);
+  });
+
   test('Python user import uses its own authenticated endpoint', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
@@ -621,4 +664,15 @@ void main() {
       expect(configuration.runtimeVariables, {'language': 'zh'});
     },
   );
+}
+
+class _ProxyHttpOverrides extends HttpOverrides {
+  _ProxyHttpOverrides(this.port);
+
+  final int port;
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) =>
+      super.createHttpClient(context)
+        ..findProxy = (_) => 'PROXY 127.0.0.1:$port';
 }
