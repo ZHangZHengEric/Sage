@@ -645,6 +645,43 @@ async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [
+    SageV2Error(RuntimeErrorInfo(code="session_store.hash_mismatch", category=ErrorCategory.CORRUPT_STATE, message="checksum mismatch")),
+    OSError("unreadable snapshot"),
+    ValueError("invalid snapshot"),
+])
+async def test_usage_overview_skips_unreadable_session_but_counts_healthy_usage(tmp_path, failure):
+    service = DesktopV2Service(tmp_path / "sage")
+    try:
+        await service.list_agents("user_1")
+        service.start = AsyncMock()
+        corrupt = SimpleNamespace(session_id="corrupt")
+        healthy = SimpleNamespace(session_id="healthy")
+        service.session_index.list = AsyncMock(return_value=(corrupt, healthy))
+        service.session_access = SimpleNamespace(get_session=AsyncMock(side_effect=(failure, healthy)))
+        service.session_store.list_session_runs = AsyncMock(return_value=())
+        service.session_store.read_session_events = AsyncMock(return_value=())
+        service.observability.list_model_requests = AsyncMock(return_value=({
+            "status": "completed", "session_id": "healthy", "run_id": "healthy-run",
+            "started_at": utc_now().isoformat(), "metadata": {"agent_id": "sage"},
+            "request": {"model": "healthy-model", "messages": []},
+            "response": {"usage": {"input_tokens": 80, "output_tokens": 20}},
+        },))
+        value = await service.usage_overview("user_1", days=7)
+        assert value["totals"]["total_tokens"] == 100
+        assert value["totals"]["model_requests"] == 1
+        assert value["totals"]["sessions"] == 1
+        assert sum(day["total_tokens"] for day in value["daily"]) == 100
+        assert value["agents"][0]["total_tokens"] == 100
+        assert value["data_quality"]["partial"] is True
+        assert value["data_quality"]["skipped_sessions"] == 1
+        assert service.observability.list_model_requests.call_args.kwargs["session_id"] == "healthy"
+        service.session_store.read_session_events.assert_awaited_once_with("healthy")
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
 async def test_usage_overview_marks_corrupt_index_entry_as_partial(tmp_path: Path):
     service = DesktopV2Service(tmp_path / "sage")
     await service.list_agents("user_1")

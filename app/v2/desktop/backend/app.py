@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 import json
 import secrets
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -59,6 +59,7 @@ def get_desktop_user_id(request: Request) -> str:
 class ProjectRequest(BaseModel):
     name: str = ""
     path: str
+    source: Literal["user", "rsi"] = "user"
 
 
 class SkillFolderImportRequest(BaseModel):
@@ -742,7 +743,7 @@ def create_app(
 
     @app.post("/api/v2/projects")
     async def add_project(body: ProjectRequest):
-        value = await _safe(runtime_service.add_project(body.name, body.path))
+        value = await _safe(runtime_service.add_project(body.name, body.path, source=body.source))
         return _success(value.model_dump(mode="json"))
 
     @app.delete("/api/v2/projects/{project_id}")

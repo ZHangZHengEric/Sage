@@ -302,6 +302,16 @@ class RsiStore:
             metadata.pop("validation", None)
         return metadata
 
+    def delete_agent(self, user, agent):
+        """Remove only this catalog Agent's optimization records."""
+        with self.connect() as db:
+            db.execute("DELETE FROM run_test_observations WHERE user=? AND agent=?", (user, agent))
+            db.execute("DELETE FROM records WHERE user=? AND agent=?", (user, agent))
+        # SQLite otherwise keeps deleted version and measurement payloads in
+        # free pages, so removing an Agent would not release its disk space.
+        with sqlite3.connect(self.path) as db:
+            db.execute("VACUUM")
+
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path)
@@ -1172,7 +1182,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
         try:
             workspace = root / "workspace"
             workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
-            project = await self.add_project(f"RSI · {agent.name} · {value['id'][-8:]}", str(workspace))
+            project = await self.add_project(f"RSI · {agent.name} · {value['id'][-8:]}", str(workspace), source="rsi")
             value.update(workspace_id=project.id, workspace_path=project.path)
             value["status"] = "running"
             save()

@@ -9675,6 +9675,109 @@ void main() {
     expect(find.text('默认'), findsWidgets);
   });
 
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'deleted Agent preserves a read-only conversation in $brightness',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        SharedPreferences.setMockInitialValues({});
+        final api = _FakeApi();
+        final controller = _newController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(() => _disposeController(controller));
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await controller.selectAgent('agent_review');
+        final conversation = controller.selectedConversation!;
+        conversation.sessionId = 'retained-session';
+        conversation.messages.add(
+          ChatMessage(
+            id: 'retained-message',
+            role: 'user',
+            text: 'Retained history',
+          ),
+        );
+        await controller.deleteAgent('agent_review');
+        await tester.pumpAndSettle();
+        expect(conversation.agentId, 'agent_review');
+        expect(conversation.sessionId, 'retained-session');
+        expect(conversation.messages.single.text, 'Retained history');
+        expect(controller.selectedConversationAgentDeleted, isTrue);
+        expect(controller.canSend, isFalse);
+        expect(
+          find.byKey(const ValueKey('conversation-agent-deleted')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('agent-composer')))
+              .readOnly,
+          isTrue,
+        );
+        await controller.selectAgent('agent_main');
+        await controller.send('Do not send');
+        expect(controller.selectedAgentId, 'agent_review');
+        expect(api.lastRunBody, isNull);
+        expect(conversation.messages.length, 1);
+        controller.createConversation();
+        await tester.pumpAndSettle();
+        expect(controller.selectedConversationAgentDeleted, isFalse);
+        expect(controller.selectedAgentId, 'agent_main');
+      },
+    );
+  }
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'RSI workspaces stay out of the project sidebar in $brightness',
+      (tester) async {
+        tester.view.physicalSize = const Size(1200, 800);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        SharedPreferences.setMockInitialValues({});
+        final api = _FakeApi();
+        api.desktopSettings = api.desktopSettings.copyWith(
+          projects: const [
+            DesktopProject(
+              id: 'project_user',
+              name: 'RSI · My own project',
+              path: '/tmp/user',
+            ),
+            DesktopProject(
+              id: 'project_experiment',
+              name: 'RSI · Hidden experiment',
+              path: '/tmp/experiment',
+              source: 'rsi',
+            ),
+          ],
+        );
+        final controller = _newController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(() => _disposeController(controller));
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        expect(controller.projectGroups.map((group) => group.id), [
+          'project_user',
+        ]);
+        expect(find.text('RSI · My own project'), findsOneWidget);
+        expect(find.text('RSI · Hidden experiment'), findsNothing);
+        expect(controller.settings.projects.length, 2);
+      },
+    );
+  }
+
   testWidgets('agent can be deleted from the compact list', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;

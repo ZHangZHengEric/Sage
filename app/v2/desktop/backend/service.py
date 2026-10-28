@@ -405,17 +405,15 @@ class DesktopV2Service(
         for value in await self.session_index.list():
             try:
                 await self.session_access.get_session(value.session_id, context)
-            except SageV2Error as exc:
+            except (OSError, ValueError, SageV2Error) as exc:
                 if (
-                    exc.info.category == ErrorCategory.AUTHORIZATION
-                    or exc.info.code
-                    in {
-                        "session.not_found",
-                        "session_not_found",
-                    }
+                    isinstance(exc, SageV2Error) and (
+                        exc.info.category == ErrorCategory.AUTHORIZATION
+                        or exc.info.code in {"session.not_found", "session_not_found"}
+                    )
                 ):
                     continue
-                if exc.info.category == ErrorCategory.CORRUPT_STATE:
+                if not isinstance(exc, SageV2Error) or exc.info.category == ErrorCategory.CORRUPT_STATE:
                     if skipped_unreadable_sessions is not None:
                         skipped_unreadable_sessions.add(value.session_id)
                     self.logger.warning(
@@ -423,8 +421,8 @@ class DesktopV2Service(
                         "Skipped an unreadable indexed Session",
                         attributes={
                             "session_id": value.session_id,
-                            "error_code": exc.info.code,
-                            "error": exc.info.message,
+                            "error_code": exc.info.code if isinstance(exc, SageV2Error) else type(exc).__name__,
+                            "error": exc.info.message if isinstance(exc, SageV2Error) else str(exc),
                         },
                     )
                     continue

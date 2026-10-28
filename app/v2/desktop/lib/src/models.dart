@@ -554,19 +554,28 @@ class DesktopProject {
     required this.id,
     required this.name,
     required this.path,
+    this.source = 'user',
   });
 
   final String id;
   final String name;
   final String path;
+  final String source;
+  bool get isRsi => source == 'rsi';
 
   factory DesktopProject.fromJson(Map<String, Object?> json) => DesktopProject(
     id: json['id']?.toString() ?? '',
     name: json['name']?.toString() ?? '',
     path: json['path']?.toString() ?? '',
+    source: json['source']?.toString() ?? 'user',
   );
 
-  Map<String, Object?> toJson() => {'id': id, 'name': name, 'path': path};
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'path': path,
+    'source': source,
+  };
 }
 
 class DesktopSettings {

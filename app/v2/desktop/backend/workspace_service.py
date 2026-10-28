@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 from app.v2.desktop.backend.package import (
@@ -170,7 +170,7 @@ class DesktopWorkspaceServiceMixin:
         self._settings_cache = value
         self._settings_cache_mtime = self.settings_path.stat().st_mtime
 
-    async def add_project(self, name: str, path: str) -> DesktopProject:
+    async def add_project(self, name: str, path: str, *, source: Literal["user", "rsi"] = "user") -> DesktopProject:
         self = cast("DesktopV2Service", self)
         root = Path(path).expanduser().resolve(strict=True)
         if not root.is_dir():
@@ -179,6 +179,7 @@ class DesktopWorkspaceServiceMixin:
             id=f"project_{hashlib.sha256(str(root).encode()).hexdigest()[:20]}",
             name=name.strip() or root.name,
             path=str(root),
+            source=source,
         )
         async with self._settings_update_lock:
             settings = await self.get_settings()
@@ -425,7 +426,11 @@ class DesktopWorkspaceServiceMixin:
     def _context(user_id: str, *, language: str = "en") -> RequestContext:
         return RequestContext(
             actor=ActorRef(
-                principal_id=user_id, tenant_id=user_id,
+                principal_id=user_id,
+                # The fixed local Desktop principal predates tenant scoping.
+                # Keep its durable identity aligned with owner adoption and
+                # existing Sessions; explicit hosted/test users stay scoped.
+                tenant_id=None if user_id == "default_user" else user_id,
                 principal_type=PrincipalType.USER,
                 scopes=(
                     "tool.read",

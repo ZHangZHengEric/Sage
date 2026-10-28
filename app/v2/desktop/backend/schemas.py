@@ -13,6 +13,7 @@ class DesktopProject(BaseModel):
     id: str
     name: str
     path: str
+    source: Literal["user", "rsi"] = "user"
 
 
 class DesktopV2Settings(BaseModel):

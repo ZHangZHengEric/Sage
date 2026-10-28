@@ -344,6 +344,9 @@ class _ComposerState extends State<_Composer> {
 
   @override
   Widget build(BuildContext context) {
+    final agentDeleted =
+        widget.studio == null &&
+        widget.controller.conversationAgentDeleted(widget.conversation);
     final running = {
       RunStatus.starting,
       RunStatus.running,
@@ -366,6 +369,17 @@ class _ComposerState extends State<_Composer> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (agentDeleted)
+            GlassCard(
+              key: const ValueKey('conversation-agent-deleted'),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Text(
+                context.l10n.text('workspace.agentDeletedReadOnly'),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ),
           if (widget.studio != null &&
               widget.controller.studioRecipientIds.isNotEmpty)
             Align(
@@ -430,8 +444,9 @@ class _ComposerState extends State<_Composer> {
                           : 'studio-composer',
                     ),
                     readOnly:
+                        agentDeleted ||
                         widget.studio != null &&
-                        widget.controller.studioSending,
+                            widget.controller.studioSending,
                     contextMenuBuilder: (context, editable) {
                       final items = editable.contextMenuButtonItems
                           .where(
@@ -472,7 +487,9 @@ class _ComposerState extends State<_Composer> {
                     ),
                     decoration: InputDecoration(
                       hintText: context.l10n.text(
-                        running
+                        agentDeleted
+                            ? 'workspace.agentDeletedReadOnly'
+                            : running
                             ? 'workspace.inputSteer'
                             : widget.conversation.planMode
                             ? 'workspace.inputPlan'
@@ -641,7 +658,8 @@ class _ComposerState extends State<_Composer> {
                           : const ValueKey('studio-send'),
                       child: _ComposerSendButton(
                         enabled: widget.studio == null
-                            ? widget.controller.canSend || running
+                            ? !agentDeleted &&
+                                  (widget.controller.canSend || running)
                             : !widget.controller.studioSending,
                         running: widget.studio == null
                             ? running
@@ -1372,7 +1390,7 @@ class _AgentPickerState extends State<_AgentPicker> {
   void _toggle() => _isOpen ? _close() : _open();
 
   void _open() {
-    if (_isOpen) return;
+    if (_isOpen || widget.controller.selectedConversationAgentDeleted) return;
     _overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         width: 220,
@@ -1439,7 +1457,9 @@ class _AgentPickerState extends State<_AgentPicker> {
           child: InkWell(
             key: const ValueKey('agent-picker'),
             borderRadius: BorderRadius.circular(9),
-            onTap: _toggle,
+            onTap: widget.controller.selectedConversationAgentDeleted
+                ? null
+                : _toggle,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               curve: Curves.easeOutCubic,
@@ -1464,7 +1484,10 @@ class _AgentPickerState extends State<_AgentPicker> {
                   if (!widget.compact) ...[
                     const SizedBox(width: 5),
                     Text(
-                      selected?.name ?? context.l10n.text('settings.agent'),
+                      widget.controller.selectedConversationAgentDeleted
+                          ? context.l10n.text('workspace.agentDeleted')
+                          : selected?.name ??
+                                context.l10n.text('settings.agent'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(

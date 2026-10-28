@@ -15,7 +15,8 @@ from collections.abc import Iterable
 
 
 from sagents.v2.contracts.events import RuntimeEvent
-from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore, StoreInUseError
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
     FILESYSTEM_SESSION_STORE_FORMAT_V2,
@@ -381,7 +382,14 @@ def _lock_source(source: Path) -> BinaryIO:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
         handle.close()
-        raise RuntimeError(f"SessionStore is in use: {source}") from exc
+        raise StoreInUseError(
+            RuntimeErrorInfo(
+                code="session_store.in_use",
+                category=ErrorCategory.CONFLICT,
+                message=f"SessionStore is in use: {source}",
+                safe_to_resume=True,
+            )
+        ) from exc
     return handle
 
 

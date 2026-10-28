@@ -185,6 +185,29 @@ def test_sidecar_writer_wait_is_bounded():
     assert now[0] == pytest.approx(0.3)
 
 
+@pytest.mark.asyncio
+async def test_sidecar_waits_for_owner_adoption_writer_lock(tmp_path):
+    from sagents.v2.runtime.session import FilesystemSessionStore
+    from sagents.v2.runtime.session.migration import adopt_unowned_sessions
+
+    store = FilesystemSessionStore(tmp_path)
+    attempts = []
+
+    def create_service():
+        attempts.append(True)
+        return adopt_unowned_sessions(tmp_path, principal_id="default_user")
+
+    def release_writer(_delay):
+        store._release_writer_lock()
+
+    try:
+        report = _create_after_writer_release(create_service, sleep=release_writer)
+        assert report.adopted_sessions == 0
+        assert len(attempts) == 2
+    finally:
+        await store.close()
+
+
 def test_sidecar_startup_logs_selected_observation_provider_before_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -26,6 +26,7 @@ async def test_external_training_workspace_registration_uses_desktop_api_and_kee
         assert request.url.path == '/api/v2/projects'
         assert request.headers['Authorization'] == 'Bearer private-workspace-token'
         assert json.loads(request.content)['path'] == str(workspace)
+        assert json.loads(request.content)['source'] == 'rsi'
         return httpx.Response(200, json={'data': {'id': 'project-test', 'path': str(workspace)}})
     client_type = httpx.AsyncClient
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs:
