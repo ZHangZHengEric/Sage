@@ -65,6 +65,7 @@ async function logout() {
         <router-link class="nav-item" to="/agents" title="智能体"><AppIcon name="agent" /><span>智能体</span></router-link>
         <hr class="nav-divider" />
         <router-link v-for="link in resourceLinks" :key="link.to" :to="link.to" class="nav-item" :class="{ 'router-link-active': link.paths?.includes(route.path) }" :title="link.label"><AppIcon :name="link.icon" /><span>{{ link.label }}</span></router-link>
+        <router-link class="nav-item" to="/im" title="IM管理"><AppIcon name="chat" /><span>IM管理</span></router-link>
         <hr class="nav-divider" />
         <router-link class="nav-item" to="/studio" title="Studio"><AppIcon name="code" /><span>Studio</span></router-link>
         <hr class="nav-divider" />

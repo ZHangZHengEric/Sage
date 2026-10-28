@@ -109,6 +109,42 @@ async function setup(t, name, directory = 'views') {
   } }
 }
 
+test('IM self-service creation loads only own Agents and never submits an owner or env reference', async t => {
+  const { api, mount } = await setup(t, 'FeishuConnectionForm', 'components')
+  t.mock.method(api, 'agentSummaries', async all => { assert.equal(all, false); return [{ id: 'own', name: 'Own' }] })
+  t.mock.method(api, 'adminUsers', async () => { throw Error('admin request forbidden') })
+  t.mock.method(api, 'createIMConnection', async body => ({ id: 'created', ...body }))
+  const state = await mount({ modelValue: true })
+  assert.equal(state.form.agent_id, 'own')
+  state.form.name = 'Mine'
+  state.form.config = { app_id: 'cli_own', tenant_key: 'tenant', app_secret: 'test-secret', verification_token: 'test-token', encrypt_key: 'test-key' }
+  await state.save()
+  const body = api.createIMConnection.mock.calls[0].arguments[0]
+  assert.equal(Object.hasOwn(body, 'owner_user_id'), false)
+  assert.equal(Object.hasOwn(body.config, 'app_secret_env'), false)
+  assert.equal(body.agent_id, 'own')
+  assert.equal(api.adminUsers.mock.calls.length, 0)
+})
+
+for (const operation of ['created', 'removed', 'changed']) {
+  test(`IM list refresh cannot overwrite a connection that was ${operation} while loading`, async t => {
+    const { api, mount } = await setup(t, 'FeishuConnections', 'components')
+    const old = { id: 'old', owner_user_id: 'admin', revision: 1, paired: false, enabled: true }
+    t.mock.method(api, 'imConnections', async () => ({ items: [old] }))
+    const state = await mount()
+    let finish
+    api.imConnections.mock.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const pending = state.load()
+    const added = { ...old, id: 'new' }, updated = { ...old, revision: 2, enabled: false }
+    state[operation](operation === 'created' ? added : operation === 'removed' ? old.id : updated)
+    finish({ items: [old] })
+    await pending
+    assert.deepEqual(state.connections, operation === 'created' ? [old, added] : operation === 'removed' ? [] : [updated])
+    assert.equal(state.loading, false)
+    if (operation !== 'changed') assert.equal(state.selected, operation === 'created' ? 'new' : '')
+  })
+}
+
 test('probe report distinguishes strict Schema support from JSON output and real errors', async t => {
   const { Component } = await setup(t, 'CapabilityReport', 'components')
   const profile = { effective_max_output_tokens: 128, verified_at: '2026-10-19T00:00:00Z', outcomes: [
@@ -1255,4 +1291,19 @@ test('agent success feedback expires, restarts for a new save and clears on retu
   t.mock.timers.tick(5000)
   assert.equal(state.savedMessage, '')
   assert.equal(state.error, '保存失败')
+})
+
+
+test('IM detail displays unavailable credentials and allows a recovery check', async t => {
+  const { api, Component, mount } = await setup(t, 'FeishuConnectionDetail', 'components')
+  const connection = { id: 'im_broken', name: 'Broken', enabled: false, paired: true, revision: 4, agent_id: 'own', config: {}, credentials_error: '请恢复密钥备份', credentials_configured: true }
+  t.mock.method(api, 'imConnection', async () => connection)
+  t.mock.method(api, 'imConnectionStatus', async () => ({ state: 'unavailable', revision: 4, paired: true }))
+  t.mock.method(api, 'imDeliveries', async () => ({ items: [], next_cursor: null }))
+  const state = await mount({ connection })
+  assert.equal(state.stateLabel, '不可用')
+  assert.equal(state.locked, false)
+  const html = await renderToString(createSSRApp(Component, { connection }))
+  assert.match(html, /role="alert">请恢复密钥备份/)
+  assert.match(html, /测试凭据/)
 })

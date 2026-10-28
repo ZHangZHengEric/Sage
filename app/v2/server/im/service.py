@@ -24,7 +24,8 @@ from sagents.v2.runtime.extensions import (
 )
 from sagents.v2.runtime.observability.logs import get_logger
 from .contracts import GRANT_KEY, DeliveryError
-from .feishu import FeishuConfig, registration, secret
+from .credentials import IMCredentials
+from .feishu import FeishuConfig, registration
 from .orm import BindingRow, DeliveryRow, InboxRow
 from .repository import IMStore, error
 
@@ -35,6 +36,8 @@ class IMService:
     def __init__(self, host):
         self.host = host
         self.store = IMStore(host.database)
+        self.credentials = None
+        self._credential_errors = {}
         self.worker = uuid4().hex
         self.scope = None
         self._channels = {}
@@ -44,6 +47,20 @@ class IMService:
         self._last_cleanup = 0
 
     async def start(self):
+        connections = await self.store.list_connections()
+        try:
+            self.credentials = IMCredentials.load(
+                self.host.paths.data_root, allow_create=not connections
+            )
+        except RuntimeError:
+            LOGGER.warning("server.im.key.unavailable", "IM credential key is unavailable")
+        for connection in connections:
+            try:
+                if self.credentials is None:
+                    raise ValueError("key unavailable")
+                self.credentials.open(connection.owner_id, connection.config)
+            except ValueError:
+                await self._disable_unavailable(connection)
         registry = ExtensionRegistry()
         registry.register(registration())
         for item in self.host._registrations:
@@ -94,10 +111,44 @@ class IMService:
                 self.scope = None
 
     async def channel(self, conn):
+        if self.credentials is None or self.credentials_error(conn.id):
+            raise error("credentials_unavailable", self.credentials_error(conn.id) or "IM 凭据加密密钥不可用，请恢复服务端密钥备份")
         if conn.id not in self._channels:
             factory = self.scope.providers.require("im.channel-factory", "feishu")
-            self._channels[conn.id] = factory.create(conn.config)
+            try:
+                parsed = self.credentials.open(conn.owner_id, conn.config)
+            except ValueError:
+                await self._disable_unavailable(conn)
+                raise error("credentials_unavailable", self.credentials_error(conn.id)) from None
+            self._channels[conn.id] = factory.create(parsed.model_dump())
         return self._channels[conn.id]
+
+    def credentials_error(self, cid):
+        return self._credential_errors.get(cid, "")
+
+    async def _disable_unavailable(self, conn):
+        self._credential_errors[conn.id] = "连接凭据无法解密，请恢复服务端密钥备份后测试凭据并重新启用"
+        async with self.store.locked(conn.id) as (_, current):
+            if current.enabled:
+                current.enabled = False
+                current.revision += 1
+                current.auth_epoch += 1
+
+    async def check_credentials(self, conn):
+        try:
+            vault = IMCredentials.load(self.host.paths.data_root, allow_create=False)
+            vault.open(conn.owner_id, conn.config)
+        except (RuntimeError, ValueError):
+            await self._disable_unavailable(conn)
+            raise error("credentials_unavailable", self.credentials_error(conn.id)) from None
+        self.credentials = vault
+        self._credential_errors.pop(conn.id, None)
+
+    async def set_enabled(self, cid, owner, revision, enabled):
+        conn = await self.store.get(cid, owner)
+        if enabled:
+            await self.check_credentials(conn)
+        return await self.store.set_enabled(cid, owner, revision, enabled)
 
     async def create(self, owner_id, agent_id, name, config):
         if (
@@ -121,15 +172,29 @@ class IMService:
                 "Configure SAGE_SERVER_PUBLIC_URL as a public HTTPS URL",
             )
         parsed = FeishuConfig.model_validate(config)
-        for env in (
-            parsed.app_secret_env,
-            parsed.encrypt_key_env,
-            parsed.verification_token_env,
-        ):
-            secret(env)
         if len(await self.store.list_connections()) >= 200:
             raise error("capacity", "IM connection capacity reached")
-        return await self.store.create(owner_id, agent_id, name, parsed.model_dump())
+        if self.credentials is None:
+            raise error("credentials_unavailable", "IM 凭据加密密钥不可用，请恢复服务端密钥备份")
+        stored = self.credentials.seal(owner_id, parsed)
+        # Verify control before reserving the globally unique external account.
+        factory = self.scope.providers.require("im.channel-factory", "feishu")
+        channel = factory.create(parsed.model_dump())
+        try:
+            await channel.probe()
+        except DeliveryError as exc:
+            raise error(
+                "credentials_invalid",
+                "飞书凭据验证暂时不可用，请稍后重试"
+                if exc.outcome == "retry"
+                else "飞书应用凭据验证失败，请检查 App ID 与 App Secret 后重试",
+                ErrorCategory.PROVIDER_TRANSIENT
+                if exc.outcome == "retry"
+                else ErrorCategory.VALIDATION,
+            ) from None
+        finally:
+            await channel.close()
+        return await self.store.create(owner_id, agent_id, name, stored)
 
     async def delete(self, cid, owner, revision):
         from sqlalchemy import delete
@@ -145,6 +210,7 @@ class IMService:
                 await db.execute(delete(table).where(table.connection_id == cid))
             await db.delete(conn)
         channel = self._channels.pop(cid, None)
+        self._credential_errors.pop(cid, None)
         if channel is not None:
             await channel.close()
 

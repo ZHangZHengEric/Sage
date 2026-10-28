@@ -6,45 +6,43 @@
 
 安装服务端依赖 `python -m pip install -e '.[server]'`。生产沿用现有 MySQL 与 SessionStore 配置，启动时创建四张缺失的渠道业务表：`im_connections`、`im_conversation_bindings`、`im_inbox`、`im_deliveries`。它们仅存连接、绑定及收发恢复状态，不存第二份聊天历史，不新增审计库。
 
-配置固定的公网地址与一组飞书凭据环境变量，例如：
+部署配置固定公网地址：
 
 ```dotenv
 SAGE_SERVER_PUBLIC_URL=https://sage.example.com
-SAGE_IM_FEISHU_PERSONAL_APP_SECRET=replace-me
-SAGE_IM_FEISHU_PERSONAL_VERIFICATION_TOKEN=replace-me
-SAGE_IM_FEISHU_PERSONAL_ENCRYPT_KEY=replace-me
 ```
 
-凭据从进程环境或现有 `app/v2/server/.env` 读取，不通过管理接口提交明文。不同机器人使用不同变量名；引用必须以 `SAGE_IM_FEISHU_` 开头。P0 仅管理员可以为一个 Sage 用户配置机器人账号，普通用户只能管理自己的连接、生成配对挑战、查看投递及重试。
+服务端首次启动自动生成独立的凭据加密主密钥，原子保存至 `<data_root>/secrets/im-credentials.key`（文件权限 `0600`、目录权限 `0700`），重启读取并复用，无需手动配置密钥或环境变量。密钥位于用户工作区之外，独立于 JWT secret。并发首次启动不会覆盖已生成的密钥；已有连接时若密钥丢失、损坏或无法解密，服务仍正常启动，仅将受影响连接停用并显示「不可用」，保留原密文且不自动替换密钥。恢复原密钥备份后，在 IM 管理中测试凭据并重新启用。
+
+部署时持久化并备份服务端数据目录，数据库备份须配套保留 `secrets` 目录。多副本须挂载同一份持久化 `secrets` 目录，再启动服务。每位用户在页面填写自己的飞书应用凭据；服务端加密后保存在现有 `im_connections.config`，不新增密钥表。密文绑定 owner、app 与 tenant，接口不返回明文或密文。先前的环境变量引用配置需由本人删除后重新创建。
 
 `SAGE_SERVER_PUBLIC_URL` 必须为 HTTPS，包含反向代理路径前缀时会原样保留。审批链接使用此配置，不使用外部请求的 Host。此地址需要能打开现有 Sage Web 页面；模型、工具授权和登录继续使用原有配置。
 
 ## 创建连接
 
-管理员登录取得现有 Sage Bearer token 后调用 `POST /api/im/connections`，其中 `owner_user_id` 是接入者的 Sage 用户 ID，`agent_id` 必须属于该用户：
+用户通过一级菜单「IM管理」（`/im`）直接创建本人连接，或使用自己的 Sage Bearer token 调用 `POST /api/im/connections`。owner 只取当前登录身份，`agent_id` 必须属于本人，不接受 `owner_user_id`、跨用户 Agent 或部署环境变量引用：
 
 ```json
 {
-  "owner_user_id": "user_existing_owner",
   "agent_id": "agent_existing_agent",
   "name": "我的飞书机器人",
   "config": {
     "app_id": "cli_actual_app_id",
     "tenant_key": "actual_tenant_key",
-    "app_secret_env": "SAGE_IM_FEISHU_PERSONAL_APP_SECRET",
-    "verification_token_env": "SAGE_IM_FEISHU_PERSONAL_VERIFICATION_TOKEN",
-    "encrypt_key_env": "SAGE_IM_FEISHU_PERSONAL_ENCRYPT_KEY"
+    "app_secret": "<your app secret>",
+    "verification_token": "<your verification token>",
+    "encrypt_key": "<your encrypt key>"
   }
 }
 ```
 
-返回 `data.id`，例如 `im_...`。相同 app/tenant 不能重复认领。P0 Agent 与账号配置在创建后固定；启停使用带 `revision` 的 PATCH，不沿用旧插件页面的全局默认绑定接口。
+创建前先验证 App ID / App Secret 能取得飞书 tenant token，失败不会占用账号；临时网络故障可重试。返回 `data.id`，例如 `im_...`，公开配置仅包含 app_id、tenant_key 与 credentials_configured 状态。相同 app/tenant 不能重复认领。P0 Agent 与账号配置在创建后固定；启停使用带 `revision` 的 PATCH，不沿用旧插件页面的全局默认绑定接口。
 
 在飞书开发者后台：
 
 1. 启用自建应用的机器人能力，开放给要配对的本人并发布应用。
 2. 为机器人配置接收用户私聊消息及以应用身份发送消息的权限，例如 `im:message.p2p_msg:readonly`、`im:message:send_as_bot`；以应用后台展示的可用权限为准。
-3. 选择将事件发送到开发者服务器，配置 Encrypt Key 与 Verification Token，与上述环境变量相同。
+3. 选择将事件发送到开发者服务器，配置 Encrypt Key 与 Verification Token，与本人在 Sage 连接表单中填写的值相同。
 4. 将事件请求地址设为 `https://sage.example.com/api/im/webhooks/<connection_id>`，完成 challenge 校验。
 5. 订阅 `im.message.receive_v1`。P0 不订阅卡片回调，不接受群消息、图片、消息编辑或撤回作为 Agent 输入。
 
@@ -65,7 +63,7 @@ IM 始终作为受委托入口执行，Shell 权限最多为 `ask`，仍取 Serv
 
 ## 管理接口
 
-除 Webhook 使用飞书认证，其余接口均要求 Sage 登录；创建额外要求管理员。
+除 Webhook 使用飞书认证，其余接口均要求 Sage 登录，只操作本人连接；创建也由普通用户自助完成。
 
 | 接口 | 作用 |
 | --- | --- |
@@ -73,7 +71,7 @@ IM 始终作为受委托入口执行，Shell 权限最多为 `ask`，仍取 Serv
 | `GET /api/im/connections` | 本人连接列表，部署最多 200 个连接 |
 | `GET /api/im/connections/{id}` | 本人连接详情，不返回密钥值与配对码 |
 | `PATCH /api/im/connections/{id}` | `{"revision": 1, "enabled": false}`，旧版本返回冲突 |
-| `GET /api/im/connections/{id}/status` | disabled、awaiting_pairing、webhook_ready；不代表生产消息权限已联调 |
+| `GET /api/im/connections/{id}/status` | unavailable（凭据不可解密）、disabled、awaiting_pairing、webhook_ready；不代表生产消息权限已联调 |
 | `POST /api/im/connections/{id}/test` | 验证 tenant token 获取，不发送测试消息 |
 | `POST /api/im/connections/{id}/pairings` | 创建或刷新本人配对挑战 |
 | `GET /api/im/connections/{id}/deliveries?after=0&limit=50` | 分页读取投递状态与脱敏错误 |
@@ -81,7 +79,9 @@ IM 始终作为受委托入口执行，Shell 权限最多为 `ask`，仍取 Serv
 | `DELETE /api/im/deliveries/{id}?revision=3` | 丢弃已失败/未知投递，解除目标队列阻塞 |
 | `POST /api/im/deliveries/{id}/retries` | 重试失败项；需传当前 `revision`；unknown 还须显式传 `{"revision": 3, "allow_duplicate": true}` |
 
-管理 UI 本次沿用 Swagger `/docs` 与现有 Sage 会话/审批页面，没有新增连接配置页面。
+Web 一级菜单 **IM管理**（`/im`）提供飞书连接管理。每位用户选择自己的 Agent、填写自己的应用凭据，自助创建与管理连接，不需要管理员代配；账号参数创建后只读。页面支持复制服务端配置的回调地址、启停/删除连接、凭据测试、生成本人配对码并刷新配对状态。密钥输入使用密码框，关闭表单后清除；配对码仅保留在当前弹框中，关闭或过期后清除，两者均不写入浏览器存储。
+
+投递管理默认按服务端 `unresolved=true` 筛选失败与未知状态后分页，可切换全部投递。重试和丢弃携带当前 revision；未知投递重试需在弹框中显式接受重复发送风险。审批仍在现有 Sage 会话页面处理，Swagger `/docs` 保留接口联调入口。
 
 ## 恢复与投递语义
 
@@ -107,11 +107,13 @@ python -m pytest tests/app/v2/server/im -q
 
 2026-10-28 本地验证记录：
 
-- IM 专项：30 项通过，包括队列满时仍可取消任务。
-- Server 非 live 回归：873 项通过、1 项跳过、1 项失败、1 项 teardown 错误。图片验收的沙箱错误与下载测试 monkeypatch 的 SessionStore 方法缺失，均在未修改的 HEAD 复现。
-- 完整 V2 非 live 回归：5083 项通过、59 项跳过，另有 125 项失败与 9 项错误，未全绿。失败包含本机禁止进程资源监控/本地端口监听、缺失 pandas/filelock 与评测数据，以及既有 RSI/SessionStore 用例问题；已在 HEAD 抽查复现非环境断言，不代表逐项完成全量基线核验。
+- IM 专项：45 项通过，包括自动密钥生成与并发发布、密钥丢失/损坏/替换后的启动隔离与恢复、用户自助创建、拒绝越权/旧 env 字段、凭据验证失败不占用账号、加密归属绑定和原有 Run/恢复链路。
+- IM 与 Server 启动/配置回归：113 项通过。
+- 前端：166 项通过，生产构建通过。真实浏览器验证普通用户创建、密钥密码框/关闭清除、配对、状态、启停、失败筛选、58 条跨页投递与未知重试确认；320/768/1024/1440px 无整页横向溢出。另在真实浏览器验证密钥损坏后显示不可用、恢复备份后测试并重新启用。飞书网络使用隔离替身。
+- 前次 Server 非 live 回归：877 项通过、1 项跳过、1 项失败、1 项 teardown 错误。图片验收的沙箱错误与下载测试 monkeypatch 的 SessionStore 方法缺失，均在未修改的 HEAD 复现。
+- P0 后端阶段完整 V2 非 live 回归：5083 项通过、59 项跳过，另有 125 项失败与 9 项错误，未全绿。失败包含本机禁止进程资源监控/本地端口监听、缺失 pandas/filelock 与评测数据，以及既有 RSI/SessionStore 用例问题；已在 HEAD 抽查复现非环境断言，不代表逐项完成全量基线核验。
 - 本次 Python 文件的 Ruff、diff 空白检查与架构检查通过。文档检查仍报告 HEAD 已有的 RSI 翻译结构和缺少对应文档问题。
 
-真实联调需配置实际应用、回调域名及服务端凭据，再依次验证：challenge → 本人配对 → 文本回复 → `/new` → `/stop` → 需要审批的任务 → Sage 登录批准 → 服务端重启后继续收发。当前实现没有把 mock 结果声明为飞书生产链路已验收。
+真实联调需配置实际应用凭据及回调域名，再依次验证：challenge → 本人配对 → 文本回复 → `/new` → `/stop` → 需要审批的任务 → Sage 登录批准 → 服务端重启后继续收发。当前实现没有把 mock 结果声明为飞书生产链路已验收。
 
 协议依据：[飞书事件接收](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/encrypt-key-encryption-configuration-case)、[接收消息事件](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)、[发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create)、[官方 Python SDK 验签](https://github.com/larksuite/oapi-sdk-python/blob/v2_main/lark_oapi/event/dispatcher_handler.py)、[官方解密实现](https://github.com/larksuite/oapi-sdk-python/blob/v2_main/lark_oapi/core/utils/decryptor.py)。

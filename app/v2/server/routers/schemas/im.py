@@ -3,7 +3,11 @@
 from typing import Any, Literal
 
 from pydantic import BaseModel
-from app.v2.server.im.feishu import FeishuConfig
+
+
+class IMConfigPublic(BaseModel):
+    app_id: str
+    tenant_key: str
 
 
 class IMConnectionPublic(BaseModel):
@@ -12,10 +16,13 @@ class IMConnectionPublic(BaseModel):
     plugin: Literal["com.sage.im.feishu"]
     owner_user_id: str
     agent_id: str
-    config: FeishuConfig
+    config: IMConfigPublic
+    credentials_configured: bool
+    credentials_error: str
     enabled: bool
     revision: int
     paired: bool
+    webhook_url: str
 
 
 class IMConnectionPage(BaseModel):
@@ -42,7 +49,7 @@ class IMPairingPublic(BaseModel):
 
 
 class IMStatusPublic(BaseModel):
-    state: Literal["disabled", "awaiting_pairing", "webhook_ready"]
+    state: Literal["unavailable", "disabled", "awaiting_pairing", "webhook_ready"]
     revision: int
     paired: bool
 

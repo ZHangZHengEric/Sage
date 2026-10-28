@@ -3,15 +3,19 @@ import asyncio
 import pytest
 
 from tests.app.v2.server.conftest import make_test_service
-from tests.app.v2.server.im.test_feishu import config, event, signed
+from tests.app.v2.server.im.test_feishu import (
+    config,
+    event,
+    signed,
+)
 
 
 @pytest.fixture
-async def im_host(tmp_path, monkeypatch):
-    for name, value in [("SECRET", "secret"), ("TOKEN", "verify"), ("KEY", "key")]:
-        monkeypatch.setenv("SAGE_IM_FEISHU_" + name, value)
+async def im_host(tmp_path, feishu_creation_probe):
     host = make_test_service(
-        tmp_path, public_base_url="https://sage.example", log_level="warning"
+        tmp_path,
+        public_base_url="https://sage.example",
+        log_level="warning",
     )
     await host.start()
     host.im.pause()  # Tests advance durable workers explicitly, without timing races.

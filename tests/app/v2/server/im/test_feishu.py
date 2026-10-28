@@ -11,14 +11,13 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from app.v2.server.im.feishu import FeishuChannel, FeishuConfig
 from app.v2.server.im.contracts import DeliveryError
 
-
 def config():
     return FeishuConfig(
         app_id="cli_test",
         tenant_key="tenant",
-        app_secret_env="SAGE_IM_FEISHU_SECRET",
-        verification_token_env="SAGE_IM_FEISHU_TOKEN",
-        encrypt_key_env="SAGE_IM_FEISHU_KEY",
+        app_secret="secret",
+        verification_token="verify",
+        encrypt_key="key",
     )
 
 
@@ -78,9 +77,7 @@ def signed(payload, *, encrypted=True, timestamp=None):
 
 
 @pytest.fixture
-def channel(monkeypatch):
-    for name, value in [("SECRET", "secret"), ("TOKEN", "verify"), ("KEY", "key")]:
-        monkeypatch.setenv("SAGE_IM_FEISHU_" + name, value)
+def channel():
     return FeishuChannel(config())
 
 

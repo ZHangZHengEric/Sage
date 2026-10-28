@@ -23,6 +23,7 @@ export const router = createRouter({
     { path: '/history', component: History },
     { path: '/tools', component: Tools },
     { path: '/plugins', component: () => import('./views/Plugins.vue'), meta: { admin: true } },
+    { path: '/im', component: () => import('./views/IM.vue') },
     { path: '/users', component: Users, meta: { admin: true } },
     { path: '/traces', component: () => import('./views/Traces.vue'), meta: { admin: true } },
     { path: '/performance', component: () => import('./views/Performance.vue'), meta: { admin: true } },

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.v2.server.im.feishu import FeishuConfig
 from app.v2.server.im.repository import error
 from app.v2.server.im.service import IMService
-from .deps import AdminUser, CurrentUser, HostDep
+from .deps import CurrentUser, HostDep
 from .render import success
 from .schemas.common import ApiResponse, AUTH_ERRORS, ErrorBody
 from .schemas.im import (
@@ -44,7 +44,6 @@ IMDep = Annotated[IMService, Depends(get_im)]
 
 class CreateConnection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    owner_user_id: str = Field(min_length=1, max_length=64)
     agent_id: str = Field(min_length=1, max_length=191)
     name: str = Field(min_length=1, max_length=128)
     config: FeishuConfig
@@ -62,17 +61,21 @@ class RetryDelivery(BaseModel):
     allow_duplicate: bool = Field(False, strict=True)
 
 
-def public(row):
+def public(row, service):
+    base = service.host.settings.public_base_url.rstrip("/")
     return {
         "id": row.id,
         "name": row.name,
         "plugin": "com.sage.im.feishu",
         "owner_user_id": row.owner_id,
         "agent_id": row.agent_id,
-        "config": row.config,
+        "config": {key: row.config[key] for key in ("app_id", "tenant_key")},
+        "credentials_configured": bool(row.config.get("credentials_ciphertext")),
+        "credentials_error": service.credentials_error(row.id),
         "enabled": row.enabled,
         "revision": row.revision,
         "paired": bool(row.sender_id),
+        "webhook_url": base + "/api/im/webhooks/" + row.id if base else "",
     }
 
 
@@ -99,19 +102,17 @@ async def plugins(user: CurrentUser):
 
 
 @router.post("/connections", response_model=ApiResponse[IMConnectionPublic])
-async def create(body: CreateConnection, admin: AdminUser, service: IMDep):
-    # Environment credentials are deployment-owned. Only an administrator may
-    # provision them for an owner; ordinary users cannot enumerate env secrets.
+async def create(body: CreateConnection, user: CurrentUser, service: IMDep):
     try:
         row = await service.create(
-            body.owner_user_id, body.agent_id, body.name, body.config.model_dump()
+            user.user_id, body.agent_id, body.name, body.config.model_dump()
         )
     except (ValueError, ValidationError):
         raise error(
             "invalid_config",
-            "Invalid IM configuration or missing deployment credential",
+            "Invalid IM configuration",
         ) from None
-    return success(public(row))
+    return success(public(row, service))
 
 
 @router.get("/connections", response_model=ApiResponse[IMConnectionPage])
@@ -119,7 +120,7 @@ async def connections(user: CurrentUser, service: IMDep):
     return success(
         {
             "items": [
-                public(row)
+                public(row, service)
                 for row in await service.store.list_connections(user.user_id)
             ],
             "next_cursor": None,
@@ -129,16 +130,17 @@ async def connections(user: CurrentUser, service: IMDep):
 
 @router.get("/connections/{cid}", response_model=ApiResponse[IMConnectionPublic])
 async def connection(cid: str, user: CurrentUser, service: IMDep):
-    return success(public(await service.store.get(cid, user.user_id)))
+    return success(public(await service.store.get(cid, user.user_id), service))
 
 
 @router.patch("/connections/{cid}", response_model=ApiResponse[IMConnectionPublic])
 async def update(cid: str, body: UpdateConnection, user: CurrentUser, service: IMDep):
     return success(
         public(
-            await service.store.set_enabled(
+            await service.set_enabled(
                 cid, user.user_id, body.revision, body.enabled
-            )
+            ),
+            service,
         )
     )
 
@@ -146,11 +148,14 @@ async def update(cid: str, body: UpdateConnection, user: CurrentUser, service: I
 @router.get("/connections/{cid}/status", response_model=ApiResponse[IMStatusPublic])
 async def status(cid: str, user: CurrentUser, service: IMDep):
     row = await service.store.get(cid, user.user_id)
+    state = "webhook_ready" if row.sender_id else "awaiting_pairing"
+    if service.credentials_error(cid):
+        state = "unavailable"
+    elif not row.enabled:
+        state = "disabled"
     return success(
         {
-            "state": "disabled"
-            if not row.enabled
-            else ("webhook_ready" if row.sender_id else "awaiting_pairing"),
+            "state": state,
             "revision": row.revision,
             "paired": bool(row.sender_id),
         }
@@ -167,6 +172,7 @@ async def test_connection(cid: str, user: CurrentUser, service: IMDep):
     from app.v2.server.im.contracts import DeliveryError
 
     row = await service.store.get(cid, user.user_id)
+    await service.check_credentials(row)
     try:
         await (await service.channel(row)).probe()
     except (ValueError, DeliveryError):
@@ -181,9 +187,12 @@ async def deliveries(
     service: IMDep,
     after: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    unresolved: bool = False,
 ):
     await service.store.get(cid, user.user_id)
-    rows = await service.store.deliveries(cid, after=after, limit=limit + 1)
+    rows = await service.store.deliveries(
+        cid, after=after, limit=limit + 1, unresolved=unresolved
+    )
     return success(
         {
             "items": [

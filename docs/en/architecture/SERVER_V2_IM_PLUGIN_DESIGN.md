@@ -236,7 +236,7 @@ Do not duplicate history or create separate IM message/Run/approval/audit tables
 
 Use inbox Run/cursor as the recovery entry, with replay-then-subscribe or gapless cursor subscription. Atomically insert unique outbound intent and advance cursor. Source keys deduplicate replay. An in-process finished callback alone can lose replies between Run completion and enqueue. All SessionStore reads require authorization, with explicit handling for revoked/deleted Runs or destinations.
 
-Credentials initially use deployment-backed `secret_ref`, never Run/event/log/UI echo. If UI secret persistence is needed, encrypt using a deployment-specific master key, not the JWT secret, without inventing a separate key platform.
+P0 uses self-service connections: the authenticated caller is the owner, and submitted credentials are encrypted in the existing connection record using an independent master key generated automatically on first server startup, persisted at `<data_root>/secrets/im-credentials.key`, and reused on restart. Credentials never enter Runs, events, logs, or UI responses. Do not use the JWT secret or introduce a separate key platform. A missing or damaged key does not block Server startup: only affected connections are disabled and shown as unavailable, with their ciphertext preserved. Restore the key backup, test credentials, and explicitly enable each recovered connection.
 
 Retain configuration/bindings until user deletion and impose business recovery retention/cleanup on input, receipts, and failure payloads. Dedupe keys and Session/Run relationships last through the maximum platform replay window; bodies may expire earlier. Unbounded replay windows preclude permanent deduplication claims after cleanup. Deleting a connection stops reception/delivery and cleans temporary/channel data; existing Sage conversations follow their own deletion semantics, without deleting an entire Agent workspace.
 
@@ -271,7 +271,7 @@ All interfaces are proposals, following existing JSON errors, field style, and r
 
 Management uses Sage login and ownership; webhooks use platform authentication. Validate typed schemas, Agent ownership, duplicate external-account claims, and credentials on create/update. Distinguish configuration, authentication, conflict, and retryable busy errors. Pagination follows ThreadPage.
 
-Navigation is **IM integration**, with a title only, without unsolicited subtitles. Show connection name, platform, Agent/routing, state, and actions. Editors contain platform fields, identity/session rules, necessary grants, and secret references. Explain permissions or errors only when relevant to an action, without exposing implementation detail.
+Navigation is a standalone **IM管理** menu (`/im`), with a title only, without unsolicited subtitles. Show connection name, platform, Agent/routing, state, and actions. Editors contain platform fields, identity/session rules, necessary grants, and secret references. Explain permissions or errors only when relevant to an action, without exposing implementation detail.
 
 Separate plugin catalogs from connection instances: one Feishu plugin may serve many accounts. A successful connection test proves the tested credentials/interface, not production message permissions, group visibility, or complete end-to-end behavior.
 

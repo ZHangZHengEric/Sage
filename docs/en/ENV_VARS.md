@@ -66,7 +66,7 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_PHOENIX_PUBLIC_URL` | Empty; optional public Phoenix console URL |
 | `SAGE_SERVER_PHOENIX_PROJECT_NAME` | `sage`; Phoenix project name |
 | `SAGE_SERVER_PHOENIX_API_KEY_ENV` | `PHOENIX_API_KEY`; environment variable containing the Phoenix API key |
-| `SAGE_SERVER_PUBLIC_URL` | Empty: use the incoming request origin; set the public origin for A2A behind a proxy |
+| `SAGE_SERVER_PUBLIC_URL` | Empty: A2A uses the request origin; IM connection creation requires a fixed public HTTPS base |
 
 Concurrency and capacity values must be positive. Run limits are per process with the default Scheduler and shared across instances with the distributed Scheduler. The distributed Job plugin has its own shared admission, execution and output bounds. Redis is required when selecting the Redis runtime plugins; local workspaces and memory databases are not made cross-node by that selection.
 

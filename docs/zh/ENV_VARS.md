@@ -66,7 +66,7 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_PHOENIX_PUBLIC_URL` | 默认空；可选的 Phoenix 公开控制台地址 |
 | `SAGE_SERVER_PHOENIX_PROJECT_NAME` | `sage`；Phoenix 项目名 |
 | `SAGE_SERVER_PHOENIX_API_KEY_ENV` | `PHOENIX_API_KEY`；保存 Phoenix API 密钥的环境变量名 |
-| `SAGE_SERVER_PUBLIC_URL` | 默认空：使用请求来源地址；反向代理后的 A2A 应设置公开来源地址 |
+| `SAGE_SERVER_PUBLIC_URL` | 默认空：A2A 使用请求来源地址；IM 创建连接要求固定的 HTTPS 公网基址 |
 
 并发和容量参数必须为正数。默认调度器按单进程计数，分布式调度器在各实例之间共享 Run 额度。分布式 Job 插件另有共享的接纳、执行和输出上限。选择 Redis 运行时插件时须提供 Redis；该选择不会使本地工作区和记忆数据库自动支持跨节点。
 

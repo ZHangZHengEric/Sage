@@ -8,13 +8,12 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 
 import httpx
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
@@ -29,18 +28,22 @@ class FeishuConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     app_id: str = Field(pattern=r"^cli_[A-Za-z0-9_]+$", max_length=128)
     tenant_key: str = Field(min_length=1, max_length=128)
-    app_secret_env: str = Field(pattern=r"^SAGE_IM_FEISHU_[A-Z0-9_]+$", max_length=128)
-    verification_token_env: str = Field(
-        pattern=r"^SAGE_IM_FEISHU_[A-Z0-9_]+$", max_length=128
-    )
-    encrypt_key_env: str = Field(pattern=r"^SAGE_IM_FEISHU_[A-Z0-9_]+$", max_length=128)
+    app_secret: SecretStr = Field(min_length=1, max_length=512)
+    verification_token: SecretStr = Field(min_length=1, max_length=512)
+    encrypt_key: SecretStr = Field(min_length=1, max_length=512)
 
-
-def secret(name):
-    value = os.environ.get(name, "")
-    if not value:
-        raise ValueError("IM credential is not configured")
-    return value
+    def request_payload(self):
+        # Explicit wire boundary; persistence encrypts this payload separately.
+        values = self.model_dump(
+            mode="json", exclude={"app_secret", "verification_token", "encrypt_key"}
+        )
+        return {
+            **values,
+            **{
+                name: getattr(self, name).get_secret_value()
+                for name in ("app_secret", "verification_token", "encrypt_key")
+            },
+        }
 
 
 class FeishuChannel:
@@ -57,8 +60,8 @@ class FeishuChannel:
         if len(body) > 65536:
             raise ValueError("event too large")
         try:
-            key = secret(self.config.encrypt_key_env)
-            token = secret(self.config.verification_token_env)
+            key = self.config.encrypt_key.get_secret_value()
+            token = self.config.verification_token.get_secret_value()
             payload = json.loads(body)
             if not isinstance(payload, dict):
                 raise ValueError("invalid event")
@@ -144,7 +147,7 @@ class FeishuChannel:
                     "/open-apis/auth/v3/tenant_access_token/internal",
                     json={
                         "app_id": self.config.app_id,
-                        "app_secret": secret(self.config.app_secret_env),
+                        "app_secret": self.config.app_secret.get_secret_value(),
                     },
                 )
                 data = response.json()

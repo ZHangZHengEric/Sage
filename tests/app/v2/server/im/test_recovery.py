@@ -15,14 +15,13 @@ from tests.app.v2.server.im.test_gateway import pair, receive, settled
 
 
 @pytest.fixture
-def persistent(tmp_path, monkeypatch):
-    for name, value in [("SECRET", "secret"), ("TOKEN", "verify"), ("KEY", "key")]:
-        monkeypatch.setenv("SAGE_IM_FEISHU_" + name, value)
-
+def persistent(tmp_path, feishu_creation_probe):
     def make():
         return FixtureServerHost(
             make_settings(
-                tmp_path, public_base_url="https://sage.example", log_level="warning"
+                tmp_path,
+                public_base_url="https://sage.example",
+                log_level="warning",
             ),
             database=Database(
                 DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db")
@@ -311,3 +310,81 @@ async def test_partial_delivery_keeps_order_and_retries_only_unconfirmed_part(
         )
     finally:
         await host.close()
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt", "wrong_key"])
+async def test_key_damage_disables_connection_without_blocking_startup(
+    persistent, damage
+):
+    from cryptography.fernet import Fernet
+    from sagents.v2.contracts.errors import SageV2Error
+
+    host = persistent()
+    await host.start()
+    host.im.pause()
+    user = await host.identity.register("key-owner", "secret1")
+    agent = (await host.catalog.get(user.user_id)).agents[0]
+    conn = await host.im.create(
+        user.user_id, agent.id, "Key recovery", config().model_dump()
+    )
+    key_file = host.paths.data_root / "secrets" / "im-credentials.key"
+    original = key_file.read_bytes()
+    await host.close()
+    if damage == "missing":
+        key_file.unlink()
+    else:
+        key_file.write_bytes(
+            b"broken" if damage == "corrupt" else Fernet.generate_key()
+        )
+    restarted = persistent()
+    await restarted.start()
+    restarted.im.pause()
+    try:
+        row = await restarted.im.store.get(conn.id, user.user_id)
+        assert not row.enabled
+        assert row.auth_epoch == conn.auth_epoch + 1
+        assert restarted.im.credentials_error(conn.id)
+        assert row.config == conn.config
+        with pytest.raises(SageV2Error) as unavailable:
+            await restarted.im.set_enabled(conn.id, user.user_id, row.revision, True)
+        assert unavailable.value.info.code == "server.im.credentials_unavailable"
+        if damage == "missing":
+            assert not key_file.exists()
+        key_file.write_bytes(original)
+        key_file.chmod(0o600)
+        await restarted.im.check_credentials(row)
+        assert not restarted.im.credentials_error(conn.id)
+        enabled = await restarted.im.set_enabled(
+            conn.id, user.user_id, row.revision, True
+        )
+        assert enabled.enabled
+        assert await restarted.im.channel(enabled)
+    finally:
+        await restarted.close()
+
+
+async def test_one_corrupt_connection_does_not_disable_healthy_connections(persistent):
+    host = persistent()
+    await host.start()
+    host.im.pause()
+    user = await host.identity.register("isolated-key-owner", "secret1")
+    agent = (await host.catalog.get(user.user_id)).agents[0]
+    healthy = await host.im.create(
+        user.user_id, agent.id, "Healthy", config().model_dump()
+    )
+    broken_config = {**config().model_dump(), "app_id": "cli_broken"}
+    broken = await host.im.create(user.user_id, agent.id, "Broken", broken_config)
+    async with host.im.store.locked(broken.id) as (_, row):
+        row.config = {**row.config, "credentials_ciphertext": "corrupt"}
+    await host.close()
+    restarted = persistent()
+    await restarted.start()
+    restarted.im.pause()
+    try:
+        assert (await restarted.im.store.get(healthy.id)).enabled
+        assert not restarted.im.credentials_error(healthy.id)
+        assert await restarted.im.channel(healthy)
+        assert not (await restarted.im.store.get(broken.id)).enabled
+        assert restarted.im.credentials_error(broken.id)
+    finally:
+        await restarted.close()

@@ -357,17 +357,15 @@ class IMStore:
             if state in ("platform_accepted", "superseded"):
                 current.text = ""
 
-    async def deliveries(self, cid, *, after=0, limit=50):
+    async def deliveries(self, cid, *, after=0, limit=50, unresolved=False):
         async with self.database.session() as db:
+            stmt = select(DeliveryRow).where(
+                DeliveryRow.connection_id == cid, DeliveryRow.id > after
+            )
+            if unresolved:
+                stmt = stmt.where(DeliveryRow.state.in_(["failed", "unknown"]))
             return list(
-                (
-                    await db.scalars(
-                        select(DeliveryRow)
-                        .where(DeliveryRow.connection_id == cid, DeliveryRow.id > after)
-                        .order_by(DeliveryRow.id)
-                        .limit(limit)
-                    )
-                ).all()
+                (await db.scalars(stmt.order_by(DeliveryRow.id).limit(limit))).all()
             )
 
     async def cleanup(self, cid, worker):
