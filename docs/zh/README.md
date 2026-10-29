@@ -31,7 +31,7 @@ Sage 是一个 **RSI Agent Harness**，整合任务执行、独立评测与递�
 
 ## 运行与贡献
 
-[环境变量](ENV_VARS.md) · [故障排查](TROUBLESHOOTING.md) · [开发](DEVELOPMENT.md)。
+[环境变量](ENV_VARS.md) · [故障排查](TROUBLESHOOTING.md) · [开发](DEVELOPMENT.md) · [模型提供方验收](MODEL_PROVIDER_ACCEPTANCE.md)。
 
 源码运行需要 Python **3.12+**。Desktop 安装包自带后端；Server 当前支持单 worker。
 
