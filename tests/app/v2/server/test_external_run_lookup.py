@@ -44,7 +44,7 @@ def _service(store):
     api = ConversationService(
         threads=MemoryThreadIndex(), runs=runs,
         admission=SimpleNamespace(prepare=AsyncMock(return_value=SimpleNamespace(
-            skills=(), metadata={"new-admission": True}, agent_id="agent", max_steps=3,
+            skills=(), enabled_skills=(), metadata={"new-admission": True}, agent_id="agent", max_steps=3,
             model_ready=True))),
         application=SimpleNamespace(composition_hash="sha256:new-spec"),
         session_access=access, log_sink=NoopLogSink(),

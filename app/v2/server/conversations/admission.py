@@ -33,6 +33,14 @@ class AdmittedRun:
     model_ready: bool
     max_steps: int | None
 
+    @property
+    def enabled_skills(self):
+        from app.v2.server.skills.runtime import enabled_skill_names
+        from sagents.v2.agent.management import AgentPackageBundle
+        raw = self.metadata.get("server_v2.composition", {}).get("package")
+        package = AgentPackageBundle.model_validate(raw) if raw is not None else self.agent.package_bundle
+        return enabled_skill_names(self.skills, package)
+
 
 class RunAdmission:
     def __init__(self, *, threads, catalog, skills, execution, users=None, settings=None,

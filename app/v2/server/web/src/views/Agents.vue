@@ -7,6 +7,16 @@ import AgentEditor from '../components/AgentEditor.vue'
 import AppIcon from '../components/AppIcon.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 import { cloneConfiguration, sameConfiguration } from '../agent-presentation.js'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+function openRsi() {
+  if (!editing.value || isForeign(selectedAgent.value) || pending.value || syncingSkills.value) return
+  if (!sameConfiguration(form.value, savedForm.value) || !sameConfiguration(selectedSkills.value, savedSkills.value)) {
+    error.value = '请先保存配置，再打开 RSI'; return
+  }
+  void router.push(`/agents/${encodeURIComponent(editing.value)}/rsi`)
+}
 
 const drawerOpen = ref(false)
 const viewOnly = ref(false), selectedAgent = ref(null), selectedSkills = ref([]), savedMessage = ref('')
@@ -269,7 +279,7 @@ onMounted(load)
           <header><span class="agent-avatar" :data-tone="index % 4" aria-hidden="true">{{ Array.from(item.name || '智能体')[0] }}</span><div class="agent-card-title"><h2>{{ item.name }}</h2><code>{{ item.id }}</code></div><span v-if="isForeign(item)" class="agent-badge">只读</span></header>
           <p v-if="item.description" class="agent-card-description">{{ item.description }}</p>
           <div class="agent-card-model"><AppIcon name="model" />{{ item.model_name || item.model_id || '使用默认模型' }}</div>
-          <footer><span class="agent-card-resources"><span><AppIcon name="tools" />{{ item.tool_count ?? '—' }} 工具</span><span><AppIcon name="skill" />{{ item.skill_count ?? '—' }} 技能</span><span v-if="item._owner" class="agent-card-owner">{{ item._owner.username }}</span></span><button class="agent-action subtle" type="button" :disabled="pending" :aria-label="`${isForeign(item) ? '查看' : '配置'} ${item.name}`" @click="openAgent(item, isForeign(item))">{{ isForeign(item) ? '查看' : '配置' }}<AppIcon name="chevron" /></button></footer>
+          <footer><span class="agent-card-resources"><span><AppIcon name="tools" />{{ item.tool_count ?? '—' }} 工具</span><span><AppIcon name="skill" />{{ item.skill_count ?? '—' }} 技能</span><span v-if="item._owner" class="agent-card-owner">{{ item._owner.username }}</span></span><div class="rsi-card-actions"><RouterLink v-if="!isForeign(item)" class="agent-action subtle" :to="`/agents/${encodeURIComponent(item.id)}/rsi`" :aria-label="`RSI 优化 ${item.name}`">RSI</RouterLink><button class="agent-action subtle" type="button" :disabled="pending" :aria-label="`${isForeign(item) ? '查看' : '配置'} ${item.name}`" @click="openAgent(item, isForeign(item))">{{ isForeign(item) ? '查看' : '配置' }}<AppIcon name="chevron" /></button></div></footer>
         </article>
       </div>
     </template>
@@ -279,9 +289,14 @@ onMounted(load)
       :skills="skills" :member-agents="memberAgents" :external-tools="externalTools" :external-tool-groups="externalToolGroups" :saved-plugins="savedPlugins" :plugin-catalog="pluginCatalog"
       :resources-loading="resourcesLoading" :resources-error="resourcesError" :approval-loading="approvalLoading" :approval-error="approvalError"
       :saved-form="savedForm" :saved-skills="savedSkills" :budget-defaults="budgetDefaults" :can-delete="Boolean(editing && !isForeign(selectedAgent))"
-      @save="save" @sync-skills="syncSkills" @edit="enableEdit" @close="closeEditor" @reload-resources="retryResources" @load-approval-tools="loadApprovalTools" @delete="requestDelete(selectedAgent)" />
+      @save="save" @rsi="openRsi" @sync-skills="syncSkills" @edit="enableEdit" @close="closeEditor" @reload-resources="retryResources" @load-approval-tools="loadApprovalTools" @delete="requestDelete(selectedAgent)" />
     <FormDrawer v-model="deleteOpen" centered panel-class="agent-confirm-dialog" title="删除智能体" :busy="pending">
       <p class="agent-confirm-copy">确认删除「{{ deleteTarget?.name }}」？此操作无法在页面中撤销。</p><p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p><div class="agent-confirm-actions"><button class="agent-action" type="button" :disabled="pending" @click="deleteOpen = false">取消</button><button class="agent-action danger" type="button" :disabled="pending" @click="remove(deleteTarget)">{{ pending ? '正在删除…' : '确认删除' }}</button></div>
     </FormDrawer>
   </section>
 </template>
+
+<style scoped>
+.rsi-card-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.rsi-card-actions a { text-decoration: none; }
+</style>

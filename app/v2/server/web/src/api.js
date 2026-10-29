@@ -16,7 +16,9 @@ async function request(path, options = {}, binary = false) {
     }
   }
   if (!response.ok) {
-    throw new Error(payload.message || `HTTP ${response.status}`)
+    const error = new Error(payload.message || `HTTP ${response.status}`)
+    error.status = response.status
+    throw error
   }
   if (binary) {
     const disposition = response.headers.get('Content-Disposition') || ''
@@ -62,6 +64,13 @@ async function catalog(path, adminPath, all = true) {
 }
 
 export const api = {
+  rsiRuns: (id, offset = 0) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs?limit=50&offset=${offset}`),
+  rsiRun: (id, run) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs/${encodeURIComponent(run)}`),
+  startRsi: (id, body) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs`, { method: 'POST', body: JSON.stringify(body) }),
+  cancelRsi: (id, run) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs/${encodeURIComponent(run)}/cancel`, { method: 'POST' }),
+  resumeRsi: (id, run) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs/${encodeURIComponent(run)}/resume`, { method: 'POST' }),
+  rsiVersion: (id, run, version) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs/${encodeURIComponent(run)}/versions/${encodeURIComponent(version)}`),
+  applyRsiVersion: (id, run, version, expected) => request(`/api/agents/${encodeURIComponent(id)}/rsi/runs/${encodeURIComponent(run)}/versions/${encodeURIComponent(version)}/apply`, { method: 'POST', body: JSON.stringify({ expected_package_ref: expected }) }),
   observabilityServices: () => request('/api/observability/services'),
   performance: params => request(`/api/observability/performance?${new URLSearchParams(params)}`),
   performanceAgents: () => request('/api/admin/agents'),

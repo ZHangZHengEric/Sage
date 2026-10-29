@@ -323,7 +323,7 @@ class A2AService:
             session_id=session_id,
             agent_id=admitted.agent_id,
             composition_hash=self._application.composition_hash,
-            enabled_skills=tuple(item.name for item in admitted.skills),
+            enabled_skills=admitted.enabled_skills,
             max_steps=admitted.max_steps,
             metadata={**admitted.metadata, **await self._execution_metadata(message, key, admitted)},
         )

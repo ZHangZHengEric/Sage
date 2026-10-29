@@ -11,7 +11,11 @@ ref: v2-applications-RSI
 
 # Agent Package Optimization (RSI)
 
+Server also exposes `POST /api/agents/{agent_id}/rsi/runs` for `instructions` and package-owned `skills`, with history/results, cancellation, checkpoint resume and explicit application guarded by the original package reference. Experiments reuse the managed package inventory and continue after HTTP disconnection. Candidates never activate automatically. The initial host uses isolated local workspaces, without MCP/A2A, teams or process execution. See [Server RSI](../../../app/v2/server/README.md#server-rsi) for requests, storage and recovery constraints.
+
 RSI evaluates and improves a supplied Agent package over a configured number of rounds, using an existing model and host-bound capabilities. It does not train model weights or automatically replace the original Agent. Use the independent Python API or launch a background job from Desktop Agent settings.
+
+Server Web exposes RSI from an Agent card or its saved configuration. It supports experiment setup and dataset import, history, stop/resume, scores and case results, version diffs, result downloads, and manual application. Candidates from an older experiment cannot overwrite a changed Agent configuration.
 
 ## The loop
 

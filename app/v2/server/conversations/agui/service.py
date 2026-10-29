@@ -340,7 +340,7 @@ class ConversationService:
                 tenant_id=workspace_user_id if agent_id is not None else None,
                 key_id=api_key.key_id if api_key is not None else None,
             )
-        enabled = tuple(item.name for item in admitted.skills)
+        enabled = admitted.enabled_skills
         metadata = {**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id}
         if runtime_context:
             if agent_id is None or len(runtime_context) > 32:

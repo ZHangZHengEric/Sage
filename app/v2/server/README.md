@@ -80,6 +80,51 @@ DEBUG 模式下，HTTP/OpenAI/MCP/A2A 客户端仅保留 WARNING 及以上日志
 
 模型客户端池使用 `SAGE_SERVER_MAX_MODEL_CLIENTS`（默认 64）限制容量。同一用户的相同配置跨 Run 复用连接，凭据变化使用新客户端；池满且所有客户端占用时返回可重试的限流错误。详见[模型池与增量持久化](../../../docs/zh/architecture/sagents-v2-model-pool-and-persistence.md)。
 
+## Server RSI
+
+Server 通过同一 `AgentPackageOptimizer` 优化普通 Agent 的 `instructions` 和包内 `skills`。HTTP 断开不停止实验；候选不会自动应用。入口为 `/api/agents/{agent_id}/rsi/runs`，使用现有登录认证与用户归属校验。
+
+Web 从「智能体」卡片的 RSI 按钮，或已保存配置页的「RSI 优化」进入 `/agents/{agent_id}/rsi`。页面提供实验配置、自动出题或 JSON 题集导入、历史分页、状态轮询、停止和恢复；完成后可查看基线/保留版本的训练与验证得分、每轮及逐题结果、提示词和技能差异，下载完整结果并手动应用已评测版本。未保存的配置须先保存；其他用户的 Agent 不提供操作入口。应用保留原始包引用，配置变化时提示新建实验，不覆盖新配置。
+
+```text
+POST /api/agents/{agent_id}/rsi/runs
+GET  /api/agents/{agent_id}/rsi/runs?limit=50&offset=0
+GET  /api/agents/{agent_id}/rsi/runs/{run_id}
+POST /api/agents/{agent_id}/rsi/runs/{run_id}/cancel
+POST /api/agents/{agent_id}/rsi/runs/{run_id}/resume
+GET  /api/agents/{agent_id}/rsi/runs/{run_id}/versions/{version_id}
+POST /api/agents/{agent_id}/rsi/runs/{run_id}/versions/{version_id}/apply
+```
+
+启动请求示例：
+
+```json
+{
+  "request_id": "arithmetic-rsi-1",
+  "goal": "提高算术回答的正确率",
+  "optimization_scope": ["instructions", "skills"],
+  "rounds": 3,
+  "initial_training_case_count": 1,
+  "training_cases_per_round": 0,
+  "suite": {
+    "cases": [
+      {"id": "train-1", "input": "6 × 7 等于多少？", "rubric": "结果为 42", "split": "training"},
+      {"id": "dev-1", "input": "40 + 2 等于多少？", "rubric": "结果为 42", "split": "validation"}
+    ]
+  }
+}
+```
+
+相同 Agent 的同一 `request_id` 和请求内容返回原实验；内容不同返回 409。省略 `suite` 时由引擎生成训练题与固定验证题；导入时以 `suite` 中的验证题数量为准。`model_id` 可选择本人模型供内部角色使用，目标 Agent 保留自己的模型绑定。查询返回状态、冻结配置、基线引用和阶段；完成后还返回 `result`、`candidate_ref`、`versions` 及是否改善/达标。实验完成不代表达标，人工可以检查完整评测后选取已评测版本。
+
+应用时提交 `{"expected_package_ref":"启动时的 base_package_ref"}`，事务内核对 Agent 当前引用，再更新包和移除失效 Skill 绑定；版本已变更返回 409，需要基于新配置另建实验。新增/修改的 Skill 随 Agent 包保存并由后续普通对话加载，不发布或覆盖公共 Skill。
+
+实验状态和请求幂等记录保存在现有 `managed_agent_records`，候选复用不可变包库存。运行检查点和结果位于 `{data_root}/runtime/rsi/{run_id}/`；备份/迁移须同时保留数据库与该目录，不新增审计表。每次调用使用独立 Session 和本地工作区，借用 Server 的模型池、模型额度和运行/用户额度。单实验所有内部调用另受 `max_concurrency` 限制。
+
+首版支持单个 Simple loop Agent、UTF-8 Skill 资源和本地官方工具；不运行依赖团队、源码插件、MCP/A2A 或自定义工具，也不授予进程执行或真实外部写操作。执行使用确定性继续策略、直接工具选择和隔离的空工作区；没有复制生产工作区、长期记忆或外部环境。需要这些环境的任务应先提供独立测试环境再扩展宿主绑定，实验分数不能代替生产集成验证。
+
+停止和正常关闭会保留检查点。恢复维持实验 ID，校验原引擎、模型/凭据绑定及冻结配置，复用已完成执行和评分；只读内部角色及可丢弃的本地目标允许重启未完成调用。异常退出后运行租约最多 60 秒到期，才能由恢复操作重新认领；跨宿主恢复还必须挂载同一实验目录。首版提供手动恢复，不因重启自动重放实验。
+
 ## Server 插件配置
 
 观测统一通过 `observability.provider` 配置日志、模型诊断及调用链；旧的三个独立能力键不再接受。日志级别、Trace 采样及诊断内容模式分别设置，保存后重启生效。

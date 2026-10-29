@@ -22,7 +22,7 @@ const props = defineProps({
   savedForm: { type: Object, default: null }, savedSkills: { type: Array, default: null },
   budgetDefaults: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['close', 'edit', 'save', 'sync-skills', 'delete', 'update:form', 'update:selectedSkills', 'reload-resources', 'load-approval-tools'])
+const emit = defineEmits(['close', 'edit', 'save', 'rsi', 'sync-skills', 'delete', 'update:form', 'update:selectedSkills', 'reload-resources', 'load-approval-tools'])
 const initialForm = cloneConfiguration(props.form), initialSkills = [...props.selectedSkills]
 const sections = agentSections
 const resourcesDisabled = computed(() => props.resourcesLoading || Boolean(props.resourcesError))
@@ -112,7 +112,7 @@ async function submit(exit = false) {
   <div class="agent-editor">
     <header class="agent-editor-head">
       <div class="agent-editor-title"><button class="agent-icon-button" type="button" aria-label="返回智能体列表" :disabled="busy" @click="requestClose"><AppIcon class="agent-back-icon" name="chevron" /></button><span class="agent-breadcrumb">智能体</span><span class="agent-breadcrumb-separator">/</span><h1>{{ form.name || '新智能体' }}</h1><span v-if="readonly" class="agent-badge">只读</span><span v-else class="agent-save-state" :class="{ dirty }" role="status"><i></i>{{ busy ? '正在保存' : dirty ? '有未保存更改' : agentId ? '已保存' : '尚未保存' }}</span></div>
-      <div class="agent-editor-actions"><button v-if="readonly && canEdit" class="agent-action primary" type="button" :disabled="busy" @click="emit('edit')">编辑配置</button><template v-if="!readonly"><button class="agent-action agent-save-exit" type="button" :disabled="busy || syncingSkills || resourcesDisabled || !form.name?.trim()" @click="submit(true)">保存并返回</button><button class="agent-action primary" type="button" :disabled="busy || syncingSkills || resourcesDisabled || !form.name?.trim()" @click="submit(false)">{{ busy ? '保存中…' : '保存更改' }}</button></template><button v-if="readonly" class="agent-action" type="button" :disabled="busy" @click="requestClose">返回列表</button></div>
+      <div class="agent-editor-actions"><button v-if="agentId && canEdit" class="agent-action" type="button" :disabled="busy || syncingSkills || dirty" :title="dirty ? '请先保存配置' : '打开 RSI 优化'" @click="emit('rsi')">RSI 优化</button><button v-if="readonly && canEdit" class="agent-action primary" type="button" :disabled="busy" @click="emit('edit')">编辑配置</button><template v-if="!readonly"><button class="agent-action agent-save-exit" type="button" :disabled="busy || syncingSkills || resourcesDisabled || !form.name?.trim()" @click="submit(true)">保存并返回</button><button class="agent-action primary" type="button" :disabled="busy || syncingSkills || resourcesDisabled || !form.name?.trim()" @click="submit(false)">{{ busy ? '保存中…' : '保存更改' }}</button></template><button v-if="readonly" class="agent-action" type="button" :disabled="busy" @click="requestClose">返回列表</button></div>
     </header>
     <p v-if="resourcesLoading" class="agent-editor-feedback" role="status">正在加载可选配置…</p><p v-else-if="resourcesError" class="agent-editor-feedback error" role="alert">{{ resourcesError }}<button class="agent-action" type="button" @click="emit('reload-resources')">重新加载配置</button></p>
     <p v-if="error" class="agent-editor-feedback error" role="alert">{{ error }}</p><p v-else-if="message && !dirty" class="agent-editor-feedback success" role="status">{{ message }}</p>

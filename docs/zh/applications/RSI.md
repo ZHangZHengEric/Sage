@@ -13,6 +13,10 @@ ref: v2-applications-RSI
 
 RSI 按设定轮数对输入的 Agent package 进行评测和调优，使用已有模型及宿主绑定的能力，不训练模型权重，也不会自动替换原 Agent。可以使用独立 Python API，或从 Desktop 的 Agent 配置启动后台任务。
 
+Server 也提供 `POST /api/agents/{agent_id}/rsi/runs`，首版支持 `instructions` 和包内 `skills`，包含历史/结果查询、停止、检查点恢复和带包引用比较的手动应用。实验复用现有包库存，HTTP 断开不影响运行；候选不会自动生效。执行隔离于生产工作区，首版不绑定 MCP/A2A、团队或进程执行。接口和部署/恢复约束见 [Server RSI](../../../app/v2/server/README.md#server-rsi)。
+
+Server Web 从智能体卡片的 RSI 按钮或已保存配置页的「RSI 优化」进入，支持配置与导入题集、历史、停止/恢复、评分和逐题结果、版本差异、结果下载及手动应用。智能体配置变化后，旧实验候选不能覆盖新配置。
+
 ## 运行流程
 
 1. 提供 package、授权目标、优化范围和测试集。未提供测试集时，可由测试设计 Agent 生成。支持单轮任务与设有轮数上限的多轮对话。

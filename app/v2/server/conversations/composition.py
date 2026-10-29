@@ -96,7 +96,9 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
     if command.agent_id not in expected_ids:
         raise _invalid("run composition does not match the Run agent")
     enabled = command.config.enabled_skills
-    if enabled is None or tuple(record.name for record in skills) != tuple(enabled):
+    from app.v2.server.skills.runtime import enabled_skill_names
+    bundle = AgentPackageBundle.model_validate(raw["package"]) if raw.get("package") else agent.package_bundle
+    if enabled is None or enabled_skill_names(skills, bundle) != tuple(enabled):
         raise _invalid("run composition does not match the Run Skill grant")
     return RunComposition(
         agent=agent,
