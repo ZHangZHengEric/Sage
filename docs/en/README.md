@@ -31,7 +31,7 @@ Sage is an **RSI Agent Harness**, bringing task execution, independent evaluatio
 
 ## Operate and contribute
 
-[Environment variables](ENV_VARS.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md).
+[Environment variables](ENV_VARS.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md) · [Model-provider acceptance](MODEL_PROVIDER_ACCEPTANCE.md).
 
 Running from source requires Python **3.12+**. Desktop installers bundle the backend; Server currently supports one worker.
 

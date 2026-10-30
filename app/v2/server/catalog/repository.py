@@ -42,6 +42,7 @@ class CatalogStore(Protocol):
     async def get(self, user_id: str) -> UserCatalog: ...
     async def create_agent(self, user_id: str, record: AgentRecord) -> None: ...
     async def update_agent(self, user_id: str, record: AgentRecord) -> None: ...
+    async def compare_and_swap_package(self, user_id: str, agent_id: str, package: AgentPackageBundle, expected_ref: str) -> None: ...
     async def delete_agent(self, user_id: str, agent_id: str) -> None: ...
     async def replace_models(
         self, user_id: str, catalog: UserCatalog
@@ -272,6 +273,23 @@ class DatabaseCatalogStore:
             row.package_ref = await self.packages.save_in_transaction(session, package_owner(user_id), record.package)
             for key, value in _agent_values(record).items():
                 setattr(row, key, value)
+
+    async def compare_and_swap_package(self, user_id, agent_id, package, expected_ref):
+        """Apply a candidate and its Skill selection changes in one transaction."""
+        async with self.database.transaction() as session:
+            row = await session.get(AgentRow, agent_id, with_for_update=True)
+            if row is None or row.owner_user_id != user_id:
+                raise _not_found("agent not found")
+            if row.package_ref != expected_ref:
+                raise ValueError("Agent package conflict; reload before applying the candidate")
+            current = AgentRecord(id=agent_id, name=package.manifest.agents[agent_id].name,
+                                  package=package, execution_policy=ExecutionPolicy.model_validate(row.execution_policy))
+            row.package_ref = await self.packages.save_in_transaction(session, package_owner(user_id), package)
+            for key, value in _agent_values(current).items():
+                setattr(row, key, value)
+            await session.execute(delete(AgentSkillSelectionRow).where(
+                AgentSkillSelectionRow.owner_user_id == user_id, AgentSkillSelectionRow.agent_id == agent_id,
+                AgentSkillSelectionRow.skill_name.not_in(current.skills)))
 
     async def _new_agent_row(self, session, user_id, record):
         record = AgentRecord.model_validate(record.model_dump(mode="json"))

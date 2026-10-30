@@ -9,6 +9,7 @@ Please use English for issues, pull requests, and general repository documentati
 - Read the [English README](README.md) and the guide for your component: [runtime](sagents/v2/README.md), [Desktop](app/v2/desktop/README.md), or [Server](app/v2/server/README.md).
 - Browse [open issues](https://github.com/ZHangZHengEric/Sage/issues) and [pull requests](https://github.com/ZHangZHengEric/Sage/pulls) to avoid duplicate work. Ask in an issue if the expected behavior or scope is unclear.
 - Small documentation fixes can go straight to a PR. Discuss larger features, new integrations, or architecture changes in an issue first.
+- For built-in model presets or plugins, follow the [model-provider acceptance standard](docs/en/MODEL_PROVIDER_ACCEPTANCE.md), including Desktop selection and scoped relay-provider requirements.
 - For a bug, include the component/version, operating system, reproduction steps, and expected versus actual behavior. Remove credentials and private data from logs and screenshots.
 
 ## Make and check your change

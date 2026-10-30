@@ -114,7 +114,9 @@ class CatalogService:
     async def get_agent(self, user_id: str, agent_id: str) -> dict:
         record = await self.store.get_agent(user_id, agent_id)
         payload = record.public_dict()
-        payload["skills"] = list(await self.skills.bound_names(user_id, agent_id))
+        from app.v2.server.skills.runtime import enabled_skill_names
+        records = await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent_id)
+        payload["skills"] = list(enabled_skill_names(records, record.package_bundle))
         return payload
 
     async def editor_resources(self, user_id: str) -> dict:
@@ -161,6 +163,10 @@ class CatalogService:
             updated = current.with_configuration(instructions=instructions)
             await self.store.update_agent(user_id, updated)
             return updated
+
+    async def apply_rsi_package(self, user_id, agent_id, package, expected_ref):
+        async with self._lock(user_id, "agents"):
+            await self.store.compare_and_swap_package(user_id, agent_id, package, expected_ref)
 
     async def delete_agent(self, user_id: str, agent_id: str) -> None:
         async with self._lock(user_id, "agents"):

@@ -436,7 +436,7 @@ class IMService:
                     config=RunConfig(
                         enabled_tools=tuple(admitted.agent.tools)
                         + tuple(admitted.agent.external_tools),
-                        enabled_skills=tuple(s.name for s in admitted.skills),
+                        enabled_skills=admitted.enabled_skills,
                         max_steps=admitted.max_steps,
                         metadata=metadata,
                     ),

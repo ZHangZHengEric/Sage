@@ -594,6 +594,10 @@ def test_single_agent_bundle_preserves_historical_content_hash():
 
     raw = {"manifest": package().model_dump(mode="json"), "files": {}}
     historical = json.loads(json.dumps(raw))
+    # Reconstruct the historical schema's nullable budget keys, now archive-only.
+    for budgets in (historical["manifest"]["policies"]["budgets"],
+                    *(agent["budgets"] for agent in historical["manifest"]["agents"].values())):
+        budgets.update(system_tokens=None, protected_recent_tokens=None)
     for agent in historical["manifest"]["agents"].values():
         agent.pop("preload_skills", None)
     expected = hashlib.sha256(

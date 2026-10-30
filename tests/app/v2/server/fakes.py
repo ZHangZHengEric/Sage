@@ -151,6 +151,14 @@ class MemoryCatalogStore:
             catalog.default_agent_id = catalog.agents[0].id
         await self.save(user_id, catalog)
 
+    async def compare_and_swap_package(self, user_id, agent_id, package, expected_ref):
+        current = await self.get_agent(user_id, agent_id)
+        if current.package_bundle.content_hash != expected_ref:
+            raise ValueError("Agent package conflict; reload before applying the candidate")
+        from app.v2.server.catalog.records import AgentRecord
+        updated = AgentRecord(id=agent_id, name=current.name, package=package, execution_policy=current.execution_policy)
+        await self.update_agent(user_id, updated)
+
     async def list_models(self, user_id: str) -> list[ModelRecord]:
         return (await self.get(user_id)).models
 

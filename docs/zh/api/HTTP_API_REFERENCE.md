@@ -185,6 +185,13 @@ parent: API
 | `GET` | `/api/agent-packages/{ref}` | `packages` |
 | `POST` | `/api/agent-packages/{ref}/activate` | `packages` |
 | `POST` | `/api/agent-packages/{ref}/fork` | `packages` |
+| `GET` | `/api/agents/{agent_id}/rsi/runs` | `rsi` |
+| `POST` | `/api/agents/{agent_id}/rsi/runs` | `rsi` |
+| `GET` | `/api/agents/{agent_id}/rsi/runs/{run_id}` | `rsi` |
+| `POST` | `/api/agents/{agent_id}/rsi/runs/{run_id}/cancel` | `rsi` |
+| `POST` | `/api/agents/{agent_id}/rsi/runs/{run_id}/resume` | `rsi` |
+| `GET` | `/api/agents/{agent_id}/rsi/runs/{run_id}/versions/{version_id}` | `rsi` |
+| `POST` | `/api/agents/{agent_id}/rsi/runs/{run_id}/versions/{version_id}/apply` | `rsi` |
 | `POST` | `/api/skill-import-previews` | `skills` |
 | `POST` | `/api/skill-imports` | `skills` |
 | `GET` | `/api/skills` | `skills` |

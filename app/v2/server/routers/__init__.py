@@ -14,6 +14,7 @@ from . import (
     models,
     observability,
     packages,
+    rsi,
     skills,
 )
 
@@ -31,6 +32,7 @@ def register_routers(app: FastAPI, *, jaeger: bool = False) -> None:
     app.include_router(models.router)
     app.include_router(agents.router)
     app.include_router(packages.router)
+    app.include_router(rsi.router)
     app.include_router(mcp.router)
     app.include_router(a2a_agents.router)
     app.include_router(skills.router)

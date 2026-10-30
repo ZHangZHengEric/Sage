@@ -91,7 +91,6 @@ class DefaultContextAssembler:
         self,
         *,
         system_instructions: str | None = None,
-        max_system_tokens: int = 16_384,
         developer_instructions: str | None = None,
         providers: tuple[ContextSegmentProvider, ...] = (),
         runtime_context_in_user: bool = True,
@@ -129,9 +128,6 @@ class DefaultContextAssembler:
             *providers,
         )
         self.runtime_context_in_user = runtime_context_in_user
-        if max_system_tokens <= 0:
-            raise ValueError("max_system_tokens must be positive")
-        self.max_system_tokens = max_system_tokens
         self.budget = budget
         self._compression_requested = {}
         self._projection_signatures = OrderedDict()

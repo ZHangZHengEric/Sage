@@ -91,7 +91,8 @@ def server_registrations(host):
         _, _, frozen, user = await run_inputs(host, context, deps)
         async def latest_record(record):
             return await host.skill_catalog.get(record.skill_id, user_id=user, role="user")
-        return CatalogSkillProvider(frozen.skills, host.paths.data_root, latest_record=latest_record)
+        return CatalogSkillProvider(frozen.skills, host.paths.data_root, latest_record=latest_record,
+            package_files=(frozen.package or frozen.agent.package_bundle).files)
 
     async def tools(context, deps):
         import hashlib

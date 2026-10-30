@@ -71,6 +71,16 @@ def _measurement_retry(phase):
         stats[phase] = stats.get(phase, 0) + 1
 
 
+def record_measurement_retry(phase):
+    """Count a host-side retry against the human measurement in progress."""
+    _measurement_retry(phase)
+
+
+def current_measurement_identity():
+    """``(round, trial)`` of the human measurement in progress, or ``None``."""
+    return _MEASUREMENT_IDENTITY.get()
+
+
 class IsolatedTestEvaluator:
     """Separate scoring/user sessions, with no tuning or selection capability."""
 

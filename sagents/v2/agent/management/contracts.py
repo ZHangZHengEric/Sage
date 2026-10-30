@@ -61,6 +61,9 @@ class AgentPackageBundle(StrictModel):
         payload = self.model_dump(mode="json")
 
         def omit_empty_preloads(bundle):
+            from sagents.v2.package.manifest.legacy_budgets import historical_budget_payload
+
+            historical_budget_payload(bundle["manifest"])
             # Empty defaults must not change immutable refs saved before this
             # field existed. Dependencies are independent, recursively pinned bundles.
             for agent in bundle["manifest"]["agents"].values():

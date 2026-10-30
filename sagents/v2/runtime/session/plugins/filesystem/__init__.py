@@ -29,6 +29,7 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.plugins._shared.facade import CoordinatorFacade
 from sagents.v2.runtime.session.plugins.filesystem.layout import (
     SESSION_LAYOUT_FORMAT,
     resolve_session_directory,
@@ -2386,7 +2387,7 @@ class _FilesystemSessionStoreMeta(type):
         return getattr(_FilesystemSessionState, name)
 
 
-class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
+class FilesystemSessionStore(CoordinatorFacade, metaclass=_FilesystemSessionStoreMeta):
     """Composed durable SessionStore facade.
 
     Persistence and transactional behavior are owned components rather than a
@@ -2415,21 +2416,6 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
     def start(self, context, dependencies):
         from sagents.v2.runtime.session.plugins import session_storage_providers
         return session_storage_providers(self)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._coordinator, name)
-
-    def __setattr__(self, name, value) -> None:
-        if name == "_coordinator":
-            object.__setattr__(self, name, value)
-        else:
-            setattr(self._coordinator, name, value)
-
-    def __delattr__(self, name) -> None:
-        if name == "_coordinator":
-            object.__delattr__(self, name)
-        else:
-            delattr(self._coordinator, name)
 
 
 class _SnapshotCodec(_FilesystemSessionState):

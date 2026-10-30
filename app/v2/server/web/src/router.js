@@ -28,6 +28,7 @@ export const router = createRouter({
     { path: '/traces', component: () => import('./views/Traces.vue'), meta: { admin: true } },
     { path: '/performance', component: () => import('./views/Performance.vue'), meta: { admin: true } },
     { path: '/agents', component: Agents },
+    { path: '/agents/:agentId/rsi', component: () => import('./views/Rsi.vue') },
     { path: '/studio', component: Studio },
     { path: '/models', component: Models },
     { path: '/mcp', component: Mcp },

@@ -80,6 +80,7 @@ class ServerHost:
             self.extensions.register(registration)
         self.agent_management = None
         self.package_queries = None
+        self.rsi = None
         self.database = database
 
         self.paths = prepare_server_v2_storage(
@@ -320,6 +321,8 @@ class ServerHost:
                 job_runtime=self.application.service("execution.job-runtime"),
             )
             self.package_queries = self.agent_management.queries
+            from app.v2.server.optimization.service import ServerRsiService
+            self.rsi = ServerRsiService(self, run_quota)
             from app.v2.server.im.service import IMService
             self.im = IMService(self)
             await self.im.start()
@@ -350,6 +353,9 @@ class ServerHost:
 
     async def close(self) -> None:
         self._background_closing = True
+        if self.rsi is not None:
+            await self.rsi.close()
+            self.rsi = None
         if self.im is not None:
             await self.im.close()
         await self.identity.close()

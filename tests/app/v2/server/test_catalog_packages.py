@@ -68,6 +68,32 @@ async def test_package_is_persistent_authority_and_old_versions_remain_readable(
     assert old.manifest.agents[agent.id].sandbox.network == "none"
 
 
+async def test_rsi_package_cas_and_skill_index_are_atomic(store, monkeypatch):
+    agent = (await store.get("alice")).agents[0]
+    skills = DatabaseSkillStore(store.database)
+    await skills.replace_bindings(owner_user_id="alice", agent_id=agent.id,
+        bindings=[AgentSkillBinding("alice", agent.id, "old", "source", 0)])
+    agent = await store.get_agent("alice", agent.id)
+    before = agent.package_bundle.content_hash
+    updated = agent.with_configuration(instructions="Verified", skills=[]).package_bundle
+    with pytest.raises(ValueError, match="conflict"):
+        await store.compare_and_swap_package("alice", agent.id, updated, "stale")
+    save = store.packages.save_in_transaction
+
+    async def fail(*args):
+        raise RuntimeError("inventory unavailable")
+
+    monkeypatch.setattr(store.packages, "save_in_transaction", fail)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await store.compare_and_swap_package("alice", agent.id, updated, before)
+    assert (await store.get_agent("alice", agent.id)).package_bundle.content_hash == before
+    assert len(await skills.list_bindings(owner_user_id="alice", agent_id=agent.id)) == 1
+    monkeypatch.setattr(store.packages, "save_in_transaction", save)
+    await store.compare_and_swap_package("alice", agent.id, updated, before)
+    assert (await store.get_agent("alice", agent.id)).instructions == "Verified"
+    assert await skills.list_bindings(owner_user_id="alice", agent_id=agent.id) == []
+
+
 async def test_skill_index_and_package_commit_and_rollback_together(store, monkeypatch):
     agent = (await store.get("alice")).agents[0]
     skills = DatabaseSkillStore(store.database)
@@ -343,6 +369,10 @@ async def test_external_scope_survives_database_reload_and_old_refs_remain_valid
     assert next(a for a in loaded.agents if a.id == agent.id).external_tools == []
     # Simulate the serialized bundle before external_tools existed.
     old = cast('AgentPackageBundle', disabled.package).model_dump(mode='json')
+    # The historical schema always emitted these null budget fields.
+    for budgets in (old['manifest']['policies']['budgets'],
+                    *(definition['budgets'] for definition in old['manifest']['agents'].values())):
+        budgets.update(system_tokens=None, protected_recent_tokens=None)
     for definition in old['manifest']['agents'].values():
         if not definition.get('preload_skills'):
             definition.pop('preload_skills', None)
