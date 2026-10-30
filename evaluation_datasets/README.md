@@ -14,6 +14,7 @@ RSI does not select an adapter from a dataset name.
 | ToolSandbox offline base | `toolsandbox/rsi.dataset.json` | 79 / 10 / 6 | Official tools and milestone/minefield scoring | [README](toolsandbox/README.md) |
 | ALFWorld text | `alfworld/rsi.dataset.json` | 120 / 24 / 24 | TextWorld PDDL; C/C++ build tools | [README](alfworld/README.md) |
 | ScienceWorld verified subset | `scienceworld/rsi.dataset.json` | 75 / 27 / 23 | Java 17 and py4j | [README](scienceworld/README.md) |
+| Web Design: Beauty and Art | `web_design/rsi.dataset.json` | 20 / 10 / 10 | Native Sage file tools and Chromium; paired visual Eval Agent | [README](web_design/README.md) |
 | AgentBench DB | `agentbench_db/rsi.dataset.json` | 234 / 32 / 34 | Docker and MySQL 8.0 | [README](agentbench_db/README.md) |
 
 These are Sage RSI configurations, not full official leaderboard reproductions.
@@ -175,6 +176,23 @@ that need a local OpenAI-compatible endpoint to the same ModelProvider.
 Import self-tests have no live model access. Each test can provide 1–16 standard
 `model_responses` dictionaries with `response_id`, `text`, and `finish_reason`.
 Extra/missing calls or wrong grades fail validation. Live runs do not use these fixtures.
+
+## Comparison plugins
+
+New plugins should use [capability-declared evaluation](../sagents/v2/optimization/EVALUATION_PLUGINS.md).
+Declare preparation, evaluation, analysis and optional training-summary capabilities.
+The configured Eval Agent fills missing stages, with the optimization goal supplied
+throughout. A plugin can also replace all evaluation stages. Web Design only prepares
+screenshots; its Eval Agent performs the visual comparison and analysis.
+
+For relative preferences, import a dataset-owned Python plugin exporting
+`prepare(request)` and `compare(request)`, with `COMPARISON_CONTRACT` and
+`COMPARISON_TEST_CASES`. Selecting it enables pairwise evaluation. Keep its runtime
+metadata beside the source. Existing absolute `score(request)` files are unchanged.
+Sage pairs repeated executions against the retained incumbent for training/dev.
+Independent tests compare with the original baseline. Both aggregate win/tie/loss results. Dataset plugins own artifact capture, rendering and judges.
+See [Paired preference evaluation](../sagents/v2/optimization/PAIRWISE_EVALUATION.md)
+for versioned wire schemas, artifact manifests, self-tests and failure semantics.
 
 ## User simulators
 

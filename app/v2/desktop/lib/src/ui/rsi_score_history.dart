@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'rsi_pairwise_summary.dart';
 
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
@@ -44,6 +45,7 @@ class _RsiScoreHistoryState extends State<RsiScoreHistory> {
       return const SizedBox.shrink();
     }
     final selected = matching ?? records.last;
+    final pairwise = _map(selected['pairwise']).isNotEmpty;
     final dark = Theme.of(context).brightness == Brightness.dark;
     final colors = [
       dark ? const Color(0xFF55D5EB) : const Color(0xFF007C91),
@@ -71,20 +73,37 @@ class _RsiScoreHistoryState extends State<RsiScoreHistory> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 24,
-            runSpacing: 10,
-            children: [
-              for (var i = 0; i < splits.length; i++)
-                Text(
-                  '${names[i]}  ${score(selected, splits[i])}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: colors[i],
-                    fontWeight: FontWeight.w600,
+          if (_map(selected['pairwise']).isNotEmpty)
+            RsiPairwiseSummary(
+              label: tr('测试集与原始基线比较', 'Test against original baseline'),
+              grades: [
+                for (final row in _rows(selected['cases']))
+                  for (final trial in _rows(row['trials']))
+                    _map(trial['grade']),
+              ],
+              expectedPairs:
+                  _rows(selected['cases']).length *
+                  ((selected['repeats'] as num?)?.toInt() ?? 1),
+              errors:
+                  (_map(selected['pairwise'])['errors'] as num?)?.toInt() ?? 0,
+              settings: widget.settings,
+              chinese: widget.chinese,
+            ),
+          if (!pairwise)
+            Wrap(
+              spacing: 24,
+              runSpacing: 10,
+              children: [
+                for (var i = 0; i < splits.length; i++)
+                  Text(
+                    '${names[i]}  ${score(selected, splits[i])}',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: colors[i],
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
           const SizedBox(height: 16),
           if (widget.round == null)
             Wrap(
@@ -151,8 +170,13 @@ class _RsiScoreHistoryState extends State<RsiScoreHistory> {
                                         'running' => tr('评测中', 'Evaluating'),
                                         _ => tr('未评估', 'Not evaluated'),
                                       };
+                                final pairGrade = {
+                                  'scorer_details': {
+                                    'pairwise_summary': row['pairwise'],
+                                  },
+                                };
                                 final label =
-                                    '${names[index]} ${i + 1} · ${value?.toStringAsFixed(3) ?? status}';
+                                    '${names[index]} ${i + 1} · ${pairwise ? (valid && row['status'] == 'completed' ? rsiPairwiseLabel(pairGrade, widget.chinese) : status) : value?.toStringAsFixed(3) ?? status}';
                                 final color = value == null
                                     ? (dark
                                           ? const Color(0xFF35434D)
@@ -279,9 +303,11 @@ class RsiScoreTrend extends StatelessWidget {
     super.key,
     required this.records,
     required this.chinese,
+    this.pairwise = false,
   });
   final List<Map<String, Object?>> records;
   final bool chinese;
+  final bool pairwise;
 
   @override
   Widget build(BuildContext context) {
@@ -297,15 +323,25 @@ class RsiScoreTrend extends StatelessWidget {
     final scale = RsiScoreScale.fromRecords(points);
     final ticks = scale.ticks.reversed.toList();
     final splits = ['training', 'validation', 'test'];
-    final names = chinese
-        ? ['训练集', '验证集', '测试集']
-        : ['Training', 'Validation', 'Test'];
+    final names = pairwise
+        ? (chinese
+              ? ['训练集 · 对当轮最佳', '验证集 · 对当轮最佳', '测试集 · 对原始基线']
+              : [
+                  'Train · vs incumbent',
+                  'Dev · vs incumbent',
+                  'Test · vs original baseline',
+                ])
+        : (chinese
+              ? ['训练集', '验证集', '测试集']
+              : ['Training', 'Validation', 'Test']);
     String score(Map<String, Object?> record, String split) {
       final value = _map(record['scores'])[split];
       return value is num &&
               value.isFinite &&
               !(split == 'test' && record['valid'] == false)
-          ? value.toStringAsFixed(3)
+          ? pairwise
+                ? '${(value * 100).toStringAsFixed(1)}%'
+                : value.toStringAsFixed(3)
           : '—';
     }
 
@@ -324,6 +360,12 @@ class RsiScoreTrend extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (pairwise)
+            Text(
+              chinese ? '逐轮负率（越低越好）' : 'Loss rate by round (lower is better)',
+              style: theme.textTheme.labelMedium,
+            ),
+          if (pairwise) const SizedBox(height: 8),
           Wrap(
             spacing: 16,
             runSpacing: 6,
@@ -351,7 +393,9 @@ class RsiScoreTrend extends StatelessWidget {
                         right: 5,
                         height: 14,
                         child: Text(
-                          scale.label(tick),
+                          pairwise
+                              ? '${(tick * 100).toStringAsFixed(0)}%'
+                              : scale.label(tick),
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),

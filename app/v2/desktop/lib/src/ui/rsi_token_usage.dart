@@ -8,9 +8,11 @@ class RsiTokenUsage extends StatelessWidget {
   String t(String zh, String en) => chinese ? zh : en;
   Map<String, Object?> map(Object? value) =>
       value is Map ? Map<String, Object?>.from(value) : const {};
-  String count(Object? value) => value is num ? value.toInt().toString() : '—';
   String compact(Object? value) {
     if (value is! num) return '—';
+    if (value >= 1000000000) {
+      return '${(value / 1000000000).toStringAsFixed(2)}B';
+    }
     if (value >= 1000000) return '${(value / 1000000).toStringAsFixed(2)}M';
     if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}K';
     return value.toInt().toString();
@@ -179,7 +181,7 @@ class RsiTokenUsage extends StatelessWidget {
                                           ? total
                                           : map(stages[entry.key]))[field],
                                     )
-                                  : count(
+                                  : compact(
                                       (entry.key == 'total'
                                           ? total
                                           : map(stages[entry.key]))[field],

@@ -656,3 +656,17 @@ async def test_invalid_proposal_returns_to_feedback_repair_instead_of_silent_rep
     with pytest.raises(InvalidOptimizationProposal):
         await retry_call(invalid, retries=3)
     assert len(attempts) == 1
+
+
+def test_safe_failure_details_preserves_nested_scorer_identity_not_secrets():
+    from sagents.v2.optimization.call_isolation import safe_failure_details
+    from sagents.v2.optimization.python_scorer import ScorerExecutionError
+    error = ExceptionGroup('secret token', [
+        ScorerExecutionError('secret path', code='scorer.dependencies_changed'),
+        ValueError('secret provider message'),
+    ])
+    assert safe_failure_details(error) == [
+        {'error_type': 'ScorerExecutionError', 'code': 'scorer.dependencies_changed'},
+        {'error_type': 'ValueError'},
+    ]
+    assert len(safe_failure_details(ExceptionGroup('many', [ValueError('x') for _ in range(40)]))) == 16

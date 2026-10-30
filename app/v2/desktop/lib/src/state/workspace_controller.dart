@@ -366,6 +366,29 @@ class WorkspaceController extends ChangeNotifier {
     await refreshAgentStatuses();
   }
 
+  Future<AgentConfiguration> saveRsiVersionAsAgent(
+    String agentId,
+    String versionId,
+    String name,
+    String requestId,
+  ) async {
+    final created = await _api.saveRsiVersionAsAgent(
+      agentId,
+      versionId,
+      name,
+      requestId,
+    );
+    if (_disposed) return created;
+    agents = [
+      ...agents.where((agent) => agent.id != created.id),
+      AgentSummary(id: created.id, name: created.name),
+    ];
+    _confirmedAgents[created.id] = created;
+    notifyListeners();
+    await refreshAgentStatuses();
+    return created;
+  }
+
   Future<void> applyRsiVersion(
     String agentId,
     String versionId,

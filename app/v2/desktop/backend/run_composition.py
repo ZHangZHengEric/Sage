@@ -102,7 +102,8 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     name=agent.name,
                     instructions=Instructions(
                         inline=agent.config.get("systemPrefix")
-                        or "You are a helpful Sage agent."
+                        if agent.config.get("systemPrefix") is not None
+                        else "You are a helpful Sage agent."
                     ),
                     models={"primary": provider.id},
                     tools=tools if provider.supports_tool_calling else (),

@@ -15,6 +15,50 @@ class _NamedUploadFile extends XFile {
 }
 
 void main() {
+  test(
+    'save RSI version creates a named Agent with a retry identity',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        expect(request.method, 'POST');
+        expect(
+          request.uri.path,
+          '/api/v2/agents/source/rsi/versions/run.1/save-as-agent',
+        );
+        expect(
+          request.headers.value(HttpHeaders.authorizationHeader),
+          'Bearer test-token',
+        );
+        expect(jsonDecode(await utf8.decoder.bind(request).join()), {
+          'name': 'Specialist',
+          'request_id': 'save-1',
+        });
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'code': 0,
+            'data': {'id': 'new-agent', 'name': 'Specialist'},
+          }),
+        );
+        await request.response.close();
+      });
+      final api = V2ApiClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+        authToken: 'test-token',
+      );
+      addTearDown(api.close);
+      final created = await api.saveRsiVersionAsAgent(
+        'source',
+        'run.1',
+        'Specialist',
+        'save-1',
+      );
+      expect(created.id, 'new-agent');
+      expect(created.name, 'Specialist');
+    },
+  );
+
   test('sidecar requests bypass an inherited proxy', () async {
     final proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final sidecar = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

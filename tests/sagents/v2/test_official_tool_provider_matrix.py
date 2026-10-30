@@ -1418,3 +1418,21 @@ async def test_shell_job_resource_loss_reaches_tool_executor(tmp_path, monkeypat
         assert "side_effect_state" not in caught.value.info.metadata
     finally:
         await plugin.executor.release_run("run_1")
+
+
+@pytest.mark.asyncio
+async def test_native_lint_checks_html_css_through_sandbox_without_shell(tmp_path):
+    (tmp_path / 'index.html').write_text('<!doctype html><title>Example</title><p>Hello</p>')
+    (tmp_path / 'style.css').write_text('body::before{opacity:.5;\nimg,svg{display:block}')
+    plugin = await plugin_for(tmp_path)
+    try:
+        result = await plugin.executor.execute(call('read_lints', {'paths': ['index.html', 'style.css']}), CONTEXT)
+        assert result.error is None
+        value = result.content[0].value
+        assert value['status'] == 'completed' and value['passed'] is False
+        assert any('missing }' in d['message'] for d in value['diagnostics'])
+        (tmp_path / 'style.css').write_text('body::before{opacity:.5;}\nimg,svg{display:block}')
+        result = await plugin.executor.execute(call('read_lints', {'paths': ['index.html', 'style.css']}, index=2), CONTEXT)
+        assert result.error is None and result.content[0].value['passed'] is True
+    finally:
+        await plugin.executor.release_run('run_1')

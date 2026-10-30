@@ -212,7 +212,7 @@ Agent 配置中的“进化”入口打开独立 RSI 对话矩阵；“版本历
 
 人工保存版本在列表中标为“配置保存”，详情可展开查看名称、描述、模型、运行变量和权限，另有指令、工具、Skills、预算及文件内容。配置从 A 改为 B 再改回 A 会保留三个历史节点；重复读取不会新增节点。功能启用前尚未归档的旧编辑无法恢复，只能从现有配置建立初始快照。
 
-优化完成不修改当前 Agent。版本历史按进化实验分组，组内按最新迭代到基线倒序展示。版本详情只读展示保存的配置、指令、工具、Skills、评测和审查结果，可查看本轮改动或导出完整版本，不提供修改或激活入口。后端独立应用接口仍要求 confirmed=true 和当前配置指纹，并拒绝未完成评测或审查未通过的候选。完整报告与版本可分别导出。
+优化完成不修改当前 Agent。版本历史按进化实验分组，组内按最新迭代到基线倒序展示。版本详情展示保存的配置、指令、工具、Skills、评测和审查结果，可查看本轮改动、导出完整版本或“另存为新 Agent”。另存使用所选版本的配置和全部 Package 资源，分配独立 Agent ID 并调整包内引用，保留来源 Agent、实验和版本记录；不继承原 Agent 的会话或实验历史。未完成评测或审查未通过的候选不能另存。同一次保存请求可安全重试。详情不提供修改或替换当前 Agent 的入口；后端独立应用接口仍要求 confirmed=true 和当前配置指纹，并拒绝未完成评测或审查未通过的候选。完整报告与版本可分别导出。
 
 第一版支持 simple Agent 和原生工具；原有运行变量被固定带入测试，每次测试使用新 Application/Session 和临时工作区。临时工作区不包含真实项目文件，进程执行禁用，网络使用默认沙箱限制；Shell 尚需测试绑定，MCP 与非 simple Agent 在启动前拒绝。工具范围可以从原生工具集合增减启用项，也可通过 `tool_definitions` 创建或修改 `rsi_` 命名的纯计算工具。实现随 package 存入 `tools/rsi/<name>.json`，包含输入 JSON Schema、说明与有界 JSON 表达式，候选评测、应用及回滚均使用该版本的实现。表达式支持条件、字段读取、逻辑、比较与算术，不执行 Python/Shell 或外部 I/O；每包最多 8 个生成工具。预算范围目前只开放 max_steps。依赖 Desktop 单 sidecar 进程，不提供分布式任务接管或自动断点续跑。
 
@@ -237,7 +237,7 @@ Agent 配置中的“进化”入口打开独立 RSI 对话矩阵；“版本历
 }
 ```
 
-工具包括 `rsi_agents`、`rsi_start`、`rsi_history`、`rsi_status`、`rsi_questions`、`rsi_cancel`、`rsi_version` 和 `rsi_apply`。`rsi_start` 必须提供 `agent_id`、`goal`、`request_id`；默认 8 轮、24 道验证题、12 道只给人看的测试题、并行上限 3，可通过 `validation_case_count` 和 `human_test_count` 设置题数。可显式设置 `optimization_scope=["instructions", "tools"]` 让调优 Agent 生成工具实现。MCP 不接受调用 Agent 提供的 `suite` 或 `human_test_suite`，题目由宿主独立生成；人工预设集合使用 Desktop API。相同意图保留相同 request_id，变更参数需新 ID。
+工具包括 `rsi_agents`、`rsi_start`、`rsi_history`、`rsi_status`、`rsi_questions`、`rsi_cancel`、`rsi_version` 和 `rsi_apply`。`rsi_start` 必须提供 `agent_id`、`goal`、`request_id`；默认 8 轮、24 道验证题、12 道只给人看的测试题、并行上限 3，可通过 `validation_case_count` 和 `human_test_count` 设置题数。可显式设置 `optimization_scope=["instructions", "tools"]` 让调优 Agent 生成工具实现。MCP 不接受调用 Agent 提供的 `suite` 或 `human_test_suite`，题目由宿主独立生成；人工预设集合先通过 Desktop API 导入，再用 `dataset_version_id` 和 `scorer_id` 选择；成对评估设置 `builtin_scoring="pairwise"`。可设置 `initial_training_case_count`、`grow_training`、`training_cases_per_round`、`human_test_repeats` 和 `call_timeout_seconds` 控制小规模真实试跑。相同意图保留相同 request_id，变更参数需新 ID。
 
 启动立即返回持久 run ID。使用 `rsi_status(after_sequence=0)` 默认读取 50 个精简事件（`limit` 最大 200）；下一次传返回的 `next_sequence`，终态仍需读完积压事件。所有 MCP 返回均遵守相同权限：train 可见问题、完成后的过程和反馈，dev 只提供匿名逐题分数及汇总成绩，test 内容和成绩完全不返回。`include_details=true` 只增加允许查看的训练证据和版本详情，不能扩大 dev/test 权限；无法从单页判断所属集合的原始调用事件只返回进度元数据。`rsi_questions` 返回累计 training 问题与 rubric，以及 validation 数量，不返回验证题。Desktop 人工页面保留三组的独立视图；MCP 断开只释放租约，运行中的 RSI 继续。候选不自动应用，`rsi_apply` 仍要求用户明确确认、`confirmed=true` 和最新配置指纹。
 
@@ -260,3 +260,17 @@ MCP 进程不打开第二个数据库 writer，也不暴露模型密钥。它验
 ### Human-only test checkpoints
 
 The RSI configuration includes `human_test_count` (UI default 12; 0 disables it). An API caller can supply `human_test_suite`, using `split=test`, independently of the train/dev `suite`. A one-way observer measures baseline and each retained round, with fresh target/scoring sessions and a shared concurrency ceiling. `test_observations` is persisted on the human-facing run; optimizer reports, tuning payloads and stopping decisions never receive it. Curves and dot matrices select the same retained package and round across train/dev/test. Failures or unfinished measurements display as missing, never zero.
+
+### RSI lint environments
+
+RSI automatically selects Sage's standard lint runtime when `read_lints` is enabled.
+Desktop and MCP share this default. Source installations provision it once with
+`npm ci --prefix sagents/v2/tool/official/lint --ignore-scripts --no-audit --no-fund`.
+
+`POST /api/v2/agents/{id}/rsi` and the `rsi_start` MCP tool accept an optional
+`lint_environment` with absolute `root` and `node` paths. The trusted root contains
+`bin/eslint`, `eslint.config.mjs`, `package-lock.json`, and installed ESLint packages.
+It is fingerprinted at admission and checked before execution/resume. Only target
+packages using `read_lints` receive a bounded process grant; internal roles do not.
+Agents without `read_lints` keep RSI processes disabled. HTML/CSS syntax checks still
+work without a process. See the Web Design dataset's lint preflight for an example.

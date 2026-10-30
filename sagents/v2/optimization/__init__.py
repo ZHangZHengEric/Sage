@@ -2,7 +2,14 @@
 from sagents.v2.optimization.dataset import OptimizationDataset
 from sagents.v2.optimization.dataset_versions import DatasetVersion, DatasetRevisionRequest, CaseExclusionProposal, SuitePreflightPolicy
 from sagents.v2.optimization.builtin_scoring import BuiltinScoring
+from sagents.v2.optimization.comparison_plugin import (
+    ComparisonPreparationRequest, ComparisonRequest, PreparedComparisonArtifact, FrozenComparisonFile, PythonComparisonPlugin, ComparisonPlugin, DiagnosticEvidence, EvaluationPresentation,
+)
+from sagents.v2.optimization.pairwise import PairwiseDecision, PairwiseEvaluator, PairwiseMeasurementError
 from sagents.v2.optimization.scoring import ExecutionScorer, ScorerDescriptor, ScoringRequest, ScoringResult
+from sagents.v2.optimization.evaluation_plugin import (
+    EvaluationCapabilities, EvaluationRequest, EvaluationResult, AnalysisRequest, SummaryRequest, PythonEvaluationPlugin,
+)
 
 from sagents.v2.optimization.contracts import (
     OptimizationTestSuite,
@@ -53,8 +60,19 @@ from sagents.v2.optimization.runner import (
     OptimizationRunner,
 )
 
+from sagents.v2.optimization.observer import HumanTestObserver, IsolatedTestEvaluator
+from sagents.v2.optimization.user_simulator import UserSimulator, UserSimulatorDescriptor, UserSimulationRequest, UserSimulationReply
+from sagents.v2.optimization.python_user_simulator import PythonUserSimulator
+from sagents.v2.optimization.default_user_simulator import DefaultUserSimulator
+from sagents.v2.optimization.contracts import OptimizationExperiment
+
 __all__ = [
-    "BuiltinScoring",
+    "DiagnosticEvidence", "EvaluationPresentation",
+    "EvaluationCapabilities", "EvaluationRequest", "EvaluationResult", "AnalysisRequest", "SummaryRequest", "PythonEvaluationPlugin",
+    "ComparisonPlugin", "ComparisonPreparationRequest", "ComparisonRequest", "PreparedComparisonArtifact", "FrozenComparisonFile",
+    "PythonComparisonPlugin", "PairwiseDecision", "PairwiseEvaluator", "PairwiseMeasurementError",
+    "BuiltinScoring", "UserSimulator", "UserSimulatorDescriptor", "UserSimulationRequest", "UserSimulationReply",
+    "PythonUserSimulator", "DefaultUserSimulator", "OptimizationExperiment",
     "OptimizationDataset",
     "DatasetVersion",
     "DatasetRevisionRequest",
@@ -110,15 +128,3 @@ __all__ = [
     "OptimizationSuiteReview",
     "OptimizationSuiteReviewRejected",
 ]
-
-from sagents.v2.optimization.observer import HumanTestObserver, IsolatedTestEvaluator
-
-from sagents.v2.optimization.user_simulator import UserSimulator, UserSimulatorDescriptor, UserSimulationRequest, UserSimulationReply
-from sagents.v2.optimization.python_user_simulator import PythonUserSimulator
-__all__ += ["UserSimulator", "UserSimulatorDescriptor", "UserSimulationRequest", "UserSimulationReply", "PythonUserSimulator"]
-
-from sagents.v2.optimization.default_user_simulator import DefaultUserSimulator
-__all__.append("DefaultUserSimulator")
-
-from sagents.v2.optimization.contracts import OptimizationExperiment
-__all__.append("OptimizationExperiment")

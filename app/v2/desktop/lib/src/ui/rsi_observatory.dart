@@ -1,4 +1,6 @@
 import 'rsi_transcript.dart';
+import 'rsi_execution_stream.dart';
+import 'rsi_pairwise_summary.dart';
 import 'rsi_token_usage.dart';
 import 'rsi_activity.dart';
 import 'rsi_conversation_stream.dart';
@@ -113,6 +115,20 @@ class _RsiObservatoryState extends State<RsiObservatory>
         ? _selectedPass
         : passes.lastOrNull;
     final cases = projection.casesFor(pass);
+    final comparisonRound = projection.scopeRound(pass);
+    final comparedRecords = [
+      ..._rows(_map(_map(widget.run?['result'])['report'])['rounds']),
+      for (final event in widget.events)
+        if (event['event'] == 'round_completed')
+          _map(_map(event['data'])['record']),
+    ];
+    final incumbentComparison = _map(
+      _map(
+        comparedRecords
+            .where((r) => r['round'] == comparisonRound)
+            .lastOrNull?['comparison'],
+      )['splits'],
+    );
     final selectedCheckpoint = _rows(widget.run?['test_observations'])
         .where((record) => record['round'] == projection.scopeRound(pass))
         .lastOrNull;
@@ -151,7 +167,12 @@ class _RsiObservatoryState extends State<RsiObservatory>
           final view = testCases.where((c) => c.id == row['id']).firstOrNull;
           if (view == null || checkpoint['valid'] == false) continue;
           if (row['score'] is num) {
-            view.grade = {'score': row['score'], 'passed': row['passed']};
+            view.grade = {
+              'score': row['score'],
+              'passed': row['passed'],
+              if (_map(row['pairwise']).isNotEmpty)
+                'scorer_details': {'pairwise_summary': row['pairwise']},
+            };
             view.state = 'graded';
           } else if (row['status'] == 'running') {
             view.state = 'responding';
@@ -193,6 +214,39 @@ class _RsiObservatoryState extends State<RsiObservatory>
                 .toList(),
       'test': testCases,
     };
+    // Live call receipts distinguish admitted calls from semaphore waiters.
+    if (running && pass == passes.lastOrNull) {
+      final pool = _map(widget.run?['call_pool']);
+      final live = _rows(pool['calls']);
+      for (final group in datasets.values) {
+        for (final item in group) {
+          for (final view in [item, ...item.trialViews.values]) {
+            view.activity.clear();
+            if (!const [
+              'responding',
+              'queued',
+              'submitted',
+            ].contains(view.state))
+              continue;
+            final matches = live
+                .where(
+                  (c) =>
+                      c['input'] == item.input &&
+                      (view.execution == null || c['trial'] == view.execution),
+                )
+                .toList();
+            if (matches.length == 1) {
+              view.state = matches.single['state'] == 'queued'
+                  ? 'queued'
+                  : 'responding';
+              view.activity.addAll(_rows(matches.single['activity']));
+            } else {
+              view.state = 'submitted';
+            }
+          }
+        }
+      }
+    }
     final filteredCases = datasets[split]!;
     final matrixExecutions = filteredCases.fold<int>(
       split == 'test'
@@ -305,32 +359,54 @@ class _RsiObservatoryState extends State<RsiObservatory>
                       ),
                     ),
                   const SizedBox(height: 16),
+                  if (_map(incumbentComparison['validation']).isNotEmpty)
+                    RsiPairwiseSummary(
+                      label: tr(
+                        '验证集 · 候选 vs 当轮最佳',
+                        'Dev · Candidate vs incumbent',
+                      ),
+                      embedded: true,
+                      summary: _map(incumbentComparison['validation']),
+                      settings: widget.settings,
+                      chinese: widget.chinese,
+                    ),
                   Wrap(
                     spacing: 24,
                     runSpacing: 14,
                     children: [
-                      _metric(
-                        projection.adaptive
-                            ? tr('基线整体分', 'Baseline overall')
-                            : tr('基线验证分', 'Baseline validation'),
-                        (projection.adaptive
-                                    ? projection.overallScores[0]
-                                    : projection.scores[0])
-                                ?.toStringAsFixed(3) ??
-                            '—',
-                        violet,
-                      ),
-                      _metric(
-                        projection.adaptive
-                            ? tr('当前整体分', 'Current overall')
-                            : tr('当前验证分', 'Current validation'),
-                        (projection.adaptive
-                                    ? projection.bestOverall
-                                    : projection.bestScore)
-                                ?.toStringAsFixed(3) ??
-                            '—',
-                        accent,
-                      ),
+                      if (_map(run?['builtin_scoring'])['mode'] !=
+                          'pairwise') ...[
+                        _metric(
+                          _map(run?['builtin_scoring'])['mode'] == 'pairwise'
+                              ? tr('基线验证比较得分', 'Baseline dev preference')
+                              : projection.adaptive
+                              ? tr('基线整体分', 'Baseline overall')
+                              : tr('基线验证分', 'Baseline validation'),
+                          (_map(run?['builtin_scoring'])['mode'] == 'pairwise'
+                                      ? projection.scores[0]
+                                      : projection.adaptive
+                                      ? projection.overallScores[0]
+                                      : projection.scores[0])
+                                  ?.toStringAsFixed(3) ??
+                              '—',
+                          violet,
+                        ),
+                        _metric(
+                          _map(run?['builtin_scoring'])['mode'] == 'pairwise'
+                              ? tr('当前验证比较得分', 'Current dev preference')
+                              : projection.adaptive
+                              ? tr('当前整体分', 'Current overall')
+                              : tr('当前验证分', 'Current validation'),
+                          (_map(run?['builtin_scoring'])['mode'] == 'pairwise'
+                                      ? projection.bestScore
+                                      : projection.adaptive
+                                      ? projection.bestOverall
+                                      : projection.bestScore)
+                                  ?.toStringAsFixed(3) ??
+                              '—',
+                          accent,
+                        ),
+                      ],
                       _metric(
                         tr('进化轮次', 'Round'),
                         '${run?['iteration'] ?? 0} / ${run?['rounds'] ?? '—'}',
@@ -408,7 +484,10 @@ class _RsiObservatoryState extends State<RsiObservatory>
                       ],
                     );
               final trend = RsiScoreTrend(
-                records: _cachedTrend,
+                records: _map(run?['builtin_scoring'])['mode'] == 'pairwise'
+                    ? projection.pairwiseTrend(_rows(run?['test_observations']))
+                    : _cachedTrend,
+                pairwise: _map(run?['builtin_scoring'])['mode'] == 'pairwise',
                 chinese: widget.chinese,
               );
               return constraints.maxWidth >= 820
@@ -952,6 +1031,8 @@ class _RsiObservatoryState extends State<RsiObservatory>
         item.grade['passed'] == true ? tr('通过', 'Passed') : tr('未通过', 'Failed'),
       'responding' =>
         terminal ? tr('未完成', 'Unfinished') : tr('对话中', 'Responding'),
+      'queued' => tr('排队中', 'Queued'),
+      'submitted' => tr('已调度', 'Scheduled'),
       'evaluating' =>
         terminal ? tr('未评估', 'Ungraded') : tr('评估中', 'Evaluating'),
       _ => terminal ? tr('未执行', 'Not run') : tr('等待对话', 'Waiting'),
@@ -1015,6 +1096,11 @@ class _RsiObservatoryState extends State<RsiObservatory>
                     ),
                   ),
                   item.grade['rationale'],
+                  Object.hashAll(
+                    item.activity.map(
+                      (a) => Object.hash(a['text'], a['state']),
+                    ),
+                  ),
                 ),
                 children: [
                   ..._conversationMessages(item, accent, violet),
@@ -1038,7 +1124,9 @@ class _RsiObservatoryState extends State<RsiObservatory>
               children: [
                 Expanded(
                   child: Text(
-                    item.grade['score'] != null
+                    isRsiPairwiseGrade(item.grade)
+                        ? rsiPairwiseLabel(item.grade, widget.chinese)
+                        : item.grade['score'] != null
                         ? '${tr('评分', 'Score')} ${item.grade['score']}'
                         : '${tr('对话轮次', 'Turns')} ${item.turns.length}',
                     style: TextStyle(fontSize: 11, color: color),
@@ -1070,6 +1158,56 @@ class _RsiObservatoryState extends State<RsiObservatory>
     Color violet, {
     bool expanded = false,
   }) {
+    final execution = rsiExecutionEntries(
+      item.turns,
+      includeInput: widget.run?['input_visibility'] != 'opaque_fixture',
+    );
+    if (execution.isNotEmpty) {
+      return [
+        if (!execution.any((entry) => entry['role'] == 'user') &&
+            widget.run?['input_visibility'] != 'opaque_fixture')
+          _bubble(
+            item.input,
+            false,
+            accent,
+            label: tr('用户', 'User'),
+            expanded: expanded,
+          ),
+        for (final entry in execution)
+          if (entry['role'] == 'tool')
+            RsiExecutionTool(
+              key: PageStorageKey('rsi-tool-${entry['id']}'),
+              name: entry['tool_name']?.toString() ?? tr('工具', 'Tool'),
+              arguments: entry['kind'] == 'tool_call'
+                  ? entry['text']?.toString() ?? ''
+                  : '',
+              result:
+                  (entry['kind'] == 'tool_result'
+                          ? entry['text']
+                          : entry['result'])
+                      ?.toString(),
+              state: entry['state']?.toString() ?? 'started',
+              chinese: widget.chinese,
+              settings: widget.settings,
+            )
+          else if (entry['text']?.toString().trim().isNotEmpty == true)
+            _bubble(
+              entry['text'].toString(),
+              entry['role'] != 'user',
+              entry['role'] == 'assistant' ? violet : accent,
+              label: entry['role'] == 'user' ? tr('用户', 'User') : 'Agent',
+              expanded: expanded,
+            ),
+        for (final activity in item.activity)
+          _bubble(
+            '${activity['text'] ?? ''}${activity['state'] == null ? '' : ' · ${activity['state']}'}',
+            true,
+            accent,
+            label: activity['role'] == 'assistant' ? 'Agent' : tr('工具', 'Tool'),
+            expanded: expanded,
+          ),
+      ];
+    }
     final messages = <({String role, String text})>[];
     final structured = item.turns.any(
       (turn) => rsiTranscript(
@@ -1092,6 +1230,13 @@ class _RsiObservatoryState extends State<RsiObservatory>
         }
         if (output != null) messages.add((role: 'assistant', text: output));
       }
+    }
+    for (final activity in item.activity) {
+      messages.add((
+        role: activity['role']?.toString() ?? 'tool',
+        text:
+            '${activity['text'] ?? ''}${activity['state'] == null ? '' : ' · ${activity['state']}'}',
+      ));
     }
     return [
       for (final message in messages)
@@ -1190,9 +1335,11 @@ class _RsiObservatoryState extends State<RsiObservatory>
             runSpacing: 8,
             children: [
               Text(
-                '${tr('评分', 'Score')} ${(grade['score'] as num?)?.toStringAsFixed(3) ?? '—'}',
+                isRsiPairwiseGrade(grade)
+                    ? rsiPairwiseLabel(grade, widget.chinese)
+                    : '${tr('评分', 'Score')} ${(grade['score'] as num?)?.toStringAsFixed(3) ?? '—'}',
               ),
-              if (grade['passed'] is bool)
+              if (!isRsiPairwiseGrade(grade) && grade['passed'] is bool)
                 Text(
                   grade['passed'] == true
                       ? tr('通过', 'Passed')
@@ -1295,7 +1442,8 @@ class _RsiObservatoryState extends State<RsiObservatory>
       Theme.of(context).colorScheme.secondary,
       expanded: true,
     ),
-    if (!item.turns.any((t) => t['output']?.toString().isNotEmpty == true))
+    if (rsiExecutionEntries(item.turns).isEmpty &&
+        !item.turns.any((t) => t['output']?.toString().isNotEmpty == true))
       Text(tr('暂无执行对话记录', 'No execution dialogue recorded')),
     const Divider(height: 28),
   ];
@@ -1388,9 +1536,14 @@ class _RsiObservatoryState extends State<RsiObservatory>
                                   ),
                                   const SizedBox(width: 10),
                                   Text(
-                                    (entry.value.grade['score'] as num?)
-                                            ?.toStringAsFixed(3) ??
-                                        '—',
+                                    isRsiPairwiseGrade(entry.value.grade)
+                                        ? rsiPairwiseLabel(
+                                            entry.value.grade,
+                                            widget.chinese,
+                                          )
+                                        : (entry.value.grade['score'] as num?)
+                                                  ?.toStringAsFixed(3) ??
+                                              '—',
                                   ),
                                 ],
                               ),
@@ -1541,6 +1694,11 @@ class _ScoreMatrix extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final pairwise = views.values.any((v) {
+      final details = _map(v.grade['scorer_details']);
+      return details.containsKey('pairwise') ||
+          details.containsKey('pairwise_summary');
+    });
     final title = switch (split) {
       'training' => chinese ? '训练集（train）' : 'Training set (train)',
       'validation' => chinese ? '验证集（dev）' : 'Validation set (dev)',
@@ -1591,22 +1749,27 @@ class _ScoreMatrix extends StatelessWidget {
       );
     }
     double? score(String id) => (views[id]?.grade['score'] as num?)?.toDouble();
-    final graded = questions
-        .where((q) => score(q['id'].toString()) != null)
-        .length;
+    final graded = questions.where((q) {
+      final grade = views[q['id'].toString()]?.grade ?? {};
+      return pairwise
+          ? rsiPairwiseCounts(grade).values.any((n) => n > 0)
+          : score(q['id'].toString()) != null;
+    }).length;
     final items = [for (final q in questions) views[q['id'].toString()]];
     final active = items
-        .where(
-          (item) =>
-              running &&
-              (item?.state == 'responding' || item?.state == 'evaluating'),
-        )
+        .where((item) => running && item?.state == 'responding')
         .length;
     final waiting = items
         .where(
           (item) => running
-              ? item == null || item.state == 'waiting'
-              : item?.grade['score'] == null,
+              ? item == null ||
+                    const [
+                      'waiting',
+                      'queued',
+                      'submitted',
+                    ].contains(item.state)
+              : item?.grade['score'] == null &&
+                    !(pairwise && item?.state == 'executed'),
         )
         .length;
     final passed = items.where((item) => item?.grade['passed'] == true).length;
@@ -1637,9 +1800,16 @@ class _ScoreMatrix extends StatelessWidget {
               style: Theme.of(context).textTheme.labelSmall,
             ),
             const Spacer(),
-            Text('0', style: Theme.of(context).textTheme.labelSmall),
+            if (pairwise)
+              Text(
+                chinese ? '胜 / 平 / 负' : 'Win / Tie / Loss',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            if (!pairwise)
+              Text('0', style: Theme.of(context).textTheme.labelSmall),
             const SizedBox(width: 5),
-            for (final value in [0.0, .25, .5, .75, 1.0])
+            for (final value
+                in (pairwise ? <double>[] : [0.0, .25, .5, .75, 1.0]))
               Container(
                 width: 7,
                 height: 7,
@@ -1650,7 +1820,8 @@ class _ScoreMatrix extends StatelessWidget {
                 ),
               ),
             const SizedBox(width: 5),
-            Text('1', style: Theme.of(context).textTheme.labelSmall),
+            if (!pairwise)
+              Text('1', style: Theme.of(context).textTheme.labelSmall),
           ],
         ),
         const SizedBox(height: 14),
@@ -1673,7 +1844,18 @@ class _ScoreMatrix extends StatelessWidget {
                       final active =
                           running &&
                           (state == 'responding' || state == 'evaluating');
-                      final status = value != null
+                      final grade = views[id]?.grade ?? {};
+                      final counts = rsiPairwiseCounts(grade);
+                      final total = counts.values.fold<int>(0, (a, b) => a + b);
+                      final dotValue = pairwise
+                          ? (total == 0
+                                ? null
+                                : (counts['wins']! + .5 * counts['ties']!) /
+                                      total)
+                          : value;
+                      final status = pairwise
+                          ? rsiPairwiseLabel(grade, chinese)
+                          : value != null
                           ? value.toStringAsFixed(3)
                           : active
                           ? (chinese ? '评测中' : 'Evaluating')
@@ -1706,10 +1888,11 @@ class _ScoreMatrix extends StatelessWidget {
                                     MediaQuery.disableAnimationsOf(context)
                                     ? Duration.zero
                                     : const Duration(milliseconds: 220),
-                                width: 14,
-                                height: 14,
+                                width: pairwise ? 24 : 14,
+                                height: pairwise ? 24 : 14,
+                                alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: _scoreDotColor(value, dark),
+                                  color: _scoreDotColor(dotValue, dark),
                                   shape: BoxShape.circle,
                                   border: active
                                       ? Border.all(
@@ -1720,6 +1903,29 @@ class _ScoreMatrix extends StatelessWidget {
                                         )
                                       : null,
                                 ),
+                                child: pairwise
+                                    ? Text(
+                                        total == 0
+                                            ? '—'
+                                            : total > 1
+                                            ? '≋'
+                                            : counts['wins'] == 1
+                                            ? (chinese ? '胜' : 'W')
+                                            : counts['ties'] == 1
+                                            ? (chinese ? '平' : 'T')
+                                            : (chinese ? '负' : 'L'),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: dotValue == null
+                                              ? Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurface
+                                              : dark
+                                              ? Colors.black
+                                              : Colors.white,
+                                        ),
+                                      )
+                                    : null,
                               ),
                             ),
                           ),
@@ -1737,11 +1943,28 @@ class _ScoreMatrix extends StatelessWidget {
           runSpacing: 8,
           children: [
             for (final stat in [
-              '${chinese ? '通过' : 'Passed'} $passed',
-              '${chinese ? '未通过' : 'Failed'} $failed',
+              if (pairwise) ...[
+                for (final entry in {
+                  'wins': chinese ? '胜' : 'Wins',
+                  'ties': chinese ? '平' : 'Ties',
+                  'losses': chinese ? '负' : 'Losses',
+                }.entries)
+                  '${entry.value} ${items.fold<int>(0, (sum, item) => sum + rsiPairwiseCounts(item?.grade ?? {})[entry.key]!)}',
+                if (items.any(
+                  (item) =>
+                      rsiPairwiseLabel(item?.grade ?? {}, false) == 'Baseline',
+                ))
+                  '${chinese ? '基线' : 'Baseline'} ${items.where((item) => rsiPairwiseLabel(item?.grade ?? {}, false) == 'Baseline').length}',
+                '${chinese ? '待比较' : 'Awaiting comparison'} ${items.where((item) => item?.state == 'executed').length}',
+              ] else ...[
+                '${chinese ? '通过' : 'Passed'} $passed',
+                '${chinese ? '未通过' : 'Failed'} $failed',
+              ],
               '${chinese ? '执行中' : 'Active'} $active',
+              if (items.any((item) => item?.state == 'evaluating'))
+                '${chinese ? '评估中' : 'Evaluating'} ${items.where((item) => item?.state == 'evaluating').length}',
               '${running ? (chinese ? '待执行' : 'Pending') : (chinese ? '未评估' : 'Not evaluated')} $waiting',
-              '${chinese ? '平均分' : 'Average'} $average',
+              if (!pairwise) '${chinese ? '平均分' : 'Average'} $average',
             ])
               Text(
                 stat,
@@ -1794,6 +2017,7 @@ class _CaseView {
     return (grade['score'] as num?)?.toDouble();
   }
 
+  final List<Map<String, Object?>> activity = [];
   final List<Map<String, Object?>> turns = [];
 }
 
@@ -1869,6 +2093,7 @@ class _Projection {
           if (call != null) {
             call.$1.observation = _map(data['observation']);
             call.$2['output'] = _map(data['observation'])['output'];
+            call.$2['evidence'] = _map(data['observation'])['evidence'];
             call.$1.state = 'evaluating';
             final individual = call.$1.executionView(
               (call.$2['trial'] as int?) ?? 1,
@@ -1883,6 +2108,7 @@ class _Projection {
             trial: (data['trial'] as num?)?.toInt(),
           );
         case 'evaluation_completed':
+          _snapshot(_pass(data), _map(data['evaluation']));
           _score(
             (data['round'] as num?)?.toInt() ?? 0,
             _map(data['evaluation']),
@@ -1898,6 +2124,10 @@ class _Projection {
               selectedOverall = _overall(_map(record['evaluation']));
             }
             if (record['evaluation_reused'] == true) reused.add(index);
+            _snapshot(
+              index == 0 ? 'baseline:0' : 'candidate:$index',
+              _map(record['evaluation']),
+            );
             _score(index, _map(record['evaluation']));
           }
         case 'final_verification_completed':
@@ -2044,6 +2274,53 @@ class _Projection {
     return values.fold<double>(0, (sum, score) => sum + score) / values.length;
   }
 
+  List<Map<String, Object?>> pairwiseTrend(
+    List<Map<String, Object?>> checkpoints,
+  ) {
+    final rows = <int, Map<String, Object?>>{};
+    for (final pass in _views.keys) {
+      if (!pass.startsWith('candidate:')) continue;
+      final round = scopeRound(pass);
+      final scores = <String, Object?>{};
+      for (final split in ['training', 'validation']) {
+        final questions = suite.where(
+          (q) => q['split'] == split && (introduced[q['id']] ?? 0) <= round,
+        );
+        var losses = 0;
+        var pairs = 0;
+        var complete = questions.isNotEmpty;
+        for (final q in questions) {
+          final counts = rsiPairwiseCounts(_views[pass]?[q['id']]?.grade ?? {});
+          final n = counts.values.fold<int>(0, (a, b) => a + b);
+          complete = complete && n > 0;
+          losses += counts['losses']!;
+          pairs += n;
+        }
+        if (complete && pairs > 0) scores[split] = losses / pairs;
+      }
+      rows[round] = {'round': round, 'scores': scores};
+    }
+    for (final checkpoint in checkpoints) {
+      if (checkpoint['valid'] == false || checkpoint['round'] is! num) continue;
+      final round = (checkpoint['round'] as num).toInt();
+      final summary = _map(checkpoint['pairwise']);
+      final losses = summary['losses'];
+      final pairs = summary['pairs'];
+      if (summary['complete'] != false &&
+          losses is num &&
+          pairs is num &&
+          pairs > 0 &&
+          (summary['errors'] ?? 0) == 0) {
+        final row = rows.putIfAbsent(
+          round,
+          () => {'round': round, 'scores': <String, Object?>{}},
+        );
+        _map(row['scores'])['test'] = losses / pairs;
+      }
+    }
+    return rows.values.toList();
+  }
+
   void _score(int index, Map<String, Object?> evaluation) {
     final training = _rows(
       evaluation['cases'],
@@ -2156,7 +2433,6 @@ class _Projection {
   }
 
   void _snapshot(String pass, Map<String, Object?> evaluation) {
-    if (_passes.any((p) => p.startsWith('$pass:'))) return;
     for (final item in _rows(evaluation['cases'])) {
       _result(pass, item);
     }
@@ -2183,6 +2459,12 @@ class _Projection {
 
   _CaseView _case(String pass, String id, String input) =>
       (_views[pass] ??= {})[id] ??= _CaseView(id, input, '');
+  bool _comparisonPending(Map<String, Object?> grade) {
+    final details = _map(grade['scorer_details']);
+    return details['pairwise_pending'] == true ||
+        _map(details['pairwise'])['pending'] == true;
+  }
+
   void _result(String pass, Map<String, Object?> result, {int? trial}) {
     final test = _map(result['case']);
     if (test['id'] == null) return;
@@ -2197,6 +2479,14 @@ class _Projection {
     view.modelGrade = _map(result['model_grade']);
     view.observation = _map(result['observation']);
     view.trials = _rows(result['trials']);
+    if (trial == null &&
+        isRsiPairwiseGrade(view.grade) &&
+        !_comparisonPending(view.grade)) {
+      // Completed comparisons replace the capture-stage trial caches too.
+      view.trialGrades.clear();
+      view.trialResults.clear();
+      if (view.trials.isEmpty) _fillExecution(view.executionView(1), result);
+    }
     for (final (index, record) in view.trials.indexed) {
       _fillExecution(view.executionView(index + 1), record);
     }
@@ -2212,7 +2502,9 @@ class _Projection {
         .whereType<num>()
         .map((score) => score.toDouble())
         .toList();
-    if (view.trialScores.isEmpty && view.trialGrades.isNotEmpty) {
+    if (trial != null &&
+        view.trialScores.isEmpty &&
+        view.trialGrades.isNotEmpty) {
       view.trialScores = view.trialGrades.values
           .map((g) => g['score'])
           .whereType<num>()
@@ -2232,13 +2524,23 @@ class _Projection {
         view.turns.add({
           'input': turn['input'],
           'output': _map(turn['observation'])['output'],
+          'evidence': _map(turn['observation'])['evidence'],
         });
       }
     } else {
       view.turns.add({
         'input': view.input,
         'output': _map(result['observation'])['output'],
+        'evidence': _map(result['observation'])['evidence'],
       });
+    }
+    if (_comparisonPending(view.grade)) {
+      view.grade = {
+        'scorer_details': {
+          'pairwise': {'pending': true},
+        },
+      };
+      view.state = 'executed';
     }
   }
 
@@ -2256,12 +2558,25 @@ class _Projection {
                 {
                   'input': turn['input'],
                   'output': _map(turn['observation'])['output'],
+                  'evidence': _map(turn['observation'])['evidence'],
                 },
             ]
           : [
-              {'input': view.input, 'output': view.observation['output']},
+              {
+                'input': view.input,
+                'output': view.observation['output'],
+                'evidence': view.observation['evidence'],
+              },
             ],
     );
+    if (_comparisonPending(view.grade)) {
+      view.grade = {
+        'scorer_details': {
+          'pairwise': {'pending': true},
+        },
+      };
+      view.state = 'executed';
+    }
   }
 
   String? executedInput(String id) {

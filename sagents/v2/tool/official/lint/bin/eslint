@@ -1,0 +1,3 @@
+#!/bin/sh
+lint_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec node --openssl-config=/dev/null "$lint_root/node_modules/eslint/bin/eslint.js" --no-config-lookup --config "$lint_root/eslint.config.mjs" "$@"

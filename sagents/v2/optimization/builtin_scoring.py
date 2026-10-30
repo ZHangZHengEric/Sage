@@ -16,14 +16,14 @@ class BuiltinScoringUnavailable(ValueError):
 
 
 class BuiltinScoring(StrictModel):
-    mode: Literal["quality", "quality_cost", "quality_latency", "quality_tokens"] = "quality"
+    mode: Literal["quality", "quality_cost", "quality_latency", "quality_tokens", "pairwise"] = "quality"
     efficiency_weight: float = Field(default=0.2, gt=0, lt=1, allow_inf_nan=False)
     cost_reference: float = Field(default=1, gt=0, allow_inf_nan=False)
     latency_reference: float = Field(default=60, gt=0, allow_inf_nan=False)
     token_reference: float = Field(default=10000, gt=0, allow_inf_nan=False)
 
     def apply(self, result):
-        if self.mode == "quality":
+        if self.mode in {"quality", "pairwise"}:
             return result
         observation = result.observation
         metrics = {"quality": result.grade.score}
@@ -48,6 +48,12 @@ class BuiltinScoring(StrictModel):
         return result.model_copy(update={"objective_score": score, "score_metrics": metrics})
 
     def selection_policy(self):
+        if self.mode == "pairwise":
+            return {"builtin_scoring": self.model_dump(mode="json"),
+                "metric": "validation_mean_paired_preference_against_incumbent",
+                "instruction": "One same-case/same-repeat pair per trial. Both presentation orders; disagreement is a tie. "
+                    "Win=1, tie=0.5, loss=0. Cases have equal weight. Selection compares only the incumbent. These scores cannot be compared across different reference versions. Unassessed captured artifacts have no preference result; internal placeholders are not scores. "
+                    "These are relative preferences, not absolute quality or task-completion probabilities."}
         return {"builtin_scoring": self.model_dump(mode="json"),
             "metric": ("validation_mean" if self.mode == "quality" else
                 "Validation mean of quality * (1 - weight + weight / (1 + measured_resource / reference))"),

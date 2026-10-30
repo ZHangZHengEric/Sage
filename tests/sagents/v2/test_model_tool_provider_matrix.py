@@ -233,6 +233,9 @@ async def test_filtered_catalog_hides_and_rejects_tools_outside_resolved_run_set
         await catalog.get_tool("hidden", run_id="run_1")
     assert denied.value.info.code == "tool.not_enabled"
     assert denied.value.info.category == ErrorCategory.POLICY_DENIED
+    with pytest.raises(SageV2Error) as missing:
+        await catalog.get_tool("missing", run_id="run_1")
+    assert missing.value.info.code == "tool.not_found"
 
 
 @pytest.mark.asyncio
@@ -268,6 +271,9 @@ async def test_invocation_grant_catalog_enforces_goal_controls_for_list_and_look
         with pytest.raises(SageV2Error) as denied:
             await catalog.get_tool(control, run_id="run_1")
         assert denied.value.info.code == "tool.not_enabled"
+    with pytest.raises(SageV2Error) as missing:
+        await catalog.get_tool("missing", run_id="run_1")
+    assert missing.value.info.code == "tool.not_found"
 
 
 @pytest.mark.asyncio

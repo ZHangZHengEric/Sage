@@ -17,10 +17,51 @@ from contextvars import ContextVar
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.agent.management.service import BuilderFactory, PackageAuthorizer
 from sagents.v2.contracts.commands import InputItem, StartRun, RunConfig, ReplyInteraction
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import ContentBlock, TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.optimization.contracts import OptimizationObservation
+
+
+# Optional host-only activity sink; never included in evaluator/tuner feedback.
+OPTIMIZATION_ACTIVITY: ContextVar[object] = ContextVar("optimization_activity", default=None)
+
+
+async def wait_with_activity(stream):
+    """Drain visible item events while execution runs; never expose reasoning."""
+    import asyncio
+    from contextlib import suppress
+    sink = OPTIMIZATION_ACTIVITY.get()
+    if sink is None:
+        return await stream.wait()
+
+    async def observe():
+        tools = {}
+        async for event in stream.events:
+            if event.type != "item.completed":
+                continue
+            item = event.model_dump(mode="json").get("data", {}).get("item", {})
+            data = item.get("data", {})
+            kind = data.get("kind")
+            if kind == "message" and data.get("role") == "assistant":
+                text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("kind") == "text")
+                activity = {"role": "assistant", "text": text[:600]}
+            elif kind in {"tool_call", "tool_result"}:
+                if kind == "tool_call":
+                    tools[data.get("tool_call_id")] = data.get("tool_name")
+                activity = {"role": "tool", "text": str(data.get("tool_name") or tools.get(data.get("tool_call_id")) or "tool")[:120],
+                            "state": "started" if kind == "tool_call" else "failed" if data.get("error") else "completed"}
+            else:
+                continue
+            if activity["text"]:
+                sink(activity)
+    task = asyncio.create_task(observe())
+    try:
+        return await stream.wait()
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
 
 
 # Hosts may use this to pair simulator seeds across independently run packages.
@@ -73,7 +114,7 @@ class OptimizationRunner(Protocol):
         self,
         package: AgentPackageBundle,
         agent_id: str,
-        content: str,
+        content: str | tuple[ContentBlock, ...],
         context: RequestContext,
     ) -> OptimizationObservation: ...
 
@@ -156,8 +197,10 @@ class IsolatedOptimizationRunner:
                 await app.close()
                 raise
             try:
+                from sagents.v2.optimization.workspace_evidence import local_workspace
                 yield _NativeConversation(
-                    self, app, package, agent_id, context, started, root
+                    self, app, package, agent_id, context, started, root,
+                    execution_workspace=local_workspace(configuration),
                 )
             finally:
                 await app.close()
@@ -199,14 +242,14 @@ class IsolatedOptimizationRunner:
                             metadata=self.run_metadata(package) if self.run_metadata else {}
                         ),
                         session_id=session_id,
-                        input=(InputItem(role="user", content=(TextBlock(text=content),)),),
+                        input=(InputItem(role="user", content=(TextBlock(text=content),) if isinstance(content, str) else tuple(content)),),
                         resolved_spec_hash=loaded.composition_hash,
                         idempotency_key=f"optimization_{uuid4().hex}",
                     ),
                     context,
                     agent=loaded,
                 )
-                snapshot = await stream.wait()
+                snapshot = await wait_with_activity(stream)
             result = (
                 await agent.runtime.session_store.get_run_result(snapshot.run_id)
                 if snapshot.state
@@ -346,15 +389,16 @@ class IsolatedOptimizationRunner:
 
 
 class _NativeConversation:
-    def __init__(self, runner, app, package, agent_id, context, started, workspace=None):
+    def __init__(self, runner, app, package, agent_id, context, started, workspace=None, *, execution_workspace=None):
         self.workspace = workspace
+        self.execution_workspace = execution_workspace
         self.runner, self.app, self.package = runner, app, package
         self.agent_id, self.context = agent_id, context
         self.session_id = None
         self.started = started
         self.pending_input = None
 
-    async def send(self, content: str) -> OptimizationObservation:
+    async def send(self, content: str | tuple[ContentBlock, ...]) -> OptimizationObservation:
         if self.session_id is not None:
             await self.runner.authorize(
                 "optimize_run", self.package.model_copy(deep=True), self.context
@@ -369,6 +413,9 @@ class _NativeConversation:
             self.package.model_copy(deep=True),
             resume_observation=self.pending_input,
         )
+        if self.execution_workspace is not None:
+            from sagents.v2.optimization.workspace_evidence import attest_files
+            observed = observed.model_copy(update={'evidence':attest_files(observed, self.execution_workspace)})
         self.pending_input = observed if observed.evidence.get('awaiting_user_input') else None
         self.session_id = observed.evidence["session_id"]
         self.started = time.monotonic()

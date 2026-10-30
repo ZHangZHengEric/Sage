@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.v2.desktop.backend.rsi import RsiStart, RsiApply, RsiResumeOptions
+from app.v2.desktop.backend.rsi_save import RsiSaveAs, save_rsi_version_as_agent
 from sagents.v2.optimization.dataset import validate_imported_dataset
 from sagents.v2.optimization.dataset_versions import DatasetRevisionRequest
 from app.v2.desktop.backend.rsi_evaluation import EvaluationPlan, ScorerImport
@@ -473,6 +474,9 @@ def create_app(
 
     @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/resume")
     async def rsi_resume(agent_id: str, run_id: str, request: Request, options: RsiResumeOptions | None = None):
+        if options and options.upgrade_evaluation_validation:
+            return _success(await _safe(runtime_service.resume_rsi(agent_id, run_id,
+                get_desktop_user_id(request), upgrade_evaluation_validation=True)))
         if options and options.upgrade_call_isolation:
             return _success(await _safe(runtime_service.resume_rsi(agent_id, run_id,
                 get_desktop_user_id(request), upgrade_call_isolation=True)))
@@ -493,6 +497,12 @@ def create_app(
     @app.post("/api/v2/agents/{agent_id}/rsi/versions/{version_id}/apply")
     async def rsi_apply(agent_id: str, version_id: str, value: RsiApply, request: Request):
         return _success(await _safe(runtime_service.apply_rsi_version(agent_id, version_id, value, get_desktop_user_id(request))))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/versions/{version_id}/save-as-agent")
+    async def rsi_save_as_agent(agent_id: str, version_id: str, value: RsiSaveAs, request: Request):
+        return _success(await _safe(save_rsi_version_as_agent(
+            runtime_service, agent_id, version_id, value, get_desktop_user_id(request)
+        )))
 
     @app.get("/api/v2/agents/{agent_id}/skills")
     async def list_skills(agent_id: str, request: Request):

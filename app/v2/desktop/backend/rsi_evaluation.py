@@ -46,9 +46,21 @@ class ScorerImport(StrictModel):
             tree = ast.parse(self.source)
         except SyntaxError as exc:
             raise ValueError('scorer must be valid Python source') from exc
-        if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'score' for node in tree.body):
-            raise ValueError('scorer must export score(request)')
+        functions = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        if not self.is_unified() and 'score' not in functions and not {'prepare', 'compare'} <= functions:
+            raise ValueError('scorer must declare EVALUATION_CAPABILITIES, export score(request), or comparison prepare(request) and compare(request)')
         return self
+
+
+    def is_unified(self):
+        tree = ast.parse(self.source)
+        return any(isinstance(node, ast.Assign) and any(isinstance(t, ast.Name)
+            and t.id == 'EVALUATION_CAPABILITIES' for t in node.targets) for node in tree.body)
+
+    def is_comparison(self):
+        tree = ast.parse(self.source)
+        functions = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        return 'score' not in functions and {'prepare', 'compare'} <= functions
 
 
 class EvaluationPlan(StrictModel):

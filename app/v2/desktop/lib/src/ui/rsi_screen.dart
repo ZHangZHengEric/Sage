@@ -12,7 +12,9 @@ import 'rsi_dataset_revision.dart';
 import 'rsi_dataset_details.dart';
 import 'rsi_activity.dart';
 import 'rsi_diff.dart';
+import 'rsi_pairwise_summary.dart';
 import 'rsi_scorer_guide.dart';
+import 'rsi_save_agent_dialog.dart';
 import '../state/workspace_controller.dart';
 import '../services/scorer_import.dart';
 
@@ -43,18 +45,18 @@ class RsiScreen extends StatefulWidget {
 class _RsiScreenState extends State<RsiScreen> {
   final _goal = TextEditingController();
   final _userSimulatorInstructions = TextEditingController();
-  final _rounds = TextEditingController(text: '8');
+  final _rounds = TextEditingController(text: '5');
   final _initialTrainingCount = TextEditingController(text: '6');
   final _trainingIncrement = TextEditingController(text: '6');
   final _systemPromptLimit = TextEditingController(text: '64000');
   final _skillLengthLimit = TextEditingController(text: '32000');
-  final _skillCountLimit = TextEditingController(text: '16');
+  final _skillCountLimit = TextEditingController(text: '5');
   final _editRepairLimit = TextEditingController(text: '3');
   final _testCount = TextEditingController(text: '24');
   final _humanTestCount = TextEditingController(text: '12');
-  final _concurrency = TextEditingController(text: '3');
-  final _evaluationRepeats = TextEditingController(text: '1');
-  final _humanTestRepeats = TextEditingController(text: '1');
+  final _concurrency = TextEditingController(text: '8');
+  final _evaluationRepeats = TextEditingController(text: '2');
+  final _humanTestRepeats = TextEditingController(text: '2');
   final _cases = TextEditingController();
   final _parts = <String>{'instructions', 'skills'};
   Map<String, Object?> _history = {};
@@ -73,6 +75,7 @@ class _RsiScreenState extends State<RsiScreen> {
   String _builtinScoring = 'quality';
 
   String builtinScorerName(String mode) => switch (mode) {
+    'pairwise' => t('配对比较', 'Pairwise comparison'),
     'quality_cost' => t('质量与成本', 'Quality & cost'),
     'quality_latency' => t('质量与耗时', 'Quality & time'),
     'quality_tokens' => t('质量与 Token 用量', 'Quality & tokens'),
@@ -517,6 +520,7 @@ class _RsiScreenState extends State<RsiScreen> {
         'request_id': _requestId,
         'scorer_id': ?_scorerId,
         'builtin_scoring': {'mode': _builtinScoring},
+        if (_builtinScoring == 'pairwise') 'evaluation_aggregation': 'mean',
         if (_datasetVersion != null)
           'dataset_version_id': _datasetVersion!['id']
         else
@@ -567,6 +571,34 @@ class _RsiScreenState extends State<RsiScreen> {
       }
     }
   }
+
+  Future<void> _saveVersionAsAgent() => _mutate(() async {
+    final version = _version;
+    if (version == null) return;
+    final savedName = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => RsiSaveAgentDialog(
+        initialName:
+            '${version['name'] ?? widget.agentName} · ${versionLabel(version)}',
+        chinese: context.l10n.locale.languageCode == 'zh',
+        settings: glass,
+        onSave: (name, requestId) async {
+          await widget.controller.saveRsiVersionAsAgent(
+            widget.agentId,
+            version['id'].toString(),
+            name,
+            requestId,
+          );
+        },
+      ),
+    );
+    if (mounted && savedName != null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text(t('已保存为 $savedName', 'Saved as $savedName'))),
+      );
+    }
+  });
 
   Future<void> _versionDiff() => _mutate(() async {
     final version = _version;
@@ -948,10 +980,51 @@ class _RsiScreenState extends State<RsiScreen> {
     _configurationChanged();
     setState(() {
       _scorerId = plan?['id']?.toString();
-      _builtinScoring = 'quality';
+      _builtinScoring =
+          map(plan?['validation'])['protocol'] == 'sage.rsi.comparison/v1'
+          ? 'pairwise'
+          : 'quality';
       _requestId = null;
     });
   }
+
+  Future<void> chooseEvaluationMode() => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: GlassCard(
+          settings: glass,
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final mode in ['quality', 'pairwise'])
+                ListTile(
+                  key: ValueKey('rsi-evaluation-mode-$mode'),
+                  title: Text(mode == 'pairwise'
+                      ? t('配对比较', 'Pairwise comparison')
+                      : t('绝对评分', 'Absolute scoring')),
+                  selected: (_builtinScoring == 'pairwise') == (mode == 'pairwise'),
+                  onTap: () {
+                    _configurationChanged();
+                    setState(() {
+                      if ((_builtinScoring == 'pairwise') != (mode == 'pairwise')) {
+                        _scorerId = null;
+                        _builtinScoring = mode;
+                        _requestId = null;
+                      }
+                    });
+                    Navigator.pop(dialogContext);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   String scorerLabel(Map<String, Object?> plan) {
     final name = plan['name']?.toString() ?? plan['id'].toString();
@@ -1019,14 +1092,12 @@ class _RsiScreenState extends State<RsiScreen> {
     );
     if (file == null) return;
     final python = await scorerPythonExecutable(file.path);
-    final module = await widget.controller.importRsiUserSimulator(
-      widget.agentId,
-      {
-        'name': file.name,
-        'source': await file.readAsString(),
-        'python_executable': ?python,
-      },
-    );
+    final module = await widget.controller
+        .importRsiUserSimulator(widget.agentId, {
+          'name': file.name,
+          'source': await file.readAsString(),
+          'python_executable': ?python,
+        });
     if (mounted) selectUserSimulator(module);
   });
 
@@ -1111,6 +1182,7 @@ class _RsiScreenState extends State<RsiScreen> {
                 },
               ),
               for (final mode in [
+                'pairwise',
                 'quality_cost',
                 'quality_latency',
                 'quality_tokens',
@@ -1293,6 +1365,14 @@ class _RsiScreenState extends State<RsiScreen> {
         .join(' · ');
     final fields = [
       field(
+        t('评价模式', 'Evaluation mode'),
+        Text(
+          map(snapshot['builtin_scoring'])['mode'] == 'pairwise'
+              ? t('配对比较', 'Pairwise comparison')
+              : t('绝对评分', 'Absolute scoring'),
+        ),
+      ),
+      field(
         t('评分器', 'Scorer'),
         Wrap(
           spacing: 12,
@@ -1384,6 +1464,20 @@ class _RsiScreenState extends State<RsiScreen> {
         _model ??
         t('目标 Agent 模型', 'Target agent model');
     final fields = [
+      field(
+        t('评价模式', 'Evaluation mode'),
+        GlassPicker(
+          key: const ValueKey('rsi-evaluation-mode-picker'),
+          value: _builtinScoring == 'pairwise'
+              ? t('配对比较', 'Pairwise comparison')
+              : t('绝对评分', 'Absolute scoring'),
+          width: 260,
+          height: 34,
+          settings: glass,
+          textStyle: Theme.of(context).textTheme.bodyMedium,
+          onTap: enabled ? chooseEvaluationMode : null,
+        ),
+      ),
       field(
         t('评分器', 'Scorer'),
         Wrap(
@@ -2576,6 +2670,13 @@ class _RsiScreenState extends State<RsiScreen> {
       final cohort = samples
           .where((c) => map(c['case'])['split'] == split)
           .toList();
+      if (cohort.any((c) {
+        final details = map(map(c['grade'])['scorer_details']);
+        return details['pairwise_pending'] == true ||
+            map(details['pairwise'])['pending'] == true;
+      })) {
+        return '—';
+      }
       final scores = cohort
           .map((c) => map(c['grade'])['score'])
           .whereType<num>()
@@ -2645,6 +2746,18 @@ class _RsiScreenState extends State<RsiScreen> {
               key: const ValueKey('rsi-export-version'),
               width: 136,
             ),
+            action(
+              t('另存为新 Agent', 'Save as new Agent'),
+              CupertinoIcons.person_badge_plus,
+              !_mutating &&
+                      (version['source'] != 'rsi' ||
+                          version['ready'] == true) &&
+                      map(version['review'])['approved'] != false
+                  ? _saveVersionAsAgent
+                  : null,
+              key: const ValueKey('rsi-save-as-agent'),
+              width: 180,
+            ),
             if (version['source'] == 'rsi' &&
                 ((version['iteration'] as num?)?.toInt() ?? 0) > 0)
               action(
@@ -2665,6 +2778,22 @@ class _RsiScreenState extends State<RsiScreen> {
               (t('验证集', 'Validation'), mean('validation')),
               (t('测试集', 'Test'), mean('test')),
             ]),
+          ),
+        if (map(
+              map(map(version['record'])['comparison'])['splits'],
+            )['validation']
+            is Map)
+          versionSection(
+            t('候选与当时最佳版本', 'Candidate vs incumbent'),
+            RsiPairwiseSummary(
+              summary: map(
+                map(
+                  map(map(version['record'])['comparison'])['splits'],
+                )['validation'],
+              ),
+              settings: glass,
+              chinese: context.l10n.locale.languageCode == 'zh',
+            ),
           ),
         savedConfiguration(version),
         versionSection(

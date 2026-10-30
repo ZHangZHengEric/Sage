@@ -280,6 +280,7 @@ class OptimizationCaseResult(OptimizationCaseTrial):
 
 
 class OptimizationEvaluation(StrictModel):
+    comparison_reference_hash: str | None = None
     package_hash: str
     cases: tuple[OptimizationCaseResult, ...]
 
@@ -356,6 +357,7 @@ class OptimizationRegression(StrictModel):
 
 
 class OptimizationRound(StrictModel):
+    comparison: dict[str, Any] = Field(default_factory=dict)
     round: int
     parent_hash: str
     candidate_package: AgentPackageBundle | None = None
@@ -448,7 +450,7 @@ class OptimizationReport(StrictModel):
     selected: OptimizationEvaluation
     rounds: tuple[OptimizationRound, ...]
     agent_calls: tuple[OptimizationAgentCall, ...]
-    improved: bool
+    improved: bool | None
     generated_tool_audit_required: bool = False
     goal_verified: bool | None = None
     recommendation_block_reason: str | None = None

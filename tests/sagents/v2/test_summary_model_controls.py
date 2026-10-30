@@ -134,6 +134,12 @@ def test_summary_overrides_high_reasoning_without_changing_primary_requests(prot
 @pytest.mark.parametrize(
     "strategy,expected",
     [
+        ({}, ("reasoning_effort_none", None)),
+        (
+            {"reasoning_behavior":"always", "reasoning_disable_strategy":"omit",
+             "supported_reasoning_efforts":[]},
+            ("omit", None),
+        ),
         (
             {"reasoning_disable_strategy": "thinking_type_disabled"},
             ("thinking_type_disabled", None),

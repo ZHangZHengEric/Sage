@@ -21,10 +21,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from .rsi_evaluation import EvaluationPlan, ScorerImport, ScorerSelection, McpExecutionScorer, scorer_binding
 from .rsi_call_recovery import failed_call
 from .rsi_ownership import process_identity, process_alive, legacy_sidecar_alive
+from .rsi_lint import RsiLintEnvironment, lint_binding, resolve_lint_environment
 
 from sagents.v2.optimization.dataset import OptimizationDataset, validate_imported_dataset
 from sagents.v2.optimization.dataset_summary import summarize_dataset
@@ -105,9 +106,12 @@ def rsi_journal(root, value, *, existing=False):
     return path
 
 
+
+
 class RsiStart(StrictModel):
+    lint_environment: RsiLintEnvironment | None = None
     goal: str = Field(min_length=1, max_length=16000)
-    rounds: int = Field(default=8, ge=1, le=100)
+    rounds: int = Field(default=5, ge=1, le=100)
     call_timeout_seconds: int = Field(default=240, ge=30, le=7200)
     optimization_scope: tuple[OptimizationPart, ...] = ("instructions", "skills")
     model_provider_id: str | None = None
@@ -124,14 +128,14 @@ class RsiStart(StrictModel):
     preflight_policy: SuitePreflightPolicy = Field(default_factory=SuitePreflightPolicy)
     human_test_count: int = Field(default=0, ge=0, le=100)
     human_test_suite: OptimizationTestSuite | None = None
-    evaluation_repeats: int = Field(default=1, ge=1, le=10)
-    human_test_repeats: int = Field(default=1, ge=1, le=10)
+    evaluation_repeats: int = Field(default=2, ge=1, le=10)
+    human_test_repeats: int = Field(default=2, ge=1, le=10)
     evaluation_aggregation: Literal["minimum", "mean"] = "minimum"
     initial_training_case_count: int = Field(default=6, ge=1, le=100)
     training_cases_per_round: int = Field(default=6, ge=0, le=100)
     max_system_prompt_chars: int = Field(default=64000, ge=1, le=1000000)
     max_skill_chars: int = Field(default=32000, ge=1, le=1000000)
-    max_skill_count: int = Field(default=16, ge=0, le=256)
+    max_skill_count: int = Field(default=5, ge=0, le=256)
     max_edit_repairs: int = Field(default=3, ge=0, le=10)
     grow_training: bool = True
     refresh_incumbent: bool = False
@@ -141,11 +145,35 @@ class RsiStart(StrictModel):
         le=100,
         validation_alias=AliasChoices("validation_case_count", "test_case_count"),
     )
-    max_concurrency: int = Field(default=3, ge=1, le=16)
+    max_concurrency: int = Field(default=8, ge=1, le=16)
     stopping_policy: OptimizationStoppingPolicy = Field(
         default_factory=OptimizationStoppingPolicy
     )
     request_id: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="before")
+    @classmethod
+    def pairwise_mean(cls, value):
+        if isinstance(value, dict):
+            scoring = value.get("builtin_scoring", {})
+            mode = scoring.get("mode") if isinstance(scoring, dict) else getattr(scoring, "mode", None)
+            if mode == "pairwise":
+                return {**value, "evaluation_aggregation": "mean"}
+        return value
+
+    @model_validator(mode="after")
+    def validate_pairwise(self):
+        if self.builtin_scoring.mode == "pairwise":
+            if self.scorer and self.scorer.mode == "mcp":
+                raise ValueError("comparison plugins currently use the Python import protocol")
+            cases = (*self.suite.cases,) if self.suite else ()
+            if self.dataset:
+                cases += tuple(self.dataset.cases)
+            if self.human_test_suite:
+                cases += self.human_test_suite.cases
+            if any(c.mode != "single_turn" for c in cases):
+                raise ValueError("pairwise evaluation currently requires single-turn cases")
+        return self
 
     @field_validator('user_simulator_instructions')
     @classmethod
@@ -168,6 +196,9 @@ def rsi_timeout_seconds(request: RsiStart) -> int:
     test_count = len(request.human_test_suite.cases) if request.human_test_suite else request.human_test_count
     test_batches = (test_count + request.max_concurrency - 1) // request.max_concurrency
     test_budget = (request.rounds + 1) * test_batches * (2 * request.call_timeout_seconds) * request.human_test_repeats
+    if request.builtin_scoring.mode == "pairwise":
+        test_budget *= 2
+        batches *= 2
     # Target + evaluator can each consume the configured per-call budget.
     # Include the growing training set and stability passes; retain a bounded deadline.
     return min(
@@ -192,6 +223,7 @@ def builtin_scoring_failure_code(error: BaseException) -> str | None:
 
 class RsiResumeOptions(StrictModel):
     upgrade_call_isolation: bool = False
+    upgrade_evaluation_validation: bool = False
 
 
 class RsiApply(StrictModel):
@@ -509,12 +541,22 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(scorer.source)
         descriptor = ScorerDescriptor(id=identity, name=scorer.name, version=source_hash)
-        checker = PythonExecutionScorer(path=path, source_hash=source_hash, descriptor=descriptor, timeout=10,
+        from sagents.v2.optimization.comparison_plugin import PythonComparisonPlugin
+        from sagents.v2.optimization.evaluation_plugin import PythonEvaluationPlugin
+        checker_type = PythonEvaluationPlugin if scorer.is_unified() else PythonComparisonPlugin if scorer.is_comparison() else PythonExecutionScorer
+        checker = checker_type(path=path, source_hash=source_hash, descriptor=descriptor, timeout=10,
             python_executable=scorer.python_executable)
         try:
             validation = await checker.validate()
         except (TimeoutError, RuntimeError, ValueError) as exc:
             raise ValueError(f"scorer validation failed: {str(exc) or '10-second validation timeout'}") from exc
+        from sagents.v2.optimization.scorer_snapshot import freeze_worker_sources
+        worker_source_root = freeze_worker_sources(
+            self.runtime_root / "rsi-worker-sources", source_root=Path(__file__).resolve().parents[4],
+            dependency_manifest=checker.dependency_manifest)
+        checker = checker_type(path=path, source_hash=source_hash, descriptor=descriptor, timeout=30,
+            python_executable=scorer.python_executable, worker_source_root=worker_source_root)
+        validation = await checker.validate()
         dependencies = checker.dependency_manifest
         binding = dependency_binding(source_hash, dependencies)
         identity = "rsi_scorer_" + configuration_fingerprint([user_id, agent_id, binding, scorer.name])[:24]
@@ -526,6 +568,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             value = {"validation": validation, "id": identity, "name": scorer.name, "source_hash": source_hash,
                      "python_executable": checker.python_executable,
                      "dependency_manifest": dependencies, "binding_hash": binding,
+                     "worker_source_root": str(worker_source_root),
                      "created_at": utc_now().isoformat(), "path": str(path), "descriptor": descriptor.model_dump(mode="json")}
             self.rsi_store.put(value, user_id, agent_id, "scorer")
         # Identical content reuses the immutable version and original date/order.
@@ -549,9 +592,14 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
     async def _rsi_scorer_selection(self, request, user_id, agent_id):
         selection = request.scorer
         if selection is None or selection.mode == "eval_agent":
+            if request.builtin_scoring.mode == "pairwise":
+                raise ValueError("pairwise evaluation requires an imported comparison plugin")
             return None
         if selection.mode == "python":
             stored = self.rsi_store.get(selection.module_id, user_id, agent_id, "scorer")
+            comparison_plugin = stored.get("validation", {}).get("protocol") == "sage.rsi.comparison/v1"
+            if comparison_plugin != (request.builtin_scoring.mode == "pairwise"):
+                raise ValueError("comparison plugins require pairwise mode; absolute scorers require absolute evaluation")
             if stored.get("validation", {}).get("status") != "passed":
                 raise ValueError("scorer has not passed validation")
             digest = hashlib.sha256(Path(stored["path"]).read_bytes()).hexdigest()
@@ -843,6 +891,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             stored = self.rsi_store.get(request.scorer_id, user_id, agent_id, "scorer")
             request = request.model_copy(update={"scorer": ScorerSelection(mode="python",
                 module_id=stored["id"], descriptor=stored["descriptor"])})
+        request = RsiStart.model_validate(request.model_dump(mode="json"))
         user_module = self._rsi_user_simulator_selection(request, user_id, agent_id)
         if user_module is not None:
             request = request.model_copy(update={"user_simulator_binding_id": user_module["binding_hash"]})
@@ -857,6 +906,8 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             raise ValueError("Goal and distinct optimization parts are required")
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
+            request = request.model_copy(update={'lint_environment': resolve_lint_environment(
+                request.lint_environment, agent.config.get('availableTools') or ())})
             runs = self.rsi_store.summaries(user_id, agent_id, "run")
             existing = next(
                 (r for r in runs if r["request_id"] == request.request_id), None
@@ -896,6 +947,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 if internal_provider is None or not internal_provider.api_key:
                     raise ValueError("RSI model is not configured")
             await self._record_agent_version(agent, package=package)
+            lint_fingerprint = request.lint_environment.fingerprint() if request.lint_environment else None
             run_id = new_id("rsi")
             value = {
                 "id": run_id,
@@ -908,6 +960,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 "scorer_id": request.scorer_id,
                 "builtin_scoring": request.builtin_scoring.model_dump(mode="json"),
                 "environment_fingerprint": environment.fingerprint if environment else None,
+                "lint_environment_fingerprint": lint_fingerprint,
                 "dataset_version_id": request.dataset_version_id,
                 "dataset_manifest": dataset_manifest,
                 "preflight_policy": request.preflight_policy.model_dump(mode="json"),
@@ -971,7 +1024,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
         return McpCaseEnvironment(tuple(self._mcp_config(records[name]) for name in binding.mcp_servers),
             terminal_on_done=binding.terminal_on_done)
 
-    async def resume_rsi(self, agent_id, run_id, user_id, *, upgrade_call_isolation=False):
+    async def resume_rsi(self, agent_id, run_id, user_id, *, upgrade_call_isolation=False, upgrade_evaluation_validation=False):
         self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
@@ -986,7 +1039,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 raise ValueError("This Agent already has an active RSI run")
             upgrade = None
             if value.get("recovery_engine_id") != engine_fingerprint():
-                if not upgrade_call_isolation:
+                if not (upgrade_call_isolation or upgrade_evaluation_validation):
                     raise ValueError("RSI engine changed since this experiment; use the original engine to resume")
                 upgrade = {"state": "requested", "from_engine": value.get("recovery_engine_id"),
                            "to_engine": engine_fingerprint()}
@@ -1017,7 +1070,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 baseline_version = self.rsi_store.get(f"{run_id}.0", user_id, agent_id, "version")
                 if frozen["assets"] != baseline_version.get("assets", {}):
                     raise ValueError("Frozen Agent assets changed since this experiment")
-                value["call_isolation_upgrade"] = upgrade
+                value["evaluation_validation_upgrade" if upgrade_evaluation_validation else "call_isolation_upgrade"] = upgrade
             value.update(status="queued", stage="resuming", recovery_journal_name=source.name if source else None, journal_name=f"audit-resume-{new_id('part')}.jsonl",
                          resumed_at=utc_now().isoformat(), resume_count=value.get("resume_count", 0) + 1)
             value.pop("finished_at", None)
@@ -1243,6 +1296,9 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             environment = await self._rsi_case_environment(request, user)
             if (environment.fingerprint if environment else None) != value.get('environment_fingerprint'):
                 raise ValueError('RSI case environment changed since experiment admission')
+            current_lint = request.lint_environment.fingerprint() if request.lint_environment else None
+            if current_lint != value.get('lint_environment_fingerprint'):
+                raise ValueError('Lint environment changed since experiment admission')
             environment_definitions = await environment.definitions() if environment else ()
             environment_tools = {d.name for d in environment_definitions}
             definitions = (*definitions, *environment_definitions)
@@ -1440,11 +1496,15 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                     plugin="sage.session.filesystem",
                     config={"root": str(workspace / "sessions")},
                 )
+                lint_config, lint_process = lint_binding(request.lint_environment,
+                    target=bundle.manifest.metadata.id == package.manifest.metadata.id,
+                    tools=bundle.manifest.agents[identity].tools)
                 choices["execution.binding"] = CapabilitySelection(
                     plugin="sage.execution.binding.local-workspace",
                     config={
                         "workspace": str(evaluation_workspace if evaluation_workspace is not None else tuner_workspace if tuner_workspace is not None else workspace / "work"),
-                        "policy": {"process": {"enabled": False},
+                        **lint_config,
+                        "policy": {"process": lint_process,
                                    **({"filesystem": {"allowed_operations": ["read", "list", "write", "create"], "protected_paths": ["inputs", "control.json"]}} if evaluation_workspace is not None else {}),
                                    **({"filesystem": {"allowed_operations": ["read", "list", "write", "create"], "protected_paths": ["evidence"]}} if editor_workspace else {})},
                     },
@@ -1506,6 +1566,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                     builder_factory=factory,
                     authorize=authorize,
                     root=root,
+                    max_evidence_bytes=16 * 1024 * 1024,
                     run_metadata=lambda bundle: (
                         json.loads(package.files["desktop/context.json"])
                         if bundle.manifest.metadata.id == package.manifest.metadata.id
@@ -1551,10 +1612,15 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                     audit=audit_scorer_model, redact=(internal_provider.api_key,))
                 await scorer_gateway.start()
                 value["scorer_model_transport"] = "sage-model-provider"
-                scorer = PythonExecutionScorer(path=stored["path"], source_hash=stored["source_hash"],
+                from sagents.v2.optimization.comparison_plugin import PythonComparisonPlugin
+                from sagents.v2.optimization.evaluation_plugin import PythonEvaluationPlugin
+                unified = stored.get("validation", {}).get("capabilities")
+                scorer_type = PythonEvaluationPlugin if unified else PythonComparisonPlugin if request.builtin_scoring.mode == "pairwise" else PythonExecutionScorer
+                scorer = scorer_type(**({"capabilities": unified} if unified else {}), path=stored["path"], source_hash=stored["source_hash"],
                     descriptor=selection.descriptor, model_api_factory=scorer_gateway.bind,
                     python_executable=stored.get("python_executable"),
-                    dependency_manifest=stored.get("dependency_manifest"))
+                    dependency_manifest=stored.get("dependency_manifest"),
+                    worker_source_root=stored.get("worker_source_root"))
             elif request.scorer is not None and request.scorer.mode == "mcp":
                 selection = await self._rsi_scorer_selection(request, user, identity)
                 scorer = McpExecutionScorer(selection, await self._mcp_plugin(user), context, value["id"])
@@ -1589,6 +1655,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 test_root = root / "human-test"
                 test_runner = IsolatedOptimizationRunner(
                     builder_factory=factory, authorize=authorize, root=test_root,
+                    max_evidence_bytes=16 * 1024 * 1024,
                     run_metadata=optimizer.runner.run_metadata,
                 )
                 test_runner = SharedCallLimitRunner(test_runner, shared_calls)
@@ -1641,7 +1708,9 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                             checkpoint_binding_id=value['request_hash'] + ':' + value['recovery_binding_id'],
                             retry_local_evaluations=True, restart_incomplete_dialogues=True,
                             context=context, goal=request.goal, timeout=request.call_timeout_seconds,
-                            scorer=scorer,
+                            scorer=None if request.builtin_scoring.mode == "pairwise" else scorer,
+                            comparison_plugin=scorer if request.builtin_scoring.mode == "pairwise" else None,
+                            pairwise_baseline=package if request.builtin_scoring.mode == "pairwise" else None,
                             user_simulator=optimizer.user_simulator,
                             call_retries=3,
                             require_clean_generated_tools=constraints.require_clean_generated_tools,
@@ -1662,7 +1731,8 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                     stopping_policy=request.stopping_policy,
                     require_diverse_suite=request.suite is None,
                     constraints=constraints,
-                    scorer=scorer,
+                    scorer=None if request.builtin_scoring.mode == "pairwise" else scorer,
+                    comparison_plugin=scorer if request.builtin_scoring.mode == "pairwise" else None,
                     optimization_scope=request.optimization_scope,
                     builtin_scoring=request.builtin_scoring,
                     suite=request.suite,
@@ -1680,6 +1750,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                     max_concurrency=request.max_concurrency,
                     call_timeout_seconds=request.call_timeout_seconds,
                     call_retries=3,
+                    allow_evaluation_validation_upgrade=value.get("evaluation_validation_upgrade", {}).get("state") == "requested",
                     allow_call_isolation_upgrade=value.get("call_isolation_upgrade", {}).get("state") == "requested",
                     timeout_seconds=rsi_timeout_seconds(request),
                     journal_path=rsi_journal(root, value),
@@ -1760,7 +1831,8 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 stage="result_completed",
                 resumable=False,
                 recommended_hash=(result.candidate_package.content_hash
-                                  if result.report.goal_verified else None),
+                                  if result.report.goal_verified or (
+                                      request.builtin_scoring.mode == "pairwise" and result.candidate_package.content_hash != package.content_hash) else None),
                 retained_hash=result.candidate_package.content_hash,
                 termination=result.report.termination.model_dump(mode="json"),
                 goal_verified=result.report.goal_verified,
@@ -1776,7 +1848,9 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
         except Exception as error:
             if value.get("call_isolation_upgrade", {}).get("state") == "requested":
                 value["call_isolation_upgrade"]["state"] = "rejected"
-            # Provider errors can contain secrets. Persist only the exception type.
+            from sagents.v2.optimization.call_isolation import safe_failure_details
+            value["failures"] = safe_failure_details(error)
+            # Provider messages can contain secrets; retain only safe identities.
             if (code := builtin_scoring_failure_code(error)) is not None:
                 value["error_code"] = code
             if human_only:

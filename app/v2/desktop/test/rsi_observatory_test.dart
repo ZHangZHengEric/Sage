@@ -52,6 +52,89 @@ Map<String, Object?> result(int i) => {
 
 void main() {
   testWidgets(
+    'native execution tools survive completed events and open in the dialogue',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: RsiObservatory(
+                run: {'status': 'completed'},
+                events: [
+                  event('suite_fixed', {
+                    'suite': {
+                      'cases': [testCase(0)],
+                    },
+                  }),
+                  event('case_completed', {
+                    'round': 0,
+                    'phase': 'baseline',
+                    'result': {
+                      ...result(0),
+                      'observation': {
+                        'output': 'Checking. Finished.',
+                        'evidence': {
+                          'execution_transcript': [
+                            {
+                              'id': 'run:1',
+                              'kind': 'message',
+                              'role': 'assistant',
+                              'text': 'Checking.',
+                            },
+                            {
+                              'id': 'run:2',
+                              'kind': 'tool_call',
+                              'role': 'tool',
+                              'tool_name': 'file_read',
+                              'call_id': 'run:call',
+                              'text': 'index.html',
+                            },
+                            {
+                              'id': 'run:3',
+                              'kind': 'tool_result',
+                              'role': 'tool',
+                              'call_id': 'run:call',
+                              'text': 'File contents',
+                              'state': 'completed',
+                            },
+                            {
+                              'id': 'run:4',
+                              'kind': 'message',
+                              'role': 'assistant',
+                              'text': 'Finished.',
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  }),
+                ],
+                settings: const LiquidGlassSettings(),
+                chinese: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Checking.'), findsOneWidget);
+      expect(find.text('Finished.'), findsOneWidget);
+      expect(find.text('Checking. Finished.'), findsNothing);
+      final tool = find.widgetWithText(ExpansionTile, '完成');
+      await tester.ensureVisible(tool);
+      await tester.tap(tool);
+      await tester.pumpAndSettle();
+      expect(find.text('index.html'), findsOneWidget);
+      expect(find.text('File contents'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'discovery subset score cannot replace the complete retained overall score',
     (tester) async {
       tester.view.physicalSize = const Size(1600, 1200);

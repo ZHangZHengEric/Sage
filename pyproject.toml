@@ -30,6 +30,8 @@ dependencies = [
   "mcp==1.28.1",
   "anyio>=4.0.0",
   "Pillow>=10.0.0",
+  "html5lib>=1.1,<2",
+  "tinycss2>=1.4,<2",
   "psutil>=5.9.0",
   "python-dotenv>=1.0.0",
   "loguru>=0.7.0",
@@ -119,6 +121,7 @@ exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "
 "share/sage/docs/zh" = ["docs/zh/*.md"]
 
 [tool.setuptools.package-data]
+"sagents.v2.tool.official" = ["lint/*.json", "lint/*.mjs", "lint/bin/*", "lint/*.md"]
 "evaluation_datasets" = ["**/*.json", "**/*.md", "**/*.txt", "**/*.py", "**/*.toml", "**/LICENSE", "**/ACKNOWLEDGEMENTS", "**/*.jar", "**/*.zip", "**/*.tw-pddl", "**/*.jsonl", "**/*.yaml", "**/*.pddl", "**/*.twl2", "**/*.tsv", "**/*.scala", "**/*.sbt", "**/*.npy", "**/*.c", "**/*.h", "**/*.l", "**/*.y", "**/*.sh", "**/*.pdf", "**/makefile", "**/Dockerfile", "**/alfworld-download"]
 "app.v1" = ["requirements*.txt"]
 "app.clients.terminal" = [

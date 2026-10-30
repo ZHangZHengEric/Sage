@@ -1,0 +1,104 @@
+{
+  "manifest": {
+    "schema_version": "sage/v2",
+    "kind": "agent-package",
+    "metadata": {
+      "id": "benchmark.web-design.baseline",
+      "version": "0.1.0",
+      "name": "Web Design Baseline",
+      "description": "Technical-only baseline for interactive webpage tasks; no aesthetic instructions."
+    },
+    "runtime": {
+      "preset": "standard",
+      "deployment_profile": "controlled_host",
+      "plugin_trust_policy": "trusted_declared",
+      "capabilities": {},
+      "required_guarantees": {}
+    },
+    "plugins": [],
+    "policies": {
+      "budgets": {
+        "max_steps": null,
+        "input_tokens": null,
+        "system_tokens": null,
+        "protected_recent_tokens": null,
+        "output_tokens": null,
+        "total_tokens": null,
+        "wall_time_seconds": null
+      }
+    },
+    "agents": {
+      "assistant": {
+        "name": "Web Design Baseline",
+        "description": null,
+        "instructions": {
+          "inline": "Build the browser-based webpage requested by the user in the current workspace using only Sage's file_write, file_update, file_read, list_dir, read_lints and turn_status tools, plus load_skill for any enabled Skills. Use these exact tool names; do not use aliases or request additional tools. Use index.html as the entry point and relative local assets. External network access and package build steps are unavailable. Use sequential operations when editing the same file. Use read_lints to check supported source files before submission; only passed=true confirms completed checks without diagnostics; incomplete checks do not mean the files are valid. When the website is ready, call turn_status with status task_done and briefly state the entry file."
+        },
+        "mode": "simple",
+        "models": {
+          "primary": "primary"
+        },
+        "delegation_model_bindings": {},
+        "entrypoint": {
+          "type": "loop",
+          "loop": "react",
+          "flow": null,
+          "config": {}
+        },
+        "tools": [
+          "file_read",
+          "file_write",
+          "file_update",
+          "list_dir",
+          "turn_status",
+          "load_skill",
+          "read_lints"
+        ],
+        "tool_approval": null,
+        "skills": [],
+        "preload_skills": [],
+        "subagents": [],
+        "budgets": {
+          "max_steps": 48,
+          "input_tokens": null,
+          "system_tokens": null,
+          "protected_recent_tokens": null,
+          "output_tokens": null,
+          "total_tokens": null,
+          "wall_time_seconds": null
+        },
+        "memory": {
+          "recall": false,
+          "auto_write": false,
+          "scope": "agent"
+        },
+        "sandbox": {
+          "network": "none"
+        }
+      }
+    },
+    "flows": {},
+    "entrypoint": {
+      "agent": "assistant",
+      "flow": null
+    },
+    "interfaces": {},
+    "tests": {
+      "scenarios": [
+        {
+          "id": "smoke",
+          "input": "Complete a representative task for this agent.",
+          "assert": {
+            "run_state": "completed",
+            "no_unhandled_error": true
+          }
+        }
+      ],
+      "gates": {
+        "required_pass_rate": 1.0
+      }
+    },
+    "environments": {}
+  },
+  "files": {}
+}

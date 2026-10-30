@@ -79,3 +79,27 @@ async def test_compact_http_view_preserves_full_owned_audit_and_full_api(tmp_pat
         assert (journal.read_bytes(), result.read_bytes()) == saved
     finally:
         await service.close()
+
+
+def test_compact_execution_keeps_order_tools_errors_and_excludes_private_data():
+    def item(identity, data, visibility='public'):
+        return {'run_id': 'run', 'item_id': identity, 'visibility': visibility, 'data': data}
+    items = [
+        item('1', {'kind': 'message', 'role': 'assistant', 'content': [{'kind': 'text', 'text': 'Checking.'}], 'provider_state': {'secret': 'hidden'}}),
+        item('2', {'kind': 'tool_call', 'tool_call_id': 'call', 'tool_name': 'file_read', 'arguments': {'path': 'index.html'}}),
+        item('3', {'kind': 'reasoning', 'content': [{'kind': 'text', 'text': 'hidden reasoning'}]}),
+        item('4', {'kind': 'tool_result', 'tool_call_id': 'call', 'content': [{'kind': 'text', 'text': 'x' * 9000}], 'error': {'code': 'failed', 'message': 'Missing file'}}),
+        item('5', {'kind': 'message', 'role': 'assistant', 'content': [{'kind': 'text', 'text': 'hidden audit'}]}, 'audit'),
+        item('6', {'kind': 'message', 'role': 'assistant', 'content': [{'kind': 'text', 'text': 'Finished.'}]}),
+    ]
+    raw = {'state': 'completed', 'output': 'Checking.\nFinished.', 'evidence': {'final_items': items}}
+    compact = compact_rsi_payload(raw)
+    transcript = compact['evidence']['execution_transcript']
+    assert [entry['kind'] for entry in transcript] == ['message', 'tool_call', 'tool_result', 'message']
+    assert transcript[1]['call_id'] == transcript[2]['call_id'] == 'run:call'
+    assert transcript[1]['tool_name'] == 'file_read'
+    assert transcript[2]['state'] == 'failed'
+    assert transcript[2]['error'] == 'Missing file'
+    assert len(transcript[2]['text']) < 6100
+    assert 'hidden' not in json.dumps(compact)
+    assert raw['evidence']['final_items'] == items

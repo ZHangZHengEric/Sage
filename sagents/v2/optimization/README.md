@@ -924,3 +924,14 @@ SDK-configured role bases are preserved. Desktop adds a distinct purpose for eac
 internal role plus the actual target continuation semantics. These are prompt
 organization changes, not new scores, permissions, acceptance rules or guarantees
 of model-quality improvement.
+
+## Paired preference evaluation
+
+Use `BuiltinScoring(mode="pairwise")` for anonymous comparisons against the retained incumbent.
+Training/dev perform only direct incumbent comparisons; independent tests retain the original baseline.
+Repeated executions pair by case and trial index; both presentation orders count as one
+pair. Dataset-owned plugins implement `prepare` and `compare`. See
+[Paired preference evaluation](PAIRWISE_EVALUATION.md) for protocols, recovery,
+artifact integrity and the difference between win rate and preference score.
+
+See [Evaluation plugins](EVALUATION_PLUGINS.md) for capability declarations, fixed output schemas, visual Eval Agent input and complete plugin replacement.

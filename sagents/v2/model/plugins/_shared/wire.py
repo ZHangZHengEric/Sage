@@ -39,6 +39,10 @@ def minimum_reasoning_control(
             return str(
                 strategy.get("reasoning_effort_strategy", "reasoning_effort")
             ), effort
+    if disable == "omit" and "supported_reasoning_efforts" in strategy:
+        # A verified route may always reason while accepting no control at all.
+        # Do not turn a minimum request into a parameter already known invalid.
+        return "omit", None
     return default_disable, None
 
 

@@ -186,6 +186,21 @@ class V2ApiClient {
               as Map)
           .cast<String, Object?>();
 
+  Future<AgentConfiguration> saveRsiVersionAsAgent(
+    String agentId,
+    String versionId,
+    String name,
+    String requestId,
+  ) async => AgentConfiguration.fromJson(
+    (await _json(
+              'POST',
+              '${_rsiPath(agentId)}/versions/${Uri.encodeComponent(versionId)}/save-as-agent',
+              body: {'name': name, 'request_id': requestId},
+            )
+            as Map)
+        .cast<String, Object?>(),
+  );
+
   Future<void> applyRsiVersion(
     String agentId,
     String versionId,

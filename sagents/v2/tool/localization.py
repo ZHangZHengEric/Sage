@@ -112,9 +112,9 @@ _TOOL_DESCRIPTIONS: dict[str, ToolText] = {
         "Anexar uma imagem ao próximo turno multimodal para análise nativa pelo Agent.",
     ),
     "read_lints": _text(
-        "对指定 Python、JavaScript 或 TypeScript 文件运行可用的静态检查并返回结构化诊断。",
-        "Run available static checks on selected Python, JavaScript, or TypeScript files and return structured diagnostics.",
-        "Executar verificações estáticas nos arquivos indicados e retornar diagnósticos estruturados.",
+        "检查 HTML、CSS（含内联样式）语法，并运行已安装的 Python、JavaScript/TypeScript 检查器。仅 passed=true 表示所有检查完成且无诊断；未完成或不可用不是通过。",
+        "Check HTML/CSS syntax including inline CSS and run installed Python/JavaScript/TypeScript linters. Only passed=true confirms complete checks with no diagnostics; incomplete checks are not passes.",
+        "Verificar HTML/CSS e executar linters instalados de Python/JavaScript/TypeScript. Apenas passed=true confirma verificações concluídas sem diagnósticos.",
     ),
     "questionnaire_async": _text(
         "校验并发起 Markdown 风格问卷，返回等待用户回复的状态。",

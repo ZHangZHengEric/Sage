@@ -45,8 +45,10 @@ async def test_large_valid_json_is_read_to_eof(tmp_path):
     ("def score(request):\n import time; time.sleep(10)\n", TimeoutError),
 ])
 async def test_broken_or_slow_scorer_is_not_a_zero_grade(tmp_path, source, error):
+    # Error typing should not depend on subsecond cold-import speed. Only the
+    # deliberately slow worker tests the short execution deadline.
     with pytest.raises(error):
-        await scorer(tmp_path, source, timeout=.7).score(request())
+        await scorer(tmp_path, source, timeout=.7 if error is TimeoutError else 5).score(request())
 
 
 @pytest.mark.asyncio
@@ -139,3 +141,21 @@ def test_missing_selected_python_does_not_fall_back_to_the_host(tmp_path):
     with pytest.raises(ValueError, match='virtual environment'):
         PythonExecutionScorer(path=module.path, source_hash=module.source_hash,
             descriptor=module.descriptor, python_executable=str(tmp_path / 'missing-python'))
+
+
+@pytest.mark.asyncio
+async def test_timeout_reaps_worker_descendants(tmp_path):
+    import asyncio
+    import os
+    if os.name != 'posix':
+        pytest.skip('POSIX process group cleanup')
+    marker = tmp_path / 'child-ticks'
+    child = f"import time;from pathlib import Path\np=Path({str(marker)!r})\nwhile True:\n p.write_text(str(time.monotonic()))\n time.sleep(.05)\n"
+    source = "import subprocess,sys,time\n"
+    source += f"def score(request):\n subprocess.Popen([sys.executable, '-c', {child!r}])\n time.sleep(20)\n"
+    with pytest.raises(TimeoutError):
+        await scorer(tmp_path, source, timeout=2).score(request())
+    assert marker.exists(), 'fixture child never started'
+    first = marker.read_text()
+    await asyncio.sleep(.3)
+    assert marker.read_text() == first, 'timed-out worker left a running descendant'

@@ -168,3 +168,61 @@ async def test_rejected_and_unchanged_rounds_also_wait_for_their_measurements(br
     assert completed == [0, 1]
     assert not result.report.rounds[0].accepted
     assert observer.records[1]['package_hash'] == bundle().content_hash
+
+
+@pytest.mark.asyncio
+async def test_live_receipts_separate_waiting_and_running_and_cleanup():
+    from sagents.v2.optimization.runner import OPTIMIZATION_ACTIVITY
+    entered, release = asyncio.Event(), asyncio.Event()
+    class LiveRunner:
+        async def run(self, package, agent_id, content, ctx):
+            OPTIMIZATION_ACTIVITY.get()({'role': 'tool', 'text': 'read_lints', 'state': 'completed'})
+            entered.set()
+            await release.wait()
+    pool = SharedCallPool(1)
+    runner = SharedCallLimitRunner(LiveRunner(), pool)
+    first = asyncio.create_task(runner.run(bundle(), 'target', 'train', context()))
+    await until(entered)
+    second = asyncio.create_task(runner.run(bundle(), 'target', 'test', context()))
+    await asyncio.sleep(0)
+    try:
+        assert pool.active == 1 and pool.waiting == 1
+        rows = {r['input']: r for r in pool.calls.values()}
+        assert rows['train']['state'] == 'running'
+        assert rows['train']['activity'][0]['text'] == 'read_lints'
+        assert rows['test']['state'] == 'queued'
+        second.cancel()
+        await asyncio.gather(second, return_exceptions=True)
+        assert len(pool.calls) == 1
+    finally:
+        release.set()
+        await first
+    assert not pool.calls and pool.active == pool.waiting == 0
+
+
+@pytest.mark.asyncio
+async def test_activity_stream_shows_tools_and_visible_text_not_reasoning():
+    from types import SimpleNamespace
+    from sagents.v2.optimization.runner import OPTIMIZATION_ACTIVITY, wait_with_activity
+    events_seen = asyncio.Event()
+    def event(data):
+        return SimpleNamespace(type='item.completed', model_dump=lambda **_: {'data': {'item': {'data': data}}})
+    async def events():
+        for data in [
+            {'kind': 'reasoning', 'text': 'PRIVATE'},
+            {'kind': 'tool_call', 'tool_name': 'read_lints', 'tool_call_id': '1'},
+            {'kind': 'tool_result', 'tool_call_id': '1'},
+            {'kind': 'message', 'role': 'assistant', 'content': [{'kind': 'text', 'text': 'Checking styles.'}]},
+        ]:
+            yield event(data)
+        events_seen.set()
+    async def wait():
+        await events_seen.wait()
+        return 'done'
+    rows = []
+    token = OPTIMIZATION_ACTIVITY.set(rows.append)
+    try:
+        assert await wait_with_activity(SimpleNamespace(events=events(), wait=wait)) == 'done'
+    finally:
+        OPTIMIZATION_ACTIVITY.reset(token)
+    assert [r['text'] for r in rows] == ['read_lints', 'read_lints', 'Checking styles.']

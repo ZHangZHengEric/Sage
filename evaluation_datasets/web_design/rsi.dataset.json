@@ -1,0 +1,406 @@
+{
+  "format_version": "sage.rsi.dataset/v1",
+  "name": "Web Design v2: Interactive Beauty and Art",
+  "cases": [
+    {
+      "id": "web-v2-training-01",
+      "input": "Create a website for a night garden festival. Let visitors explore the program and save a personal evening plan.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "brand"
+      ]
+    },
+    {
+      "id": "web-v2-training-02",
+      "input": "Create a website for an experimental furniture workshop. Let visitors explore a collection and compare two pieces.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "brand"
+      ]
+    },
+    {
+      "id": "web-v2-training-03",
+      "input": "Build an interactive story about a letter crossing the ocean. Let readers choose the route and revisit how their choices changed the ending.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "narrative"
+      ]
+    },
+    {
+      "id": "web-v2-training-04",
+      "input": "Build a scrolling visual essay about the life of a raindrop. Let readers move between chapters and explore details within each scene.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "narrative"
+      ]
+    },
+    {
+      "id": "web-v2-training-05",
+      "input": "Build an interactive visualization of changing ocean temperatures. Let viewers filter regions and years, compare trends and inspect a selected observation.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "data"
+      ]
+    },
+    {
+      "id": "web-v2-training-06",
+      "input": "Build an interactive atlas of imaginary constellations. Link a navigable sky map, a searchable catalog and details for the selected constellation.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "data"
+      ]
+    },
+    {
+      "id": "web-v2-training-07",
+      "input": "Build a browser tool for composing geometric posters. Include editable text, shape and color controls, live preview, undo and reset.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "creative_tool"
+      ]
+    },
+    {
+      "id": "web-v2-training-08",
+      "input": "Build an interactive palette mixer inspired by natural pigments. Let users mix pigments, save swatches and compare combinations.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "creative_tool"
+      ]
+    },
+    {
+      "id": "web-v2-training-09",
+      "input": "Build an interactive explanation of how eclipses happen. Let learners change the alignment and see the explanation update with the scene.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "learning"
+      ]
+    },
+    {
+      "id": "web-v2-training-10",
+      "input": "Build an interactive guide to the anatomy of a wave. Connect adjustable wave controls to a diagram and a short explanation.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "learning"
+      ]
+    },
+    {
+      "id": "web-v2-training-11",
+      "input": "Build a playful browser experience for growing an imaginary garden. Let players plant, tend and rearrange a garden that changes as they play.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "play"
+      ]
+    },
+    {
+      "id": "web-v2-training-12",
+      "input": "Build an interactive toy for making constellations from dots. Let players connect stars, name a constellation and start another.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "play"
+      ]
+    },
+    {
+      "id": "web-v2-training-13",
+      "input": "Build an interactive workspace for planning a small exhibition. Connect an artwork catalog, room layout and schedule; allow selections to be revised.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "workspace"
+      ]
+    },
+    {
+      "id": "web-v2-training-14",
+      "input": "Build an interactive dashboard for a personal stargazing journal. Connect a calendar, observation list and selected-entry details with editable notes.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "workspace"
+      ]
+    },
+    {
+      "id": "web-v2-training-15",
+      "input": "Build an interactive archive of imaginary postage stamps. Let collectors search, filter, inspect and assemble a personal selection.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "explorer"
+      ]
+    },
+    {
+      "id": "web-v2-training-16",
+      "input": "Build an interactive explorer of unusual musical instruments. Let visitors compare instruments and explore their construction.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "explorer"
+      ]
+    },
+    {
+      "id": "web-v2-training-17",
+      "input": "Build an interactive configurator for a modular reading lamp. Let users change components and finishes with a live preview and configuration summary.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "configurator"
+      ]
+    },
+    {
+      "id": "web-v2-training-18",
+      "input": "Build an interactive builder for a bouquet of paper flowers. Let users combine flowers, adjust the arrangement and review their bouquet.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "configurator"
+      ]
+    },
+    {
+      "id": "web-v2-training-19",
+      "input": "Build an interactive invitation to a secret rooftop dinner. Let guests explore the event and preview their meal preferences locally.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "experience"
+      ]
+    },
+    {
+      "id": "web-v2-training-20",
+      "input": "Build an interactive listening room with visual sound controls. Let listeners combine sound layers and see their mix represented visually; include a mute control.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "training",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "experience"
+      ]
+    },
+    {
+      "id": "web-v2-validation-01",
+      "input": "Create a website for a mountain film residency. Let visitors explore films, compare sessions and assemble a viewing plan.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "brand"
+      ]
+    },
+    {
+      "id": "web-v2-validation-02",
+      "input": "Build an interactive diary of a city after midnight. Let readers follow different characters and revisit scenes on a timeline.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "narrative"
+      ]
+    },
+    {
+      "id": "web-v2-validation-03",
+      "input": "Build an interactive visualization of a city’s daily rhythms. Connect district filters, a time control, a chart and a detail view using sample data.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "data"
+      ]
+    },
+    {
+      "id": "web-v2-validation-04",
+      "input": "Build an interactive tool for arranging a personal reading room. Include a furniture palette, editable room arrangement, live preview and undo.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "creative_tool"
+      ]
+    },
+    {
+      "id": "web-v2-validation-05",
+      "input": "Build an interactive explanation of how a camera captures light. Let learners adjust exposure controls and compare the resulting image and explanation.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "learning"
+      ]
+    },
+    {
+      "id": "web-v2-validation-06",
+      "input": "Build a playful browser experience for composing a tiny city. Let players place and remove buildings and see their neighborhood change.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "play"
+      ]
+    },
+    {
+      "id": "web-v2-validation-07",
+      "input": "Build an interactive planner for a slow train journey. Connect a route overview, stop selection and editable day-by-day itinerary.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "workspace"
+      ]
+    },
+    {
+      "id": "web-v2-validation-08",
+      "input": "Build an interactive cabinet of seaside discoveries. Let visitors filter finds, open specimen details and collect favorites.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "explorer"
+      ]
+    },
+    {
+      "id": "web-v2-validation-09",
+      "input": "Build an interactive configurator for a custom mechanical keyboard. Let users change layout, switches and colors, with a live preview and a configuration summary.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "configurator"
+      ]
+    },
+    {
+      "id": "web-v2-validation-10",
+      "input": "Build an interactive menu for a seasonal tasting experience. Let diners explore courses, apply dietary preferences and review their chosen menu.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "validation",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "experience"
+      ]
+    },
+    {
+      "id": "web-v2-test-01",
+      "input": "Create a website for a floating botanical exhibition. Let visitors explore exhibits and assemble a route through the collection.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "brand"
+      ]
+    },
+    {
+      "id": "web-v2-test-02",
+      "input": "Build an interactive journey through a forgotten observatory. Let visitors choose rooms, examine discoveries and revisit them in a personal notebook.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "narrative"
+      ]
+    },
+    {
+      "id": "web-v2-test-03",
+      "input": "Build an interactive visualization of a forest through the seasons. Connect season and habitat controls to a landscape, a chart and details for selected wildlife.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "data"
+      ]
+    },
+    {
+      "id": "web-v2-test-04",
+      "input": "Build a browser tool for designing a patterned ceramic tile. Include editable pattern and color controls, repeated-tile preview, undo and reset.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "creative_tool"
+      ]
+    },
+    {
+      "id": "web-v2-test-05",
+      "input": "Build an interactive guide to how a seed becomes a tree. Let learners adjust growing conditions and explore how the stages change.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "learning"
+      ]
+    },
+    {
+      "id": "web-v2-test-06",
+      "input": "Build an interactive toy for arranging a mobile of abstract shapes. Let players add and reposition shapes, adjust their balance and reset the composition.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "play"
+      ]
+    },
+    {
+      "id": "web-v2-test-07",
+      "input": "Build an interactive workspace for curating a film night. Connect a searchable film library, editable running order and a shared-night preview.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "workspace"
+      ]
+    },
+    {
+      "id": "web-v2-test-08",
+      "input": "Build an interactive collection of fictional scientific specimens. Let visitors filter specimens, compare two and open detailed field notes.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "explorer"
+      ]
+    },
+    {
+      "id": "web-v2-test-09",
+      "input": "Build an interactive builder for a miniature sculpture. Let users combine forms and materials, adjust their arrangement and review the result.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "configurator"
+      ]
+    },
+    {
+      "id": "web-v2-test-10",
+      "input": "Build an interactive exhibition about the texture of time. Let visitors explore several exhibits, manipulate their states and revisit a saved selection.",
+      "rubric": "Judge beauty, visual appeal and artistic expression first. Assess composition, typography, color, imagery, visual rhythm, originality and coherent art direction across screen sizes and captured interaction states. Respect the intended use, requested interactions and legibility. Judge only evidenced states; do not assume unseen flows work. No preferred style; no reward for more features, pages or content. Explain concrete visual evidence and tradeoffs. Use A/B/tie, not an absolute aesthetic score.",
+      "split": "test",
+      "mode": "single_turn",
+      "coverage_tags": [
+        "experience"
+      ]
+    }
+  ]
+}

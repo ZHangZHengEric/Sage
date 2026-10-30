@@ -1,6 +1,7 @@
 """Close unattended single-turn episodes without changing native Run state.
 
-Only typed native loop guards with complete, successful tool receipts qualify.
+Only typed native loop guards with complete tool receipts qualify. Rejected
+native calls must explicitly attest that no mutation was applied.
 Closure authorizes measurement of the executed prefix, never task success.
 The scorer still determines reward from the fixed task and observed effects.
 """
@@ -10,6 +11,16 @@ from sagents.v2.optimization.native_projection import observation_digest, projec
 
 PROTOCOL = 'sage.rsi.single-turn-episode-closure/v1'
 LOOP_REASONS = frozenset({'loop.repeated_pattern', 'loop.no_progress'})
+
+
+def _unapplied_result(item):
+    data = item.get('data') or {}
+    error = data.get('error') or {}
+    metadata = error.get('metadata') or {}
+    return (item.get('status') == 'failed' and data.get('kind') == 'tool_result'
+        and bool(error.get('code'))
+        and metadata.get('side_effect_state') == 'not_applied'
+        and (error.get('code') != 'tool.not_found' or metadata.get('tool_execution_started') is False))
 
 
 def close_single_turn_episode(observation, case):
@@ -61,7 +72,7 @@ def _close(observation):
     source = canonical if canonical else raw_items
     items, seen, calls, results = [], {}, {}, {}
     for item in source:
-        if item.get('run_id') != run or item.get('status') != 'completed':
+        if item.get('run_id') != run or (item.get('status') != 'completed' and not _unapplied_result(item)):
             return None
         identity = item.get('item_id')
         if not isinstance(identity, str) or not identity or identity in seen and seen[identity] != item:
@@ -86,9 +97,9 @@ def _close(observation):
     for event in events:
         if event.get('run_id') != run:
             continue
-        if event.get('type') in {'tool.call.failed', 'tool.call.cancelled'}:
+        if event.get('type') == 'tool.call.cancelled':
             return None
-        if event.get('type') not in {'tool.call.proposed', 'tool.call.succeeded'}:
+        if event.get('type') not in {'tool.call.proposed', 'tool.call.succeeded', 'tool.call.failed'}:
             continue
         target = proposed if event['type'] == 'tool.call.proposed' else succeeded
         identity = event['data']['tool_call_id']
@@ -103,6 +114,17 @@ def _close(observation):
         if not isinstance(args, dict) or not call.get('step_id'):
             return None
         name = call['data']['tool_name']
+        unapplied = _unapplied_result(result)
+        if unapplied and name not in {'file_write', 'file_update', 'file_read', 'list_dir', 'turn_status'}:
+            if name.startswith('mcp_') or result['data']['error']['code'] != 'tool.not_found':
+                return None
+        if unapplied:
+            if (end.get('type') != 'tool.call.failed' or end['data'].get('state') != 'failed'
+                    or end['data'].get('error') != result['data']['error']):
+                return None
+        elif (end.get('type') != 'tool.call.succeeded' or end['data'].get('state') != 'completed'
+                or end['data'].get('error') or result['data'].get('error')):
+            return None
         if name == 'load_skill':
             if not evidence.get('session_id'):
                 return None
@@ -113,8 +135,6 @@ def _close(observation):
                 or not start['data'].get('operation_id')
                 or start['data']['operation_id'] != end['data'].get('operation_id')
                 or end['data'].get('result_item_id') != result['item_id']
-                or end['data'].get('state') != 'completed' or end['data'].get('error')
-                or result['data'].get('error')
                 or start.get('run_sequence', 0) >= end.get('run_sequence', 0)):
             return None
         if (name.startswith('mcp_')
@@ -123,7 +143,9 @@ def _close(observation):
     receipt = {
         'protocol': PROTOCOL, 'native_state': 'suspended', 'episode_state': 'closed',
         'reason': reason, 'interaction_id': suspension['interaction_id'],
-        'tool_call_count': len(calls), 'coverage': 'complete native tool receipts; no inferred actions',
+        'tool_call_count': len(calls),
+        'rejected_not_applied_calls': sum(_unapplied_result(item) for item in results.values()),
+        'coverage': 'complete native tool receipts; no inferred actions',
     }
     previous = evidence.get('episode_termination') or {}
     if all(previous.get(key) == value for key, value in receipt.items()):

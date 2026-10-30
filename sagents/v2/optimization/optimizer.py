@@ -193,6 +193,7 @@ class AgentPackageOptimizer:
         call_timeout_seconds: float = 120,
         call_retries: int = 0,
         allow_call_isolation_upgrade: bool = False,
+        allow_evaluation_validation_upgrade: bool = False,
         timeout_seconds: float = 3600,
         evaluation_repeats: int = 1,
         evaluation_aggregation: Literal["minimum", "mean"] = "minimum",
@@ -216,6 +217,7 @@ class AgentPackageOptimizer:
         resume_optimization_id: str | None = None,
         authoritative_grader=None,
         scorer=None,
+        comparison_plugin=None,
         builtin_scoring: BuiltinScoring | None = None,
         resume_from: str | Path | None = None,
         recovery_binding_id: str | None = None,
@@ -273,6 +275,19 @@ class AgentPackageOptimizer:
         if scorer is not None and authoritative_grader is not None:
             raise ValueError("choose scorer or legacy authoritative_grader, not both")
         builtin_scoring = BuiltinScoring.model_validate(builtin_scoring or {})
+        pairwise_mode = builtin_scoring.mode == "pairwise"
+        if comparison_plugin is not None and not pairwise_mode:
+            raise ValueError("comparison plugins require pairwise mode")
+        if pairwise_mode:
+            if scorer is not None or authoritative_grader is not None:
+                raise ValueError("pairwise evaluation cannot be combined with an absolute scorer")
+            if comparison_plugin is None:
+                raise ValueError("pairwise evaluation requires a comparison plugin")
+            if min_latency_improvement is not None:
+                raise ValueError("pairwise selection does not use absolute latency tie-breaks")
+            if suite and any(c.mode != "single_turn" for c in suite.cases):
+                raise ValueError("pairwise evaluation currently requires single-turn cases")
+            evaluation_aggregation = "mean"
         if restart_readonly_roles and not recovery_binding_id:
             raise ValueError("read-only recovery roles require a frozen host binding identity")
         if edit_package_files and tuner_workspace is None:
@@ -362,6 +377,9 @@ class AgentPackageOptimizer:
                     "adaptive RSI uses only training and validation suites"
                 )
             final_max_cases = 0
+        if pairwise_mode:
+            # A preference against a reference is not an absolute success target.
+            stopping_policy = None
         original = AgentPackageBundle.model_validate(package.model_dump(mode="json"))
         original.resolved_manifest()
         target = agent_id or original.manifest.entrypoint.agent
@@ -449,6 +467,8 @@ class AgentPackageOptimizer:
                 "test_driver": self.test_driver,
                 **({"suite_reviewer": self.suite_reviewer} if self.suite_reviewer else {}),
                 **({"reviewer": self.reviewer} if self.reviewer else {})}.items()})
+        if comparison_plugin is not None:
+            recovery_config["comparison_plugin"] = comparison_plugin.descriptor.model_dump(mode="json")
         if self.user_simulator is not None:
             recovery_config["user_simulator"] = self.user_simulator.descriptor.model_dump(mode="json")
         if checkpoint_barrier is not None:
@@ -466,21 +486,32 @@ class AgentPackageOptimizer:
             try:
                 recovery.verify({"recovery_fingerprint": recovery_hash})
             except ValueError:
-                if not allow_call_isolation_upgrade or not call_retries:
-                    raise
-                old_engine = recovery.operation.get("recovery_engine_id")
-                if (not isinstance(old_engine, str) or not re.fullmatch(r"[0-9a-f]{64}", old_engine)
-                        or old_engine == recovery_config["engine"]
-                        or recovery.operation.get("call_isolation_protocol")):
-                    raise ValueError("unsupported call isolation engine upgrade") from None
-                legacy_config = {**recovery_config, "engine": old_engine}
-                legacy_config.pop("call_retries", None)
-                if configuration_fingerprint(legacy_config) != recovery.operation["recovery_fingerprint"]:
-                    raise ValueError("call isolation upgrade changes frozen experiment configuration") from None
-                policy_upgrade = {"protocol": "sage.rsi.call-isolation/v1",
-                    "from_engine": old_engine, "to_engine": recovery_config["engine"],
-                    "previous_fingerprint": recovery.operation["recovery_fingerprint"],
-                    "current_fingerprint": recovery_hash}
+                if allow_evaluation_validation_upgrade:
+                    old_engine = recovery.operation.get("recovery_engine_id")
+                    legacy_config = {**recovery_config, "engine": old_engine}
+                    if (not isinstance(old_engine, str) or not re.fullmatch(r"[0-9a-f]{64}", old_engine)
+                            or configuration_fingerprint(legacy_config) != recovery.operation["recovery_fingerprint"]):
+                        raise ValueError("evaluation validation upgrade changes frozen experiment configuration") from None
+                    policy_upgrade = {"protocol": "sage.rsi.evaluation-validation/v1",
+                        "from_engine": old_engine, "to_engine": recovery_config["engine"],
+                        "previous_fingerprint": recovery.operation["recovery_fingerprint"],
+                        "current_fingerprint": recovery_hash}
+                else:
+                    if not allow_call_isolation_upgrade or not call_retries:
+                        raise
+                    old_engine = recovery.operation.get("recovery_engine_id")
+                    if (not isinstance(old_engine, str) or not re.fullmatch(r"[0-9a-f]{64}", old_engine)
+                            or old_engine == recovery_config["engine"]
+                            or recovery.operation.get("call_isolation_protocol")):
+                        raise ValueError("unsupported call isolation engine upgrade") from None
+                    legacy_config = {**recovery_config, "engine": old_engine}
+                    legacy_config.pop("call_retries", None)
+                    if configuration_fingerprint(legacy_config) != recovery.operation["recovery_fingerprint"]:
+                        raise ValueError("call isolation upgrade changes frozen experiment configuration") from None
+                    policy_upgrade = {"protocol": "sage.rsi.call-isolation/v1",
+                        "from_engine": old_engine, "to_engine": recovery_config["engine"],
+                        "previous_fingerprint": recovery.operation["recovery_fingerprint"],
+                        "current_fingerprint": recovery_hash}
             recovery.require_reconciled(restart_incomplete=restart_incomplete)
             optimization_id = recovery.operation["optimization_id"]
         underlying_runner = self.runner
@@ -576,10 +607,13 @@ class AgentPackageOptimizer:
                     "properties"
                 ]["kind"]["enum"]
                 kinds.remove("split_leakage")
+            visual_artifacts = data.get("_evaluation_artifacts", ())
+            use_evidence_files = data.get("_evaluation_use_files", False)
+            data = {key: value for key, value in data.items() if key not in {"_evaluation_artifacts", "_evaluation_use_files"}}
             call_agent = agent
             source_data = data
             evaluation_directory = None
-            if role == "evaluation":
+            if role == "evaluation" and (not visual_artifacts or use_evidence_files):
                 from sagents.v2.optimization.evaluation_files import evaluation_file_call
                 import hashlib
                 case_label = re.sub(r"[^A-Za-z0-9_.-]+", "-", case_id or "summary").strip(".-")[:48] or "case"
@@ -602,6 +636,11 @@ class AgentPackageOptimizer:
                     "Return ONLY a JSON object matching response_schema.",
                     "data": data,
                     "response_schema": response_schema,
+                    # Native media are attached separately from this text. Bind
+                    # recovery to their ordered manifests so a completed A/B
+                    # judgment cannot be reused for the opposite B/A call.
+                    **({"visual_artifact_binding": configuration_fingerprint(visual_artifacts)}
+                       if visual_artifacts else {}),
                 },
                 ensure_ascii=False,
             )
@@ -624,6 +663,16 @@ class AgentPackageOptimizer:
             )
             observation = recovery.completed_call(role=role, phase=active_phase, round=active_round,
                 trial=current_trial(), case_id=case_id, request=content) if recovery else None
+            if observation is not None and role == "evaluation" and allow_evaluation_validation_upgrade:
+                from sagents.v2.optimization.evaluation_files import evaluation_response, validate_assessment_evidence
+                try:
+                    restored = schema.model_validate_json(evaluation_response(observation, file_mode))
+                    validate_assessment_evidence(restored, source_data, file_mode=file_mode)
+                except ValueError:
+                    # Only the readonly evaluator is rerun. Target calls and valid decisions remain frozen.
+                    observation = None
+                    journal.emit("invalid_evaluation_replay_skipped", case_id=case_id,
+                        round=active_round, trial=current_trial())
             if (observation is not None and role == "tuning" and edit_package_files
                     and "authored_package" in observation.evidence):
                 from sagents.v2.optimization.package_workspace import restore_authored_package
@@ -638,7 +687,14 @@ class AgentPackageOptimizer:
                             reply = UserSimulationReply.model_validate(await self.user_simulator.reply(request), strict=True)
                         observation = OptimizationObservation(state="completed", output=reply.model_dump_json())
                     else:
-                        observation = await run(call_agent.package, call_agent.agent_id, content,
+                        if visual_artifacts:
+                            from sagents.v2.optimization.evaluation_plugin import evidence_content
+                            from sagents.v2.optimization.comparison_plugin import PreparedComparisonArtifact
+                            native_content = evidence_content(task, data, schema,
+                                [(label, PreparedComparisonArtifact.model_validate(item)) for label, item in visual_artifacts], file_mode=file_mode)
+                        else:
+                            native_content = content
+                        observation = await run(call_agent.package, call_agent.agent_id, native_content,
                             local_file_evaluation=local_file_evaluation)
                 except Exception as error:
                     journal.emit("agent_call_failed", call_id=call_id, role=role,
@@ -705,7 +761,7 @@ class AgentPackageOptimizer:
                         case_id=case_id, trial=current_trial(), reason=str(error)[:6000])
                 if file_mode:
                     persist_assessment(evaluation_directory, data, observation, error)
-                if role == "evaluation" and (schema in (OptimizationDiagnosis, OptimizationDiagnosisSummary) or file_mode and schema is OptimizationGrade) and _repair_attempt < 2:
+                if role == "evaluation" and (schema in (OptimizationDiagnosis, OptimizationDiagnosisSummary) or schema.__name__ == "EvaluationResult" or file_mode and schema is OptimizationGrade) and _repair_attempt < 2:
                     journal.emit("agent_response_repair_requested", role=role,
                                  round=active_round, case_id=case_id,
                                  attempt=_repair_attempt + 1, error_type=type(error).__name__)
@@ -714,7 +770,8 @@ class AgentPackageOptimizer:
                         "including every maximum length and evidence requirement. Preserve the substantive "
                         "findings and uncertainty; shorten wording rather than inventing evidence or changing scores. "
                         + ("Read the supplied evidence files and write the corrected assessment JSON to the specified output file." if file_mode else "Do not execute tools. Return only valid schema JSON."),
-                        {"original_task": task, "original_data": source_data,
+                        {"_evaluation_artifacts": visual_artifacts, "_evaluation_use_files": use_evidence_files,
+                         "goal": source_data.get("goal"), "original_task": task, "original_data": source_data,
                          "invalid_response": observation.evidence.get("evaluation_record", observation.output), "validation_error": str(error)[:6000]},
                         schema, case_id=case_id, _repair_attempt=_repair_attempt + 1)
                 if role == "tuning":
@@ -723,7 +780,24 @@ class AgentPackageOptimizer:
                     error.rsi_local_retries_exhausted = True
                 raise
 
+        from sagents.v2.optimization.evaluation_plugin import PythonEvaluationPlugin, agent_fallback
+        unified_plugin = comparison_plugin if isinstance(comparison_plugin, PythonEvaluationPlugin) else scorer if isinstance(scorer, PythonEvaluationPlugin) else None
+        if unified_plugin is not None:
+            async def eval_fallback(task, data, schema):
+                case_id = data.pop("_evaluation_case_id", None)
+                return await ask("evaluation", self.evaluator, task, data, schema, case_id=case_id)
+            unified_plugin.fallback = agent_fallback(eval_fallback, combine_analysis=not unified_plugin.capabilities.analyze)
+            unified_plugin.artifact_root = journal.path.parent / "evaluation-artifacts" if journal.path else None
+        from sagents.v2.optimization.pairwise import PairwiseEvaluator, comparison_training_feedback
+        pairwise = PairwiseEvaluator(binding=configuration_fingerprint([
+            optimization_id, original.content_hash, goal, self.evaluator.package.content_hash,
+            self.evaluator.agent_id, recovery_binding_id, comparison_plugin.descriptor.model_dump(mode="json")]),
+            directory=Path(journal_path).parent / "pairwise" if journal_path else None,
+            plugin=comparison_plugin, goal=goal) if pairwise_mode else None
+
         async def diagnose_execution(bundle, case, observation, history, grade):
+            if isinstance(scorer, PythonEvaluationPlugin) and grade.diagnosis is not None:
+                return grade
             async def invoke(request):
                 diagnosis = await ask("evaluation", self.evaluator, request["task"],
                                       request["data"], OptimizationDiagnosis, case_id=case.id)
@@ -736,7 +810,7 @@ class AgentPackageOptimizer:
                 entries = [{"kind": "case", "input": case.input, "reference_answer": case.reference_answer}]
                 entries.extend(execution_entries(observation, conversation=history or ()))
             return await diagnose_scored_execution(
-                grade=grade, entries=entries, rubric=case.rubric,
+                grade=grade, entries=entries, rubric=case.rubric, goal=goal,
                 policy=bundle.resolved_manifest().agents[target].instructions.inline,
                 constraints=policy.model_dump(mode="json"),
                 file_backed=file_backed,
@@ -745,6 +819,23 @@ class AgentPackageOptimizer:
                 agent_configuration=execution_configuration(bundle, target), invoke=invoke)
 
         async def grade_observation(bundle, case, observation, history=None, *, analyze=True):
+            if pairwise is not None:
+                captured = await pairwise.capture(case, observation, trial=current_trial(),
+                    execution_id=f"{bundle.content_hash}:{active_phase}:{active_round}")
+                if (unified_plugin is not None and bundle.content_hash == original.content_hash and case.split == "training"
+                        and not captured.scorer_details.get("pairwise", {}).get("execution_failed")):
+                    evidence = await pairwise.prepare(case, observation, trial=current_trial(),
+                        execution_id=f"{bundle.content_hash}:{active_phase}:{active_round}")
+                    diagnosis = await unified_plugin.analyze_reference(goal=goal, case=case,
+                        observation=observation, evidence=evidence)
+                    captured = captured.model_copy(update={"diagnosis": diagnosis})
+                return captured, None
+            from sagents.v2.optimization.pairwise import execution_failure
+            failure = execution_failure(observation, case)
+            if failure is not None:
+                return OptimizationGrade(score=0, passed=False,
+                    rationale=f"Target execution failed: {failure}",
+                    scorer_details={"execution_failure": failure}), None
             if model_transport_interrupted(observation):
                 raise OptimizationTransientFailure("target model transport interrupted")
             if not evaluation_episode_finished(observation, case) and scorer is None:
@@ -1145,6 +1236,7 @@ class AgentPackageOptimizer:
             return result
 
         async def evaluate_jobs(bundle, jobs):
+            from sagents.v2.optimization.call_isolation import safe_failure_details
             async def execute(job):
                 case, trial = job
                 return await evaluate_case(bundle, case, trial)
@@ -1154,6 +1246,7 @@ class AgentPackageOptimizer:
                     on_error=lambda job, error: journal.emit("case_call_failed", round=active_round,
                         phase=active_phase, trial=job[1], case_id=job[0].id,
                         error_type=type(error).__name__,
+                        failures=safe_failure_details(error),
                         retry_budget_exhausted=getattr(error, "rsi_local_retries_exhausted", False)))
             if max_concurrency == 1:
                 return [await execute(job) for job in jobs]
@@ -1204,6 +1297,11 @@ class AgentPackageOptimizer:
                     f"target trials: {evaluation_aggregation} evaluator score; all trials must pass. "
                     "See trials for individual evaluation Agent judgments.",
                 )
+                if pairwise_mode:
+                    from sagents.v2.optimization.pairwise import comparison_summary
+                    grade = grade.model_copy(update={"scorer_details": {
+                        "pairwise_summary": comparison_summary(item.grade for item in samples),
+                        "pairwise_pending": any(item.grade.scorer_details.get("pairwise", {}).get("pending") for item in samples)}})
                 observation = worst.observation.model_copy(
                     update={
                         "elapsed_seconds": sum(
@@ -1230,10 +1328,10 @@ class AgentPackageOptimizer:
                         case=case,
                         observation=observation,
                         grade=grade,
-                        objective_score=(None if builtin_scoring.mode == "quality" else
+                        objective_score=(None if builtin_scoring.mode in {"quality", "pairwise"} else
                             sum(item.objective_score for item in samples) / len(samples)
                             if evaluation_aggregation == "mean" else min(item.objective_score for item in samples)),
-                        score_metrics=({} if builtin_scoring.mode == "quality" else {
+                        score_metrics=({} if builtin_scoring.mode in {"quality", "pairwise"} else {
                             key: grade.score if key == "quality" else sum(item.score_metrics[key] for item in samples) / len(samples)
                             for key in samples[0].score_metrics}),
                         trials=tuple(
@@ -1269,7 +1367,7 @@ class AgentPackageOptimizer:
                         + request["task"], request["data"], OptimizationDiagnosis, case_id=result.case.id)
                     return diagnosis.model_dump_json()
                 compared = await diagnose_scored_execution(grade=result.grade, entries=entries,
-                    rubric=result.case.rubric, policy=bundle.resolved_manifest().agents[target].instructions.inline,
+                    rubric=result.case.rubric, goal=goal, policy=bundle.resolved_manifest().agents[target].instructions.inline,
                     constraints=policy.model_dump(mode="json"),
                     original_policy=original.resolved_manifest().agents[target].instructions.inline,
                     case_context={"id": result.case.id, "input": result.case.input,
@@ -1308,7 +1406,7 @@ class AgentPackageOptimizer:
                     {"goal": goal, "package": review_package,
                      "original_instructions": original.resolved_manifest().agents[target].instructions.inline,
                      "constraints": policy.model_dump(mode="json"),
-                     "external_scorer": scorer.descriptor.model_dump(mode="json") if scorer is not None else None,
+                     "external_scorer": (scorer or comparison_plugin).descriptor.model_dump(mode="json") if scorer is not None or comparison_plugin is not None else None,
                      "suite": current.model_dump(mode="json"), "require_diverse_suite": require_diverse_suite,
                      "source": "generated" if generated else "imported",
                      "preflight_policy": preflight_policy.model_dump(mode="json")}, OptimizationSuiteReview)
@@ -1788,6 +1886,7 @@ class AgentPackageOptimizer:
                             )
                             if item.evaluation
                             else [],
+                            "paired_training": comparison_training_feedback(item.comparison),
                             "patch_error": item.reason
                             if item.candidate_package is None
                             else None,
@@ -1800,10 +1899,22 @@ class AgentPackageOptimizer:
                     diagnostic_evidence = synthesis_evidence(best_evaluation.cases)
                     diagnostic_summary = None
                     if diagnostic_evidence:
-                        diagnostic_summary = await ask("evaluation", self.evaluator,
+                        if unified_plugin is not None and unified_plugin.capabilities.summarize:
+                            from sagents.v2.optimization.evaluation_plugin import SummaryRequest
+                            diagnostic_summary = await unified_plugin.summarize(SummaryRequest(goal=goal,
+                                training_diagnoses=tuple(diagnostic_evidence), constraints=policy.model_dump(mode="json"),
+                                optimization_scope=tuple(optimization_scope or ()),
+                                policy=best.resolved_manifest().agents[target].instructions.inline))
+                        else:
+                            diagnostic_summary = await ask("evaluation", self.evaluator,
                             "Decide what to verify NEXT from independent TRAINING execution diagnoses. Return next_action and next_verification. "
                             "Use test_hypothesis only for a supported controllable mechanism; use measure when evidence is missing, "
                             "measurement_issue for environment/user/scoring/infrastructure problems, and no_change when no justified intervention exists. "
+                            "For pairwise_reference evidence no candidate exists yet: neutral reference grades are not quality scores, "
+                            "observed ties or proof of success. The absence of a previous comparison is expected, not missing evidence "
+                            "or a measurement fault. A controllable hypothesis supported by intrinsic execution/visual findings can "
+                            "use test_hypothesis so the tuner creates the candidate for its FIRST paired measurement. Its benefit "
+                            "remains unproven until that measurement. Do not demand a candidate comparison before permitting its creation. "
                             "Do not produce a comprehensive flaw checklist or force changes to passing behavior. Synthesize prioritized, actionable "
                             "optimization work. Compare successful and failed trials; identify reusable success "
                             "procedures and failure branches. Each priority must cite supplied training case IDs, "
@@ -1813,7 +1924,7 @@ class AgentPackageOptimizer:
                             "environment/tool defects belong in uncertainties, not requests to rewrite protected tools. "
                             "Do not restate scores or case counts in prose; host metrics are authoritative. "
                             "Do not make the tuner rediscover root causes by reading every raw case. Return concise Chinese.",
-                            {"training_diagnoses": diagnostic_evidence,
+                            {"goal": goal, "training_diagnoses": diagnostic_evidence,
                              "policy": best.resolved_manifest().agents[target].instructions.inline,
                              "original_policy": original.resolved_manifest().agents[target].instructions.inline
                                  if best.resolved_manifest().agents[target].instructions.inline != original.resolved_manifest().agents[target].instructions.inline else None,
@@ -2122,34 +2233,35 @@ class AgentPackageOptimizer:
                         journal.emit("incumbent_evaluation_completed", round=index,
                                      evaluation=best_evaluation.model_dump(mode="json"))
                     evaluation = await evaluate(candidate, fixed_suite)
-                    journal.emit(
-                        "evaluation_completed",
-                        round=index,
-                        evaluation=evaluation.model_dump(mode="json"),
-                    )
-                    accepted, reason = (
-                        self._select_adaptive if adaptive else self._select
-                    )(
-                        best_evaluation,
-                        evaluation,
-                        min_improvement,
-                        min_latency_improvement,
-                    )
+                    comparison = {}
+                    if pairwise is not None:
+                        from sagents.v2.optimization.pairwise import compare_evaluations
+                        comparison, evaluation = await compare_evaluations(pairwise, best_evaluation, evaluation,
+                            max_concurrency=max_concurrency)
+                        preference = comparison["splits"]["validation"]["preference_score"]
+                        accepted = preference > .5 + 1e-12 and preference - .5 >= min_improvement - 1e-12
+                        reason = ("Candidate preferred over incumbent" if accepted else "Insufficient preference over incumbent") + f"; validation paired score {preference:.4f}"
+                        journal.emit("round_comparison_completed", round=index, comparison=comparison)
+                    else:
+                        accepted, reason = (self._select_adaptive if adaptive else self._select)(
+                            best_evaluation, evaluation, min_improvement, min_latency_improvement)
+                    journal.emit("evaluation_completed", round=index, evaluation=evaluation.model_dump(mode="json"))
                     history.append(
                         OptimizationRound(
                             round=index,
                             parent_hash=best.content_hash,
+                            comparison=comparison,
                             patch=patch,
                             candidate_package=candidate,
                             evaluation=evaluation,
                             accepted=accepted,
                             reason=reason,
                             review=review,
-                            overall_before=best_evaluation.overall_score() if adaptive else None,
-                            overall_after=self._paired_evaluations(best_evaluation, evaluation)[1].overall_score() if adaptive else None,
-                            objective_before=best_evaluation.objective_score("validation") if builtin_scoring.mode != "quality" else None,
-                            objective_after=self._paired_evaluations(best_evaluation, evaluation)[1].objective_score("validation") if builtin_scoring.mode != "quality" else None,
-                            regressions=self._regressions(best_evaluation, evaluation) if adaptive else (),
+                            overall_before=best_evaluation.overall_score() if adaptive and not pairwise_mode else None,
+                            overall_after=self._paired_evaluations(best_evaluation, evaluation)[1].overall_score() if adaptive and not pairwise_mode else None,
+                            objective_before=best_evaluation.objective_score("validation") if builtin_scoring.mode not in {"quality", "pairwise"} else None,
+                            objective_after=self._paired_evaluations(best_evaluation, evaluation)[1].objective_score("validation") if builtin_scoring.mode not in {"quality", "pairwise"} else None,
+                            regressions=self._regressions(best_evaluation, evaluation) if adaptive and not pairwise_mode else (),
                         )
                     )
                     journal.emit(
@@ -2238,6 +2350,10 @@ class AgentPackageOptimizer:
                         else None
                     )
                 )
+                if pairwise_mode:
+                    goal_verified = None
+                    recommend = best.content_hash != original.content_hash
+                    withdrawal_reason = None if recommend else "No candidate preferred over the incumbent"
                 if recovery:
                     recovery.assert_consumed()
                 result = OptimizationResult(
@@ -2291,7 +2407,7 @@ class AgentPackageOptimizer:
                         selected=best_evaluation,
                         rounds=tuple(history),
                         agent_calls=tuple(calls),
-                        improved=best.content_hash != original.content_hash,
+                        improved=(None if pairwise_mode else best.content_hash != original.content_hash),
                         generated_tool_audit_required=policy.require_clean_generated_tools,
                         goal_verified=goal_verified,
                         recommendation_block_reason=withdrawal_reason,

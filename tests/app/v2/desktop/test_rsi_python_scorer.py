@@ -5,7 +5,14 @@ from pydantic import ValidationError
 
 from app.v2.desktop.backend.rsi_evaluation import ScorerImport, ScorerSelection
 from tests.sagents.v2.test_python_scorer import request as scoring_request
-from tests.app.v2.desktop.test_rsi import RsiModel, setup_service, start_request, authored_evaluation_response
+from tests.app.v2.desktop.test_rsi import RsiModel, setup_service, start_request as base_start_request, authored_evaluation_response
+
+
+def start_request(*args, **kwargs):
+    # These fixtures assert exact call/recovery counts for one trial. Production
+    # defaults may use repeated evaluations; repetition has separate coverage.
+    return base_start_request(*args, **kwargs).model_copy(update={
+        'evaluation_repeats': 1, 'human_test_repeats': 1})
 
 
 @pytest.mark.asyncio
@@ -364,7 +371,7 @@ async def test_imported_scorer_persists_selected_python_and_keeps_host_versions_
         assert selection.binding_id == stored['binding_hash']
         restored = PythonExecutionScorer(path=stored['path'], source_hash=stored['source_hash'],
             descriptor=stored['descriptor'], python_executable=stored['python_executable'],
-            dependency_manifest=stored['dependency_manifest'])
+            dependency_manifest=stored['dependency_manifest'], worker_source_root=stored['worker_source_root'])
         assert (await restored.score(scoring_request())).grade.score == .8
         assert 'python_executable' not in selected
     finally:

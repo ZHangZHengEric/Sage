@@ -1,3 +1,4 @@
+from pathlib import Path
 import json
 
 import httpx
@@ -89,11 +90,12 @@ async def test_bridge_tools_route_to_one_authenticated_runtime(tmp_path):
         agents = await server.call_tool("rsi_agents", {})
         assert "secret" not in str(agents)
         await server.call_tool("rsi_start", {"agent_id": "a", "goal": "Become support", "request_id": "intent-1",
-            "optimization_scope": ["instructions", "tools"], "target_score": .98, "patience": 4, "stability_passes": 3})
+            "optimization_scope": ["instructions", "tools"], "lint_environment": {"root": "/tmp/lint", "node": "/tmp/node"}, "target_score": .98, "patience": 4, "stability_passes": 3})
         body = json.loads(next(r for r in requests if r.method == "POST").content)
-        assert body["max_concurrency"] == 3 and body["validation_case_count"] == 24
+        assert body["max_concurrency"] == 8 and body["validation_case_count"] == 24
         assert body["optimization_scope"] == ["instructions", "tools"]
-        assert body["rounds"] == 8 and body["suite"] is None and body["human_test_count"] == 12
+        assert body["lint_environment"] == {"root": str(Path("/tmp/lint").resolve()), "node": str(Path("/tmp/node").resolve())}
+        assert body["rounds"] == 5 and body["suite"] is None and body["human_test_count"] == 12
         assert "final_suite" not in body
         assert body["stopping_policy"] == {"target_score": .98, "patience": 4, "stability_passes": 3}
         questions = await server.call_tool("rsi_questions", {"agent_id": "a", "run_id": "r"})
@@ -142,6 +144,36 @@ async def test_unknown_mutation_outcome_is_never_retried(tmp_path):
         with pytest.raises(RuntimeError, match="Do not repeat"):
             await bridge.request("POST", "/api/v2/agents/a/rsi", json={})
         assert len(posts) == 1
+    finally:
+        await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_pairwise_start_forwards_imported_dataset_and_plugin_without_applying(tmp_path):
+    registry(tmp_path)
+    posts = []
+    def handler(request):
+        if request.url.path == '/health':
+            data = {'protocol': SIDECAR_PROTOCOL, 'revision': SIDECAR_REVISION, 'build_id': 'test'}
+        elif '/runtime/clients/' in request.url.path:
+            data = {'lease_ttl_seconds': 30}
+        else:
+            posts.append(request)
+            data = {'id': 'real-job', 'status': 'running'}
+        return httpx.Response(200, json={'code': 0, 'data': data})
+    bridge = DesktopBridge(tmp_path, transport=httpx.MockTransport(handler))
+    try:
+        server = create_server(tmp_path, bridge=bridge)
+        await server.call_tool('rsi_start', {'agent_id': 'web', 'goal': 'Beauty', 'request_id': 'web-intent',
+            'builtin_scoring': 'pairwise', 'dataset_version_id': 'dataset', 'scorer_id': 'screenshots',
+            'rounds': 1, 'initial_training_case_count': 2, 'grow_training': False, 'training_cases_per_round': 0,
+            'call_timeout_seconds': 600, 'human_test_repeats': 1})
+        assert len(posts) == 1 and posts[0].url.path == '/api/v2/agents/web/rsi'
+        value = json.loads(posts[0].content)
+        assert value['builtin_scoring']['mode'] == 'pairwise'
+        assert value['dataset_version_id'] == 'dataset' and value['scorer_id'] == 'screenshots'
+        assert value['evaluation_aggregation'] == 'mean' and not value['grow_training']
+        assert value['initial_training_case_count'] == 2 and value['call_timeout_seconds'] == 600
     finally:
         await bridge.close()
 

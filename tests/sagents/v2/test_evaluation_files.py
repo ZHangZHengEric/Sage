@@ -10,6 +10,22 @@ from sagents.v2.optimization.evaluation_files import (
 from tests.sagents.v2.test_package_optimizer import bundle
 
 
+def test_structured_reply_reads_terminal_assistant_message_without_progress_or_tool_data():
+    def message(text, **fields):
+        return {'run_id':'run','status':'completed','data':{'kind':'message','role':'assistant',
+            'content':[{'kind':'text','text':text}]}, **fields}
+    observation = OptimizationObservation(state='completed',output='Reading evidence...\n{"score":1}',evidence={
+        'run_id':'run','final_items':[message('Reading evidence...'),message('{"score":1}'),
+            {'data':{'kind':'tool_result','content':[{'kind':'text','text':'{"score":0}'}]}}]})
+    assert evaluation_response(observation,False) == '{"score":1}'
+    observation.evidence['final_items'].append(message('Not a JSON reply'))
+    assert evaluation_response(observation,False) == 'Not a JSON reply'
+    observation.evidence['final_items'][-1]['status'] = 'failed'
+    with pytest.raises(ValueError,match='incomplete'):
+        evaluation_response(observation,False)
+    assert evaluation_response(OptimizationObservation(state='completed',output='  {}  '),False) == '{}'
+
+
 def evaluator():
     package = bundle('evaluator')
     definition = package.manifest.agents['assistant'].model_copy(update={'tools': ('file_read', 'file_write')})

@@ -211,7 +211,9 @@ def validate_assessment_evidence(assessment, source, *, file_mode=False):
         return
     if not hasattr(diagnosis, 'findings'):
         return
-    if file_mode and isinstance(source.get('observation'), dict):
+    if source.get('_evaluation_artifacts'):
+        available = set(range(len(source['_evaluation_artifacts'])))
+    elif file_mode and isinstance(source.get('observation'), dict):
         messages = conversation_messages(OptimizationObservation.model_validate(source['observation']),
             conversation=source.get('conversation') or (), initial_input=source.get('case', {}).get('input'))
         available = set(range(len(messages)))
@@ -228,6 +230,21 @@ def validate_assessment_evidence(assessment, source, *, file_mode=False):
 
 def evaluation_response(observation, file_mode):
     if not file_mode:
+        # Tool-using agents can emit progress messages before their final JSON.
+        # Preserve the full output for audit, but parse only the final assistant
+        # message. Never search earlier text/tool results for a usable judgment.
+        evidence = observation.evidence
+        run_id = evidence.get('run_id')
+        messages = [item for item in evidence.get('final_items', ())
+            if isinstance(item, dict) and item.get('data', {}).get('kind') == 'message'
+            and item['data'].get('role') == 'assistant'
+            and (run_id is None or item.get('run_id') == run_id)]
+        if messages:
+            final = messages[-1]
+            if final.get('status') not in {None, 'completed'}:
+                raise ValueError('Terminal structured response is incomplete')
+            return ''.join(block.get('text', '') for block in final['data'].get('content', ())
+                if block.get('kind') == 'text').strip()
         return observation.output.strip()
     if observation.evidence.get('evaluation_record_error'):
         raise ValueError(observation.evidence['evaluation_record_error'])

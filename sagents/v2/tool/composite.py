@@ -23,6 +23,20 @@ from sagents.v2.contracts.errors import (
 from sagents.v2.contracts.principals import RequestContext
 
 
+async def _propagate_unknown_name(catalog, name, run_id):
+    """Classify a missing name without granting or invoking any Tool.
+
+    Known but ungranted Tools must still produce a policy denial. A name absent
+    from the underlying catalog instead uses the engine's existing, explicitly
+    not-applied validation feedback path.
+    """
+    try:
+        await catalog.get_tool(name, run_id=run_id)
+    except SageV2Error as error:
+        if error.info.code == "tool.not_found":
+            raise
+
+
 class FilteredToolCatalog:
     """Least-privilege view over a catalog for one resolved Agent/Run."""
 
@@ -39,6 +53,7 @@ class FilteredToolCatalog:
 
     async def get_tool(self, name: str, *, run_id: str) -> ToolDefinition:
         if name not in self._allowed_names:
+            await _propagate_unknown_name(self._catalog, name, run_id)
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="tool.not_enabled",
@@ -146,6 +161,7 @@ class InvocationGrantToolCatalog:
 
     async def get_tool(self, name: str, *, run_id: str) -> ToolDefinition:
         if name not in await self._allowed(run_id):
+            await _propagate_unknown_name(self._catalog, name, run_id)
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="tool.not_enabled",

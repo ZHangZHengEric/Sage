@@ -92,9 +92,10 @@ def verify_capture(expected, observed):
 
 
 class DependencyCapture:
-    def __init__(self, entry, *, bind_runtime=False):
+    def __init__(self, entry, *, bind_runtime=False, capture_reads=True):
         self.entry = Path(entry).resolve()
         self.bind_runtime = bind_runtime
+        self.capture_reads = capture_reads
         self.files = {}
         self.active, self.hashing = True, False
         # Installed libraries are version-bound rather than hashing large native
@@ -117,7 +118,7 @@ class DependencyCapture:
         self.files[key] = digest
 
     def _audit(self, event, args):
-        if not self.active or self.hashing or event != 'open' or not isinstance(args[0], (str, bytes)):
+        if not self.capture_reads or not self.active or self.hashing or event != 'open' or not isinstance(args[0], (str, bytes)):
             return
         name, mode, flags = args
         if (isinstance(mode, str) and any(c in mode for c in 'wax+')) or (

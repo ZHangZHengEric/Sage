@@ -119,7 +119,9 @@ class ScorerModelGateway:
         if self.base_url is None:
             raise RuntimeError('Scorer model API is not running')
         token = secrets.token_urlsafe(32)
-        self._leases[token] = {'case_id': request.case.id, 'split': request.case.split, 'calls': 0}
+        case = getattr(request, 'case', None)
+        self._leases[token] = {'case_id': case.id if case is not None else 'training-summary',
+            'split': case.split if case is not None else 'training', 'calls': 0}
         try:
             yield ScorerModelAPI(protocol='openai-responses', base_url=self.base_url,
                 api_key=token, model=self.model, max_output_tokens=self.max_output_tokens,

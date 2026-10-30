@@ -14,7 +14,10 @@ from sagents.v2.optimization.scorer_dependencies import (
 
 
 class ScorerExecutionError(RuntimeError):
-    pass
+    def __init__(self, message, *, code="scorer.execution_failed"):
+        super().__init__(message)
+        self.code = code
+
 
 
 class PythonExecutionScorer:
@@ -22,7 +25,8 @@ class PythonExecutionScorer:
     worker_module = "sagents.v2.optimization.python_scorer_worker"
 
     def __init__(self, *, path, source_hash, descriptor, timeout=120, model_api=None, model_api_factory=None,
-                 dependency_manifest=None, python_executable=None):
+                 dependency_manifest=None, python_executable=None, worker_source_root=None):
+        self.worker_source_root = Path(worker_source_root).resolve() if worker_source_root else Path(__file__).resolve().parents[3]
         self.path = Path(path).resolve()
         self.source_hash = source_hash
         self.descriptor = self.descriptor_type.model_validate(descriptor)
@@ -61,12 +65,12 @@ class PythonExecutionScorer:
 
     async def _execute(self, payload, *, validate=False, model_api=None):
         if hashlib.sha256(self.path.read_bytes()).hexdigest() != self.source_hash:
-            raise ScorerExecutionError('frozen scorer source changed')
+            raise ScorerExecutionError('frozen scorer source changed', code='scorer.source_changed')
         try:
             if self.dependency_manifest is not None:
                 verify_dependencies(self.dependency_manifest, check_environment=self.python_executable is None)
         except ScorerDependencyError as error:
-            raise ScorerExecutionError(str(error)) from error
+            raise ScorerExecutionError(str(error), code='scorer.dependencies_changed') from error
         # Do not inherit model credentials from the Desktop process environment.
         environment = {'PATH': os.environ.get('PATH', os.defpath), 'PYTHONIOENCODING': 'utf-8',
                        'LANG': os.environ.get('LANG', 'en_US.UTF-8')}
@@ -78,12 +82,15 @@ class PythonExecutionScorer:
         if verify_in_worker:
             payload = json.dumps({'request': json.loads(payload) if payload else None,
                                   'dependencies': self.dependency_manifest}).encode()
-        process = await asyncio.create_subprocess_exec(self.python_executable or sys.executable, '-I', '-m',
-            self.worker_module, str(self.path),
+        # -I suppresses ambient PYTHONPATH; explicitly select the admitted source tree
+        # before editable-install finders can resolve the mutable checkout.
+        bootstrap = "import sys,runpy;sys.path.insert(0,sys.argv.pop(1));runpy.run_module(sys.argv.pop(1),run_name='__main__')"
+        process = await asyncio.create_subprocess_exec(self.python_executable or sys.executable, '-I', '-c',
+            bootstrap, str(self.worker_source_root), self.worker_module, str(self.path),
             '--capture-dependencies', *(['--validate'] if validate else []),
             *(['--bind-runtime'] if self.python_executable else []),
             *(['--verify-dependencies'] if verify_in_worker else []),
-            cwd=self.path.parent, env=environment,
+            cwd=self.path.parent, env=environment, start_new_session=(os.name == "posix"),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=4 * 1024 * 1024 + 1)
         async def write():
@@ -112,7 +119,7 @@ class PythonExecutionScorer:
                     if code:
                         raise ScorerExecutionError(f'scorer process exited with code {code}')
                     if hashlib.sha256(self.path.read_bytes()).hexdigest() != self.source_hash:
-                        raise ScorerExecutionError('frozen scorer source changed')
+                        raise ScorerExecutionError('frozen scorer source changed', code='scorer.source_changed')
                     result = json.loads(output)
                     if isinstance(result, dict) and 'dependency_manifest' in result:
                         observed = result['dependency_manifest']
@@ -123,7 +130,7 @@ class PythonExecutionScorer:
                             else:
                                 verify_dependencies(observed, check_environment=self.python_executable is None)
                         except ScorerDependencyError as error:
-                            raise ScorerExecutionError(str(error)) from error
+                            raise ScorerExecutionError(str(error), code='scorer.dependencies_changed') from error
                         self.dependency_manifest = self.dependency_manifest or observed
                         result = result['payload']
                         output = json.dumps(result).encode()
@@ -132,7 +139,7 @@ class PythonExecutionScorer:
                     error = result.get('execution_error') if isinstance(result, dict) else None
                     if error is not None:
                         if error.get('code') == 'scorer.dependencies_changed':
-                            raise ScorerExecutionError('frozen scorer dependencies changed')
+                            raise ScorerExecutionError('frozen scorer dependencies changed', code='scorer.dependencies_changed')
                         if error.get('retryable') and str(error.get('code', '')).startswith('model.'):
                             from sagents.v2.optimization.recovery import OptimizationTransientFailure
                             raise OptimizationTransientFailure('Scorer ModelProvider transport interrupted')
@@ -144,6 +151,15 @@ class PythonExecutionScorer:
                         send.cancel()
                         await asyncio.gather(send, return_exceptions=True)
         finally:
-            if process.returncode is None:
+            if os.name == "posix":
+                # Reap only this worker's own group, including Playwright/Chromium
+                # descendants. A killed parent must not leave a busy browser behind.
+                import signal
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            elif process.returncode is None:
                 process.kill()
+            if process.returncode is None:
                 await process.wait()

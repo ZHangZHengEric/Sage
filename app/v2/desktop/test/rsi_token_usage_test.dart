@@ -66,13 +66,41 @@ void main() {
         await tester.tap(find.text('Token 用量'));
         await tester.pumpAndSettle();
         expect(find.byType(DataTable), findsOneWidget);
-        expect(find.text('1050'), findsNWidgets(2));
+        expect(find.text('1.1K'), findsNWidgets(3));
+        expect(find.text('1050'), findsNothing);
         expect(find.text('总计'), findsOneWidget);
         expect(find.textContaining('合计 = 输入 + 输出'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }
   }
+  testWidgets('large token values use B M K in the detail table', (
+    tester,
+  ) async {
+    final data = usage();
+    (data['total'] as Map).addAll(<String, num>{
+      'input_tokens': 1264000000,
+      'cached_input_tokens': 488772762,
+      'output_tokens': 19007885,
+      'total_tokens': 1283007885,
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RsiTokenUsage(usage: data, chinese: true),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Token 用量'));
+    await tester.pumpAndSettle();
+    expect(find.text('1.26B'), findsOneWidget);
+    expect(find.text('488.77M'), findsOneWidget);
+    expect(find.text('19.01M'), findsOneWidget);
+    expect(find.text('1264000000'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'missing and legacy usage are visible as incomplete rather than zero',
     (tester) async {

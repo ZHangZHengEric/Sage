@@ -1,0 +1,20 @@
+{
+  "rounds": 5,
+  "optimization_scope": [
+    "instructions",
+    "skills"
+  ],
+  "max_skill_count": 5,
+  "evaluation_repeats": 2,
+  "human_test_repeats": 2,
+  "max_concurrency": 8,
+  "initial_training_case_count": 20,
+  "validation_case_count": 10,
+  "human_test_count": 10,
+  "grow_training": false,
+  "training_cases_per_round": 0,
+  "builtin_scoring": {
+    "mode": "pairwise"
+  },
+  "call_timeout_seconds": 3600
+}

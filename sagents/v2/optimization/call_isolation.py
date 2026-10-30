@@ -117,3 +117,23 @@ async def settle_cases(cases, evaluate, *, max_concurrency, on_error=None, stop_
             error.rsi_local_retries_exhausted = True
         raise error
     return values
+
+
+def safe_failure_details(error):
+    """Bounded allowlisted identities; never persist exception/provider messages."""
+    allowed = {"scorer.execution_failed", "scorer.source_changed", "scorer.dependencies_changed"}
+    leaves = []
+    def visit(value, depth=0):
+        if len(leaves) >= 16 or depth > 8:
+            return
+        if isinstance(value, BaseExceptionGroup):
+            for child in value.exceptions:
+                visit(child, depth + 1)
+        else:
+            row = {"error_type": type(value).__name__}
+            code = getattr(value, "code", None)
+            if code in allowed:
+                row["code"] = code
+            leaves.append(row)
+    visit(error)
+    return leaves

@@ -10,6 +10,29 @@ def guarded_case():
     return OptimizationCase(id='task', input='Complete the fixed task', rubric='Official task goal')
 
 
+@pytest.mark.asyncio
+async def test_native_conversation_attests_default_workspace_for_each_run(tmp_path):
+    import time
+    from sagents.v2.optimization.runner import _NativeConversation
+    from tests.sagents.v2.test_package_optimizer import bundle, context
+    class Runner:
+        calls = 0
+        async def authorize(self, *args):
+            pass
+        async def _send(self, *args, **kwargs):
+            self.calls += 1
+            return OptimizationObservation(state='completed',output='{}',
+                evidence={'session_id':'session','run_id':f'run-{self.calls}'})
+    conversation = _NativeConversation(Runner(),None,bundle(),'assistant',context(),time.monotonic(),workspace=tmp_path,
+        execution_workspace=tmp_path)
+    for i in (1, 2):
+        observation = await conversation.send('A task')
+        info = observation.evidence['workspace_attestation']
+        assert info['protocol'] == 'sage.rsi.workspace/v1'
+        assert info['run_id'] == observation.evidence['run_id'] == f'run-{i}'
+        assert tmp_path.resolve().as_posix() in info['roots']
+
+
 def guarded_execution(*, canonical=False):
     call = {'item_id': 'call-item', 'run_id': 'run', 'step_id': 'step', 'status': 'completed',
             'data': {'kind': 'tool_call', 'tool_call_id': 'call', 'tool_name': 'mcp_world_step',
@@ -39,6 +62,103 @@ def guarded_execution(*, canonical=False):
         events[1:1] = [{'type': 'item.completed', 'run_id': 'run', 'run_sequence': index,
                         'data': {'item': item}} for index, item in enumerate([call, result], start=2)]
     return OptimizationObservation(state='suspended', output='', evidence=evidence)
+
+
+def rejected_native_execution():
+    original = guarded_execution(canonical=True)
+    e = deepcopy(original.evidence)
+    args = {'file_path':'index.html','operations':[]}
+    error = {'code':'tool.file_update_not_applied','metadata':{'side_effect_state':'not_applied'}}
+    e['final_items'][0]['data'].update(tool_name='file_update', arguments=args)
+    e['final_items'][1].update(status='failed')
+    e['final_items'][1]['data'].update(error=error, metadata={})
+    e['runtime_events'][0]['data'].update(tool_name='file_update',arguments=args)
+    e['runtime_events'][1]['type'] = 'tool.call.failed'
+    e['runtime_events'][1]['data'].update(state='failed',error=deepcopy(error))
+    return original.model_copy(update={'evidence':e,'output':'A recorded artifact'})
+
+
+def test_loop_prefix_accepts_only_proven_not_applied_native_rejections():
+    observation = rejected_native_execution()
+    closed = close_single_turn_episode(observation, guarded_case())
+    assert closed is not None and closed.state == 'suspended'
+    assert closed.evidence['episode_termination']['rejected_not_applied_calls'] == 1
+
+
+@pytest.mark.parametrize('defect', ['unknown_effect','missing_receipt','changed_error','external_tool'])
+def test_rejected_loop_prefix_cannot_hide_uncertain_or_external_effects(defect):
+    observation = rejected_native_execution()
+    e = deepcopy(observation.evidence)
+    if defect == 'unknown_effect':
+        e['final_items'][1]['data']['error']['metadata']['side_effect_state'] = 'unknown'
+    elif defect == 'missing_receipt':
+        e['runtime_events'].pop(1)
+    elif defect == 'changed_error':
+        e['runtime_events'][1]['data']['error']['code'] = 'different'
+    else:
+        e['final_items'][0]['data']['tool_name'] = e['runtime_events'][0]['data']['tool_name'] = 'mcp_world_step'
+    assert close_single_turn_episode(observation.model_copy(update={'evidence':e}), guarded_case()) is None
+
+
+@pytest.mark.asyncio
+async def test_pairwise_loop_limit_is_both_failed_without_fabricating_run_success():
+    from sagents.v2.optimization.pairwise import PairwiseEvaluator
+    async def judge(data, case):
+        return {'winner':'tie','rationale':'Same rendered result'}
+    engine = PairwiseEvaluator(binding='closed-prefix',judge=judge)
+    observation = rejected_native_execution()
+    await engine.grade(guarded_case(),observation,trial=1,is_reference=True)
+    grade = await engine.grade(guarded_case(),observation,trial=1)
+    assert grade.score == 0
+    assert grade.scorer_details["pairwise"]["outcome"] == "both_failed"
+    assert observation.state == 'suspended'
+
+
+def test_website_can_replay_verified_loop_prefix_but_not_a_forged_closure():
+    from evaluation_datasets.web_design.workspace import replay
+    original = guarded_execution(canonical=True)
+    e = deepcopy(original.evidence)
+    args = {'file_path':'index.html','content':'<h1>Artifact</h1>','mode':'overwrite'}
+    e['final_items'][0]['data'].update(tool_name='file_write',arguments=args)
+    e['runtime_events'][0]['data'].update(tool_name='file_write',arguments=args)
+    e['final_items'][1]['data'].update(content=[{'kind':'json','value':{
+        'status':'success','file_path':'index.html','mode':'overwrite'}}],metadata={})
+    request = {'case':guarded_case().model_dump(mode='json'),
+        'observation':original.model_copy(update={'evidence':e}).model_dump(mode='json')}
+    assert replay(request)[0]['index.html'] == '<h1>Artifact</h1>'
+    request['observation']['evidence']['runtime_events'] = []
+    with pytest.raises(ValueError,match='verified closed'):
+        replay(request)
+
+
+@pytest.mark.asyncio
+async def test_failed_human_execution_is_archived_separately_from_completed_measurements(tmp_path):
+    import json
+    from contextlib import asynccontextmanager
+    from pathlib import Path
+    from sagents.v2.optimization.observer import IsolatedTestEvaluator, HumanTestExecutionFailure
+    from tests.sagents.v2.test_package_optimizer import Runner, optimizer, bundle, context
+    original = guarded_execution(canonical=True)
+    evidence = deepcopy(original.evidence)
+    evidence['runtime_events'][2]['data']['payload']['reason_code'] = 'user.clarification'
+    observation = original.model_copy(update={'evidence':evidence})
+    class Sessions:
+        @asynccontextmanager
+        async def conversation(self, *args):
+            class Session:
+                async def send(self, content):
+                    return observation
+            yield Session()
+    roles = optimizer(Runner())
+    evaluator = IsolatedTestEvaluator(runner=Sessions(),evaluator=roles.evaluator,driver=roles.test_driver,
+        context=context(),goal='Fixed task',evidence_directory=tmp_path,checkpoint_binding_id='frozen')
+    with pytest.raises(HumanTestExecutionFailure) as caught:
+        await evaluator(bundle(),guarded_case())
+    archive = Path(caught.value.rsi_failure_metadata['evidence_archive'])
+    payload = json.loads(archive.read_text())['payload']
+    assert payload['conversation'][0]['target']['state'] == 'suspended'
+    assert payload['grade'] is None
+    assert not (tmp_path/'.phase-checkpoints').exists()
 
 
 @pytest.mark.parametrize('canonical', [False, True])
@@ -142,7 +262,7 @@ async def test_human_checkpoint_scores_closed_prefix_without_repeating_target():
 
 
 @pytest.mark.asyncio
-async def test_optimizer_sends_closed_episode_to_fixed_model_rubric():
+async def test_optimizer_counts_native_loop_limit_as_case_failure():
     import json
     from sagents.v2.optimization.contracts import OptimizationSuite
     from tests.sagents.v2.test_package_optimizer import Runner, optimizer, bundle, context
@@ -164,7 +284,7 @@ async def test_optimizer_sends_closed_episode_to_fixed_model_rubric():
             guarded_case().model_copy(update={'id': 'second', 'input': 'A separate fixed task', 'split': 'validation'}))))
     observed = result.report.baseline.cases[0]
     assert observed.observation.state == 'suspended'
-    assert observed.grade.rationale == 'Fixed goal was not completed'
+    assert observed.grade.rationale == 'Target execution failed: loop.repeated_pattern'
 
 
 def test_adaptive_selection_uses_score_of_valid_closed_episode():

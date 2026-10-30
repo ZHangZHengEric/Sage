@@ -50,7 +50,7 @@ def engine_fingerprint():
         import importlib.util
         import marshal
         names = [f"sagents.v2.optimization.{name}" for name in ('optimizer', 'contracts', 'feedback',
-                 'principles', 'generator', 'runner', 'recovery', 'native_projection', 'native_recovery', 'native_episode', 'observer', 'diagnostics', 'experiments', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'dataset_versions', 'dataset_summary', 'preflight', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'scorer_dependencies', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints', 'user_simulator', 'default_user_simulator', 'python_user_simulator', 'python_user_simulator_worker', 'user_simulator_runtime')]
+                 'principles', 'generator', 'runner', 'recovery', 'native_projection', 'native_recovery', 'native_episode', 'observer', 'diagnostics', 'experiments', 'evidence', 'experience', 'package_workspace', 'scoring', 'dataset', 'dataset_versions', 'dataset_summary', 'preflight', 'environment', 'scorer_runtime', 'python_scorer', 'python_scorer_worker', 'scorer_dependencies', 'evaluation_files', 'execution_records', 'call_isolation', 'human_checkpoints', 'user_simulator', 'default_user_simulator', 'python_user_simulator', 'python_user_simulator_worker', 'user_simulator_runtime', 'pairwise', 'comparison_plugin', 'comparison_plugin_worker')]
         names.extend(('sagents.v2.tool.generated', 'sagents.v2.tool.plugins.result_file', 'sagents.v2.optimization.builtin_scoring'))
         hashes = {}
         for name in names:
@@ -70,8 +70,15 @@ def case_key(package_hash, phase, round, trial, case_id):
 
 
 def call_key(data):
+    # Separate anonymous media orders within the same case/round. Their textual
+    # prompts can be identical, but each requires its own completed judgment.
+    try:
+        payload = json.loads(data['request'])
+        media_binding = payload.get('visual_artifact_binding') if isinstance(payload, dict) else None
+    except (ValueError, TypeError):
+        media_binding = None
     return (data['role'], data.get('phase', 'optimization'), data.get('round', 0),
-            data.get('trial', 1), data.get('case_id'), data['request'])
+            data.get('trial', 1), data.get('case_id'), media_binding, data['request'])
 
 
 class OptimizationRecovery:

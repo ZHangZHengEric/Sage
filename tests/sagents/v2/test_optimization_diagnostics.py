@@ -13,6 +13,23 @@ def diagnosis(index=0, cause='Skipped required confirmation'):
         'scope': 'skills', 'confidence': 'confirmed'}], 'strengths': [], 'uncertainties': [], 'coverage': 'Recorded execution'}
 
 
+def test_pairwise_reference_diagnoses_do_not_present_placeholder_as_measured_quality():
+    from sagents.v2.optimization.contracts import OptimizationCaseResult, OptimizationDiagnosis
+    grade = OptimizationGrade(score=.5, passed=True, rationale='Frozen reference, not quality',
+        diagnosis=OptimizationDiagnosis.model_validate(diagnosis()),
+        scorer_details={'pairwise': {'reference': True, 'trial': 1}})
+    case = OptimizationCaseResult(case=suite().cases[0],
+        observation=OptimizationObservation(state='completed', output='website'), grade=grade)
+    rows = synthesis_evidence([case])
+    assert 'score' not in rows[0] and 'trial_scores' not in rows[0]
+    assert rows[0]['measurement_context']['kind'] == 'pairwise_reference'
+    assert rows[0]['measurement_context']['comparison_observed'] is False
+    assert rows[0]['diagnoses'][0]['findings'][0]['cause'] == 'Skipped required confirmation'
+    measured = case.model_copy(update={'grade': grade.model_copy(update={
+        'scorer_details': {'pairwise': {'outcome': 'tie'}}})})
+    assert synthesis_evidence([measured])[0]['score'] == .5
+
+
 def test_chunking_is_lossless_even_for_one_huge_escaped_tool_payload():
     entries = [{'tool_result': '\\"\n' * 10000}, {'user': 'last request'}]
     chunks = execution_chunks(entries, max_chars=2048)
