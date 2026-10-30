@@ -764,6 +764,11 @@ void main() {
           };
           final run = <String, Object?>{
             'id': 'repetitions',
+            'call_pool': {
+              'calls': [
+                {'input': questions[1], 'trial': 2, 'state': 'running'},
+              ],
+            },
             'status': snapshot ? 'completed' : 'running',
             'evaluation_repeats': 2,
             if (snapshot)
@@ -1405,6 +1410,15 @@ void main() {
                           run: {
                             'id': 'run-1',
                             'status': status,
+                            'call_pool': {
+                              'calls': [
+                                {
+                                  'input': questions[1],
+                                  'trial': 1,
+                                  'state': 'running',
+                                },
+                              ],
+                            },
                             'rounds': 3,
                             'iteration': 1,
                           },

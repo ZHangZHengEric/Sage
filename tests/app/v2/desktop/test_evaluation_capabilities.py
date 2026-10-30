@@ -88,7 +88,8 @@ async def test_desktop_prepare_only_plugin_runs_visual_eval_and_summary(tmp_path
         assert final['test_observations'] and all(row['status'] == 'completed' for row in final['test_observations'])
         assert 'PRIVATE hidden visual brief' not in str(final['result']['report']['agent_calls'])
         assert model.visual_requests >= 5  # Initial training analysis plus both orders for train/dev.
-        assert final['result']['report']['baseline']['cases'][0]['grade']['diagnosis']
+        baseline_case = final['result']['report']['baseline']['cases'][0]
+        assert all(trial['grade']['diagnosis'] for trial in (baseline_case['trials'] or [baseline_case]))
         # Resume after only the first anonymous order has completed. The other
         # order must not consume its cached judgment, even with identical text.
         from sagents.v2.optimization.recovery import OptimizationRecovery

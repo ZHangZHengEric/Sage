@@ -107,4 +107,3 @@ if __name__ == '__main__':
             sys.stdout.flush()
             sys.exit(0)
         sys.stdout.write(json.dumps({'status': 'failed', 'error': f'{type(error).__name__}: {error}'[:1000]}))
-
