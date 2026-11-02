@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 from uuid import uuid4
 
 from app.v2.server.conversations.bindings import SessionBinding
@@ -55,12 +55,25 @@ class IMService:
                 self.host.paths.data_root, allow_create=not connections
             )
         except RuntimeError:
-            LOGGER.warning("server.im.key.unavailable", "IM credential key is unavailable")
+            LOGGER.warning(
+                "server.im.key.unavailable", "IM credential key is unavailable"
+            )
         for connection in connections:
             try:
                 if self.credentials is None:
                     raise ValueError("key unavailable")
-                self.credentials.open(connection.owner_id, connection.config)
+                parsed = self.credentials.open(connection.owner_id, connection.config)
+                # Migrate only operational connection configuration, preserving
+                # pairing, inbox/outbox and Run identities.
+                if "tenant_key" in connection.config:
+                    if not await self.store.migrate_config(
+                        connection.id,
+                        connection.owner_id,
+                        self.credentials.seal(connection.owner_id, parsed),
+                    ):
+                        self._credential_errors[connection.id] = (
+                            "同一飞书应用已配置，请保留一个连接"
+                        )
             except ValueError:
                 await self._disable_unavailable(connection)
         registry = ExtensionRegistry()
@@ -114,14 +127,20 @@ class IMService:
 
     async def channel(self, conn):
         if self.credentials is None or self.credentials_error(conn.id):
-            raise error("credentials_unavailable", self.credentials_error(conn.id) or "IM 凭据加密密钥不可用，请恢复服务端密钥备份")
+            raise error(
+                "credentials_unavailable",
+                self.credentials_error(conn.id)
+                or "IM 凭据加密密钥不可用，请恢复服务端密钥备份",
+            )
         if conn.id not in self._channels:
             factory = self.scope.providers.require("im.channel-factory", "feishu")
             try:
                 parsed = self.credentials.open(conn.owner_id, conn.config)
             except ValueError:
                 await self._disable_unavailable(conn)
-                raise error("credentials_unavailable", self.credentials_error(conn.id)) from None
+                raise error(
+                    "credentials_unavailable", self.credentials_error(conn.id)
+                ) from None
             self._channels[conn.id] = factory.create(parsed.model_dump())
         return self._channels[conn.id]
 
@@ -129,7 +148,9 @@ class IMService:
         return self._credential_errors.get(cid, "")
 
     async def _disable_unavailable(self, conn):
-        self._credential_errors[conn.id] = "连接凭据无法解密，请恢复服务端密钥备份后测试凭据并重新启用"
+        self._credential_errors[conn.id] = (
+            "连接凭据无法解密，请恢复服务端密钥备份后测试凭据并重新启用"
+        )
         async with self.store.locked(conn.id) as (_, current):
             if current.enabled:
                 current.enabled = False
@@ -139,10 +160,16 @@ class IMService:
     async def check_credentials(self, conn):
         try:
             vault = IMCredentials.load(self.host.paths.data_root, allow_create=False)
-            vault.open(conn.owner_id, conn.config)
+            parsed = vault.open(conn.owner_id, conn.config)
+            if "tenant_key" in conn.config and not await self.store.migrate_config(
+                conn.id, conn.owner_id, vault.seal(conn.owner_id, parsed)
+            ):
+                raise error("account_conflict", "同一飞书应用已配置，请保留一个连接")
         except (RuntimeError, ValueError):
             await self._disable_unavailable(conn)
-            raise error("credentials_unavailable", self.credentials_error(conn.id)) from None
+            raise error(
+                "credentials_unavailable", self.credentials_error(conn.id)
+            ) from None
         self.credentials = vault
         self._credential_errors.pop(conn.id, None)
 
@@ -150,7 +177,11 @@ class IMService:
         conn = await self.store.get(cid, owner)
         if enabled:
             await self.check_credentials(conn)
-        return await self.store.set_enabled(cid, owner, revision, enabled)
+        result = await self.store.set_enabled(cid, owner, revision, enabled)
+        channel = self._channels.pop(cid, None)
+        if channel is not None:
+            await channel.close()
+        return result
 
     async def create(self, owner_id, agent_id, name, config):
         if (
@@ -158,26 +189,13 @@ class IMService:
             or await self.host.catalog.agent_owner(agent_id) != owner_id
         ):
             raise error("agent_not_found", "Owned Agent not found")
-        # P0 is a personal connection. Require a real public base for safe login
-        # links; never derive it from an inbound Host/X-Forwarded-Host header.
-        base = urlsplit(self.host.settings.public_base_url)
-        if (
-            base.scheme != "https"
-            or not base.hostname
-            or base.username
-            or base.password
-            or base.query
-            or base.fragment
-        ):
-            raise error(
-                "public_url_required",
-                "Configure SAGE_SERVER_PUBLIC_URL as a public HTTPS URL",
-            )
         parsed = FeishuConfig.model_validate(config)
         if len(await self.store.list_connections()) >= 200:
             raise error("capacity", "IM connection capacity reached")
         if self.credentials is None:
-            raise error("credentials_unavailable", "IM 凭据加密密钥不可用，请恢复服务端密钥备份")
+            raise error(
+                "credentials_unavailable", "IM 凭据加密密钥不可用，请恢复服务端密钥备份"
+            )
         stored = self.credentials.seal(owner_id, parsed)
         # Verify control before reserving the globally unique external account.
         factory = self.scope.providers.require("im.channel-factory", "feishu")
@@ -219,19 +237,8 @@ class IMService:
     async def pairing(self, cid, user):
         return await self.store.pairing(cid, user)
 
-    async def receive(self, cid, body, headers):
-        conn = await self.store.get(cid)
-        try:
-            event = (await self.channel(conn)).decode(body, headers)
-        except ValueError:
-            raise error(
-                "invalid_event", "Invalid Feishu event", ErrorCategory.AUTHENTICATION
-            ) from None
-        if isinstance(event, dict):
-            return event
-        if event is not None and conn.enabled:
-            await self.store.accept(cid, event)
-        return {"code": 0}
+    async def receive(self, cid, event, *, worker=None, auth_epoch=None):
+        await self.store.accept(cid, event, worker=worker, auth_epoch=auth_epoch)
 
     def context(self, conn):
         context = self.host.contexts.for_user(conn.owner_id)
@@ -281,7 +288,22 @@ class IMService:
     async def _process_connection(self, conn, cleanup):
         try:
             if not await self.store.claim(conn.id, self.worker):
+                channel = self._channels.pop(conn.id, None)
+                if channel is not None:
+                    await channel.close()
                 return
+            channel = await self.channel(conn)
+
+            async def admit(event):
+                await self.receive(
+                    conn.id, event, worker=self.worker, auth_epoch=conn.auth_epoch
+                )
+
+            receiving = sum(item.receiving for item in self._channels.values())
+            if not channel.receiving and receiving >= 8:
+                channel.state = "capacity"
+            else:
+                await channel.start(admit)
             rows = await self.store.inboxes(conn.id, active=True)
             # Existing Session serial admission remains authoritative;
             # do not repeatedly submit a second pending turn behind it.
@@ -443,7 +465,9 @@ class IMService:
                     resolved_spec_hash=self.host.application.composition_hash,
                     idempotency_key="im_" + row.message_key,
                 )
-                command = await self.notifications.bind(command, conn.owner_id, conn.id, binding_id=row.binding_id)
+                command = await self.notifications.bind(
+                    command, conn.owner_id, conn.id, binding_id=row.binding_id
+                )
                 await self.store.change_inbox(
                     row, self.worker, command=command.model_dump(mode="json")
                 )
@@ -465,11 +489,12 @@ class IMService:
             row, self.worker, state="watching", run_id=run_id, error=""
         )
 
-    def link(self, session_id):
+    def link(self, session_id, conn):
+        base = conn.config.get("web_url", "")
         return (
-            self.host.settings.public_base_url.rstrip("/")
-            + "/?thread="
-            + quote(session_id, safe="")
+            base + "/?thread=" + quote(session_id, safe="")
+            if base
+            else "Sage 会话 " + session_id
         )
 
     async def _watch(self, conn, row):
@@ -521,11 +546,11 @@ class IMService:
                 self.worker,
                 "interaction:" + suspension.suspension_id,
                 "任务需要你的确认或补充，请登录 Sage 继续：\n"
-                + self.link(row.session_id),
+                + self.link(row.session_id, conn),
             )
         elif run.state in TERMINAL_RUN_STATES:
             result = await access.get_run_result(row.run_id, context)
-            text = final_text(run, result, self.link(row.session_id))
+            text = final_text(run, result, self.link(row.session_id, conn))
             await self.store.project(row, self.worker, "final", text, final=True)
 
     async def _send(self, conn):

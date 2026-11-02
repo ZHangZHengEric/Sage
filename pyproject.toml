@@ -47,6 +47,7 @@ otel = [
   "opentelemetry-exporter-otlp>=1.20.0",
 ]
 server = [
+  "lark-oapi==1.7.5",
   "cryptography>=44.0.0",
   "ag-ui-protocol==0.1.19",
   "fastapi>=0.115.2",

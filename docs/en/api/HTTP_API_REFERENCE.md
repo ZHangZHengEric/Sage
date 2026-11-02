@@ -148,7 +148,6 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `DELETE` | `/api/im/deliveries/{delivery_id}` | `im` |
 | `POST` | `/api/im/deliveries/{delivery_id}/retries` | `im` |
 | `GET` | `/api/im/plugins` | `im` |
-| `POST` | `/api/im/webhooks/{cid}` | `im` |
 | `GET` | `/api/mcp` | `mcp` |
 | `POST` | `/api/mcp` | `mcp` |
 | `DELETE` | `/api/mcp/{name}` | `mcp` |

@@ -1,8 +1,8 @@
-"""Authenticated IM management and platform-authenticated Feishu Webhooks."""
+"""Authenticated owner-scoped IM management; Feishu events arrive over SDK sockets."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.v2.server.im.feishu import FeishuConfig
@@ -62,20 +62,18 @@ class RetryDelivery(BaseModel):
 
 
 def public(row, service):
-    base = service.host.settings.public_base_url.rstrip("/")
     return {
         "id": row.id,
         "name": row.name,
         "plugin": "com.sage.im.feishu",
         "owner_user_id": row.owner_id,
         "agent_id": row.agent_id,
-        "config": {key: row.config[key] for key in ("app_id", "tenant_key")},
+        "config": {"app_id": row.config["app_id"]},
         "credentials_configured": bool(row.config.get("credentials_ciphertext")),
         "credentials_error": service.credentials_error(row.id),
         "enabled": row.enabled,
         "revision": row.revision,
         "paired": bool(row.sender_id),
-        "webhook_url": base + "/api/im/webhooks/" + row.id if base else "",
     }
 
 
@@ -89,7 +87,7 @@ async def plugins(user: CurrentUser):
                     "name": "飞书",
                     "config_schema": FeishuConfig.model_json_schema(),
                     "capabilities": [
-                        "webhook",
+                        "websocket",
                         "private_text",
                         "final_reply",
                         "approval_link",
@@ -137,9 +135,7 @@ async def connection(cid: str, user: CurrentUser, service: IMDep):
 async def update(cid: str, body: UpdateConnection, user: CurrentUser, service: IMDep):
     return success(
         public(
-            await service.set_enabled(
-                cid, user.user_id, body.revision, body.enabled
-            ),
+            await service.set_enabled(cid, user.user_id, body.revision, body.enabled),
             service,
         )
     )
@@ -148,7 +144,8 @@ async def update(cid: str, body: UpdateConnection, user: CurrentUser, service: I
 @router.get("/connections/{cid}/status", response_model=ApiResponse[IMStatusPublic])
 async def status(cid: str, user: CurrentUser, service: IMDep):
     row = await service.store.get(cid, user.user_id)
-    state = "webhook_ready" if row.sender_id else "awaiting_pairing"
+    channel = service._channels.get(cid)
+    state = channel.state if channel is not None else "connecting"
     if service.credentials_error(cid):
         state = "unavailable"
     elif not row.enabled:
@@ -224,16 +221,6 @@ async def retry(
         allow_duplicate=body.allow_duplicate,
     )
     return success({"queued": True})
-
-
-@router.post("/webhooks/{cid}")
-async def webhook(cid: str, request: Request, service: IMDep):
-    body = bytearray()
-    async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > 65536:
-            raise HTTPException(413, "IM event too large")
-    return await service.receive(cid, bytes(body), dict(request.headers))
 
 
 @router.delete("/deliveries/{delivery_id}", response_model=ApiResponse[dict[str, bool]])

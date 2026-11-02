@@ -267,7 +267,6 @@ All interfaces are proposals, following existing JSON errors, field style, and r
 | `POST /api/im/connections/{id}/conversation-resets` | Create a new Session after ownership checks |
 | `GET /api/im/connections/{id}/deliveries` | Bounded failed/unknown delivery listing |
 | `POST /api/im/deliveries/{id}/retries` | Revision-controlled retry; unknown requires explicit duplicate-risk handling |
-| `/api/im/webhooks/{id}` | Plugin-method challenge/message/card callbacks |
 
 Management uses Sage login and ownership; webhooks use platform authentication. Validate typed schemas, Agent ownership, duplicate external-account claims, and credentials on create/update. Distinguish configuration, authentication, conflict, and retryable busy errors. Pagination follows ThreadPage.
 
@@ -296,3 +295,5 @@ Required integration scenarios include:
 - Reload/deletion, stale generation callbacks, backpressure, shutdown, temporary attachment cleanup, and media ownership.
 
 Validation needs contract tests, real database/SessionStore recovery tests, and platform sandbox-bot end-to-end tests. None were executed for this proposal; source research is not platform integration evidence.
+
+The current Feishu implementation uses the official `lark-oapi` SDK with long connections. It accepts App ID / App Secret and removes public Webhooks, user-supplied tenant_key, Verification Token and Encrypt Key. The Sage page automatically supplies its approval-link address without IM public-URL environment configuration. Application receivers are isolated and acknowledge only after committing the existing durable queue. Runs, personal pairing, cancellation, approvals and delivery recovery retain the existing pipeline.

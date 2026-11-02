@@ -75,7 +75,7 @@ class IMStore:
             owner_id=owner,
             agent_id=agent,
             name=name,
-            account_key=key("feishu", config["app_id"], config["tenant_key"]),
+            account_key=key("feishu", config["app_id"]),
             config=config,
         )
         try:
@@ -103,6 +103,31 @@ class IMStore:
             conn.auth_epoch += 1
             return conn
 
+    async def migrate_config(self, cid, owner, config):
+        for attempt in range(2):
+            try:
+                async with self.locked(cid, owner=owner) as (db, conn):
+                    account = key("feishu", config["app_id"])
+                    duplicate = await db.scalar(
+                        select(ConnectionRow.id).where(
+                            ConnectionRow.account_key == account,
+                            ConnectionRow.id != cid,
+                        )
+                    )
+                    if duplicate is not None:
+                        if conn.enabled:
+                            conn.enabled = False
+                            conn.revision += 1
+                            conn.auth_epoch += 1
+                        return False
+                    conn.config, conn.account_key = config, account
+                    return True
+            except IntegrityError:
+                # Another replica can claim the unique app identity after our
+                # read; retry once to observe it and disable the conflicting row.
+                if attempt:
+                    raise
+
     async def pairing(self, cid, owner):
         code = secrets.token_urlsafe(24)
         async with self.locked(cid, owner=owner) as (_, conn):
@@ -119,8 +144,14 @@ class IMStore:
             conn.pairing_attempts = 0
         return {"code": code, "expires_in": 600, "command": "/pair " + code}
 
-    async def accept(self, cid, event):
-        async with self.locked(cid) as (db, conn):
+    async def accept(self, cid, event, *, worker=None, auth_epoch=None):
+        async with self.locked(cid, worker=worker) as (db, conn):
+            if auth_epoch is not None and (
+                not conn.enabled or conn.auth_epoch != auth_epoch
+            ):
+                raise error(
+                    "grant_revoked", "IM connection changed", ErrorCategory.CONFLICT
+                )
             if not conn.enabled:
                 return
             mk, ek = key(cid, event.message_id), key(cid, event.event_id)
@@ -360,7 +391,8 @@ class IMStore:
     async def deliveries(self, cid, *, after=0, limit=50, unresolved=False):
         async with self.database.session() as db:
             stmt = select(DeliveryRow).where(
-                DeliveryRow.connection_id == cid, DeliveryRow.id > after,
+                DeliveryRow.connection_id == cid,
+                DeliveryRow.id > after,
                 DeliveryRow.state.not_in(["prepared", "projected"]),
             )
             if unresolved:
@@ -384,6 +416,8 @@ class IMStore:
                 delete(DeliveryRow).where(
                     DeliveryRow.connection_id == cid,
                     DeliveryRow.created_at < cutoff,
-                    DeliveryRow.state.in_(["platform_accepted", "superseded", "projected"]),
+                    DeliveryRow.state.in_(
+                        ["platform_accepted", "superseded", "projected"]
+                    ),
                 )
             )

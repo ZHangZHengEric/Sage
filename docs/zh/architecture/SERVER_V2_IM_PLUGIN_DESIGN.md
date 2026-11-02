@@ -271,7 +271,6 @@ fencing 只能拦住过期 worker 的本地写入，不能撤回已经发给平�
 | `POST /api/im/connections/{id}/conversation-resets` | 经过归属校验后生成新 Session |
 | `GET /api/im/connections/{id}/deliveries` | 有界分页读取失败/未知投递等业务状态 |
 | `POST /api/im/deliveries/{id}/retries` | 带 revision 的受控重试；unknown 须明确重复风险 |
-| `/api/im/webhooks/{id}` | 由平台插件按方法处理挑战、消息与卡片回调 |
 
 管理接口使用 Sage 登录鉴权与 owner 检查，Webhook 使用平台认证；两者不能混用。创建/更新校验 typed schema、Agent 归属、外部账号重复认领与当前凭据权限，返回统一可区分的配置错误、认证错误、冲突和可重试繁忙错误。列表游标和过滤参考现有 ThreadPage。
 
@@ -300,3 +299,5 @@ fencing 只能拦住过期 worker 的本地写入，不能撤回已经发给平�
 - 连接配置重载/删除、旧 generation 回调、队列背压、shutdown、临时附件清理与媒体归属。
 
 验证分为纯契约测试、真实数据库/SessionStore 恢复测试、平台 sandbox bot 端到端测试；本提案没有执行这些测试，也没有把源码调研当成平台联调证据。
+
+当前飞书实现已改为官方 `lark-oapi` SDK 长连接：只配置 App ID / App Secret，移除公网 Webhook、手填 tenant_key、Verification Token 和 Encrypt Key。Sage 页面自动保存审批链接地址，无需 IM 公网环境配置；应用接收进程相互隔离，提交现有持久队列后才确认事件。Run、本人配对、取消、审批与投递恢复仍复用原链路。

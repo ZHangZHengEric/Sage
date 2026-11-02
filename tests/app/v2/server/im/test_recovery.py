@@ -20,7 +20,6 @@ def persistent(tmp_path, feishu_creation_probe):
         return FixtureServerHost(
             make_settings(
                 tmp_path,
-                public_base_url="https://sage.example",
                 log_level="warning",
             ),
             database=Database(
@@ -386,5 +385,64 @@ async def test_one_corrupt_connection_does_not_disable_healthy_connections(persi
         assert await restarted.im.channel(healthy)
         assert not (await restarted.im.store.get(broken.id)).enabled
         assert restarted.im.credentials_error(broken.id)
+    finally:
+        await restarted.close()
+
+
+async def test_webhook_credentials_upgrade_preserves_the_paired_connection(
+    persistent, monkeypatch
+):
+    import json
+    from cryptography.fernet import Fernet
+    from app.v2.server.im.repository import key
+    from app.v2.server.im.feishu import FeishuChannel
+
+    async def send(self, chat, text, uid):
+        return "receipt-" + uid
+
+    monkeypatch.setattr(FeishuChannel, "send", send)
+    first = persistent()
+    await first.start()
+    first.im.pause()
+    try:
+        user = await first.identity.register("legacy-sdk-owner", "secret1")
+        agent = (await first.catalog.get(user.user_id)).agents[0]
+        conn = await first.im.create(
+            user.user_id, agent.id, "Upgraded", config().model_dump()
+        )
+        await pair(first, conn, user)
+        encryption_key = (
+            first.paths.data_root / "secrets/im-credentials.key"
+        ).read_bytes()
+        payload = {
+            "owner_id": user.user_id,
+            "app_id": "cli_test",
+            "app_secret": "secret",
+            "tenant_key": "tenant",
+            "verification_token": "verify",
+            "encrypt_key": "key",
+        }
+        async with first.im.store.locked(conn.id) as (_, row):
+            row.config = {
+                "app_id": "cli_test",
+                "tenant_key": "tenant",
+                "credentials_ciphertext": Fernet(encryption_key)
+                .encrypt(json.dumps(payload).encode())
+                .decode(),
+            }
+            row.account_key = key("feishu", "cli_test", "tenant")
+    finally:
+        await first.close()
+    restarted = persistent()
+    await restarted.start()
+    restarted.im.pause()
+    try:
+        row = await restarted.im.store.get(conn.id, user.user_id)
+        assert row.enabled and row.sender_id == "ou_owner"
+        assert set(row.config) == {"app_id", "web_url", "credentials_ciphertext"}
+        assert row.account_key == key("feishu", "cli_test")
+        parsed = restarted.im.credentials.open(user.user_id, row.config)
+        assert parsed.app_secret.get_secret_value() == "secret"
+        assert len(await restarted.im.store.inboxes(conn.id)) == 1
     finally:
         await restarted.close()

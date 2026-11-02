@@ -4,10 +4,8 @@ import pytest
 
 from tests.app.v2.server.im.test_feishu import (
     event,
-    signed,
+    admit_event,
 )
-
-
 
 
 async def receive(host, conn, text="hello", n=1, sender="ou_owner"):
@@ -15,7 +13,7 @@ async def receive(host, conn, text="hello", n=1, sender="ou_owner"):
     payload["header"]["event_id"] = f"event-{n}"
     payload["event"]["message"]["message_id"] = f"om_{n}"
     payload["event"]["sender"]["sender_id"]["open_id"] = sender
-    return await host.im.receive(conn.id, *signed(payload))
+    return await admit_event(host, conn, payload)
 
 
 async def pair(host, conn, user):
@@ -134,6 +132,13 @@ async def test_suspended_run_sends_authenticated_sage_link_and_revocation_blocks
     from sagents.v2.contracts.errors import SageV2Error
 
     host, conn, user = im_host
+    sent = []
+
+    async def send(chat, text, uid):
+        sent.append(text)
+        return "receipt-" + uid
+
+    (await host.im.channel(conn)).send = send
     host.execution.fallback_model = CompletingJudgeModel(
         ScriptedModelProvider(
             (
@@ -163,9 +168,15 @@ async def test_suspended_run_sends_authenticated_sage_link_and_revocation_blocks
     await host.im.tick()
     await host.im.tick()
     rows = await host.im.store.deliveries(conn.id, limit=100)
-    links = [r for r in rows if "?thread=" in r.text]
+    links = [
+        r
+        for r in rows
+        if r.run_context and r.run_context.get("purpose", "").startswith("interaction:")
+    ]
     assert len(links) == 1
-    assert links[0].text.endswith("https://sage.example/?thread=" + item["thread_id"])
+    delivered = [text for text in sent if "?thread=" in text]
+    assert len(delivered) == 1
+    assert delivered[0].endswith("https://sage.example/?thread=" + item["thread_id"])
     assert not (
         host.paths.workspace_dir(user.user_id, conn.agent_id) / "private.txt"
     ).exists()
@@ -344,3 +355,41 @@ async def test_connection_disable_is_checked_before_next_model_request(im_host):
     )
     with pytest.raises(PermissionError):
         await provider.capabilities("primary")
+
+
+async def test_stale_sdk_receiver_cannot_admit_after_disable_or_lease_loss(im_host):
+    from sagents.v2.contracts.errors import SageV2Error
+    from tests.app.v2.server.im.test_feishu import event
+
+    host, conn, user = im_host
+    await pair(host, conn, user)
+    current = await host.im.store.get(conn.id)
+    assert await host.im.store.claim(conn.id, host.im.worker)
+    message = (await host.im.channel(current)).normalize(event())
+    await host.im.set_enabled(conn.id, user.user_id, current.revision, False)
+    with pytest.raises(SageV2Error):
+        await host.im.receive(
+            conn.id, message, worker=host.im.worker, auth_epoch=current.auth_epoch
+        )
+    assert all(row.kind != "message" for row in await host.im.store.inboxes(conn.id))
+
+
+async def test_sdk_receiver_capacity_is_visible_and_recovers_when_a_slot_is_free(
+    im_host,
+):
+    host, conn, _ = im_host
+    channel = await host.im.channel(conn)
+
+    class ActiveReceiver:
+        receiving = True
+
+        async def close(self):
+            pass
+
+    for index in range(8):
+        host.im._channels[f"reserved-{index}"] = ActiveReceiver()
+    await host.im.tick()
+    assert channel.state == "capacity"
+    host.im._channels.pop("reserved-0")
+    await host.im.tick()
+    assert channel.state == "connected"

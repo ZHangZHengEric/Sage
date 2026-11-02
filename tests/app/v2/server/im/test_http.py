@@ -6,16 +6,15 @@ from fastapi.testclient import TestClient
 from tests.app.v2.server.im.test_feishu import (
     config,
     event,
-    signed,
+    admit_event,
 )
 
 
-def test_connection_provisioning_webhook_and_ownership(
+def test_sdk_connection_provisioning_without_public_config_and_ownership(
     tmp_path, feishu_creation_probe, monkeypatch
 ):
     host = make_test_service(
         tmp_path,
-        public_base_url="https://sage.example/sage",
         log_level="warning",
     )
     with TestClient(create_app(host)) as client:
@@ -89,15 +88,12 @@ def test_connection_provisioning_webhook_and_ownership(
         assert response.json()["data"]["credentials_configured"] is True
         assert response.json()["data"]["config"] == {
             "app_id": "cli_test",
-            "tenant_key": "tenant",
         }
         cid = response.json()["data"]["id"]
         stored = client.portal.call(host.im.store.get, cid).config
-        assert set(stored) == {"app_id", "tenant_key", "credentials_ciphertext"}
+        assert set(stored) == {"app_id", "web_url", "credentials_ciphertext"}
         assert "credentials_ciphertext" not in response.text
-        assert response.json()["data"]["webhook_url"] == (
-            "https://sage.example/sage/api/im/webhooks/" + cid
-        )
+        assert "webhook_url" not in response.json()["data"]
         assert '"secret"' not in response.text
         own_page = client.get("/api/im/connections", headers=alice)
         assert '"secret"' not in own_page.text and '"verify"' not in own_page.text
@@ -114,13 +110,8 @@ def test_connection_provisioning_webhook_and_ownership(
             f"/api/im/connections/{cid}/pairings", headers=alice
         ).json()["data"]
         payload = event("/pair " + challenge["code"])
-        raw, headers = signed(payload)
-        assert (
-            client.post(
-                f"/api/im/webhooks/{cid}", content=raw, headers=headers
-            ).status_code
-            == 200
-        )
+        conn = client.portal.call(host.im.store.get, cid)
+        client.portal.call(admit_event, host, conn, payload)
         assert (
             client.get(f"/api/im/connections/{cid}", headers=alice).json()["data"][
                 "paired"
@@ -181,18 +172,9 @@ def test_connection_provisioning_webhook_and_ownership(
             ).status_code
             == 200
         )
-        raw, headers = signed(event())
-        headers["x-lark-signature"] = "fake"
-        assert (
-            client.post(
-                f"/api/im/webhooks/{cid}", content=raw, headers=headers
-            ).status_code
-            == 401
-        )
-        assert (
-            client.post(f"/api/im/webhooks/{cid}", content=b"x" * 65537).status_code
-            == 413
-        )
+        assert client.post(
+            f"/api/im/webhooks/{cid}", content=b"removed"
+        ).status_code in {404, 405}
 
         assert (
             client.delete(
@@ -220,9 +202,7 @@ def test_connection_provisioning_webhook_and_ownership(
 def test_unavailable_connection_is_visible_and_recoverable_over_http(
     tmp_path, feishu_creation_probe
 ):
-    host = make_test_service(
-        tmp_path, public_base_url="https://sage.example", log_level="warning"
-    )
+    host = make_test_service(tmp_path, log_level="warning")
     with TestClient(create_app(host)) as client:
         host.im.pause()
         alice, _ = identity(client, "key-http-owner")

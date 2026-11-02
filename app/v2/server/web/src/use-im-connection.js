@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { api } from './api.js'
 
-export const connectionStates = { unavailable: '不可用', disabled: '已停用', awaiting_pairing: '待本人配对', webhook_ready: '已配对' }
+export const connectionStates = { unavailable: '不可用', disabled: '已停用', capacity: '等待连接资源', connecting: '连接中', connected: '已连接', reconnecting: '重连中', disconnected: '未连接' }
 export const deliveryStates = { pending: '待发送', sending: '发送中', platform_accepted: '平台已接收', failed: '发送失败', unknown: '结果未知', superseded: '已丢弃或失效' }
 
 export function useIMConnection(initial, { client = api, onChange = () => {} } = {}) {

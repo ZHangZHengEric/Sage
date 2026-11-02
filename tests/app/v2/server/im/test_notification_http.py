@@ -5,7 +5,7 @@ import pytest
 
 from app.v2.server.main import create_app
 from tests.app.v2.server.conftest import make_test_service, scripted_hello
-from tests.app.v2.server.im.test_feishu import config, event, signed
+from tests.app.v2.server.im.test_feishu import config, event, admit_event
 from tests.app.v2.server.test_file_downloads import identity
 from tests.app.v2.server.test_agui_chat import _run_input
 
@@ -26,11 +26,8 @@ def setup_route(host, client):
     pairing = client.post(f"/api/im/connections/{cid}/pairings", headers=owner).json()[
         "data"
     ]
-    raw, headers = signed(event(pairing["command"]))
-    assert (
-        client.post(f"/api/im/webhooks/{cid}", content=raw, headers=headers).status_code
-        == 200
-    )
+    connection = client.portal.call(host.im.store.get, cid)
+    client.portal.call(admit_event, host, connection, event(pairing["command"]))
     current = client.portal.call(host.im.store.get, cid)
     channel = client.portal.call(host.im.channel, current)
     sent = []
@@ -49,7 +46,6 @@ def test_web_and_scheduled_run_notify_the_owners_im_with_fallback(
     host = make_test_service(
         tmp_path,
         model_provider=scripted_hello(2),
-        public_base_url="https://sage.example",
         log_level="warning",
     )
     with TestClient(create_app(host)) as client:
@@ -110,9 +106,7 @@ def test_web_and_scheduled_run_notify_the_owners_im_with_fallback(
 def test_notification_target_cannot_be_injected_from_another_owner_or_business_tenant(
     tmp_path, feishu_creation_probe
 ):
-    host = make_test_service(
-        tmp_path, public_base_url="https://sage.example", log_level="warning"
-    )
+    host = make_test_service(tmp_path, log_level="warning")
     with TestClient(create_app(host)) as client:
         host.im.pause()
         owner, uid, agent, cid, _ = setup_route(host, client)
@@ -147,9 +141,7 @@ def test_notification_target_cannot_be_injected_from_another_owner_or_business_t
 def test_scheduler_key_revocation_suppresses_pending_notification(
     tmp_path, feishu_creation_probe
 ):
-    host = make_test_service(
-        tmp_path, public_base_url="https://sage.example", log_level="warning"
-    )
+    host = make_test_service(tmp_path, log_level="warning")
     with TestClient(create_app(host)) as client:
         host.im.pause()
         owner, uid, agent, cid, sent = setup_route(host, client)
@@ -189,7 +181,6 @@ def test_revoked_scheduler_delivery_does_not_block_a_fresh_authorized_run(
     host = make_test_service(
         tmp_path,
         model_provider=scripted_hello(2),
-        public_base_url="https://sage.example",
         log_level="warning",
     )
     with TestClient(create_app(host)) as client:

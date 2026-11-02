@@ -75,9 +75,7 @@ async def test_model_notification_survives_host_restart_without_rerunning_or_dup
 
     def make(provider):
         return FixtureServerHost(
-            make_settings(
-                tmp_path, public_base_url="https://sage.example", log_level="warning"
-            ),
+            make_settings(tmp_path, log_level="warning"),
             database=Database(
                 DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db")
             ),

@@ -99,7 +99,7 @@ class IMCredentials:
         encrypted = self._cipher.encrypt(json.dumps(payload).encode()).decode()
         return {
             "app_id": config.app_id,
-            "tenant_key": config.tenant_key,
+            "web_url": config.web_url,
             "credentials_ciphertext": encrypted,
         }
 
@@ -111,8 +111,18 @@ class IMCredentials:
             if (
                 payload.pop("owner_id") != owner_id
                 or payload["app_id"] != stored["app_id"]
-                or payload["tenant_key"] != stored["tenant_key"]
             ):
+                raise ValueError("credential binding mismatch")
+            # One-time read of persisted Webhook credentials; new API requests
+            # reject these removed fields. Preserve the app and pairing.
+            if (
+                "tenant_key" in stored
+                and payload.get("tenant_key") != stored["tenant_key"]
+            ):
+                raise ValueError("credential binding mismatch")
+            for name in ("tenant_key", "verification_token", "encrypt_key"):
+                payload.pop(name, None)
+            if payload.get("web_url", "") != stored.get("web_url", ""):
                 raise ValueError("credential binding mismatch")
             return FeishuConfig.model_validate(payload)
         except (InvalidToken, ValueError, TypeError, KeyError, AttributeError):

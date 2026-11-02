@@ -152,7 +152,6 @@ async def test_native_tool_prepares_model_text_and_publishes_once_after_complete
     host = make_test_service(
         tmp_path,
         model_provider=model,
-        public_base_url="https://sage.example",
         log_level="warning",
     )
     await host.start()
@@ -212,7 +211,8 @@ async def test_native_tool_prepares_model_text_and_publishes_once_after_complete
             if outcome == "completed"
             else "任务已取消。"
             if outcome == "cancelled"
-            else "任务执行失败，请在 Sage 中查看：" + host.im.link(command.session_id)
+            else "任务执行失败，请在 Sage 中查看："
+            + host.im.link(command.session_id, conn)
         )
         for _ in range(100):
             await host.im.tick()

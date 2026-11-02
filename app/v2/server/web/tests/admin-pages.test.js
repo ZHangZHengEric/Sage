@@ -117,12 +117,15 @@ test('IM self-service creation loads only own Agents and never submits an owner 
   const state = await mount({ modelValue: true })
   assert.equal(state.form.agent_id, 'own')
   state.form.name = 'Mine'
-  state.form.config = { app_id: 'cli_own', tenant_key: 'tenant', app_secret: 'test-secret', verification_token: 'test-token', encrypt_key: 'test-key' }
+  state.form.config = { app_id: 'cli_own', app_secret: 'test-secret' }
   await state.save()
   const body = api.createIMConnection.mock.calls[0].arguments[0]
   assert.equal(Object.hasOwn(body, 'owner_user_id'), false)
   assert.equal(Object.hasOwn(body.config, 'app_secret_env'), false)
   assert.equal(body.agent_id, 'own')
+  assert.equal(Object.hasOwn(body.config, 'tenant_key'), false)
+  assert.equal(Object.hasOwn(body.config, 'verification_token'), false)
+  assert.equal(Object.hasOwn(body.config, 'encrypt_key'), false)
   assert.equal(api.adminUsers.mock.calls.length, 0)
 })
 

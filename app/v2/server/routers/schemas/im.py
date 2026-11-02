@@ -1,4 +1,4 @@
-"""IM management responses; platform Webhook responses retain Feishu's format."""
+"""Owner-scoped IM management and SDK connection status."""
 
 from typing import Any, Literal
 
@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 class IMConfigPublic(BaseModel):
     app_id: str
-    tenant_key: str
 
 
 class IMConnectionPublic(BaseModel):
@@ -22,7 +21,6 @@ class IMConnectionPublic(BaseModel):
     enabled: bool
     revision: int
     paired: bool
-    webhook_url: str
 
 
 class IMConnectionPage(BaseModel):
@@ -49,7 +47,15 @@ class IMPairingPublic(BaseModel):
 
 
 class IMStatusPublic(BaseModel):
-    state: Literal["unavailable", "disabled", "awaiting_pairing", "webhook_ready"]
+    state: Literal[
+        "unavailable",
+        "disabled",
+        "connecting",
+        "connected",
+        "reconnecting",
+        "disconnected",
+        "capacity",
+    ]
     revision: int
     paired: bool
 

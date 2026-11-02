@@ -200,6 +200,7 @@ class IMNotifications:
             )
             return
         run, command = found
+        conn = await self.service.store.get(route.connection_id)
         if command.config.metadata.get(NOTIFY_KEY) != info[
             "route"
         ] or not await self.authorized(command, route):
@@ -223,7 +224,7 @@ class IMNotifications:
                 worker,
                 run.run_id,
                 "任务需要你的确认或补充，请登录 Sage 继续：\n"
-                + self.service.link(run.session_id),
+                + self.service.link(run.session_id, conn),
                 purpose="interaction:" + run.suspension_id,
             )
         elif run.state in TERMINAL_RUN_STATES:
@@ -232,7 +233,7 @@ class IMNotifications:
                 record,
                 worker,
                 run.run_id,
-                final_text(run, result, self.service.link(run.session_id)),
+                final_text(run, result, self.service.link(run.session_id, conn)),
                 final=True,
                 completed=run.state == RunState.COMPLETED,
             )

@@ -1,23 +1,17 @@
-import base64
-import hashlib
 import json
-import time
 
 import httpx
 import pytest
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from lark_oapi.core.http import Transport
+from lark_oapi.core.model import RawResponse
 
 from app.v2.server.im.feishu import FeishuChannel, FeishuConfig
 from app.v2.server.im.contracts import DeliveryError
 
+
 def config():
     return FeishuConfig(
-        app_id="cli_test",
-        tenant_key="tenant",
-        app_secret="secret",
-        verification_token="verify",
-        encrypt_key="key",
+        app_id="cli_test", app_secret="secret", web_url="https://sage.example"
     )
 
 
@@ -29,7 +23,6 @@ def event(text="hello", **message):
             "event_type": "im.message.receive_v1",
             "app_id": "cli_test",
             "tenant_key": "tenant",
-            "token": "verify",
         },
         "event": {
             "sender": {
@@ -49,144 +42,82 @@ def event(text="hello", **message):
     }
 
 
-def signed(payload, *, encrypted=True, timestamp=None):
-    raw = json.dumps(payload).encode()
-    if encrypted:
-        pad = padding.PKCS7(128).padder()
-        padded = pad.update(raw) + pad.finalize()
-        iv = b"0123456789abcdef"
-        enc = Cipher(
-            algorithms.AES(hashlib.sha256(b"key").digest()), modes.CBC(iv)
-        ).encryptor()
-        raw = json.dumps(
-            {
-                "encrypt": base64.b64encode(
-                    iv + enc.update(padded) + enc.finalize()
-                ).decode()
-            }
-        ).encode()
-    stamp = str(timestamp or int(time.time()))
-    headers = {
-        "x-lark-request-timestamp": stamp,
-        "x-lark-request-nonce": "nonce",
-        "x-lark-signature": hashlib.sha256(
-            (stamp + "nonce" + "key").encode() + raw
-        ).hexdigest(),
-    }
-    return raw, headers
+async def admit_event(host, conn, payload):
+    message = (await host.im.channel(conn)).normalize(payload)
+    if message is not None:
+        await host.im.receive(conn.id, message)
 
 
 @pytest.fixture
-def channel():
-    return FeishuChannel(config())
+async def channel():
+    value = FeishuChannel(config())
+    yield value
+    await value.close()
 
 
-def test_decrypt_and_normalize_private_text(channel):
-    raw, headers = signed(event())
-    msg = channel.decode(raw, headers)
+async def test_normalizes_only_the_bound_apps_private_user_text(channel):
+    msg = channel.normalize(event())
     assert (msg.sender_id, msg.chat_id, msg.message_id, msg.text) == (
         "ou_owner",
         "oc_dm",
         "om_1",
         "hello",
     )
+    assert channel.normalize(event(chat_type="group")) is None
+    assert channel.normalize(event(message_type="image")) is None
+    for field in ("app_id", "tenant_key"):
+        payload = event()
+        payload["header"][field] = "wrong"
+        with pytest.raises(ValueError):
+            channel.normalize(payload)
 
 
-def test_challenge_accepts_token_without_signature(channel):
-    assert channel.decode(
-        json.dumps(
-            {"type": "url_verification", "token": "verify", "challenge": "123"}
-        ).encode(),
-        {},
-    ) == {"challenge": "123"}
-
-
-@pytest.mark.parametrize("change", ["signature", "timestamp", "tenant", "token", "app"])
-def test_rejects_forgery_and_replay(channel, change):
-    payload = event()
-    if change in ("tenant", "token", "app"):
-        payload["header"][
-            {"tenant": "tenant_key", "token": "token", "app": "app_id"}[change]
-        ] = "wrong"
-    raw, headers = signed(payload, timestamp=1 if change == "timestamp" else None)
-    if change == "signature":
-        headers["x-lark-signature"] = "bad"
-    with pytest.raises(ValueError):
-        channel.decode(raw, headers)
-
-
-def test_ignores_groups_and_non_text(channel):
-    assert channel.decode(*signed(event(chat_type="group"))) is None
-    assert channel.decode(*signed(event(message_type="image"))) is None
-
-
-async def test_transport_reports_rate_limit_and_unknown_without_duplicate_retry(
-    channel,
+@pytest.mark.parametrize(
+    ("case", "outcome"),
+    [
+        ("timeout", "unknown"),
+        ("limit", "retry"),
+        ("server", "unknown"),
+        ("rejected", "failed"),
+        ("invalid", "unknown"),
+        ("ok", None),
+    ],
+)
+async def test_official_api_uses_stable_uuid_and_never_retries_send(
+    channel, monkeypatch, case, outcome
 ):
     calls = []
 
-    async def handler(request):
-        calls.append(request)
-        if "tenant_access_token" in request.url.path:
-            return httpx.Response(
-                200, json={"code": 0, "tenant_access_token": "token", "expire": 7200}
-            )
-        raise httpx.ReadTimeout("possibly sent")
+    async def execute(conf, req, option=None):
+        raw = RawResponse()
+        raw.headers = {}
+        raw.status_code = 200
+        if "tenant_access_token" in req.uri:
+            assert req.body.app_id == "cli_test" and req.body.app_secret == "secret"
+            data = {"code": 0, "tenant_access_token": "token", "expire": 7200}
+        else:
+            calls.append(req)
+            assert req.body.uuid == "stable-id" and req.body.receive_id == "oc_dm"
+            assert option.tenant_access_token == "token"
+            if case == "timeout":
+                raise httpx.ReadTimeout("possibly sent")
+            data = {"code": 0, "data": {"message_id": "receipt"}}
+            if case == "limit":
+                raw.status_code, data = 429, {"code": 99991400}
+            if case == "server":
+                raw.status_code, data = 503, {"code": 1}
+            if case == "rejected":
+                data = {"code": 9999}
+            if case == "invalid":
+                data = {"code": 0, "data": {}}
+        raw.content = json.dumps(data).encode()
+        return raw
 
-    channel.client = httpx.AsyncClient(
-        base_url="https://open.feishu.cn", transport=httpx.MockTransport(handler)
-    )
-    try:
+    monkeypatch.setattr(Transport, "aexecute", execute)
+    if outcome:
         with pytest.raises(DeliveryError) as exc:
             await channel.send("oc_dm", "hello", "stable-id")
-        assert exc.value.outcome == "unknown"
-        assert len(calls) == 2
-        assert json.loads(calls[-1].content)["uuid"] == "stable-id"
-    finally:
-        await channel.close()
-
-
-@pytest.mark.parametrize("payload", [[], {"header": []}, {"header": {}, "event": []}])
-def test_malformed_platform_objects_fail_closed(channel, payload):
-    with pytest.raises(ValueError):
-        channel.decode(*signed(payload))
-
-
-@pytest.mark.parametrize("malformed", [{"code": 0, "data": {}}, []])
-async def test_rate_limit_is_retryable_but_platform_acceptance_requires_receipt(
-    channel,
-    malformed,
-):
-    await channel.client.aclose()
-    mode = ["limited"]
-
-    async def handler(request):
-        if "tenant_access_token" in request.url.path:
-            return httpx.Response(
-                200, json={"code": 0, "tenant_access_token": "token", "expire": 7200}
-            )
-        if mode[0] == "limited":
-            return httpx.Response(
-                429, headers={"Retry-After": "7"}, json={"code": 99991400}
-            )
-        if mode[0] == "malformed":
-            return httpx.Response(200, json=malformed)
-        return httpx.Response(
-            200, json={"code": 0, "data": {"message_id": "om_receipt"}}
-        )
-
-    channel.client = httpx.AsyncClient(
-        base_url="https://open.feishu.cn", transport=httpx.MockTransport(handler)
-    )
-    try:
-        with pytest.raises(DeliveryError) as exc:
-            await channel.send("oc_dm", "hello", "stable-id")
-        assert (exc.value.outcome, exc.value.retry_after) == ("retry", 7)
-        mode[0] = "malformed"
-        with pytest.raises(DeliveryError) as exc:
-            await channel.send("oc_dm", "hello", "stable-id")
-        assert exc.value.outcome == "unknown"
-        mode[0] = "accepted"
-        assert await channel.send("oc_dm", "hello", "stable-id") == "om_receipt"
-    finally:
-        await channel.close()
+        assert exc.value.outcome == outcome
+    else:
+        assert await channel.send("oc_dm", "hello", "stable-id") == "receipt"
+    assert len(calls) == 1

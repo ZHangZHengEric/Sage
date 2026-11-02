@@ -28,9 +28,7 @@ NOTICE = "审批后的报告已完成。"
 
 def make_host(path, steps):
     return FixtureServerHost(
-        make_settings(
-            path, public_base_url="https://sage.example", log_level="warning"
-        ),
+        make_settings(path, log_level="warning"),
         database=Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{path}/host.db")),
         model_provider=CompletingJudgeModel(ScriptedModelProvider(tuple(steps))),
     )

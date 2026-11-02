@@ -12,13 +12,13 @@ from tests.app.v2.server.im.test_feishu import config
 def test_credentials_are_encrypted_and_bound_to_owner_and_external_account():
     vault = IMCredentials(Fernet.generate_key().decode())
     stored = vault.seal("alice", config())
-    assert set(stored) == {"app_id", "tenant_key", "credentials_ciphertext"}
+    assert set(stored) == {"app_id", "web_url", "credentials_ciphertext"}
     assert '"secret"' not in json.dumps(stored)
     assert vault.open("alice", stored).app_secret.get_secret_value() == "secret"
     for owner, value in [
         ("bob", stored),
         ("alice", {**stored, "app_id": "cli_other"}),
-        ("alice", {**stored, "tenant_key": "other"}),
+        ("alice", {**stored, "web_url": "https://other.example"}),
     ]:
         with pytest.raises(ValueError, match="cannot be decrypted"):
             vault.open(owner, value)

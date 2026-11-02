@@ -12,14 +12,21 @@ def feishu_creation_probe(monkeypatch):
     async def probe(self):
         return None
 
+    async def start(self, admit):
+        self.state = "connected"
+
+    async def send(self, chat, text, delivery_id):
+        return "receipt-" + delivery_id
+
     monkeypatch.setattr(FeishuChannel, "probe", probe)
+    monkeypatch.setattr(FeishuChannel, "start", start)
+    monkeypatch.setattr(FeishuChannel, "send", send)
 
 
 @pytest.fixture
 async def im_host(tmp_path, feishu_creation_probe):
     host = make_test_service(
         tmp_path,
-        public_base_url="https://sage.example",
         log_level="warning",
     )
     await host.start()
