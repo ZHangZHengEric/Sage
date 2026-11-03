@@ -54,6 +54,16 @@ When `base_url` is omitted, the route uses the same OrcaRouter endpoint.
 This preset supports the existing chat protocol; it does not add image or
 video generation APIs.
 
+## Gemini tool calls through OpenAI compatibility
+
+For a Gemini model using `openai-chat-completions`, Sage retains the documented
+`extra_content.google.thought_signature` on each matching tool call across
+streamed responses, conversation history, and Session save/restore. No additional
+configuration is needed. Signatures remain opaque strings; unrelated extension
+fields are not retained. Malformed signature state is rejected, and the existing
+8 MiB provider-state limit applies. This handling concerns tool-call signatures;
+the native `gemini-generate-content` route has its own continuation handling.
+
 ## Selecting runtime implementations
 
 Use `runtime.capabilities` for provider bindings. For example, the lazy Skill loader accepts a token budget:

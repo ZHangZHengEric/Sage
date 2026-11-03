@@ -51,6 +51,15 @@ models:
 省略 `base_url` 时，路由使用同一 OrcaRouter 地址。该预设支持现有聊天协议，
 不新增图像或视频生成 API。
 
+## 通过 OpenAI 兼容接口调用 Gemini 工具
+
+Gemini 模型使用 `openai-chat-completions` 时，Sage 会将文档定义的
+`extra_content.google.thought_signature` 保留在对应的工具调用上，覆盖流式响应、
+会话历史以及 Session 保存和恢复，无需额外配置。签名按不透明字符串原样保留，
+不保存其他扩展字段。格式不合法的签名状态会被拒绝，并沿用现有 provider-state
+的 8 MiB 上限。此处理针对工具调用签名；原生 `gemini-generate-content` 路由
+使用自身的续接状态处理。
+
 ## 选择运行组件
 
 通过 `runtime.capabilities` 绑定实现。例如，为延迟加载 Skill 的组件设置 token 预算：
