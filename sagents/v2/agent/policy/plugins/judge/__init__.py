@@ -767,6 +767,8 @@ def _trailing_plain_assistant_responses(
 ) -> int:
     count = 0
     for message in reversed(messages):
+        if message.metadata.get("runtime_continuation_guidance"):
+            continue
         if message.role in {"user", "tool"}:
             break
         if message.role == "assistant":

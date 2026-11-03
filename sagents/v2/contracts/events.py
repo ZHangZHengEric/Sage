@@ -16,7 +16,7 @@ from sagents.v2.contracts.common import (
     VerbatimText,
 )
 from sagents.v2.contracts.errors import RuntimeErrorInfo
-from sagents.v2.contracts.items import ArtifactRef, ItemSnapshot, UsageSummary
+from sagents.v2.contracts.items import ArtifactRef, ItemSnapshot, UsageSummary, Visibility
 from sagents.v2.contracts.principals import ActorRef
 
 
@@ -75,12 +75,21 @@ class ItemEventData(StrictModel):
     kind: Literal["item"] = "item"
     operation: Literal["started", "delta", "completed", "failed", "snapshot"]
     item: ItemSnapshot | None = None
+    # Streaming events may precede the complete snapshot. Producers of hidden
+    # Items must declare visibility from the first event, including deltas.
+    visibility: Visibility | None = None
     delta: VerbatimText | dict[str, Any] | tuple[dict[str, Any], ...] | None = None
     content_hash: str | None = None
     error: RuntimeErrorInfo | None = None
 
     @model_validator(mode="after")
     def validate_operation_payload(self) -> "ItemEventData":
+        if (
+            self.item is not None
+            and self.visibility is not None
+            and self.visibility != self.item.visibility
+        ):
+            raise ValueError("event visibility must match item visibility")
         if self.operation in {"completed", "snapshot"} and self.item is None:
             raise ValueError(f"{self.operation} item event requires item")
         if self.operation == "delta" and self.delta is None:

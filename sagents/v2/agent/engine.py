@@ -132,6 +132,7 @@ from sagents.v2.contracts.items import (
     ToolCallItemData,
     ToolResultItemData,
     UsageSummary,
+    Visibility,
 )
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
@@ -2173,6 +2174,29 @@ class AgentLoopEngine:
                 in {"openui.validation_retry", "output.self_check_retry"}
                 else 240,
             )
+        continuation_drafts: tuple[EventDraft, ...] = ()
+        if continuation_reason and decision.reason_code.startswith("judge."):
+            guidance = DefaultAgentStepRequestBuilder._continuation_message(
+                continuation_reason, run_prompt_language(command.config.metadata)
+            )
+            guidance = guidance.model_copy(update={"metadata": {
+                key: value for key, value in guidance.metadata.items()
+                if key != "inference_view_only"
+            }})
+            item_id = new_id("item")
+            item = self._item(
+                item_id, run.run_id, state.turn_id, step_id,
+                MessageItemData(role=guidance.role, content=guidance.content,
+                                metadata=guidance.metadata),
+            ).model_copy(update={"visibility": Visibility.MODEL_VISIBLE})
+            continuation_drafts = (EventDraft(
+                type="message.completed", turn_id=state.turn_id, step_id=step_id,
+                item_id=item_id, data=ItemEventData(operation="completed", item=item),
+            ),)
+            state = state.model_copy(update={"messages": (*state.messages, guidance)})
+            # The canonical message and checkpoint commit together. The next
+            # request reads the ledger instead of injecting a second copy.
+            continuation_reason = None
         state = state.model_copy(
             update={
                 "step_number": state.step_number + 1,
@@ -2186,6 +2210,7 @@ class AgentLoopEngine:
             run,
             context,
             (
+                *continuation_drafts,
                 EventDraft(
                     type="step.completed",
                     turn_id=state.turn_id,

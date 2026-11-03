@@ -29,6 +29,7 @@ from sagents.v2.contracts.items import (
     TextBlock,
     ToolCallItemData,
     ToolResultItemData,
+    Visibility,
 )
 from sagents.v2.interfaces.protocols.contracts import (
     AdapterCapabilities,
@@ -54,6 +55,7 @@ class AgUiProtocolAdapter:
         self._started_reasoning: set[str] = set()
         self._streamed_text: set[str] = set()
         self._streamed_reasoning: set[str] = set()
+        self._hidden_items: set[str] = set()
 
     async def capabilities(self) -> AdapterCapabilities:
         return AdapterCapabilities(
@@ -192,6 +194,18 @@ class AgUiProtocolAdapter:
         """Maintain AG-UI start/content/end framing for one canonical Item."""
 
         item_id = event.item_id or (data.item.item_id if data.item else event.event_id)
+        visibility = data.item.visibility if data.item is not None else data.visibility
+        if visibility is not None and visibility != Visibility.PUBLIC:
+            self._hidden_items.add(item_id)
+        if item_id in self._hidden_items:
+            # Do not fall back to a CUSTOM frame: it would expose the same
+            # private content through Sage extensions during live or replay.
+            return AdapterResult(losses=(loss(
+                event,
+                fidelity=MappingFidelity.LOSSY,
+                code="ag_ui.non_public_item",
+                detail="Non-public Item omitted from the user-facing projection",
+            ),))
         if event.type == "message.started":
             if item_id in self._started_text:
                 return self._extension(

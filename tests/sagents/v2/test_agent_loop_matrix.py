@@ -1183,7 +1183,7 @@ async def test_openui_parser_feedback_reaches_the_next_model_request():
 
 
 @pytest.mark.asyncio
-async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
+async def test_judge_continue_persists_model_only_guidance():
     def assert_first_request(request):
         assert request.tool_choice == "auto"
 
@@ -1195,6 +1195,10 @@ async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
     def assert_after_tool_request(request):
         assert request.tool_choice == "auto"
         assert not request.messages[-1].metadata.get("runtime_continuation_guidance")
+        guidance = [message for message in request.messages
+                    if message.metadata.get("runtime_continuation_guidance")]
+        assert len(guidance) == 1
+        assert "Verification is still missing." in guidance[0].content[0].text
 
     model = ScriptedModelProvider(
         (
@@ -1242,6 +1246,85 @@ async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
     assert result.state == RunState.COMPLETED
     assert len(executor.calls) == 1
     assert len(judge.requests) == 2
+    from sagents.v2.contracts.events import ItemEventData
+    from sagents.v2.contracts.items import Visibility
+    from sagents.v2.context.session_history import SessionEventModelProjector
+    from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
+
+    events = await runtime.session_store.read_events(handle.run_id)
+    hidden = [event for event in events
+              if isinstance(event.data, ItemEventData) and event.data.item
+              and event.data.item.visibility == Visibility.MODEL_VISIBLE]
+    assert len(hidden) == 1
+    assert hidden[0].data.item.data.metadata["runtime_continuation_guidance"]
+    rebuilt = SessionEventModelProjector().project(events)
+    persisted = [message for message in rebuilt
+                 if message.metadata.get("runtime_continuation_guidance")]
+    assert len(persisted) == 1
+    checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
+    through_checkpoint = tuple(event for event in events
+                               if event.run_sequence <= checkpoint.run_sequence)
+    assert loop._ledger_digest(SessionEventModelProjector().project(through_checkpoint)) == checkpoint.state["ledger_digest"]
+    assert AgUiProtocolAdapter().translate(hidden[0]).frames == ()
+
+
+@pytest.mark.asyncio
+async def test_persisted_judge_guidance_survives_worker_restart_without_duplication(monkeypatch):
+    judge = ScriptedModelProvider((ScriptedModelStep(events=(completed(
+        '{"decision":"continue","reason":"Verification is still missing."}'
+    ),)),))
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("Checking next."),)),
+        ScriptedModelStep(events=(), error=RuntimeErrorInfo(
+            code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+            message="offline", retryable=True,
+        )),
+    ))
+    runtime, handle, loop, _ = await setup_loop(
+        model, continuation_policy=LLMJudgeContinuationPolicy(LLMContinuationJudge(judge)),
+    )
+    waiting = asyncio.Event()
+
+    async def wait(run_id, delay):
+        waiting.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(loop, "_wait_for_model_retry", wait)
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    try:
+        await asyncio.wait_for(waiting.wait(), 2)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    def assert_guidance(request):
+        guidance = [message for message in request.messages
+                    if message.metadata.get("runtime_continuation_guidance")]
+        assert len(guidance) == 1
+        assert "Verification is still missing." in guidance[0].content[0].text
+
+    recovered_model = ScriptedModelProvider((ScriptedModelStep(
+        assertion=assert_guidance, events=(completed("Verified."),),
+    ),))
+    recovered = AgentLoopEngine(
+        runtime=runtime, model=recovered_model,
+        tool_catalog=InMemoryToolCatalog(()), tool_executor=InMemoryToolExecutor({}, {}),
+    )
+
+    async def no_wait(run_id, delay):
+        pass
+
+    monkeypatch.setattr(recovered, "_wait_for_model_retry", no_wait)
+    result = await recovered.recover_interrupted(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert sum(
+        isinstance(event.data, ItemEventData) and event.data.item is not None
+        and isinstance(event.data.item.data, MessageItemData)
+        and bool(event.data.item.data.metadata.get("runtime_continuation_guidance"))
+        for event in events
+    ) == 1
 
 
 @pytest.mark.asyncio
