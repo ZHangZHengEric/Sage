@@ -160,6 +160,7 @@ class _InteractiveHtmlPreviewState extends State<_InteractiveHtmlPreview> {
   var _loading = true;
   String? _loadError;
   String _selection = '';
+  Future<void> _updates = Future.value();
 
   @override
   void initState() {
@@ -212,10 +213,32 @@ class _InteractiveHtmlPreviewState extends State<_InteractiveHtmlPreview> {
   @override
   void didUpdateWidget(covariant _InteractiveHtmlPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.source != widget.source) unawaited(_load());
+    final next = widget.source;
+    if (oldWidget.source != next) {
+      _updates = _updates.then((_) => _update(oldWidget.source, next));
+    }
   }
 
-  Future<void> _load() async {
+  Future<void> _update(String previous, String next) async {
+    if (!mounted) return;
+    if (!_loading &&
+        _loadError == null &&
+        previous.contains('data-sage-live-region') &&
+        next.contains('data-sage-live-region')) {
+      try {
+        final arguments = jsonEncode([previous, next]);
+        final applied = await _controller.runJavaScriptReturningResult(
+          '($_liveRegionUpdate)(...$arguments)',
+        );
+        if (applied == true || applied == 'true') return;
+      } on Object {
+        // A navigated or unavailable WebView needs a complete document load.
+      }
+    }
+    if (mounted) await _load(next);
+  }
+
+  Future<void> _load([String? source]) async {
     if (mounted) {
       setState(() {
         _loading = true;
@@ -225,7 +248,7 @@ class _InteractiveHtmlPreviewState extends State<_InteractiveHtmlPreview> {
     }
     try {
       await _controller.loadHtmlString(
-        workspaceInteractiveHtmlDocument(widget.source),
+        workspaceInteractiveHtmlDocument(source ?? widget.source),
       );
     } on Object catch (exception) {
       if (!mounted) return;
@@ -319,6 +342,62 @@ class _StaticHtmlPreview extends StatelessWidget {
     );
   }
 }
+
+// Opt-in content regions keep their live elements (and their runtime state).
+// The document outside those regions must stay identical.
+const _liveRegionUpdate = r'''
+(previous, next) => {
+  const marker = '[data-sage-live-region]';
+  const parse = source => new DOMParser().parseFromString(source, 'text/html');
+  const collect = doc => {
+    const regions = new Map();
+    for (const element of doc.querySelectorAll(marker)) {
+      const id = element.dataset.sageLiveRegion;
+      if (!id || regions.has(id) || element.parentElement.closest(marker)) return null;
+      regions.set(id, element);
+    }
+    return regions;
+  };
+  const before = parse(previous);
+  const after = parse(next);
+  const oldRegions = collect(before);
+  const newRegions = collect(after);
+  const liveRegions = collect(document);
+  if (!oldRegions?.size || !newRegions || !liveRegions ||
+      oldRegions.size !== newRegions.size || oldRegions.size !== liveRegions.size) return false;
+
+  const patches = [];
+  for (const [id, old] of oldRegions) {
+    const replacement = newRegions.get(id);
+    const live = liveRegions.get(id);
+    if (!replacement || !live || live.tagName !== old.tagName) return false;
+    if (old.innerHTML !== replacement.innerHTML) {
+      if (replacement.querySelector('script, style, link, iframe, object, embed, base, meta')) return false;
+      if (live.contains(document.activeElement)) return false;
+      patches.push([live, [...replacement.childNodes]]);
+    }
+    old.replaceChildren();
+    replacement.replaceChildren();
+  }
+  if (before.documentElement.outerHTML !== after.documentElement.outerHTML ||
+      before.doctype?.name !== after.doctype?.name) return false;
+
+  const x = window.scrollX;
+  const y = window.scrollY;
+  const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const [live, children] of patches) {
+    live.replaceChildren(...children);
+    if (animate && !live.hidden) {
+      const rect = live.getBoundingClientRect();
+      if (rect.bottom > 0 && rect.top < window.innerHeight) {
+        live.animate([{opacity: 0.76}, {opacity: 1}], {duration: 180});
+      }
+    }
+  }
+  window.scrollTo({left: x, top: y, behavior: 'instant'});
+  return true;
+}
+''';
 
 const _interactiveHtmlSecurity = '''
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">

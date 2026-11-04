@@ -27,11 +27,19 @@ class _FileWorkspacePanelPlugin extends WorkspacePanelPluginBase {
       _FilePanel(
         controller: panelContext.services.read<WorkspaceController>(),
         compact: panelContext.compact,
+        replayFrame: panelContext.services
+            .read<ValueNotifier<ReplayHtmlFrame?>>(),
       );
 }
 
 class _FilePanel extends StatefulWidget {
-  const _FilePanel({required this.controller, this.compact = false});
+  const _FilePanel({
+    required this.controller,
+    required this.replayFrame,
+    this.compact = false,
+  });
+
+  final ValueListenable<ReplayHtmlFrame?> replayFrame;
 
   final WorkspaceController controller;
   final bool compact;
@@ -173,20 +181,25 @@ class _FilePanelState extends State<_FilePanel> {
               child: Stack(
                 children: [
                   Positioned.fill(
-                    child: WorkspaceFilePreview(
-                      key: ValueKey(controller.selectedFile?.path),
-                      node: controller.selectedFile,
-                      content: controller.selectedFileContent,
-                      mode: _previewMode,
-                      onReferenceSelection: (selection) {
-                        final file = controller.selectedFile;
-                        if (file != null) {
-                          controller.referenceWorkspaceSelection(
-                            file,
-                            selection,
-                          );
-                        }
-                      },
+                    child: ValueListenableBuilder<ReplayHtmlFrame?>(
+                      valueListenable: widget.replayFrame,
+                      builder: (context, frame, live) =>
+                          frame == null ? live! : _replayFilePreview(frame),
+                      child: WorkspaceFilePreview(
+                        key: ValueKey(controller.selectedFile?.path),
+                        node: controller.selectedFile,
+                        content: controller.selectedFileContent,
+                        mode: _previewMode,
+                        onReferenceSelection: (selection) {
+                          final file = controller.selectedFile;
+                          if (file != null) {
+                            controller.referenceWorkspaceSelection(
+                              file,
+                              selection,
+                            );
+                          }
+                        },
+                      ),
                     ),
                   ),
                   if (_treeVisible)
@@ -649,9 +662,9 @@ class _FileTreeRowState extends State<_FileTreeRow> {
               GlassMenuItem(
                 key: ValueKey('file-tree-trash:${node.path}'),
                 title: context.l10n.text('workspace.moveToTrash'),
-                titleStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.error,
-                ),
+                titleStyle: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.error),
                 icon: Icon(CupertinoIcons.trash, size: 14, color: colors.error),
                 height: 28,
                 onTap: moveToTrash,

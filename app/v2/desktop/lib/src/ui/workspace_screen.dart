@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,7 @@ import 'workspace_panels/terminal/terminal_workspace_panel_plugin.dart';
 import 'workspace_panels/workspace_panel_plugin.dart';
 
 part 'workspace/thread.dart';
+part 'workspace/replay.dart';
 part 'workspace/plan_preview.dart';
 part 'workspace/plan_decision_composer.dart';
 part 'workspace/messages.dart';
@@ -137,6 +139,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  final _replayFrame = ValueNotifier<ReplayHtmlFrame?>(null);
+
   double _railFraction = _defaultRailFraction;
   double _workspaceFraction =
       _defaultWorkspacePanelSizing.preferredWidthFraction;
@@ -147,6 +151,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   WorkspacePanelServices get _panelServices => WorkspacePanelServices({
     WorkspaceController: widget.controller,
     _PlanPreviewState: _planPreview,
+    ValueNotifier<ReplayHtmlFrame?>: _replayFrame,
     TerminalService: widget.controller.terminalService,
     WorkspacePanelSelection: WorkspacePanelSelection(
       agentId: widget.controller.selectedAgentId,
@@ -201,6 +206,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     widget.controller.removeListener(_onOpenUiSelectionChanged);
     if (_ownsPanelDockController) _panelDockController.dispose();
     _planPreview.dispose();
+    _replayFrame.dispose();
     super.dispose();
   }
 
@@ -358,6 +364,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                             ),
                           )
                         : _ThreadPanel(
+                            key: ObjectKey(
+                              widget.controller.selectedDisplayConversation,
+                            ),
+                            onReplayFrame: (frame) {
+                              if (mounted) _replayFrame.value = frame;
+                            },
                             onOpenPlan: _openPlanPreview,
                             controller: widget.controller,
                             compact: true,
@@ -473,6 +485,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                               ),
                             )
                           : _ThreadPanel(
+                              key: ObjectKey(
+                                widget.controller.selectedDisplayConversation,
+                              ),
+                              onReplayFrame: (frame) {
+                                if (mounted) _replayFrame.value = frame;
+                              },
                               onOpenPlan: _openPlanPreview,
                               controller: widget.controller,
                               railCollapsed: _railCollapsed,

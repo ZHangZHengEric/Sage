@@ -1,7 +1,9 @@
 part of '../workspace_screen.dart';
 
-class _ThreadPanel extends StatelessWidget {
+class _ThreadPanel extends StatefulWidget {
   const _ThreadPanel({
+    super.key,
+    required this.onReplayFrame,
     required this.controller,
     required this.railCollapsed,
     required this.workspaceCollapsed,
@@ -19,8 +21,18 @@ class _ThreadPanel extends StatelessWidget {
   final bool compact;
   final ValueChanged<String> onOpenPlan;
 
+  final ValueChanged<ReplayHtmlFrame?> onReplayFrame;
+
+  @override
+  State<_ThreadPanel> createState() => _ThreadPanelState();
+}
+
+class _ThreadPanelState extends State<_ThreadPanel> {
+  bool _replaying = false;
+
   @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     final conversation = controller.selectedDisplayConversation;
     if (conversation == null) return const SizedBox.shrink();
     final readOnly = controller.viewingSubSession;
@@ -30,7 +42,7 @@ class _ThreadPanel extends StatelessWidget {
         ? _InteractionCard(
             key: ValueKey(interaction.id),
             interaction: interaction,
-            onOpenPlan: onOpenPlan,
+            onOpenPlan: widget.onOpenPlan,
             onReply: readOnly
                 ? controller.replyDisplayInteraction
                 : controller.replyInteraction,
@@ -43,13 +55,28 @@ class _ThreadPanel extends StatelessWidget {
           _ThreadHeader(
             controller: controller,
             conversation: conversation,
-            railCollapsed: railCollapsed,
-            compact: compact,
-            workspaceCollapsed: workspaceCollapsed,
-            onToggleRail: onToggleRail,
-            onToggleWorkspace: onToggleWorkspace,
+            onReplay: _replaying
+                ? null
+                : () => setState(() => _replaying = true),
+            railCollapsed: widget.railCollapsed,
+            compact: widget.compact,
+            workspaceCollapsed: widget.workspaceCollapsed,
+            onToggleRail: widget.onToggleRail,
+            onToggleWorkspace: widget.onToggleWorkspace,
           ),
-          if (conversation.messages.isEmpty &&
+          if (_replaying)
+            Expanded(
+              child: _ConversationReplay(
+                source: conversation,
+                controller: controller,
+                onFrame: widget.onReplayFrame,
+                onClose: () {
+                  widget.onReplayFrame(null);
+                  setState(() => _replaying = false);
+                },
+              ),
+            )
+          else if (conversation.messages.isEmpty &&
               conversation.pendingInteraction == null)
             Expanded(
               child: Center(
@@ -101,7 +128,12 @@ class _ThreadPanel extends StatelessWidget {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 680),
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(20, 2, 20, compact ? 18 : 24),
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      2,
+                      20,
+                      widget.compact ? 18 : 24,
+                    ),
                     child: _PlanDecisionComposer(
                       key: ValueKey(
                         'plan-decision:${conversation.pendingInteraction!.id}',
@@ -127,7 +159,12 @@ class _ThreadPanel extends StatelessWidget {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 820),
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(34, 8, 34, compact ? 18 : 24),
+                    padding: EdgeInsets.fromLTRB(
+                      34,
+                      8,
+                      34,
+                      widget.compact ? 18 : 24,
+                    ),
                     child: _Composer(
                       controller: controller,
                       conversation: conversation,
@@ -145,6 +182,7 @@ class _ThreadPanel extends StatelessWidget {
 class _ThreadHeader extends StatelessWidget {
   const _ThreadHeader({
     required this.controller,
+    required this.onReplay,
     required this.conversation,
     required this.railCollapsed,
     required this.compact,
@@ -154,6 +192,7 @@ class _ThreadHeader extends StatelessWidget {
   });
 
   final WorkspaceController controller;
+  final VoidCallback? onReplay;
   final Conversation conversation;
   final bool railCollapsed;
   final bool compact;
@@ -226,6 +265,17 @@ class _ThreadHeader extends StatelessWidget {
             icon: CupertinoIcons.stop_fill,
             onTap: controller.cancel,
           ),
+        if (onReplay != null &&
+            (conversation.messages.any(
+                  (message) => message.role == 'assistant',
+                ) ||
+                conversation.processPanels.any((panel) => !panel.running)))
+          _HeaderIconButton(
+            keyValue: 'conversation-replay-button',
+            icon: CupertinoIcons.play_rectangle,
+            tooltip: context.l10n.text('workspace.replay'),
+            onTap: onReplay!,
+          ),
         const SizedBox(width: 8),
         _HeaderIconButton(
           keyValue: workspaceCollapsed
@@ -246,12 +296,14 @@ class _MessageList extends StatefulWidget {
     required this.conversation,
     this.subSessions = const [],
     this.readOnly = false,
+    this.replayNow,
   });
 
   final WorkspaceController controller;
   final Conversation conversation;
   final List<Conversation> subSessions;
   final bool readOnly;
+  final DateTime Function()? replayNow;
 
   @override
   State<_MessageList> createState() => _MessageListState();
@@ -710,6 +762,7 @@ class _MessageListState extends State<_MessageList> {
         children.add(const SizedBox(height: 14));
         children.add(
           _ProcessPanel(
+            replayNow: widget.replayNow,
             onOpenUi: widget.readOnly ? null : widget.controller.expandOpenUi,
             key: ValueKey(panel.id),
             panel: panel,
@@ -744,6 +797,7 @@ class _MessageListState extends State<_MessageList> {
     )) {
       children.add(
         _ProcessPanel(
+          replayNow: widget.replayNow,
           onOpenUi: widget.readOnly ? null : widget.controller.expandOpenUi,
           key: ValueKey(panel.id),
           panel: panel,

@@ -3410,6 +3410,108 @@ void main() {
     );
   });
 
+  testWidgets('chat replay skips user gaps and changes speed mid wait', (
+    tester,
+  ) async {
+    final start = DateTime.utc(2026, 11, 4);
+    final nextDay = start.add(const Duration(days: 1));
+    final chat = Conversation(
+      id: 'replay-test',
+      title: 'Replay test',
+      status: RunStatus.completed,
+      processPanels: [
+        RuntimeProcessPanel(
+          id: 'replay-process',
+          anchorMessageId: 'u1',
+          startedAt: start,
+          completedAt: start.add(const Duration(seconds: 8)),
+          running: false,
+          activities: [
+            RuntimeActivity(
+              id: 'replay-tool',
+              label: 'file_read',
+              active: false,
+              startedAt: start,
+              completedAt: start.add(const Duration(seconds: 8)),
+            ),
+          ],
+        ),
+      ],
+      messages: [
+        ChatMessage(
+          id: 'u1',
+          role: 'user',
+          text: 'First prompt',
+          createdAt: start,
+        ),
+        ChatMessage(
+          id: 'a1',
+          role: 'assistant',
+          text: 'First answer',
+          createdAt: start.add(const Duration(seconds: 8)),
+        ),
+        ChatMessage(
+          id: 'u2',
+          role: 'user',
+          text: 'Second prompt',
+          createdAt: nextDay,
+        ),
+        ChatMessage(
+          id: 'a2',
+          role: 'assistant',
+          text: 'Second answer',
+          createdAt: nextDay.add(const Duration(seconds: 8)),
+        ),
+      ],
+    );
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [chat.toJson()],
+      }),
+    });
+    final controller = _newController(
+      api: _FakeApi(),
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    final composer = find.byKey(const ValueKey('composer-control-cluster'));
+    expect(composer, findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('conversation-replay-button')));
+    await tester.pump();
+    expect(find.byType(Dialog), findsNothing);
+    expect(composer, findsNothing);
+    final replay = find.byKey(const ValueKey('inline-conversation-replay'));
+    Finder inside(String value) => find.descendant(
+      of: replay,
+      matching: find.text(value, findRichText: true),
+    );
+    expect(inside('First prompt'), findsOneWidget);
+    expect(inside('First answer'), findsNothing);
+    expect(inside('0s'), findsOneWidget);
+    expect(
+      tester.getCenter(inside('关闭回放')).dy,
+      closeTo(tester.getCenter(inside('8×')).dy, 2),
+    );
+    await tester.tap(inside('8×'));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(inside('First answer'), findsOneWidget);
+    expect(inside('已处理 8s'), findsOneWidget);
+    expect(inside('Second prompt'), findsOneWidget);
+    expect(inside('Second answer'), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(inside('Second answer'), findsOneWidget);
+    expect(controller.selectedConversation!.messages, hasLength(4));
+    await tester.tap(find.text('关闭回放'));
+    await tester.pumpAndSettle();
+    expect(replay, findsNothing);
+    expect(composer, findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test(
     'all supported frontend locales contain the complete translation set',
     () {

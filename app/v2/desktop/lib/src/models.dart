@@ -1059,6 +1059,29 @@ class RuntimeProcessPanel {
   };
 }
 
+class ReplayHtmlFrame {
+  const ReplayHtmlFrame(this.at, this.path, this.source);
+
+  final DateTime at;
+  final String path;
+  final String source;
+
+  static ReplayHtmlFrame? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final at = DateTime.tryParse(value['at']?.toString() ?? '');
+    final path = value['path'];
+    final source = value['source'];
+    if (at == null || path is! String || source is! String) return null;
+    return ReplayHtmlFrame(at, path, source);
+  }
+
+  Map<String, Object?> toJson() => {
+    'at': at.toIso8601String(),
+    'path': path,
+    'source': source,
+  };
+}
+
 class Conversation {
   Conversation({
     required this.id,
@@ -1123,6 +1146,7 @@ class Conversation {
   bool archived;
   DateTime? archivedAt;
   final List<Map<String, Object?>> runtimeEvents = [];
+  final List<ReplayHtmlFrame> replayHtml = [];
   final List<RuntimeProcessPanel> processPanels;
   final List<Conversation> subSessions;
   final DateTime createdAt;
@@ -1238,6 +1262,15 @@ class Conversation {
       archived: json['archived'] == true,
       archivedAt: DateTime.tryParse(json['archived_at']?.toString() ?? ''),
     )..resetCompletedGoalMode();
+    final rawReplay = json['replay_html'];
+    if (rawReplay is List) {
+      conversation.replayHtml.addAll(
+        rawReplay
+            .take(12)
+            .map(ReplayHtmlFrame.fromJson)
+            .whereType<ReplayHtmlFrame>(),
+      );
+    }
     conversation._settleOrphanedProcessPanels();
     return conversation;
   }
@@ -1302,6 +1335,8 @@ class Conversation {
     'pending_plan_execution': pendingPlanExecution,
     'last_completed_goal_run_id': lastCompletedGoalRunId,
     'process_panels': [for (final value in processPanels) value.toJson()],
+    if (replayHtml.isNotEmpty)
+      'replay_html': [for (final frame in replayHtml) frame.toJson()],
     'sub_sessions': [for (final value in subSessions) value.toJson()],
     'created_at': createdAt.toIso8601String(),
     'archived': archived,

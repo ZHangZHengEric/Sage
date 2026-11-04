@@ -717,7 +717,7 @@ class WorkspaceController extends ChangeNotifier {
       }
     }
     if (selectionToReload != null) {
-      await openFile(selectionToReload);
+      await openFile(selectionToReload, keepPreview: true);
     }
   }
 
@@ -730,24 +730,78 @@ class WorkspaceController extends ChangeNotifier {
     return null;
   }
 
-  Future<void> openFile(WorkspaceFileNode node) async {
+  int _fileOpenGeneration = 0;
+
+  Future<void> openFile(
+    WorkspaceFileNode node, {
+    bool keepPreview = false,
+  }) async {
     if (node.isDirectory) return;
+    final generation = ++_fileOpenGeneration;
+    final workspace = workspaceFilesRoot;
+    final retain = keepPreview && selectedFile?.path == node.path;
     selectedFile = node;
-    selectedFileContent = null;
-    notifyListeners();
+    if (!retain) {
+      selectedFileContent = null;
+      notifyListeners();
+    }
+    bool current() =>
+        !_disposed &&
+        generation == _fileOpenGeneration &&
+        workspace == workspaceFilesRoot &&
+        selectedFile?.path == node.path;
     try {
       final content = await _api.workspaceFile(
         agentId: selectedAgentId,
         workspaceId: selectedGroup.workspaceId,
         path: node.path,
       );
-      if (selectedFile?.path == node.path) {
-        selectedFileContent = content;
-      }
+      if (!current()) return;
+      _recordReplayHtml(node, selectedFileContent, content);
+      selectedFileContent = content;
     } on Object catch (exception) {
+      if (!current()) return;
       error = exception.toString();
     }
     notifyListeners();
+  }
+
+  void _recordReplayHtml(
+    WorkspaceFileNode node,
+    WorkspaceFileContent? previous,
+    WorkspaceFileContent content,
+  ) {
+    final conversation = selectedDisplayConversation;
+    if (conversation == null ||
+        conversation.processPanels.isEmpty ||
+        !RegExp(r'\.html?$', caseSensitive: false).hasMatch(node.name) ||
+        content.bytes.length > 64 * 1024) {
+      return;
+    }
+    final panel = conversation.processPanels.last;
+    final completedAt = panel.completedAt;
+    final now = DateTime.now();
+    if (!panel.running &&
+        (completedAt == null ||
+            now.difference(completedAt) > const Duration(seconds: 3))) {
+      return;
+    }
+    final frames = conversation.replayHtml;
+    if (frames.length >= 12) return;
+    final source = utf8.decode(content.bytes, allowMalformed: true);
+    if (frames.lastOrNull?.path == node.path && frames.last.source == source) {
+      return;
+    }
+    if (frames.isEmpty &&
+        previous != null &&
+        previous.bytes.length <= 64 * 1024) {
+      final baseline = utf8.decode(previous.bytes, allowMalformed: true);
+      if (baseline != source) {
+        frames.add(ReplayHtmlFrame(panel.startedAt, node.path, baseline));
+      }
+    }
+    frames.add(ReplayHtmlFrame(now, node.path, source));
+    _persist();
   }
 
   bool isWorkspaceNodeReferenced(WorkspaceFileNode? node) {

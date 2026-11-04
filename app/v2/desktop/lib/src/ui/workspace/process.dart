@@ -6,6 +6,7 @@ class _ProcessPanel extends StatefulWidget {
     required this.messages,
     this.subSessions = const [],
     this.forceCollapsed = false,
+    this.replayNow,
     this.onOpenUi,
     super.key,
   });
@@ -14,6 +15,7 @@ class _ProcessPanel extends StatefulWidget {
   final List<ChatMessage> messages;
   final List<Conversation> subSessions;
   final bool forceCollapsed;
+  final DateTime Function()? replayNow;
   final ValueChanged<Map<String, Object?>>? onOpenUi;
 
   @override
@@ -64,9 +66,9 @@ class _ProcessPanelState extends State<_ProcessPanel> {
   Widget build(BuildContext context) {
     final panel = widget.panel;
     final colors = Theme.of(context).colorScheme;
-    final elapsed = (panel.completedAt ?? DateTime.now()).difference(
-      panel.startedAt,
-    );
+    final elapsed =
+        (panel.completedAt ?? widget.replayNow?.call() ?? DateTime.now())
+            .difference(panel.startedAt);
     final items = _orderedProcessItems(panel, widget.messages);
     final childSessionIds = {
       for (final value in widget.subSessions) value.sessionId,
