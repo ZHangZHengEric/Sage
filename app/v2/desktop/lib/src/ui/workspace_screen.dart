@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
@@ -74,6 +75,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final _planPreview = _PlanPreviewState();
   bool _railCollapsed = false;
   bool _workspaceCollapsed = false;
+  bool _workspaceExpanded = false;
   bool _settingsOpen = false;
   String _lastStudioId = '';
   int _lastOpenUiRevision = 0;
@@ -88,12 +90,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _onStudioDockChanged() {
-    if (widget.controller.selectedStudio != null &&
-        _panelDockController.openInstances.isEmpty &&
-        !_workspaceCollapsed) {
-      setState(() => _workspaceCollapsed = true);
+    if (_panelDockController.openInstances.isNotEmpty) return;
+    final collapse =
+        widget.controller.selectedStudio != null && !_workspaceCollapsed;
+    if (collapse || _workspaceExpanded) {
+      setState(() {
+        _workspaceExpanded = false;
+        if (collapse) _workspaceCollapsed = true;
+      });
     }
   }
+
+  void _toggleWorkspaceExpansion() =>
+      setState(() => _workspaceExpanded = !_workspaceExpanded);
+
+  void _collapseWorkspace() => setState(() {
+    _workspaceExpanded = false;
+    _workspaceCollapsed = true;
+  });
+
+  Widget _threadVisibility({
+    double? width,
+    double? height,
+    required Widget child,
+  }) => Visibility(
+    visible: !_workspaceExpanded,
+    maintainState: true,
+    child: OverflowBox(
+      minWidth: _workspaceExpanded ? width : null,
+      maxWidth: _workspaceExpanded ? width : null,
+      minHeight: _workspaceExpanded ? height : null,
+      maxHeight: _workspaceExpanded ? height : null,
+      child: child,
+    ),
+  );
 
   void _onStudioSelectionChanged() {
     final id = widget.controller.selectedStudioId;
@@ -305,45 +335,57 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   ),
                 ),
               Expanded(
-                child: RepaintBoundary(
-                  key: const ValueKey('thread-repaint-boundary'),
-                  child: widget.controller.selectedStudio != null
-                      ? _StudioThread(
-                          key: ValueKey(widget.controller.selectedStudioId),
-                          compact: true,
-                          controller: widget.controller,
-                          onDetails: _openStudioDetails,
-                          workspaceCollapsed: _workspaceCollapsed,
-                          railCollapsed: _railCollapsed,
-                          onToggleWorkspace: () => setState(
-                            () => _workspaceCollapsed = !_workspaceCollapsed,
+                child: _threadVisibility(
+                  height: max(
+                    0.0,
+                    constraints.maxHeight - railHeight - workspaceHeight,
+                  ),
+                  child: RepaintBoundary(
+                    key: const ValueKey('thread-repaint-boundary'),
+                    child: widget.controller.selectedStudio != null
+                        ? _StudioThread(
+                            key: ValueKey(widget.controller.selectedStudioId),
+                            compact: true,
+                            controller: widget.controller,
+                            onDetails: _openStudioDetails,
+                            workspaceCollapsed: _workspaceCollapsed,
+                            railCollapsed: _railCollapsed,
+                            onToggleWorkspace: () => setState(
+                              () => _workspaceCollapsed = !_workspaceCollapsed,
+                            ),
+                            onToggleRail: () => setState(
+                              () => _railCollapsed = !_railCollapsed,
+                            ),
+                          )
+                        : _ThreadPanel(
+                            onOpenPlan: _openPlanPreview,
+                            controller: widget.controller,
+                            compact: true,
+                            railCollapsed: _railCollapsed,
+                            workspaceCollapsed: _workspaceCollapsed,
+                            onToggleRail: () => setState(
+                              () => _railCollapsed = !_railCollapsed,
+                            ),
+                            onToggleWorkspace: () => setState(
+                              () => _workspaceCollapsed = !_workspaceCollapsed,
+                            ),
                           ),
-                          onToggleRail: () =>
-                              setState(() => _railCollapsed = !_railCollapsed),
-                        )
-                      : _ThreadPanel(
-                          onOpenPlan: _openPlanPreview,
-                          controller: widget.controller,
-                          compact: true,
-                          railCollapsed: _railCollapsed,
-                          workspaceCollapsed: _workspaceCollapsed,
-                          onToggleRail: () =>
-                              setState(() => _railCollapsed = !_railCollapsed),
-                          onToggleWorkspace: () => setState(
-                            () => _workspaceCollapsed = !_workspaceCollapsed,
-                          ),
-                        ),
+                  ),
                 ),
               ),
               if (!_workspaceCollapsed)
                 SizedBox(
-                  height: workspaceHeight,
+                  height: _workspaceExpanded
+                      ? max(0.0, constraints.maxHeight - railHeight)
+                      : workspaceHeight,
                   child: RepaintBoundary(
                     key: const ValueKey('workspace-repaint-boundary'),
                     child: WorkspacePanelDock(
                       onCollapse: widget.controller.selectedStudio == null
                           ? null
-                          : () => setState(() => _workspaceCollapsed = true),
+                          : _collapseWorkspace,
+                      expanded: _workspaceExpanded,
+                      onToggleExpansion: _toggleWorkspaceExpansion,
                       registry: _panelRegistry,
                       services: _panelServices,
                       controller: _panelDockController,
@@ -369,13 +411,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           constraints.maxWidth * panelSizing.maxWidthFraction,
           max(0.0, widthAfterRail - desktopSplitHandleWidth - minThreadWidth),
         );
-        final showWorkspace =
+        final showSplitWorkspace =
             !_workspaceCollapsed && maxWorkspaceWidth >= minWorkspaceWidth;
-        final workspaceWidth = showWorkspace
+        final showWorkspace =
+            !_workspaceCollapsed && (showSplitWorkspace || _workspaceExpanded);
+        final splitWorkspaceWidth = showSplitWorkspace
             ? (constraints.maxWidth * _workspaceFraction)
                   .clamp(minWorkspaceWidth, maxWorkspaceWidth)
                   .toDouble()
             : 0.0;
+        final workspaceWidth = _workspaceExpanded
+            ? widthAfterRail
+            : splitWorkspaceWidth;
         return Stack(
           children: [
             Row(
@@ -401,45 +448,56 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   ),
                 ],
                 Expanded(
-                  child: RepaintBoundary(
-                    key: const ValueKey('thread-repaint-boundary'),
-                    child: widget.controller.selectedStudio != null
-                        ? _StudioThread(
-                            key: ValueKey(widget.controller.selectedStudioId),
-                            controller: widget.controller,
-                            onDetails: _openStudioDetails,
-                            workspaceCollapsed: _workspaceCollapsed,
-                            railCollapsed: _railCollapsed,
-                            onToggleWorkspace: () => setState(
-                              () => _workspaceCollapsed = !_workspaceCollapsed,
+                  child: _threadVisibility(
+                    width: max(
+                      0.0,
+                      widthAfterRail -
+                          splitWorkspaceWidth -
+                          (showSplitWorkspace ? desktopSplitHandleWidth : 0),
+                    ),
+                    child: RepaintBoundary(
+                      key: const ValueKey('thread-repaint-boundary'),
+                      child: widget.controller.selectedStudio != null
+                          ? _StudioThread(
+                              key: ValueKey(widget.controller.selectedStudioId),
+                              controller: widget.controller,
+                              onDetails: _openStudioDetails,
+                              workspaceCollapsed: _workspaceCollapsed,
+                              railCollapsed: _railCollapsed,
+                              onToggleWorkspace: () => setState(
+                                () =>
+                                    _workspaceCollapsed = !_workspaceCollapsed,
+                              ),
+                              onToggleRail: () => setState(
+                                () => _railCollapsed = !_railCollapsed,
+                              ),
+                            )
+                          : _ThreadPanel(
+                              onOpenPlan: _openPlanPreview,
+                              controller: widget.controller,
+                              railCollapsed: _railCollapsed,
+                              workspaceCollapsed:
+                                  _workspaceCollapsed || !showWorkspace,
+                              onToggleRail: () => setState(
+                                () => _railCollapsed = !_railCollapsed,
+                              ),
+                              onToggleWorkspace: () => setState(
+                                () =>
+                                    _workspaceCollapsed = !_workspaceCollapsed,
+                              ),
                             ),
-                            onToggleRail: () => setState(
-                              () => _railCollapsed = !_railCollapsed,
-                            ),
-                          )
-                        : _ThreadPanel(
-                            onOpenPlan: _openPlanPreview,
-                            controller: widget.controller,
-                            railCollapsed: _railCollapsed,
-                            workspaceCollapsed:
-                                _workspaceCollapsed || !showWorkspace,
-                            onToggleRail: () => setState(
-                              () => _railCollapsed = !_railCollapsed,
-                            ),
-                            onToggleWorkspace: () => setState(
-                              () => _workspaceCollapsed = !_workspaceCollapsed,
-                            ),
-                          ),
+                    ),
                   ),
                 ),
                 if (showWorkspace) ...[
-                  _SplitResizeHandle(
-                    key: const ValueKey('workspace-split-handle'),
-                    onDragUpdate: (details) => _resizeWorkspace(
-                      details.delta.dx,
-                      constraints.maxWidth,
+                  if (!_workspaceExpanded)
+                    _SplitResizeHandle(
+                      key: const ValueKey('workspace-split-handle'),
+                      onDragUpdate: (details) => _resizeWorkspace(
+                        details.delta.dx,
+                        constraints.maxWidth,
+                      ),
                     ),
-                  ),
                   SizedBox(
                     width: workspaceWidth,
                     child: RepaintBoundary(
@@ -447,7 +505,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                       child: WorkspacePanelDock(
                         onCollapse: widget.controller.selectedStudio == null
                             ? null
-                            : () => setState(() => _workspaceCollapsed = true),
+                            : _collapseWorkspace,
+                        expanded: _workspaceExpanded,
+                        onToggleExpansion: _toggleWorkspaceExpansion,
                         registry: _panelRegistry,
                         services: _panelServices,
                         controller: _panelDockController,
@@ -471,7 +531,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                       _resizeRail(details.delta.dx, constraints.maxWidth),
                 ),
               ),
-            if (showWorkspace && _splitHandleHitWidth > desktopSplitHandleWidth)
+            if (showWorkspace &&
+                !_workspaceExpanded &&
+                _splitHandleHitWidth > desktopSplitHandleWidth)
               Positioned(
                 top: 0,
                 bottom: 0,

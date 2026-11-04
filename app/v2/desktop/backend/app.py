@@ -469,8 +469,33 @@ def create_app(
         return _success(await _safe(runtime_service.delete_rsi_run(agent_id, run_id, get_desktop_user_id(request))))
 
     @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}")
-    async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0, compact: bool = False):
-        return _success(await _safe(runtime_service.rsi_run(agent_id, run_id, get_desktop_user_id(request), after_sequence=after_sequence, compact=compact)))
+    async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0, compact: bool = False, overview: bool = False,
+                      retry_overview: bool = False):
+        return _success(await _safe(runtime_service.rsi_run(agent_id, run_id, get_desktop_user_id(request),
+            after_sequence=after_sequence, compact=compact, overview=overview, retry_overview=retry_overview)))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/events")
+    async def rsi_event_metadata(agent_id: str, run_id: str, request: Request, after_sequence: int = 0):
+        return _success(await _safe(runtime_service.rsi_event_metadata(
+            agent_id, run_id, get_desktop_user_id(request), after_sequence)))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/result/cases/{part}")
+    async def rsi_result_case(agent_id: str, run_id: str, part: int, request: Request):
+        return _success(await _safe(runtime_service.rsi_result_case(agent_id, run_id, get_desktop_user_id(request), part)))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/result/human/{checkpoint}/{case}")
+    async def rsi_human_case(agent_id: str, run_id: str, checkpoint: int, case: int, request: Request):
+        return _success(await _safe(runtime_service.rsi_human_case(
+            agent_id, run_id, get_desktop_user_id(request), checkpoint, case)))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/result/export")
+    async def rsi_result_export(agent_id: str, run_id: str, request: Request):
+        from .rsi_result_store import result_chunks, result_exists
+
+        root = await _safe(runtime_service.rsi_result_root(agent_id, run_id, get_desktop_user_id(request)))
+        if not result_exists(root):
+            raise HTTPException(status_code=404, detail="RSI result not found")
+        return StreamingResponse(result_chunks(root), media_type="application/json")
 
     @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/resume")
     async def rsi_resume(agent_id: str, run_id: str, request: Request, options: RsiResumeOptions | None = None):
@@ -491,8 +516,9 @@ def create_app(
         return _success(await _safe(runtime_service.cancel_rsi(agent_id, run_id, get_desktop_user_id(request))))
 
     @app.get("/api/v2/agents/{agent_id}/rsi/versions/{version_id}")
-    async def rsi_version(agent_id: str, version_id: str, request: Request):
-        return _success(await _safe(runtime_service.rsi_version(agent_id, version_id, get_desktop_user_id(request))))
+    async def rsi_version(agent_id: str, version_id: str, request: Request, overview: bool = False):
+        return _success(await _safe(runtime_service.rsi_version(
+            agent_id, version_id, get_desktop_user_id(request), overview=overview)))
 
     @app.post("/api/v2/agents/{agent_id}/rsi/versions/{version_id}/apply")
     async def rsi_apply(agent_id: str, version_id: str, value: RsiApply, request: Request):

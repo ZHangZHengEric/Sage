@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show InternetAddress, SocketException;
 import 'dart:math';
 import 'dart:ui' show Locale;
 
@@ -303,8 +304,19 @@ class WorkspaceController extends ChangeNotifier {
     return true;
   }
 
+  Future<T> _readSidecar<T>(Future<T> Function() read) async {
+    try {
+      return await read();
+    } on SocketException {
+      final host = _runtimeHost;
+      if (host == null) rethrow;
+      await host.ensureReady();
+      return read();
+    }
+  }
+
   Future<Map<String, Object?>> rsiHistory(String agentId) =>
-      _api.rsiHistory(agentId);
+      _readSidecar(() => _api.rsiHistory(agentId));
   Future<void> deleteRsiRun(String agentId, String runId) =>
       _api.deleteRsiRun(agentId, runId);
   Future<Map<String, Object?>> importRsiDataset(
@@ -339,9 +351,32 @@ class WorkspaceController extends ChangeNotifier {
     String agentId,
     String runId, {
     int afterSequence = 0,
-  }) => _api.rsiRun(agentId, runId, afterSequence: afterSequence);
+  }) => _readSidecar(
+    () => _api.rsiRun(agentId, runId, afterSequence: afterSequence),
+  );
+  Future<Map<String, Object?>> retryRsiOverview(
+    String agentId,
+    String runId,
+    int afterSequence,
+  ) => _readSidecar(() => _api.retryRsiOverview(agentId, runId, afterSequence));
+
+  Future<Map<String, Object?>> rsiEvents(
+    String agentId,
+    String runId,
+    int afterSequence,
+  ) => _readSidecar(() => _api.rsiEvents(agentId, runId, afterSequence));
+
+  Future<Map<String, Object?>> rsiResultCase(
+    String agentId,
+    String runId,
+    String part,
+  ) => _readSidecar(() => _api.rsiResultCase(agentId, runId, part));
+
+  Future<void> exportRsiResult(String agentId, String runId, String path) =>
+      _api.exportRsiResult(agentId, runId, path);
+
   Future<Map<String, Object?>> rsiVersion(String agentId, String versionId) =>
-      _api.rsiVersion(agentId, versionId);
+      _readSidecar(() => _api.rsiVersion(agentId, versionId));
   Future<Map<String, Object?>> startRsi(
     String agentId,
     Map<String, Object?> request,
@@ -625,16 +660,46 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _loadedFilesRoot;
+  int _filesRefreshGeneration = 0;
+
+  String get workspaceFilesRoot =>
+      selectedGroup.project?.path ?? settings.agentWorkspacePath;
+
+  String? localWorkspaceRootFor(WorkspaceFileNode node) {
+    final root = workspaceFilesRoot;
+    if (!hasLocalWorkspaceFiles ||
+        root.isEmpty ||
+        root != _loadedFilesRoot ||
+        filesLoading ||
+        !identical(_findFile(files, node.path), node)) {
+      return null;
+    }
+    return root;
+  }
+
+  bool get hasLocalWorkspaceFiles {
+    final host = _api.baseUri.host;
+    return host == 'localhost' ||
+        InternetAddress.tryParse(host)?.isLoopback == true;
+  }
+
   Future<void> refreshFiles() async {
     if (selectedAgentId.isEmpty) return;
+    final generation = ++_filesRefreshGeneration;
+    final workspaceRoot = workspaceFilesRoot;
+    final workspaceId = selectedGroup.workspaceId;
     WorkspaceFileNode? selectionToReload;
     filesLoading = true;
     notifyListeners();
     try {
-      files = await _api.workspaceTree(
+      final loaded = await _api.workspaceTree(
         agentId: selectedAgentId,
-        workspaceId: selectedGroup.workspaceId,
+        workspaceId: workspaceId,
       );
+      if (generation != _filesRefreshGeneration) return;
+      files = loaded;
+      _loadedFilesRoot = workspaceRoot;
       final selectedPath = selectedFile?.path;
       if (selectedPath != null) {
         selectionToReload = _findFile(files, selectedPath);
@@ -644,10 +709,12 @@ class WorkspaceController extends ChangeNotifier {
         selectedFileContent = null;
       }
     } on Object catch (exception) {
-      error = exception.toString();
+      if (generation == _filesRefreshGeneration) error = exception.toString();
     } finally {
-      filesLoading = false;
-      notifyListeners();
+      if (generation == _filesRefreshGeneration) {
+        filesLoading = false;
+        notifyListeners();
+      }
     }
     if (selectionToReload != null) {
       await openFile(selectionToReload);
@@ -1099,14 +1166,16 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
     try {
       _syncToolCatalogLanguage();
-      final values = await Future.wait<Object>([
-        _api.getAgentConfiguration(targetAgentId),
-        _api.listTools(),
-        _api.listSkillCatalog(),
-        _api.listModelProviders(),
-        _api.listMcpConnections(),
-        _api.listComponents(),
-      ]);
+      final values = await _readSidecar(
+        () => Future.wait<Object>([
+          _api.getAgentConfiguration(targetAgentId),
+          _api.listTools(),
+          _api.listSkillCatalog(),
+          _api.listModelProviders(),
+          _api.listMcpConnections(),
+          _api.listComponents(),
+        ], eagerError: true),
+      );
       if (_disposed || catalogRevision != _settingsCatalogRevision) return;
       if (agentRevision == _settingsAgentRevision) {
         _adoptAgentRead(values[0] as AgentConfiguration, writeRevision);
@@ -1124,7 +1193,14 @@ class WorkspaceController extends ChangeNotifier {
       if (!_disposed &&
           catalogRevision == _settingsCatalogRevision &&
           agentRevision == _settingsAgentRevision) {
-        error = exception.toString();
+        final language = settings.language == 'system'
+            ? PlatformDispatcher.instance.locale.languageCode
+            : settings.language;
+        error = exception is SocketException
+            ? (language == 'zh'
+                  ? '暂时无法连接本地服务'
+                  : 'Could not connect to the local service')
+            : exception.toString();
       }
     } finally {
       if (!_disposed && catalogRevision == _settingsCatalogRevision) {

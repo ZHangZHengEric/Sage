@@ -7,4 +7,4 @@ SIDECAR_PROTOCOL = "sage.runtime/v2"
 # an older source/build. The Flutter host rejects and retires an incompatible
 # registered process before launching the matching backend.
 # RSI MCP clients require bounded case concurrency and generated pure tools.
-SIDECAR_REVISION = 16
+SIDECAR_REVISION = 17

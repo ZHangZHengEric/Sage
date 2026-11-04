@@ -370,6 +370,8 @@ class WorkspacePanelDock extends StatefulWidget {
     required this.controller,
     this.compact = false,
     this.onCollapse,
+    this.expanded = false,
+    this.onToggleExpansion,
     super.key,
   });
 
@@ -378,6 +380,8 @@ class WorkspacePanelDock extends StatefulWidget {
   final WorkspacePanelDockController controller;
   final bool compact;
   final VoidCallback? onCollapse;
+  final bool expanded;
+  final VoidCallback? onToggleExpansion;
 
   @override
   State<WorkspacePanelDock> createState() => _WorkspacePanelDockState();
@@ -446,7 +450,8 @@ class _WorkspacePanelDockState extends State<WorkspacePanelDock> {
     final showTabs =
         open.length > 1 ||
         closedPlugins.isNotEmpty ||
-        widget.onCollapse != null;
+        widget.onCollapse != null ||
+        widget.onToggleExpansion != null;
     final activeInstanceId = widget.controller.activeInstanceId;
     final activeIndex = open.indexWhere(
       (instance) => instance.instanceId == activeInstanceId,
@@ -482,6 +487,8 @@ class _WorkspacePanelDockState extends State<WorkspacePanelDock> {
           onClose: widget.controller.closeInstance,
           onOpen: widget.controller.open,
           onCollapse: widget.onCollapse,
+          expanded: widget.expanded,
+          onToggleExpansion: widget.onToggleExpansion,
         ),
         Expanded(child: content),
       ],
@@ -553,9 +560,13 @@ class _WorkspacePanelTabs extends StatelessWidget {
     required this.onClose,
     required this.onOpen,
     this.onCollapse,
+    required this.expanded,
+    this.onToggleExpansion,
   });
 
   final VoidCallback? onCollapse;
+  final bool expanded;
+  final VoidCallback? onToggleExpansion;
   final List<WorkspacePanelInstance> open;
   final List<WorkspacePanelPlugin> closedPlugins;
   final WorkspacePanelRegistry registry;
@@ -608,6 +619,21 @@ class _WorkspacePanelTabs extends StatelessWidget {
                 },
               ),
             ),
+            if (onToggleExpansion != null)
+              IconButton(
+                key: const ValueKey('workspace-panel-toggle-expansion'),
+                tooltip: context.l10n.text(
+                  expanded ? 'workspace.restorePanel' : 'workspace.expandPanel',
+                ),
+                onPressed: onToggleExpansion,
+                icon: Icon(
+                  expanded
+                      ? CupertinoIcons.arrow_down_right_arrow_up_left
+                      : CupertinoIcons.arrow_up_left_arrow_down_right,
+                  size: 16,
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
             if (closedPlugins.isNotEmpty)
               PopupMenuButton<String>(
                 key: const ValueKey('workspace-panel-open-menu'),

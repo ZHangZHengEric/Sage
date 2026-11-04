@@ -728,7 +728,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 visited.add(source_id)
                 source = environment.agents[source_id]
                 provider = environment.provider(source)
-                candidate = self._manifest(source, provider,
+                candidate = manifest if source_id == agent.agent_id else self._manifest(source, provider,
                     tuple(source.config.get("availableTools") or ()), tuple(source.config.get("availableSkills") or ()))
                 definition = candidate.agents[source_id]
                 from .runtime_config import _continuation_agent_instructions

@@ -345,6 +345,27 @@ class RsiScoreTrend extends StatelessWidget {
           : '—';
     }
 
+    String detailScore(Map<String, Object?> point, String split) {
+      final value = score(point, split);
+      if (split == 'test') {
+        if (point['valid'] == false) {
+          return chinese ? '结果无效' : 'Invalid result';
+        }
+        if (value != '—' && point['test_partial'] == true) {
+          final pairs = point['test_pairs'];
+          final expected = point['test_expected_pairs'];
+          final count = expected == null ? '$pairs' : '$pairs/$expected';
+          return chinese
+              ? '$value（已完成 $count 组）'
+              : '$value ($count pairs completed)';
+        }
+        if (value == '—' && point['test_status'] == 'error') {
+          return chinese ? '评测失败' : 'Evaluation failed';
+        }
+      }
+      return value == '—' ? (chinese ? '未评估' : 'Not evaluated') : value;
+    }
+
     String round(Object? value) => value == 0
         ? (chinese ? '基线' : 'Baseline')
         : (chinese ? '第 $value 轮' : 'Round $value');
@@ -353,7 +374,7 @@ class RsiScoreTrend extends StatelessWidget {
       label: points
           .map(
             (p) =>
-                '${round(p['round'])}: ${splits.indexed.map((s) => '${names[s.$1]} ${score(p, s.$2)}').join(', ')}',
+                '${round(p['round'])}: ${splits.indexed.map((s) => '${names[s.$1]} ${detailScore(p, s.$2)}').join(', ')}',
           )
           .join('; '),
       child: Column(
@@ -424,11 +445,7 @@ class RsiScoreTrend extends StatelessWidget {
                       String details(Map<String, Object?> point) => [
                         round(point['round']),
                         for (final (index, split) in splits.indexed)
-                          '${names[index]}：${split == 'test' && point['valid'] == false
-                              ? (chinese ? '结果无效' : 'Invalid result')
-                              : score(point, split) == '—'
-                              ? (chinese ? '未评估' : 'Not evaluated')
-                              : score(point, split)}',
+                          '${names[index]}：${detailScore(point, split)}',
                       ].join('\n');
                       return Stack(
                         fit: StackFit.expand,
@@ -441,6 +458,7 @@ class RsiScoreTrend extends StatelessWidget {
                                 alpha: .12,
                               ),
                               scale: scale,
+                              surface: theme.colorScheme.surface,
                             ),
                           ),
                           for (var i = 0; i < points.length; i++)
@@ -503,11 +521,13 @@ class _ScoreLines extends CustomPainter {
     this.colors,
     this.grid, {
     this.scale = const RsiScoreScale(0, 1, .25),
+    required this.surface,
   });
   final List<Map<String, Object?>> records;
   final List<Color> colors;
   final Color grid;
   final RsiScoreScale scale;
+  final Color surface;
   @override
   void paint(Canvas canvas, Size size) {
     const pad = 8.0;
@@ -530,12 +550,19 @@ class _ScoreLines extends CustomPainter {
     final maxRound = (records.last['round'] as num).toDouble();
     for (final (i, split) in ['training', 'validation', 'test'].indexed) {
       Offset? previous;
+      num? previousRound;
+      var missing = false;
       for (final record in records) {
+        final round = record['round'] as num;
         final score = _map(record['scores'])[split];
         if (score is! num ||
             !score.isFinite ||
             (split == 'test' && record['valid'] == false)) {
-          previous = null;
+          if (split == 'test') {
+            missing = true;
+          } else {
+            previous = null;
+          }
           continue;
         }
         final point = Offset(
@@ -543,21 +570,44 @@ class _ScoreLines extends CustomPainter {
               area.width *
                   (maxRound == minRound
                       ? .5
-                      : ((record['round'] as num) - minRound) /
-                            (maxRound - minRound)),
+                      : (round - minRound) / (maxRound - minRound)),
           area.bottom - area.height * scale.fraction(score),
         );
         if (previous != null) {
-          canvas.drawLine(
-            previous,
+          final paint = Paint()
+            ..color = colors[i]
+            ..strokeWidth = 2;
+          if (split == 'test' && (missing || round - previousRound! > 1)) {
+            final delta = point - previous;
+            final distance = delta.distance;
+            for (var offset = 0.0; offset < distance; offset += 9) {
+              canvas.drawLine(
+                previous + delta * (offset / distance),
+                previous +
+                    delta * ((offset + 5).clamp(0.0, distance) / distance),
+                paint,
+              );
+            }
+          } else {
+            canvas.drawLine(previous, point, paint);
+          }
+        }
+        if (split == 'test' && record['test_partial'] == true) {
+          canvas.drawCircle(point, 4, Paint()..color = surface);
+          canvas.drawCircle(
             point,
+            4,
             Paint()
               ..color = colors[i]
-              ..strokeWidth = 2,
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6,
           );
+        } else {
+          canvas.drawCircle(point, 3.5, Paint()..color = colors[i]);
         }
-        canvas.drawCircle(point, 3.5, Paint()..color = colors[i]);
         previous = point;
+        previousRound = round;
+        missing = false;
       }
     }
   }

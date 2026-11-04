@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:sage_desktop_v2/src/models.dart';
 import 'package:sage_desktop_v2/src/state/workspace_controller.dart';
 import 'package:sage_desktop_v2/src/ui/rsi_screen.dart';
@@ -101,6 +102,16 @@ void main() {
         await tester.ensureVisible(button);
         await tester.tap(button);
         await tester.pumpAndSettle();
+        final cancel = tester.widget<GlassButton>(
+          find.byKey(const ValueKey('rsi-save-agent-cancel')),
+        );
+        final save = tester.widget<GlassButton>(
+          find.byKey(const ValueKey('rsi-save-agent-confirm')),
+        );
+        expect(cancel.shape, isA<LiquidRoundedRectangle>());
+        expect(save.shape, isA<LiquidRoundedRectangle>());
+        expect(cancel.style, GlassButtonStyle.transparent);
+        expect(save.style, GlassButtonStyle.filled);
         final field = find.byKey(const ValueKey('rsi-new-agent-name'));
         final screenshotDir = Platform.environment['RSI_SAVE_SCREENSHOT_DIR'];
         if (screenshotDir != null) {

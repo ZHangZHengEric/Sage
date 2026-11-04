@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
@@ -986,6 +987,8 @@ Inspect the complete diff before reporting findings.
     lastRemovedProjectId = projectId;
   }
 
+  bool includeHtmlFile = false;
+
   @override
   Future<List<WorkspaceFileNode>> workspaceTree({
     required String agentId,
@@ -993,8 +996,8 @@ Inspect the complete diff before reporting findings.
   }) async {
     workspaceTreeCalls += 1;
     lastWorkspaceTreeId = workspaceId;
-    return const [
-      WorkspaceFileNode(
+    return [
+      const WorkspaceFileNode(
         name: 'projects',
         path: 'projects',
         isDirectory: true,
@@ -1008,12 +1011,19 @@ Inspect the complete diff before reporting findings.
           ),
         ],
       ),
-      WorkspaceFileNode(
+      const WorkspaceFileNode(
         name: 'README.md',
         path: 'README.md',
         isDirectory: false,
         size: 12,
       ),
+      if (includeHtmlFile)
+        const WorkspaceFileNode(
+          name: 'index.html',
+          path: 'index.html',
+          isDirectory: false,
+          size: 12,
+        ),
     ];
   }
 
@@ -3122,7 +3132,14 @@ void main() {
         find.byKey(const ValueKey('agent-name-field')),
         'Customized',
       );
-      await tester.tap(find.byKey(const ValueKey('settings-agent-clone')));
+      final more = find.byKey(const ValueKey('settings-agent-more'));
+      final edit = find.byKey(const ValueKey('settings-agent-edit'));
+      final clone = find.byKey(const ValueKey('settings-agent-clone'));
+      expect(clone, findsNothing);
+      expect(tester.getCenter(more).dx, lessThan(tester.getCenter(edit).dx));
+      await tester.tap(more);
+      await tester.pumpAndSettle();
+      await tester.tap(clone);
       await tester.pumpAndSettle();
       expect(api.lastAgentPatch, {'name': 'Customized'});
       expect(api.lastClonedAgentId, source);
@@ -4917,6 +4934,130 @@ void main() {
       expect(controller.selectedConversation?.status, RunStatus.completed);
     },
   );
+
+  for (final width in [1440.0, 700.0]) {
+    testWidgets(
+      'workspace expansion preserves the rail, file and split at $width',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final controller = await _controller(api: _FakeApi());
+        addTearDown(() => _disposeController(controller));
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('file-tree-row:README.md')));
+        await tester.pumpAndSettle();
+
+        final toggle = find.byKey(
+          const ValueKey('workspace-panel-toggle-expansion'),
+        );
+        final thread = find.byKey(const ValueKey('thread-repaint-boundary'));
+        final dock = find.byKey(const ValueKey('workspace-repaint-boundary'));
+        final rail = find.byKey(
+          const ValueKey('project-rail-repaint-boundary'),
+        );
+        final preview = find.byKey(const ValueKey('file-preview-rendered'));
+        final originalDockSize = tester.getSize(dock);
+        final originalRailSize = tester.getSize(rail);
+        final previewElement = tester.element(preview);
+        expect(thread, findsOneWidget);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+
+        expect(thread, findsNothing);
+        expect(tester.getSize(rail), originalRailSize);
+        expect(tester.element(preview), same(previewElement));
+        final expandedSize = tester.getSize(dock);
+        expect(
+          width > 760 ? expandedSize.width : expandedSize.height,
+          greaterThan(
+            width > 760 ? originalDockSize.width : originalDockSize.height,
+          ),
+        );
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(thread, findsOneWidget);
+        expect(tester.getSize(dock), originalDockSize);
+        expect(tester.element(preview), same(previewElement));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('HTML preview exposes an open in browser action', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = await _controller(
+      api: _FakeApi()..includeHtmlFile = true,
+    );
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+
+    final browser = find.byKey(const ValueKey('file-header-open-browser'));
+    expect(browser, findsNothing);
+    await tester.tap(find.byKey(const ValueKey('file-tree-row:index.html')));
+    await tester.pumpAndSettle();
+    expect(browser, findsOneWidget);
+    expect(
+      tester.getCenter(browser).dy,
+      tester.getCenter(find.byKey(const ValueKey('file-preview-mode'))).dy,
+    );
+    await tester.tap(find.byKey(const ValueKey('file-tree-row:README.md')));
+    await tester.pumpAndSettle();
+    expect(browser, findsNothing);
+  });
+
+  testWidgets('workspace file context menu moves a file to the Trash', (
+    tester,
+  ) async {
+    if (!Platform.isMacOS) return;
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi()..includeHtmlFile = true;
+    final controller = await _controller(api: api);
+    addTearDown(() => _disposeController(controller));
+    const channel = MethodChannel('sage_desktop_v2/workspace_files');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      api.includeHtmlFile = false;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    final row = find.byKey(const ValueKey('file-tree-row:index.html'));
+    final trash = find.byKey(const ValueKey('file-tree-trash:index.html'));
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    final click = tester.getTopLeft(row) + const Offset(23, 9);
+    await tester.tapAt(click, buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expect(controller.selectedFile?.path, 'index.html');
+
+    final menuItem = tester.getTopLeft(trash);
+    expect(menuItem.dx, closeTo(click.dx, 12));
+    expect(menuItem.dy, closeTo(click.dy, 12));
+    expect(tester.getSize(trash).height, lessThanOrEqualTo(34));
+
+    await tester.tap(trash);
+    await tester.pumpAndSettle();
+    expect(calls.single.method, 'moveToTrash');
+    expect(calls.single.arguments['path'], 'index.html');
+    expect(row, findsNothing);
+    expect(controller.selectedFile, isNull);
+  });
 
   testWidgets('desktop layout exposes agent, skill, workspace, and files', (
     tester,

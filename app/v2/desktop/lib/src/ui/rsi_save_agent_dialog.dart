@@ -54,7 +54,12 @@ class _RsiSaveAgentDialogState extends State<RsiSaveAgentDialog> {
     }
   }
 
-  Widget button(String label, VoidCallback? onTap, Key key) => Semantics(
+  Widget button(
+    String label,
+    VoidCallback? onTap,
+    Key key, {
+    bool primary = false,
+  }) => Semantics(
     button: true,
     enabled: onTap != null,
     label: label,
@@ -67,8 +72,17 @@ class _RsiSaveAgentDialogState extends State<RsiSaveAgentDialog> {
           width: 112,
           height: 36,
           settings: widget.settings,
+          shape: const LiquidRoundedRectangle(borderRadius: 10),
+          style: primary
+              ? GlassButtonStyle.filled
+              : GlassButtonStyle.transparent,
           onTap: onTap ?? () {},
-          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: primary ? FontWeight.w600 : null,
+            ),
+          ),
         ),
       ),
     ),
@@ -96,7 +110,7 @@ class _RsiSaveAgentDialogState extends State<RsiSaveAgentDialog> {
               key: _form,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
                     t('另存为新 Agent', 'Save as new Agent'),
@@ -160,8 +174,10 @@ class _RsiSaveAgentDialogState extends State<RsiSaveAgentDialog> {
                   Wrap(
                     spacing: 12,
                     runSpacing: 12,
+                    alignment: WrapAlignment.end,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
+                      if (_saving) const CupertinoActivityIndicator(),
                       button(
                         t('取消', 'Cancel'),
                         _saving ? null : () => Navigator.pop(context),
@@ -171,8 +187,8 @@ class _RsiSaveAgentDialogState extends State<RsiSaveAgentDialog> {
                         t('保存', 'Save'),
                         _saving ? null : _save,
                         const ValueKey('rsi-save-agent-confirm'),
+                        primary: true,
                       ),
-                      if (_saving) const CupertinoActivityIndicator(),
                     ],
                   ),
                 ],

@@ -64,3 +64,68 @@ def compact_rsi_payload(value):
                     "expression", "case", "user_context", "reference_answer"}
     return {key: item if key in literal_keys else compact_rsi_payload(item) for key, item in value.items()
             if not (is_agent_call and key == "request")}
+
+
+def summarize_grade(grade):
+    if not isinstance(grade, dict):
+        return grade
+    result = {k: grade[k] for k in ("score", "passed") if k in grade}
+    details = grade.get("scorer_details")
+    if isinstance(details, dict):
+        result["scorer_details"] = {
+            k: {field: details[k][field] for field in fields if field in details[k]}
+            for k, fields in (
+                ("pairwise", ("outcome", "reference", "pending")),
+                ("pairwise_summary", ("wins", "ties", "losses", "pairs")),
+            )
+            if isinstance(details.get(k), dict)
+        }
+        if details.get("pairwise_pending"):
+            result["scorer_details"]["pairwise_pending"] = True
+    return result
+
+
+def summarize_human_tests(checkpoints):
+    return [
+        {**{k: v for k, v in checkpoint.items() if k != "cases"}, "cases": [
+            {**{k: v for k, v in case.items() if k != "trials"},
+             "human_part": [checkpoint_index, case_index],
+             "trials": [{**{k: trial[k] for k in ("trial", "status") if k in trial},
+                         "grade": summarize_grade(trial.get("grade"))}
+                        for trial in case.get("trials", [])]}
+            for case_index, case in enumerate(checkpoint.get("cases", []))
+        ]}
+        for checkpoint_index, checkpoint in enumerate(checkpoints)
+    ]
+
+
+def summarize_live_event(value):
+    """Keep live scoring and short previews without returning raw transcripts."""
+    if isinstance(value, list):
+        return [summarize_live_event(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if isinstance(value.get("output"), str) and isinstance(value.get("evidence"), dict):
+        return {k: (item[:6000] if k == "output" else item) for k, item in value.items() if k != "evidence"}
+    if value.get("event") == "agent_call_started" and isinstance(value.get("data"), dict):
+        return {**value, "data": summarize_live_event({k: v for k, v in value["data"].items() if k != "request"})}
+    return {
+        k: item if k in {"case", "files", "manifest"}
+        else summarize_grade(item) if k in {"grade", "model_grade"}
+        else {"splits": item.get("splits", {})} if k == "comparison" and isinstance(item, dict)
+        else summarize_live_event(item)
+        for k, item in value.items() if k not in {"agent_calls"}
+    }
+
+
+def summarize_version_record(record):
+    evaluation = record.get("evaluation") or {}
+    comparison = record.get("comparison") or {}
+    return {
+        "evaluation": {"cases": [
+            {"case": {"id": entry["case"]["id"], "split": entry["case"]["split"]},
+             "grade": summarize_grade(entry["grade"])}
+            for entry in evaluation.get("cases", [])
+        ]},
+        "comparison": {"splits": comparison.get("splits", {})},
+    }

@@ -1,7 +1,7 @@
-import json
 
 import pytest
 
+from app.v2.desktop.backend.rsi_result_store import read_result, result_exists
 from app.v2.desktop.backend.rsi import RsiStart
 from sagents.v2 import BuiltinScoring
 from tests.app.v2.desktop.test_rsi import RsiModel, setup_service, start_request
@@ -29,7 +29,7 @@ async def test_builtin_selection_is_frozen_and_reaches_native_optimizer(tmp_path
         finished = await service.rsi_run(agent_id, run['id'], 'alice')
         assert finished['status'] == 'completed', finished.get('error')
         assert finished['builtin_scoring']['mode'] == 'quality_tokens'
-        result = json.loads((service.runtime_root / 'rsi' / run['id'] / 'result.json').read_text())
+        result = read_result(service.runtime_root / 'rsi' / run['id'])
         assert result['report']['builtin_scoring']['mode'] == 'quality_tokens'
         assert all(c['objective_score'] is not None for c in result['report']['baseline']['cases'])
         for case in result['report']['baseline']['cases']:
@@ -51,7 +51,7 @@ async def test_missing_cost_is_a_specific_failure_without_quality_fallback(tmp_p
         await service._rsi_tasks[run['id']]
         finished = await service.rsi_run(agent_id, run['id'], 'alice')
         assert finished['status'] == 'failed' and finished['error_code'] == 'rsi.cost_unavailable'
-        assert not (service.runtime_root / 'rsi' / run['id'] / 'result.json').exists()
+        assert not result_exists(service.runtime_root / 'rsi' / run['id'])
     finally:
         await service.close()
 
@@ -83,6 +83,6 @@ async def test_grouped_scoring_failure_keeps_only_unambiguous_public_code(tmp_pa
         assert finished['status'] == 'failed'
         assert finished['error_type'] == 'ExceptionGroup'
         assert finished.get('error_code') == expected
-        assert not (service.runtime_root / 'rsi' / run['id'] / 'result.json').exists()
+        assert not result_exists(service.runtime_root / 'rsi' / run['id'])
     finally:
         await service.close()

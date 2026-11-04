@@ -586,9 +586,14 @@ class AgentPackageOptimizer:
                     restore_authored_package(active_draft, snapshot)
                     for name, content in snapshot_files.items():
                         (active_draft / "package" / name).write_bytes(content)
-            return await retry_call(lambda: ask_once(role, agent, task, data, schema,
-                case_id=case_id, _repair_attempt=_repair_attempt), retries=call_retries if safe else 0,
-                on_retry=retry_event(role, case_id), before_retry=reset_editor)
+            try:
+                return await retry_call(lambda: ask_once(role, agent, task, data, schema,
+                    case_id=case_id, _repair_attempt=_repair_attempt), retries=call_retries if safe else 0,
+                    on_retry=retry_event(role, case_id), before_retry=reset_editor)
+            except TimeoutError as error:
+                if role == "evaluation":
+                    error.rsi_evaluation_measurement_missing = True
+                raise
 
         async def ask_once(
             role: Literal["test_design", "test_dialogue", "evaluation", "tuning", "semantic_review", "suite_review"],
@@ -776,8 +781,9 @@ class AgentPackageOptimizer:
                         schema, case_id=case_id, _repair_attempt=_repair_attempt + 1)
                 if role == "tuning":
                     raise InvalidOptimizationProposal(str(error)) from error
-                if call_retries and role == "evaluation" and _repair_attempt >= 2:
+                if role == "evaluation" and _repair_attempt >= 2:
                     error.rsi_local_retries_exhausted = True
+                    error.rsi_evaluation_measurement_missing = True
                 raise
 
         from sagents.v2.optimization.evaluation_plugin import PythonEvaluationPlugin, agent_fallback
@@ -2239,8 +2245,9 @@ class AgentPackageOptimizer:
                         comparison, evaluation = await compare_evaluations(pairwise, best_evaluation, evaluation,
                             max_concurrency=max_concurrency)
                         preference = comparison["splits"]["validation"]["preference_score"]
-                        accepted = preference > .5 + 1e-12 and preference - .5 >= min_improvement - 1e-12
-                        reason = ("Candidate preferred over incumbent" if accepted else "Insufficient preference over incumbent") + f"; validation paired score {preference:.4f}"
+                        accepted = preference is not None and preference > .5 + 1e-12 and preference - .5 >= min_improvement - 1e-12
+                        reason = ("Incomplete validation measurements; incumbent retained" if preference is None else
+                            ("Candidate preferred over incumbent" if accepted else "Insufficient preference over incumbent") + f"; validation paired score {preference:.4f}")
                         journal.emit("round_comparison_completed", round=index, comparison=comparison)
                     else:
                         accepted, reason = (self._select_adaptive if adaptive else self._select)(

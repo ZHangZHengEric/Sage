@@ -47,15 +47,19 @@ class RsiTokenUsage extends StatelessWidget {
         color: theme.colorScheme.onSurfaceVariant,
       ),
     );
+    final incomplete =
+        usage['coverage'] == 'partial_legacy' ||
+        (total['unreported_records'] as num? ?? 0) > 0;
     return Material(
       type: MaterialType.transparency,
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           key: const ValueKey('rsi-token-usage'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+          tilePadding: EdgeInsets.zero,
+          minTileHeight: 42,
           title: Wrap(
-            spacing: 12,
+            spacing: 16,
             runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
@@ -69,69 +73,26 @@ class RsiTokenUsage extends StatelessWidget {
                     : compact(total['total_tokens']),
                 key: const ValueKey('rsi-token-total'),
                 style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              Text(
-                usage['coverage'] == 'partial_legacy' ||
-                        (total['unreported_records'] as num? ?? 0) > 0
-                    ? t('已知用量 · 记录不完整', 'Known usage · incomplete records')
-                    : t('本实验已回传累计', 'Reported experiment usage'),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              if (records > 0)
+                metric(
+                  t('缓存率', 'Cache rate'),
+                  rate(total['cache_rate']),
+                  'rsi-token-cache-rate',
                 ),
-              ),
+              if (incomplete)
+                Text(
+                  t('已知用量 · 记录不完整', 'Known usage · incomplete records'),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
             ],
           ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 4,
-                  children: [
-                    metric(
-                      t('输入', 'Input'),
-                      compact(total['input_tokens']),
-                      'rsi-token-input',
-                    ),
-                    metric(
-                      t('缓存命中', 'Cached'),
-                      compact(total['cached_input_tokens']),
-                      'rsi-token-cached',
-                    ),
-                    metric(
-                      t('输出', 'Output'),
-                      compact(total['output_tokens']),
-                      'rsi-token-output',
-                    ),
-                    metric(
-                      t('缓存率', 'Cache rate'),
-                      rate(total['cache_rate']),
-                      'rsi-token-cache-rate',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 4,
-                  children: [
-                    for (final entry in labels.entries)
-                      metric(
-                        entry.value,
-                        compact(map(stages[entry.key])['total_tokens']),
-                        'rsi-token-stage-${entry.key}',
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
           expandedCrossAxisAlignment: CrossAxisAlignment.start,
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          childrenPadding: const EdgeInsets.only(bottom: 6),
           children: [
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,

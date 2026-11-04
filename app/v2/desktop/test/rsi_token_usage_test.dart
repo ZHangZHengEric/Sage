@@ -58,11 +58,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('输入 1.0K'), findsOneWidget);
-        expect(find.text('缓存命中 250'), findsOneWidget);
-        expect(find.text('输出 50'), findsOneWidget);
         expect(find.text('缓存率 25.0%'), findsOneWidget);
-        expect(find.text('执行 1.1K'), findsOneWidget);
+        expect(find.byType(DataTable), findsNothing);
         await tester.tap(find.text('Token 用量'));
         await tester.pumpAndSettle();
         expect(find.byType(DataTable), findsOneWidget);

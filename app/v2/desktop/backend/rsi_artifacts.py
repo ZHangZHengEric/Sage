@@ -24,7 +24,9 @@ def write_directory_index(root):
 - `workspace/iterations/round-NNN/proposal.json`、`decision.json`：实际差异与采纳结论。
 - `workspace/iterations/round-NNN/experience.md`：本轮结束后的累计经验快照；采纳状态与调优方假设分开记录。
 - `human-test/`：仅供人查看的 test 执行、评估和分数，不提供给调优方。
-- `audit*.jsonl`、`result.json`、`resume-context.json`：运行审计、完成结果、恢复上下文。
+- `result-index-v1/overview.json`：评分与结论。 `result-index-v1/records/` 按轮次、数据集、用例和调用角色组织，入口为其中的 README。
+- `result-index-v1/index.json` 和 `records/paths.json`：程序读取、定位详情及导出时使用的索引。调用证据可能引用根目录的审计文件。
+- `audit*.jsonl`、`resume-context.json`：运行审计与恢复上下文。完整 JSON 可从桌面端导出。
 
 评估的输入目录只读；只有 assessment 输出可写。评估 JSON 不合格时重跑评估，不重跑目标执行。
 若配置了自定义评分器，评估说明不能更改其数值分数。调优方只能修改本轮获准的 package 资源。

@@ -3,6 +3,7 @@ import json
 
 import httpx
 import pytest
+from app.v2.desktop.backend.rsi_result_store import read_result, result_chunks
 from app.v2.desktop.backend import rsi as original_rsi
 from app.v2.desktop.backend import app as original_app
 from sagents.v2.optimization.contracts import OptimizationCase, OptimizationTestSuite
@@ -52,7 +53,7 @@ async def completed_legacy(
     value = service.rsi_store.get(run["id"], "alice", agent, "run")
     assert value["status"] == "completed" and value["human_test_error"] == "ValueError"
     root = service.runtime_root / "rsi" / run["id"]
-    result = json.loads((root / "result.json").read_text())
+    result = read_result(root)
     record = {
         "round": 0,
         "package_hash": result["report"]["baseline"]["package_hash"],
@@ -104,7 +105,7 @@ async def test_authenticated_postrun_replay_preserves_report_and_never_optimizes
         before, root = await completed_legacy(
             service, agent, model, candidate, monkeypatch
         )
-        report = (root / "result.json").read_bytes()
+        report = b"".join(result_chunks(root))
         audit = (root / "audit.jsonl").read_bytes()
         requests = len(model.requests)
         monkeypatch.setattr(
@@ -169,7 +170,7 @@ async def test_authenticated_postrun_replay_preserves_report_and_never_optimizes
         assert after["retained_hash"] == before["retained_hash"]
         assert after.get("recommended_hash") == before.get("recommended_hash")
         assert after["finished_at"] == before["finished_at"]
-        assert (root / "result.json").read_bytes() == report
+        assert b"".join(result_chunks(root)) == report
         assert (root / "audit.jsonl").read_bytes() == audit
         assert len(model.requests) == requests
     finally:
@@ -236,7 +237,7 @@ async def test_cancelling_human_only_replay_keeps_completed_training_and_can_res
         before, root = await completed_legacy(
             service, agent, model, candidate, monkeypatch
         )
-        report = (root / "result.json").read_bytes()
+        report = b"".join(result_chunks(root))
         requests = len(model.requests)
         monkeypatch.setattr(
             candidate,
@@ -264,7 +265,7 @@ async def test_cancelling_human_only_replay_keeps_completed_training_and_can_res
         assert cancelled["status"] == "completed"
         assert cancelled["human_test_recovery_status"] == "cancelled"
         assert cancelled["retained_hash"] == before["retained_hash"]
-        assert (root / "result.json").read_bytes() == report
+        assert b"".join(result_chunks(root)) == report
         assert len(model.requests) == requests
 
         def ready(**kwargs):
@@ -284,7 +285,7 @@ async def test_cancelling_human_only_replay_keeps_completed_training_and_can_res
             record["status"] == "completed" for record in after["test_observations"]
         )
         assert after["test_observations"][0]["cases"][0]["trials"][0]["score"] == 0
-        assert (root / "result.json").read_bytes() == report
+        assert b"".join(result_chunks(root)) == report
     finally:
         await service.close()
 
@@ -368,7 +369,7 @@ async def test_postrun_real_python_scorer_remains_authority_and_diagnoses_still_
             monkeypatch,
             override={"scorer_id": scorer["id"]},
         )
-        report = (root / "result.json").read_bytes()
+        report = b"".join(result_chunks(root))
         monkeypatch.setattr(
             candidate,
             "resumable_human_test_observer",
@@ -398,7 +399,7 @@ async def test_postrun_real_python_scorer_remains_authority_and_diagnoses_still_
                 )
                 if record["round"] != 0 or case["id"] != "sealed-a":
                     assert trial["grade"]["diagnosis"]
-        assert (root / "result.json").read_bytes() == report
+        assert b"".join(result_chunks(root)) == report
         assert "PRIVATE QUESTION" not in report.decode()
     finally:
         await service.close()

@@ -420,3 +420,38 @@ async def test_disposable_partial_dialogue_restart_discards_stale_user_decisions
     events = [json.loads(line) for line in resumed.read_text().splitlines()]
     restart = next(e for e in events if e['event'] == 'partial_dialogue_restarted')
     assert restart['data']['discarded_decisions'] == 1
+
+
+def test_partial_resume_preserves_parent_cases_and_rejects_cycles(tmp_path):
+    from sagents.v2.optimization.recovery import OptimizationRecovery
+    from sagents.v2.optimization.contracts import OptimizationCaseResult, OptimizationGrade
+    from tests.sagents.v2.test_package_optimizer import suite
+    import json
+    original = tmp_path/'original.jsonl'
+    partial = tmp_path/'partial.jsonl'
+    operation = {'optimization_id':'same', 'recovery_binding_id':'same', 'resumed_from':None}
+    case = OptimizationCaseResult(case=suite().cases[0], observation=OptimizationObservation(state='completed'),
+        grade=OptimizationGrade(score=1,passed=True,rationale='done'))
+    original.write_text('\n'.join(json.dumps(x) for x in [
+        {'event':'operation_started','data':operation},
+        {'event':'case_completed','data':{'package_hash':'p','round':3,'trial':1,'result':case.model_dump(mode='json')}}]))
+    partial.write_text(json.dumps({'event':'operation_started','data':{**operation,'resumed_from':str(original)}}))
+    recovery = OptimizationRecovery(partial)
+    assert recovery.completed_case('p',phase='optimization',round=3,trial=1,case_id=case.case.id) == case
+    assert recovery.completed_case('p',phase='optimization',round=3,trial=1,case_id=case.case.id) is None
+    original.write_text(json.dumps({'event':'operation_started','data':{**operation,'resumed_from':str(partial)}}))
+    with pytest.raises(ValueError,match='cyclic'):
+        OptimizationRecovery(partial)
+
+
+def test_file_request_progress_does_not_change_recovery_identity():
+    from sagents.v2.optimization.recovery import call_key
+    import json
+    def key(header):
+        return call_key(dict(role='evaluation',round=1,trial=1,case_id='a',request=json.dumps({
+            'task':'same','data':header})))
+    old={'protocol':'sage.rsi.evaluation-files/v1','sha256':'abc','reading':'old',
+         'files':[{'path':'inputs/context.json','total_lines':10,'read_ranges':[[1,10]]}]}
+    new={**old,'reading':'new','files':[{**old['files'][0],'read_through_line':5,'remaining_read_ranges':[[6,10]]}]}
+    assert key(old)==key(new)
+    assert key(old)!=key({**new,'sha256':'different'})

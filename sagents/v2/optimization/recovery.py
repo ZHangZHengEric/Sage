@@ -75,6 +75,14 @@ def call_key(data):
     try:
         payload = json.loads(data['request'])
         media_binding = payload.get('visual_artifact_binding') if isinstance(payload, dict) else None
+        header = payload.get('data', {}) if isinstance(payload, dict) else {}
+        if header.get('protocol') == 'sage.rsi.evaluation-files/v1':
+            # Coverage is host progress, not a change to the bound evidence or task.
+            header.pop('reading', None)
+            for item in header.get('files', []):
+                item.pop('read_through_line', None)
+                item.pop('remaining_read_ranges', None)
+            data = {**data, 'request': json.dumps(payload, sort_keys=True, ensure_ascii=False)}
     except (ValueError, TypeError):
         media_binding = None
     return (data['role'], data.get('phase', 'optimization'), data.get('round', 0),
@@ -82,8 +90,11 @@ def call_key(data):
 
 
 class OptimizationRecovery:
-    def __init__(self, path, *, readonly_roles=(), local_package_editor=False, local_file_evaluator=False):
+    def __init__(self, path, *, readonly_roles=(), local_package_editor=False, local_file_evaluator=False, _ancestors=()):
         self.path = Path(path).resolve()
+        if self.path in _ancestors or len(_ancestors) >= 32:
+            raise ValueError("cyclic or excessive recovery journal ancestry")
+        self.parent = None
         self.operation = None
         self.cases = defaultdict(deque)
         self.calls = defaultdict(deque)
@@ -190,6 +201,19 @@ class OptimizationRecovery:
                 self.calls[key] = deque((identity, observation) for identity, observation in queue if identity not in rejected_calls)
         if self.operation is None:
             raise ValueError('recovery journal has no operation configuration')
+        ancestor = self.operation.get('resumed_from')
+        if ancestor:
+            ancestor = Path(ancestor).resolve()
+            if ancestor.parent != self.path.parent:
+                raise ValueError('recovery ancestor outside experiment directory')
+            self.parent = OptimizationRecovery(ancestor, readonly_roles=readonly_roles,
+                local_package_editor=local_package_editor, local_file_evaluator=local_file_evaluator,
+                _ancestors=(*_ancestors, self.path))
+            excluded = {'resumed_from', 'recovery_fingerprint', 'recovery_engine_id', 'call_isolation_protocol'}
+            current = {k:v for k,v in self.operation.items() if k not in excluded}
+            previous = {k:v for k,v in self.parent.operation.items() if k not in excluded}
+            if current != previous:
+                raise ValueError('recovery ancestor experiment configuration differs')
         def transport_failed(observation):
             return model_transport_interrupted(observation)
         self.unresolved = [value for identity, value in targets.items()
@@ -222,6 +246,8 @@ class OptimizationRecovery:
             raise ValueError('optimization recovery configuration differs')
 
     def require_reconciled(self, *, restart_incomplete=False):
+        if self.parent:
+            self.parent.require_reconciled(restart_incomplete=restart_incomplete)
         if self.unresolved and not restart_incomplete:
             raise OptimizationRecoveryRequired(
                 f'{len(self.unresolved)} target executions have unknown outcomes; host reconciliation is required')
@@ -229,11 +255,29 @@ class OptimizationRecovery:
     def completed_case(self, package_hash, *, phase, round, trial, case_id):
         queue = self.cases.get(case_key(package_hash, phase, round, trial, case_id))
         if not queue:
+            if self.parent:
+                result = self.parent.completed_case(package_hash, phase=phase, round=round,
+                    trial=trial, case_id=case_id)
+                self.recovered_agent_calls = self.parent.recovered_agent_calls
+                return result
             return None
+        # Consume the ancestor copy as well so it cannot be reused twice.
+        if self.parent:
+            self.parent.completed_case(package_hash, phase=phase, round=round, trial=trial, case_id=case_id)
         result, consumed, records = queue.popleft()
         self.recovered_agent_calls = records
         self._consumed_calls.update(consumed)
         return result.model_copy(deep=True)
+
+    def consume_matching_call(self, key):
+        queue = self.calls.get(key)
+        while queue:
+            identity, _ = queue.popleft()
+            if identity not in self._consumed_calls:
+                self._consumed_calls.add(identity)
+                break
+        if self.parent:
+            self.parent.consume_matching_call(key)
 
     def completed_call(self, *, role, phase, round, trial, case_id, request):
         queue = self.calls.get(call_key(dict(role=role, phase=phase, round=round,
@@ -242,7 +286,15 @@ class OptimizationRecovery:
             identity, observation = queue.popleft()
             if identity not in self._consumed_calls:
                 self._consumed_calls.add(identity)
+                if self.parent:
+                    self.parent.consume_matching_call(call_key(dict(role=role, phase=phase,
+                        round=round, trial=trial, case_id=case_id, request=request)))
                 return observation.model_copy(deep=True)
+        if self.parent:
+            restored = self.parent.completed_call(role=role, phase=phase, round=round,
+                trial=trial, case_id=case_id, request=request)
+            if restored is not None:
+                return restored
         expected_key = call_key(dict(role=role, phase=phase, round=round, trial=trial,
                                      case_id=case_id, request=request))
         if any(key[:-1] == expected_key[:-1] and any(identity not in self._consumed_calls for identity, _ in queue)

@@ -53,6 +53,23 @@ class MainFlutterWindow: NSWindow {
       result(FlutterStandardTypedData(bytes: png))
     }
 
+    let workspaceFilesChannel = FlutterMethodChannel(
+      name: "sage_desktop_v2/workspace_files",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    workspaceFilesChannel.setMethodCallHandler { call, result in
+      guard call.method == "moveToTrash" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      do {
+        try Self.trashWorkspaceFile(call.arguments)
+        result(nil)
+      } catch {
+        result(FlutterError(code: "trash_failed", message: error.localizedDescription, details: nil))
+      }
+    }
+
     super.awakeFromNib()
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
@@ -63,6 +80,41 @@ class MainFlutterWindow: NSWindow {
       self.syncFlutterSurfaceToWindow()
       self.scheduleFlutterSurfaceSync()
     }
+  }
+
+  private static func trashWorkspaceFile(_ arguments: Any?) throws {
+    guard let values = arguments as? [String: String],
+          let workspace = values["workspace"],
+          let path = values["path"],
+          !workspace.contains("\0"), !path.contains("\0") else {
+      throw CocoaError(.fileWriteInvalidFileName)
+    }
+    let rootPath = (workspace as NSString).expandingTildeInPath
+    let parts = path.components(separatedBy: "/")
+    guard rootPath.hasPrefix("/"),
+          parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+          let filename = parts.last else {
+      throw CocoaError(.fileWriteInvalidFileName)
+    }
+
+    let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+      .resolvingSymlinksInPath().standardizedFileURL
+    let home = FileManager.default.homeDirectoryForCurrentUser
+      .resolvingSymlinksInPath().standardizedFileURL
+    let parent = parts.dropLast().reduce(root) { url, part in
+      url.appendingPathComponent(part, isDirectory: true)
+    }.resolvingSymlinksInPath().standardizedFileURL
+    guard root.path != "/", root.path != home.path,
+          parent.path == root.path || parent.path.hasPrefix(root.path + "/") else {
+      throw CocoaError(.fileWriteNoPermission)
+    }
+
+    let file = parent.appendingPathComponent(filename)
+    let type = try FileManager.default.attributesOfItem(atPath: file.path)[.type] as? FileAttributeType
+    guard type == .typeRegular || type == .typeSymbolicLink else {
+      throw CocoaError(.fileWriteNoPermission)
+    }
+    try FileManager.default.trashItem(at: file, resultingItemURL: nil)
   }
 
   deinit {

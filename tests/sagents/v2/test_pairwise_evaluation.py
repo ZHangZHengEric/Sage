@@ -417,3 +417,60 @@ async def test_evaluation_validation_upgrade_preserves_completed_targets_and_jud
     assert len(resumed.target_hashes) == 4
     assert bundle().content_hash not in resumed.target_hashes
     assert len(resumed.comparisons) == 8
+
+
+@pytest.mark.asyncio
+async def test_exhausted_evaluation_is_missing_and_other_cases_continue():
+    from sagents.v2.optimization.contracts import OptimizationGrade
+    from sagents.v2.optimization.pairwise import compare_evaluations
+    previous, candidate = comparison_evaluations()
+    seen = []
+    failed = next(c.case.id for c in candidate.cases if c.case.split == 'validation')
+    class Engine:
+        async def compare_prepared(self, case, **kwargs):
+            seen.append(case.id)
+            if case.id == failed:
+                error = ValueError('evidence incomplete')
+                error.rsi_evaluation_measurement_missing = True
+                raise error
+            return OptimizationGrade(score=1, passed=True, rationale='Win',
+                scorer_details={'pairwise':{'outcome':'win'}})
+    result, _ = await compare_evaluations(Engine(), previous, candidate, max_concurrency=1)
+    assert set(seen) == {c.case.id for c in candidate.cases}
+    validation = result['splits']['validation']
+    assert validation['missing'] == 2
+    assert validation['losses'] == 0 and validation['ties'] == 0
+    assert validation['preference_score'] is None
+
+
+@pytest.mark.asyncio
+async def test_missing_dev_keeps_incumbent_and_continues_next_round(tmp_path):
+    class MissingOnce(FixtureComparisonPlugin):
+        failed = False
+        async def compare(self, request):
+            if request.case.split == 'validation' and not self.failed:
+                self.failed = True
+                error = ValueError('evidence read repair exhausted')
+                error.rsi_evaluation_measurement_missing = True
+                raise error
+            return await super().compare(request)
+    runner = ComparisonRunner()
+    result = await optimizer(runner).optimize(bundle(), context=context(), goal='Clarity', suite=suite(),
+        validation_case_count=1, grow_training=False, rounds=2,
+        builtin_scoring=BuiltinScoring(mode='pairwise'), comparison_plugin=MissingOnce(runner),
+        journal_path=tmp_path/'audit.jsonl')
+    assert len(result.report.rounds) == 2
+    first, second = result.report.rounds
+    assert not first.accepted
+    assert first.comparison['splits']['validation']['missing'] == 1
+    assert 'Incomplete validation' in first.reason
+    assert second.comparison['reference_package_hash'] == bundle().content_hash
+    assert second.accepted
+
+
+def test_complete_comparison_summary_preserves_pre_migration_tuning_payload():
+    from sagents.v2.optimization.contracts import OptimizationGrade
+    value = comparison_summary([OptimizationGrade(score=1,passed=True,rationale='win',
+        scorer_details={'pairwise':{'outcome':'win'}})])
+    assert value == {'wins':1,'ties':0,'losses':0,'both_failed':0,'order_disagreements':0,
+        'pairs':1,'win_rate':1.,'tie_rate':0.,'loss_rate':0.,'preference_score':1.}

@@ -15,8 +15,10 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
@@ -25,6 +27,10 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from .rsi_evaluation import EvaluationPlan, ScorerImport, ScorerSelection, McpExecutionScorer, scorer_binding
 from .rsi_call_recovery import failed_call
 from .rsi_ownership import process_identity, process_alive, legacy_sidecar_alive
+from .rsi_result_store import (
+    index_legacy_result, overview_exists, read_measurement_overview, read_overview, read_part, read_result,
+    result_exists, save_measurement_overview, usage_snapshot_key, write_result,
+)
 from .rsi_lint import RsiLintEnvironment, lint_binding, resolve_lint_environment
 
 from sagents.v2.optimization.dataset import OptimizationDataset, validate_imported_dataset
@@ -379,10 +385,13 @@ class RsiStore:
                     (value["id"], user, agent),
                 ).fetchone()
                 if existing:
+                    if "_test_revision" in old:
+                        body["_test_revision"] = old["_test_revision"]
                     body.pop("test_observations", None)
                     body["_test_observations_external"] = True
                 elif "test_observations" in body:
                     observations = body.pop("test_observations")
+                    body["_test_revision"] = old.get("_test_revision", 0) + 1
                     db.execute(
                         "INSERT OR REPLACE INTO run_test_observations (id, user, agent, body) VALUES (?, ?, ?, ?)",
                         (value["id"], user, agent, json.dumps(observations, ensure_ascii=False)),
@@ -407,6 +416,7 @@ class RsiStore:
     def _decode(db, encoded, user, agent):
         value = json.loads(encoded)
         value.pop("_host_owner", None)
+        value.pop("_test_revision", None)
         if value.pop("_test_observations_external", False):
             row = db.execute(
                 "SELECT body FROM run_test_observations WHERE id=? AND user=? AND agent=?",
@@ -447,7 +457,7 @@ class RsiStore:
                 ).fetchall()
             ]
 
-    def get(self, identity, user, agent, kind):
+    def get(self, identity, user, agent, kind, *, include_tests=True):
         with self.connect() as db:
             row = db.execute(
                 "SELECT body FROM records WHERE id=? AND user=? AND agent=? AND kind=?",
@@ -455,7 +465,29 @@ class RsiStore:
             ).fetchone()
             if row is None:
                 raise ValueError("RSI record not found")
-            return self._decode(db, row[0], user, agent)
+            if include_tests:
+                return self._decode(db, row[0], user, agent)
+            value = json.loads(row[0])
+            value.pop("_host_owner", None)
+            return value
+
+    def human_case(self, run, user, agent, checkpoint, case):
+        if min(checkpoint, case) < 0:
+            raise ValueError("RSI test case not found")
+        selector = f"[{checkpoint}].cases[{case}]"
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT json_extract(body, ?) FROM run_test_observations WHERE id=? AND user=? AND agent=?",
+                (f"${selector}", run, user, agent),
+            ).fetchone()
+            if row is None:
+                row = db.execute(
+                    "SELECT json_extract(body, ?) FROM records WHERE id=? AND user=? AND agent=? AND kind='run'",
+                    (f"$.test_observations{selector}", run, user, agent),
+                ).fetchone()
+        if row is None or row[0] is None:
+            raise ValueError("RSI test case not found")
+        return json.loads(row[0])
 
 
 class DesktopRsiMixin(DesktopUserSimulatorMixin):
@@ -630,6 +662,11 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
         self._rsi_tasks = {}
         self._rsi_cursors = {}
         self._rsi_usage_readers = {}
+        self._rsi_overview_jobs = {}
+        self._rsi_overview_cache = {}
+        self._rsi_usage_lock = threading.Lock()
+        self._rsi_cursor_lock = threading.Lock()
+        self._rsi_index_slot = asyncio.Semaphore(1)
 
     @property
     def rsi_active(self):
@@ -638,7 +675,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
 
     async def _close_rsi(self):
         self = cast("DesktopV2Service", self)
-        tasks = tuple(self._rsi_tasks.values())
+        tasks = (*self._rsi_tasks.values(), *self._rsi_overview_jobs.values())
         for task in tasks:
             task.cancel()
         if tasks:
@@ -788,35 +825,174 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             # provenance; deletion removes the entry from normal history only.
             return {"id": run_id, "deleted": True}
 
-    async def rsi_version(self, agent_id, version_id, user_id):
+    async def rsi_version(self, agent_id, version_id, user_id, *, overview=False):
         self = cast("DesktopV2Service", self)
         await self._agent(agent_id, user_id)
-        return self.rsi_store.get(version_id, user_id, agent_id, "version")
+        def load():
+            value = self.rsi_store.get(version_id, user_id, agent_id, "version")
+            if overview and isinstance(value.get("record"), dict):
+                from .rsi_presentation import summarize_version_record
 
-    async def rsi_run(self, agent_id, run_id, user_id, *, after_sequence=0, compact=False):
-        self = cast("DesktopV2Service", self)
+                value["record"] = summarize_version_record(value["record"])
+            return value
+
+        return await asyncio.to_thread(load)
+
+    async def rsi_result_root(self, agent_id, run_id, user_id):
         await self._agent(agent_id, user_id)
-        value = self.rsi_store.get(run_id, user_id, agent_id, "run")
-        path = rsi_journal(self.runtime_root / "rsi" / run_id, value, existing=True)
+        self.rsi_store.get(run_id, user_id, agent_id, "run", include_tests=False)
+        return self.runtime_root / "rsi" / run_id
+
+    async def rsi_result_case(self, agent_id, run_id, user_id, part):
+        from .rsi_presentation import compact_rsi_payload
+
+        root = await self.rsi_result_root(agent_id, run_id, user_id)
+        return await asyncio.to_thread(lambda: compact_rsi_payload(read_part(root, part, case_only=True)))
+
+    async def rsi_human_case(self, agent_id, run_id, user_id, checkpoint, case):
+        from .rsi_presentation import compact_rsi_payload
+
+        await self.rsi_result_root(agent_id, run_id, user_id)
+        return await asyncio.to_thread(lambda: compact_rsi_payload(
+            self.rsi_store.human_case(run_id, user_id, agent_id, checkpoint, case)))
+
+    def _rsi_read_usage(self, run_id, root, value):
+        from .rsi_usage import RsiUsageReader
+
+        with self._rsi_usage_lock:
+            reader = self._rsi_usage_readers.pop(run_id, None) or RsiUsageReader()
+            self._rsi_usage_readers[run_id] = reader
+            while len(self._rsi_usage_readers) > 32:
+                self._rsi_usage_readers.pop(next(iter(self._rsi_usage_readers)))
+            return reader.read(root, value)
+
+    async def _rsi_prepare_overview(self, key, agent_id, run_id, user_id, root, revision, previous):
+        from .rsi_presentation import summarize_human_tests
+
+        def measurements():
+            terminal = revision[1] not in {"queued", "running"}
+            signature = usage_snapshot_key(root, revision) if terminal else None
+            if signature is not None and (cached := read_measurement_overview(root, signature)) is not None:
+                return cached
+            reuse_tests = (not terminal and previous is not None and previous[0][-1] == revision[-1]
+                           and revision[-1] is not None and run_id in self._rsi_usage_readers)
+            stored = self.rsi_store.get(run_id, user_id, agent_id, "run", include_tests=not reuse_tests)
+            tests = previous[1] if reuse_tests else summarize_human_tests(stored.get("test_observations", []))
+            usage = self._rsi_read_usage(run_id, root, stored)
+            if signature is not None and root.is_dir() and signature == usage_snapshot_key(root, revision):
+                try:
+                    save_measurement_overview(root, signature, tests, usage)
+                except OSError:
+                    logging.getLogger(__name__).warning("Could not persist RSI measurements for %s", run_id)
+            return tests, usage
+
+        async def index():
+            if revision[1] == "completed" and not overview_exists(root) and (root / "result.json").is_file():
+                async with self._rsi_index_slot:
+                    await asyncio.to_thread(index_legacy_result, root)
+
+        async def measure():
+            tests, usage = await asyncio.to_thread(measurements)
+            self._rsi_overview_cache[key] = (revision, tests, usage, "pending")
+
+        try:
+            results = await asyncio.gather(index(), measure(), return_exceptions=True)
+            failures = [result for result in results if isinstance(result, Exception)]
+            for error in failures:
+                logging.getLogger(__name__).error("Could not prepare RSI overview for %s", run_id, exc_info=error)
+            cached = self._rsi_overview_cache.get(key, (revision, [], None, "pending"))
+            self._rsi_overview_cache[key] = (revision, cached[1], cached[2], "error" if failures else "ready")
+            while len(self._rsi_overview_cache) > 32:
+                self._rsi_overview_cache.pop(next(iter(self._rsi_overview_cache)))
+        finally:
+            self._rsi_overview_jobs.pop(key, None)
+
+    def _rsi_event_page(self, path, run_id, after_sequence, *, overview=False, metadata=False):
+        from .rsi_presentation import summarize_live_event
+
         events = []
-        if after_sequence < 0:
-            raise ValueError("after_sequence must be nonnegative")
+        size = 0
         if path.exists():
             with path.open(encoding="utf-8") as journal:
-                journal.seek(self._rsi_cursors.get((run_id, path.name, after_sequence), 0))
+                with self._rsi_cursor_lock:
+                    journal.seek(self._rsi_cursors.get((run_id, path.name, after_sequence), 0))
                 while line := journal.readline():
                     try:
                         event = json.loads(line)
                     except json.JSONDecodeError:
                         break
                     if event["sequence"] > after_sequence:
-                        events.append(event)
-                        self._rsi_cursors[(run_id, path.name, event["sequence"])] = journal.tell()
-                        if len(events) == 200:
+                        if metadata:
+                            event = {**{k: event[k] for k in ("event", "sequence", "time") if k in event},
+                                     "data": {k: v for k, v in (event.get("data") or {}).items()
+                                              if k in {"role", "activity"}}}
+                        events.append(summarize_live_event(event) if overview else event)
+                        with self._rsi_cursor_lock:
+                            self._rsi_cursors[(run_id, path.name, event["sequence"])] = journal.tell()
+                        size += len(line)
+                        if len(events) == 200 or (overview and size >= (32 if metadata else 2) * 1024 * 1024):
                             break
-            while len(self._rsi_cursors) > 512:
-                self._rsi_cursors.pop(next(iter(self._rsi_cursors)))
-        value["events"] = events
+            with self._rsi_cursor_lock:
+                while len(self._rsi_cursors) > 512:
+                    self._rsi_cursors.pop(next(iter(self._rsi_cursors)))
+        return events
+
+    async def rsi_event_metadata(self, agent_id, run_id, user_id, after_sequence):
+        if after_sequence < 0:
+            raise ValueError("after_sequence must be nonnegative")
+        await self._agent(agent_id, user_id)
+        value = self.rsi_store.get(run_id, user_id, agent_id, "run", include_tests=False)
+        root = self.runtime_root / "rsi" / run_id
+        path = rsi_journal(root, value, existing=True)
+        events = await asyncio.to_thread(self._rsi_event_page, path, run_id, after_sequence,
+                                         overview=True, metadata=True)
+        return {"events": events, "more": bool(events) and events[-1]["sequence"] < value.get("sequence", 0)}
+
+    async def rsi_run(
+        self, agent_id, run_id, user_id, *, after_sequence=0, compact=False, overview=False, retry_overview=False,
+    ):
+        self = cast("DesktopV2Service", self)
+        await self._agent(agent_id, user_id)
+        if after_sequence < 0:
+            raise ValueError("after_sequence must be nonnegative")
+        if overview:
+            value = self.rsi_store.get(run_id, user_id, agent_id, "run", include_tests=False)
+            value.pop("_test_observations_external", None)
+            value.pop("test_observations", None)
+            root = self.runtime_root / "rsi" / run_id
+            terminal = value["status"] not in {"queued", "running"}
+            revision = (value.get("sequence"), value["status"], value.get("human_test_recovery_status"),
+                        value.pop("_test_revision", None))
+            key = (user_id, agent_id, run_id)
+            cached = self._rsi_overview_cache.get(key)
+            if cached is None and terminal and overview_exists(root):
+                persisted = await asyncio.to_thread(
+                    lambda: read_measurement_overview(root, usage_snapshot_key(root, revision)))
+                if persisted is not None:
+                    cached = (revision, *persisted, "ready")
+            needs_build = cached is None or cached[0] != revision or (retry_overview and cached[3] == "error")
+            if needs_build and key not in self._rsi_overview_jobs:
+                self._rsi_overview_jobs[key] = asyncio.create_task(
+                    self._rsi_prepare_overview(key, agent_id, run_id, user_id, root, revision, cached))
+                if cached is not None and cached[0] == revision:
+                    cached = (*cached[:3], "pending")
+                    self._rsi_overview_cache[key] = cached
+            if cached is not None:
+                value["test_observations"], value["token_usage"] = cached[1:3]
+            value["overview_pending"] = cached is None or cached[0] != revision or cached[3] == "pending"
+            value["overview_error"] = cached is not None and cached[0] == revision and cached[3] == "error"
+            value["has_result"] = result_exists(root)
+            value["result"] = await asyncio.to_thread(read_overview, root)
+            value["events"] = []
+            if not terminal or not value["has_result"]:
+                path = rsi_journal(root, value, existing=True)
+                value["events"] = await asyncio.to_thread(
+                    self._rsi_event_page, path, run_id, after_sequence, overview=True)
+                value["events_pending"] = bool(value["events"]) and value["events"][-1]["sequence"] < value.get("sequence", 0)
+            return value
+        value = self.rsi_store.get(run_id, user_id, agent_id, "run")
+        path = rsi_journal(self.runtime_root / "rsi" / run_id, value, existing=True)
+        value["events"] = self._rsi_event_page(path, run_id, after_sequence)
         versions = self.rsi_store.iterations(user_id, agent_id, run_id)
         value["iterations"] = sorted(
             [
@@ -831,14 +1007,9 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             ],
             key=lambda v: v["iteration"],
         )
-        result = path.parent / "result.json"
-        if result.exists():
-            value["result"] = json.loads(result.read_text())
-        from .rsi_usage import RsiUsageReader
-        reader = self._rsi_usage_readers.setdefault(run_id, RsiUsageReader())
-        value["token_usage"] = reader.read(path.parent, value)
-        while len(self._rsi_usage_readers) > 32:
-            self._rsi_usage_readers.pop(next(iter(self._rsi_usage_readers)))
+        if result_exists(path.parent):
+            value["result"] = await asyncio.to_thread(read_result, path.parent)
+        value["token_usage"] = await asyncio.to_thread(self._rsi_read_usage, run_id, path.parent, value)
         if compact:
             from app.v2.desktop.backend.rsi_presentation import compact_rsi_payload
             return compact_rsi_payload(value)
@@ -1075,7 +1246,8 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                          resumed_at=utc_now().isoformat(), resume_count=value.get("resume_count", 0) + 1)
             value.pop("finished_at", None)
             value.pop("error_type", None)
-            self._rsi_cursors = {key: offset for key, offset in self._rsi_cursors.items() if key[0] != run_id}
+            with self._rsi_cursor_lock:
+                self._rsi_cursors = {key: offset for key, offset in self._rsi_cursors.items() if key[0] != run_id}
             self.rsi_store.put(value, user_id, agent_id, "run")
             task = asyncio.create_task(self._execute_rsi(agent,
                 AgentPackageBundle.model_validate(frozen["package"]), provider, internal_provider,
@@ -1117,7 +1289,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             if rsi_binding(agent, provider, internal_provider) != value["recovery_binding_id"]:
                 raise ValueError("RSI model configuration changed since this experiment")
             from sagents.v2.optimization.contracts import OptimizationResult
-            result = OptimizationResult.model_validate_json((root / "result.json").read_text())
+            result = OptimizationResult.model_validate(await asyncio.to_thread(read_result, root))
             if result.candidate_package.content_hash != value.get("retained_hash"):
                 raise ValueError("Completed RSI result differs from retained version")
             snapshot = AgentPackageBundle.model_validate(frozen["package"])
@@ -1770,7 +1942,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 if test_observer is None:
                     raise ValueError("Human test observer could not be restored")
                 from sagents.v2.optimization.contracts import OptimizationResult
-                saved = OptimizationResult.model_validate_json((root / "result.json").read_text())
+                saved = OptimizationResult.model_validate(await asyncio.to_thread(read_result, root))
                 if saved.candidate_package.content_hash != value.get("retained_hash"):
                     raise ValueError("Completed RSI result differs from retained version")
                 events = completed_checkpoint_events(package, saved,
@@ -1812,9 +1984,6 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 value["stage"] = "human_test_pending"
                 save()
                 await test_observer.finish()
-            result_path = root / "result.json"
-            result_path.write_text(result.model_dump_json(), encoding="utf-8")
-            os.chmod(result_path, 0o600)
             for item in result.iterations:
                 stored = self.rsi_store.get(
                     f"{value['id']}.{item.iteration}", user, identity, "version"
@@ -1826,6 +1995,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                     review=item.review.model_dump(mode="json") if item.review else None,
                 )
                 self.rsi_store.put(stored, user, identity, "version")
+            await asyncio.to_thread(write_result, root, result)
             value.update(
                 status="completed",
                 stage="result_completed",

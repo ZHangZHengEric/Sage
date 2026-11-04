@@ -236,6 +236,26 @@ class RsiApi extends V2ApiClient {
   }
 }
 
+class IndexedRsiApi extends RsiApi {
+  int reads = 0;
+  bool disconnected = false;
+
+  @override
+  Future<Map<String, Object?>> rsiRun(
+    String agentId,
+    String runId, {
+    int afterSequence = 0,
+  }) async {
+    reads++;
+    if (disconnected) throw const SocketException('Connection refused');
+    return {
+      ...await super.rsiRun(agentId, runId, afterSequence: afterSequence),
+      'has_result': true,
+      'overview_pending': false,
+    };
+  }
+}
+
 class DatasetRevisionApi extends RsiApi {
   Map<String, Object?>? revision;
   Map<String, Object?>? latestVersion;
@@ -638,6 +658,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final positions = [
+        for (final key in [
+          'rsi-toggle-setup',
+          'rsi-start',
+          'rsi-toggle-history',
+          'rsi-open-folder',
+        ])
+          tester.getTopLeft(find.byKey(ValueKey(key))).dx,
+      ];
+      expect(positions, orderedEquals([...positions]..sort()));
       await tester.tap(find.byKey(const ValueKey('rsi-open-folder')));
       await tester.pumpAndSettle();
       expect(opened, ['/tmp/sage-rsi/run-1']);
@@ -660,6 +690,40 @@ void main() {
       await icons.load();
     }
   });
+  testWidgets('indexed result stops polling and survives a read failure', (
+    tester,
+  ) async {
+    final api = IndexedRsiApi();
+    final controller = WorkspaceController(api: api);
+    addTearDown(() {
+      controller.dispose();
+      api.close();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RsiScreen(
+          controller: controller,
+          agentId: 'agent',
+          agentName: 'Sage',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 8));
+    expect(api.reads, 1);
+    api.disconnected = true;
+    await tester.tap(find.byKey(const ValueKey('rsi-refresh')));
+    await tester.pumpAndSettle();
+    final retry = find.byKey(const ValueKey('rsi-retry-refresh'));
+    expect(retry, findsOneWidget);
+    expect(find.textContaining('SocketException'), findsNothing);
+    expect(find.byKey(const ValueKey('rsi-open-folder')), findsOneWidget);
+    api.disconnected = false;
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(retry, findsNothing);
+  });
+
   testWidgets(
     'history selection loads immediately during an older poll and ignores stale results',
     (tester) async {
@@ -1080,9 +1144,10 @@ void main() {
                 controller: controller,
                 agentId: 'agent',
                 agentName: 'Sage',
-                frameBuilder: (title, actions, body) => Column(
+                frameBuilder: (title, titleBar, actions, body) => Column(
                   children: [
-                    actions,
+                    titleBar,
+                    if (actions != null) actions,
                     Expanded(child: body),
                   ],
                 ),
@@ -1170,6 +1235,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('对话矩阵'), findsNothing);
       expect(find.text('版本历史 · Sage'), findsOneWidget);
+      final back = find.byKey(const ValueKey('rsi-back-agent'));
+      expect(tester.widget(back), isA<GlassIconButton>());
+      final title = find.byKey(const ValueKey('settings-content-title'));
+      final refresh = find.byKey(const ValueKey('rsi-refresh'));
+      expect(tester.getCenter(back).dx, lessThan(tester.getCenter(title).dx));
+      expect(
+        tester.getCenter(title).dx,
+        lessThan(tester.getCenter(refresh).dx),
+      );
+      expect(tester.getCenter(back).dy, tester.getCenter(refresh).dy);
       expect(find.byKey(const ValueKey('rsi-apply-version')), findsNothing);
       expect(find.byKey(const ValueKey('rsi-confirm-apply')), findsNothing);
       expect(find.text('保持用户目标，验证工具结果。'), findsOneWidget);
@@ -1243,7 +1318,7 @@ void main() {
           )
           .controller
           ?.text,
-      '1',
+      '2',
     );
     await tester.enterText(
       find.byKey(const ValueKey('rsi-evaluation-repeats')),
@@ -1284,7 +1359,7 @@ void main() {
     expect(api.startOptions!['initial_training_case_count'], 3);
     expect(api.startOptions!['training_cases_per_round'], 2);
     expect(api.startOptions!['validation_case_count'], 24);
-    expect(api.startOptions!['max_concurrency'], 3);
+    expect(api.startOptions!['max_concurrency'], 8);
     expect(api.startOptions!['evaluation_repeats'], 3);
     expect(api.startOptions!['human_test_repeats'], 2);
     expect(api.startOptions!['optimization_scope'], ['skills']);
@@ -1306,11 +1381,11 @@ void main() {
               agentId: 'agent',
               agentName: 'Sage',
               historyOnly: true,
-              frameBuilder: (title, action, body) => ColoredBox(
+              frameBuilder: (title, titleBar, action, body) => ColoredBox(
                 color: Colors.black,
                 child: Column(
                   children: [
-                    Text(title),
+                    titleBar,
                     Expanded(child: body),
                   ],
                 ),

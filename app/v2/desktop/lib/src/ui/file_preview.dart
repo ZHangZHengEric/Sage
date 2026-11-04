@@ -115,7 +115,8 @@ class _PreviewContent extends StatelessWidget {
       );
     }
 
-    if (mode == WorkspaceFilePreviewMode.rendered && _isHtml(node.name)) {
+    if (mode == WorkspaceFilePreviewMode.rendered &&
+        workspaceFileIsHtml(node.name)) {
       if (WebViewPlatform.instance != null) {
         return _InteractiveHtmlPreview(
           key: ValueKey('file-preview-webview:${node.path}'),
@@ -573,14 +574,16 @@ String _formattedSource(String source, String name) {
   }
 }
 
-bool _isRenderable(String name) => _isMarkdown(name) || _isHtml(name);
+bool _isRenderable(String name) =>
+    _isMarkdown(name) || workspaceFileIsHtml(name);
 
 bool workspaceFileSupportsRenderedPreview(String name) => _isRenderable(name);
 
 bool _isMarkdown(String name) =>
     const {'md', 'markdown', 'mdown'}.contains(_extension(name));
 
-bool _isHtml(String name) => const {'html', 'htm'}.contains(_extension(name));
+bool workspaceFileIsHtml(String name) =>
+    const {'html', 'htm'}.contains(_extension(name));
 
 bool _isRasterImage(String name, String mediaType) {
   if (!mediaType.startsWith('image/')) return false;

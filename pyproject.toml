@@ -62,6 +62,7 @@ server = [
   "a2a-sdk[fastapi]>=1.1.4,<2",
 ]
 desktop = [
+  "ijson>=3.3,<4",
   "fastapi>=0.115.2",
   "uvicorn[standard]>=0.24.0",
   "uvloop>=0.21.0; sys_platform != 'win32'",

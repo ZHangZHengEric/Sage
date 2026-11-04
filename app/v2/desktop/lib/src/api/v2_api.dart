@@ -10,7 +10,7 @@ import '../models.dart';
 import '../usage_models.dart';
 
 const sageSidecarProtocol = 'sage.runtime/v2';
-const sageSidecarRevision = 16;
+const sageSidecarRevision = 17;
 const _maxUploadBytes = 64 * 1024 * 1024;
 
 class SageApiException implements Exception {
@@ -141,13 +141,77 @@ class V2ApiClient {
     String agentId,
     String runId, {
     int afterSequence = 0,
+  }) => _rsiOverview(agentId, runId, afterSequence);
+
+  Future<Map<String, Object?>> retryRsiOverview(
+    String agentId,
+    String runId,
+    int afterSequence,
+  ) => _rsiOverview(agentId, runId, afterSequence, retry: true);
+
+  Future<Map<String, Object?>> _rsiOverview(
+    String agentId,
+    String runId,
+    int afterSequence, {
+    bool retry = false,
   }) async =>
       (await _json(
                 'GET',
-                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}?after_sequence=$afterSequence&compact=true',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}'
+                    '?after_sequence=$afterSequence&overview=true${retry ? '&retry_overview=true' : ''}',
               )
               as Map)
           .cast<String, Object?>();
+
+  Future<Map<String, Object?>> rsiEvents(
+    String agentId,
+    String runId,
+    int afterSequence,
+  ) async =>
+      (await _json(
+                'GET',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/events?after_sequence=$afterSequence',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<Map<String, Object?>> rsiResultCase(
+    String agentId,
+    String runId,
+    String part,
+  ) async =>
+      (await _json(
+                'GET',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/result/$part',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<void> exportRsiResult(
+    String agentId,
+    String runId,
+    String path,
+  ) async {
+    final uri = baseUri.resolve(
+      '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/result/export',
+    );
+    final response = await (await _request('GET', uri)).close();
+    if (response.statusCode != HttpStatus.ok) {
+      _unwrap(await _decodeResponse(response), response.statusCode);
+      throw const SageApiException('RSI result export failed.');
+    }
+    final target = File(path);
+    final temporary = await target.parent.createTemp('.sage-rsi-export-');
+    try {
+      final file = File(
+        '${temporary.path}${Platform.pathSeparator}result.json',
+      );
+      await response.pipe(file.openWrite());
+      await file.rename(path);
+    } finally {
+      await temporary.delete(recursive: true);
+    }
+  }
 
   Future<Map<String, Object?>> resumeRsi(String agentId, String runId) async =>
       (await _json(
@@ -181,7 +245,7 @@ class V2ApiClient {
   ) async =>
       (await _json(
                 'GET',
-                '${_rsiPath(agentId)}/versions/${Uri.encodeComponent(versionId)}',
+                '${_rsiPath(agentId)}/versions/${Uri.encodeComponent(versionId)}?overview=true',
               )
               as Map)
           .cast<String, Object?>();

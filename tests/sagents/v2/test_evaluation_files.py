@@ -224,7 +224,7 @@ async def test_empty_reply_after_written_assessment_does_not_restart_successful_
                 return await super().run(package, agent_id, content, ctx)
             request = json.loads(content)
             calls.append(request['response_schema']['title'])
-            context_doc = json.loads(package.files['evaluation/inputs/context.json'])
+            context_doc = request['data']
             incomplete = needs_read_repair and 'repair' not in context_doc
             if 'repair' in context_doc:
                 assert 'Read all evidence' in context_doc['repair']['reason']
@@ -250,7 +250,7 @@ async def test_empty_reply_after_written_assessment_does_not_restart_successful_
     validations = list((tmp_path/'evaluations').rglob('validation.json'))
     assert len(calls) == (2 if needs_read_repair else 1) * sum(e['event'] == 'execution_scored' for e in events)
     assert any(json.loads(p.read_text())['valid'] for p in validations)
-    assert len(validations) == (4 if needs_read_repair else 2)  # Train/dev; stability reuses the same input documents.
+    assert len(validations) == 2  # Train/dev; stability reuses the same input documents.
     assert all(json.loads(p.read_text())['native_state'] == 'suspended' for p in validations)
 
 
@@ -273,7 +273,7 @@ async def test_independent_test_analysis_uses_the_same_file_completion_boundary(
             calls.append(content)
             incomplete = valid == 'repair' and len(calls) == 1
             if valid == 'repair' and len(calls) > 1:
-                doc = json.loads(package.files['evaluation/inputs/context.json'])
+                doc = json.loads(content)['data']
                 assert 'missing lines' in doc['repair']['reason']
             record = {'summary': 'Recorded success', 'findings': [], 'strengths': ['Completed'],
                 'uncertainties': [], 'coverage': 'All evidence', 'next_action': 'no_change'} if valid else {'findings': 'invalid'}
@@ -297,3 +297,37 @@ async def test_independent_test_analysis_uses_the_same_file_completion_boundary(
         with pytest.raises((HumanTestExecutionFailure, ValueError)):
             await measure._ask(measure.evaluator, 'Diagnose', {}, OptimizationDiagnosis)
         assert not any(json.loads(p.read_text())['valid'] for p in tmp_path.rglob('validation.json'))
+
+
+def test_read_progress_survives_repair_but_not_changed_evidence(tmp_path):
+    from sagents.v2.optimization.evaluation_files import persist_assessment
+    data = {'input': 'x' * 15000}
+    prepared, header = evaluation_file_call(evaluator(), 'Analyze', data, {}, directory=tmp_path)
+    total = header['files'][0]['total_lines']
+    observation = OptimizationObservation(state='completed', evidence={
+        'evaluation_record': '{}', 'evaluation_read_coverage': [
+            {'file': 'inputs/context.json', 'read_through_line': 5, 'total_lines': total}]})
+    persist_assessment(tmp_path, header, observation, ValueError('incomplete'))
+    repaired, next_header = evaluation_file_call(evaluator(), 'Repair', {
+        'original_data': data, 'validation_error': 'continue', 'invalid_response': '{}'}, {}, directory=tmp_path)
+    assert header['sha256'] == next_header['sha256']
+    assert next_header['files'][0]['remaining_read_ranges'][0][0] == 6
+    assert prepared.package.files['evaluation/inputs/context.json'] == repaired.package.files['evaluation/inputs/context.json']
+    root = tmp_path/'worker'/'evaluation'
+    root.mkdir(parents=True)
+    (root/'assessment.json').write_text('{}')
+    items = [{'data': {'kind':'tool_call','tool_name':'file_read','tool_call_id':'r',
+        'arguments':{'file_path':'inputs/context.json'}}}, {'data':{'kind':'tool_result','tool_call_id':'r',
+        'content':[{'kind':'json','value':{'status':'success','file_path':'inputs/context.json',
+        'total_lines':total,'start_line':6,'end_line':total}}]}}]
+    result = collect_evaluation_output(root.parent, repaired.package,
+        observation.model_copy(update={'evidence':{'final_items':items}}))
+    assert 'evaluation_record_error' not in result
+    assert result['evaluation_read_coverage'][0]['read_through_line'] == total
+    (root/'assessment.json').unlink()
+    missing = collect_evaluation_output(root.parent, repaired.package,
+        observation.model_copy(update={'evidence':{'final_items':items}}))
+    assert missing['evaluation_read_coverage'][0]['read_through_line'] == total
+    assert 'evaluation_record_error' in missing
+    changed = evaluation_file_call(evaluator(), 'Analyze', {'input':'different'}, {}, directory=tmp_path)[1]
+    assert changed['files'][0]['read_through_line'] == 0

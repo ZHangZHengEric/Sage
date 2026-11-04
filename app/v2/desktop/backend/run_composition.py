@@ -58,6 +58,8 @@ from app.v2.desktop.backend.schemas import (
 from app.v2.desktop.backend.run_environment import DesktopRunEnvironmentMixin
 from app.v2.desktop.backend.runtime_config import (
     _PLAN_BLOCKED_TOOLS,
+    _SKILL_NAME,
+    _TOOL_NAME,
     _agent_memory_behavior,
     _resolved_sandbox_config,
     _sandbox_workspace_root,
@@ -82,7 +84,13 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
 
     def _manifest(self, agent, provider, tools, skills):
         self = cast("DesktopV2Service", self)
-        tools = tuple(name for name in tools if name not in STUDIO_TOOLS)
+        tools = tuple(
+            name for name in tools
+            if isinstance(name, str) and _TOOL_NAME.fullmatch(name) and name not in STUDIO_TOOLS
+        )
+        skills = tuple(
+            name for name in skills if isinstance(name, str) and _SKILL_NAME.fullmatch(name)
+        )
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 10_000))
         memory_enabled = (
             self.memory_plugin_id != "sage.memory.noop" and "search_memory" in tools

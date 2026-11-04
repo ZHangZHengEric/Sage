@@ -34,7 +34,7 @@ class RsiScreen extends StatefulWidget {
   final String agentId;
   final String agentName;
   final VoidCallback? onBack;
-  final Widget Function(String, Widget, Widget)? frameBuilder;
+  final Widget Function(String, Widget, Widget?, Widget)? frameBuilder;
   final Widget Function(String, Widget)? fieldBuilder;
   final bool historyOnly;
   final Future<void> Function(String path)? onOpenFolder;
@@ -70,6 +70,7 @@ class _RsiScreenState extends State<RsiScreen> {
   bool _versionLoading = false;
   String? _selectedRun, _model, _requestId, _error, _requestOptions;
   String? _caseFilename;
+  bool _refreshFailed = false;
   String? _scorerId;
   String? _userSimulatorId;
   String _builtinScoring = 'quality';
@@ -91,6 +92,10 @@ class _RsiScreenState extends State<RsiScreen> {
   bool get _versions => widget.historyOnly || _versionMode;
   int _revision = 0;
   final List<Map<String, Object?>> _events = [];
+  final List<Map<String, Object?>> _auditEvents = [];
+  String? _auditRun;
+  bool _auditLoading = false, _auditFailed = false, _auditMore = true;
+  final _caseDetails = <String, Future<Map<String, Object?>>>{};
   String t(String zh, String en) =>
       context.l10n.locale.languageCode == 'zh' ? zh : en;
   Map<String, Object?> map(Object? v) =>
@@ -127,7 +132,7 @@ class _RsiScreenState extends State<RsiScreen> {
     }
     final expected = <int>{
       0,
-      ...rows(run['iterations'])
+      ...rows(map(run['result'])['iterations'] ?? run['iterations'])
           .map((record) => record['iteration'])
           .whereType<num>()
           .map((number) => number.toInt()),
@@ -139,8 +144,12 @@ class _RsiScreenState extends State<RsiScreen> {
         .toSet();
     return !measured.containsAll(expected) ||
         checkpoints.any(
-          (record) =>
-              {'queued', 'running', 'cancelled'}.contains(record['status']),
+          (record) => {
+            'queued',
+            'running',
+            'cancelled',
+            'error',
+          }.contains(record['status']),
         ) ||
         checkpoints.any(
           (record) => rows(record['cases']).any(
@@ -166,7 +175,17 @@ class _RsiScreenState extends State<RsiScreen> {
         }
       });
     }
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    _poll = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_refreshFailed ||
+          active(_run?['status']) ||
+          _run?['overview_pending'] == true ||
+          _run?['events_pending'] == true ||
+          (_showRunHistory && _run?['has_result'] != true) ||
+          (_run == null && !_versions) ||
+          (_versions && _history.isEmpty)) {
+        unawaited(_refresh(polling: true));
+      }
+    });
     unawaited(_refresh());
   }
 
@@ -280,12 +299,18 @@ class _RsiScreenState extends State<RsiScreen> {
     super.dispose();
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool polling = false}) async {
     if (_loadingRevision == _revision || !mounted) return;
     final revision = _revision;
     _loadingRevision = revision;
     try {
-      final history = await widget.controller.rsiHistory(widget.agentId);
+      final history =
+          polling &&
+              !_refreshFailed &&
+              _run?['overview_pending'] == true &&
+              !active(_run?['status'])
+          ? _history
+          : await widget.controller.rsiHistory(widget.agentId);
       if (!mounted || revision != _revision) return;
       setState(() {
         _history = history;
@@ -293,19 +318,26 @@ class _RsiScreenState extends State<RsiScreen> {
           _selectedRun ??= rows(history['runs']).firstOrNull?['id']?.toString();
         }
       });
-      final run = _selectedRun == null
+      final runId = _selectedRun;
+      final cursor = (_events.lastOrNull?['sequence'] as num?)?.toInt() ?? 0;
+      final run = runId == null
           ? null
+          : !polling && _run?['overview_error'] == true
+          ? await widget.controller.retryRsiOverview(
+              widget.agentId,
+              runId,
+              cursor,
+            )
           : await widget.controller.rsiRun(
               widget.agentId,
-              _selectedRun!,
-              afterSequence: _events.isEmpty
-                  ? 0
-                  : (_events.last['sequence'] as num).toInt(),
+              runId,
+              afterSequence: cursor,
             );
       if (!mounted || revision != _revision) return;
       setState(() {
         _history = history;
         _run = run;
+        _refreshFailed = false;
         _events.addAll(rows(run?['events']));
       });
       await _restoreConfiguration(run, revision);
@@ -313,9 +345,9 @@ class _RsiScreenState extends State<RsiScreen> {
         final latest = rows(history['versions']).firstOrNull;
         if (latest != null) await _openVersion(latest);
       }
-    } on Object catch (e) {
+    } on Object {
       if (mounted && revision == _revision) {
-        setState(() => _error = e.toString());
+        setState(() => _refreshFailed = true);
       }
     } finally {
       if (_loadingRevision == revision) _loadingRevision = null;
@@ -600,11 +632,58 @@ class _RsiScreenState extends State<RsiScreen> {
     }
   });
 
+  Future<void> _loadAudit(String runId) async {
+    if (_auditRun != runId) {
+      _auditRun = runId;
+      _auditEvents.clear();
+      _auditMore = true;
+      _auditLoading = false;
+    }
+    if (_auditLoading || !_auditMore) return;
+    setState(() {
+      _auditLoading = true;
+      _auditFailed = false;
+    });
+    try {
+      final page = await widget.controller.rsiEvents(
+        widget.agentId,
+        runId,
+        (_auditEvents.lastOrNull?['sequence'] as num?)?.toInt() ?? 0,
+      );
+      if (mounted && _auditRun == runId) {
+        setState(() {
+          _auditEvents.addAll(rows(page['events']));
+          _auditMore = page['more'] == true;
+        });
+      }
+    } on Object {
+      if (mounted && _auditRun == runId) setState(() => _auditFailed = true);
+    } finally {
+      if (mounted && _auditRun == runId) setState(() => _auditLoading = false);
+    }
+  }
+
   Future<void> _versionDiff() => _mutate(() async {
     final version = _version;
     if (version == null || version['run_id'] == null) return;
     final runId = version['run_id'].toString();
     var detail = await widget.controller.rsiRun(widget.agentId, runId);
+    for (
+      var attempt = 0;
+      mounted &&
+          attempt < 60 &&
+          detail['has_result'] == true &&
+          detail['overview_pending'] == true &&
+          detail['result'] == null;
+      attempt++
+    ) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      detail = await widget.controller.rsiRun(widget.agentId, runId);
+    }
+    if (detail['has_result'] == true && detail['result'] == null) {
+      throw StateError(t('实验结果仍无法读取', 'Experiment results could not be read'));
+    }
     final events = rows(detail['events']);
     while (map(detail['result']).isEmpty &&
         events.isNotEmpty &&
@@ -1003,14 +1082,18 @@ class _RsiScreenState extends State<RsiScreen> {
               for (final mode in ['quality', 'pairwise'])
                 ListTile(
                   key: ValueKey('rsi-evaluation-mode-$mode'),
-                  title: Text(mode == 'pairwise'
-                      ? t('配对比较', 'Pairwise comparison')
-                      : t('绝对评分', 'Absolute scoring')),
-                  selected: (_builtinScoring == 'pairwise') == (mode == 'pairwise'),
+                  title: Text(
+                    mode == 'pairwise'
+                        ? t('配对比较', 'Pairwise comparison')
+                        : t('绝对评分', 'Absolute scoring'),
+                  ),
+                  selected:
+                      (_builtinScoring == 'pairwise') == (mode == 'pairwise'),
                   onTap: () {
                     _configurationChanged();
                     setState(() {
-                      if ((_builtinScoring == 'pairwise') != (mode == 'pairwise')) {
+                      if ((_builtinScoring == 'pairwise') !=
+                          (mode == 'pairwise')) {
                         _scorerId = null;
                         _builtinScoring = mode;
                         _requestId = null;
@@ -2055,6 +2138,25 @@ class _RsiScreenState extends State<RsiScreen> {
     return groups;
   }
 
+  Widget _titleAction(
+    Key key,
+    String tooltip,
+    IconData icon,
+    VoidCallback onPressed,
+  ) => Tooltip(
+    message: tooltip,
+    child: GlassIconButton(
+      key: key,
+      size: 32,
+      iconSize: 16,
+      shape: GlassIconButtonShape.roundedSquare,
+      borderRadius: 8,
+      settings: glass,
+      icon: Icon(icon),
+      onPressed: onPressed,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final busy = rows(_history['runs']).any((r) => active(r['status']));
@@ -2077,15 +2179,6 @@ class _RsiScreenState extends State<RsiScreen> {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         if (!_versions) ...[
-          action(
-            _showRunHistory
-                ? t('隐藏历史', 'Hide history')
-                : t('实验历史', 'Experiments'),
-            CupertinoIcons.list_bullet,
-            () => setState(() => _showRunHistory = !_showRunHistory),
-            key: const ValueKey('rsi-toggle-history'),
-            width: 112,
-          ),
           action(
             _showConfiguration
                 ? t('收起设置', 'Hide setup')
@@ -2114,24 +2207,6 @@ class _RsiScreenState extends State<RsiScreen> {
             width: 124,
           ),
         ],
-        if (!_versions)
-          action(
-            t('版本管理', 'Versions'),
-            CupertinoIcons.clock,
-            () => setState(() {
-              _versionMode = true;
-              _version = null;
-            }),
-            width: 112,
-          ),
-        if (!_versions && _optimizationFolder != null)
-          action(
-            t('打开优化文件夹', 'Open optimization folder'),
-            CupertinoIcons.folder_open,
-            _openOptimizationFolder,
-            key: const ValueKey('rsi-open-folder'),
-            width: 164,
-          ),
         if (!_versions &&
             _run?['resumable'] == true &&
             _run?['external_host'] != true &&
@@ -2165,26 +2240,64 @@ class _RsiScreenState extends State<RsiScreen> {
             key: const ValueKey('rsi-resume-tests'),
             width: 120,
           ),
-        IconButton(
-          tooltip: t('刷新', 'Refresh'),
-          onPressed: _refresh,
-          icon: const Icon(CupertinoIcons.refresh, size: 18),
-        ),
-        if (back != null)
+        if (!_versions)
           action(
-            _versionMode && !widget.historyOnly
-                ? t('返回进化', 'Back to evolution')
-                : t('返回 Agent', 'Back to agent'),
-            CupertinoIcons.chevron_left,
-            back,
-            key: const ValueKey('rsi-back-agent'),
-            width: 132,
+            _showRunHistory
+                ? t('隐藏历史', 'Hide history')
+                : t('实验历史', 'Experiments'),
+            CupertinoIcons.list_bullet,
+            () => setState(() => _showRunHistory = !_showRunHistory),
+            key: const ValueKey('rsi-toggle-history'),
+            width: 112,
+          ),
+        if (!_versions)
+          action(
+            t('版本管理', 'Versions'),
+            CupertinoIcons.clock,
+            () => setState(() {
+              _versionMode = true;
+              _version = null;
+            }),
+            width: 112,
+          ),
+        if (!_versions && _optimizationFolder != null)
+          action(
+            t('打开优化文件夹', 'Open optimization folder'),
+            CupertinoIcons.folder_open,
+            _openOptimizationFolder,
+            key: const ValueKey('rsi-open-folder'),
+            width: 164,
           ),
       ],
     );
     final body = LayoutBuilder(
       builder: (context, constraints) {
         final details = <Widget>[
+          if (_refreshFailed || _run?['overview_error'] == true)
+            card(
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      t('暂时无法刷新实验记录', 'Could not refresh experiment records'),
+                    ),
+                  ),
+                  GlassButton.custom(
+                    key: const ValueKey('rsi-retry-refresh'),
+                    width: 88,
+                    height: 34,
+                    shape: const LiquidRoundedRectangle(borderRadius: 10),
+                    settings: glass,
+                    onTap: _refresh,
+                    child: Text(t('重试', 'Retry')),
+                  ),
+                ],
+              ),
+            ),
+          if (_run?['overview_pending'] == true &&
+              _run?['has_result'] == true &&
+              _run?['result'] == null)
+            const Center(child: CupertinoActivityIndicator()),
           if (_error != null)
             Text(
               _error!,
@@ -2192,7 +2305,8 @@ class _RsiScreenState extends State<RsiScreen> {
             ),
           if (_versions &&
               (_history.isEmpty || _versionLoading) &&
-              _error == null)
+              _error == null &&
+              !_refreshFailed)
             SizedBox(
               key: const ValueKey('rsi-version-loading'),
               height: 280,
@@ -2206,7 +2320,8 @@ class _RsiScreenState extends State<RsiScreen> {
           if (!_versions &&
               _run == null &&
               _selectedRun != null &&
-              _error == null)
+              _error == null &&
+              !_refreshFailed)
             SizedBox(
               key: const ValueKey('rsi-run-loading'),
               height: 280,
@@ -2221,6 +2336,13 @@ class _RsiScreenState extends State<RsiScreen> {
             RsiObservatory(
               run: _run,
               events: _events,
+              loadCase: _run == null
+                  ? null
+                  : (part) => widget.controller.rsiResultCase(
+                      widget.agentId,
+                      _run!['id'].toString(),
+                      part,
+                    ),
               settings: glass,
               chinese: context.l10n.locale.languageCode == 'zh',
             ),
@@ -2279,14 +2401,50 @@ class _RsiScreenState extends State<RsiScreen> {
         '${_versions ? t('版本历史', 'Version history') : t('进化', 'Evolution')} · ${widget.agentName}';
     // Each region shares one renderer with the same settings as its children.
     // The settings frame uses a different glass style, so keep it outside these layers.
-    final glassActions = AdaptiveLiquidGlassLayer(
+    final titleBar = AdaptiveLiquidGlassLayer(
       settings: glass,
-      child: actions,
+      child: Row(
+        children: [
+          if (back != null) ...[
+            _titleAction(
+              const ValueKey('rsi-back-agent'),
+              _versionMode && !widget.historyOnly
+                  ? t('返回进化', 'Back to evolution')
+                  : t('返回 Agent', 'Back to agent'),
+              CupertinoIcons.chevron_left,
+              back,
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Text(
+              title,
+              key: const ValueKey('settings-content-title'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 10),
+          _titleAction(
+            const ValueKey('rsi-refresh'),
+            t('刷新', 'Refresh'),
+            CupertinoIcons.refresh,
+            _refresh,
+          ),
+        ],
+      ),
     );
+    final glassActions = _versions
+        ? null
+        : AdaptiveLiquidGlassLayer(settings: glass, child: actions);
     final glassBody = AdaptiveLiquidGlassLayer(settings: glass, child: body);
     if (widget.frameBuilder != null) {
       return widget.frameBuilder!(
         title,
+        titleBar,
         glassActions,
         Material(type: MaterialType.transparency, child: glassBody),
       );
@@ -2298,16 +2456,11 @@ class _RsiScreenState extends State<RsiScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(width: double.infinity, child: glassActions),
+              titleBar,
+              if (glassActions != null) ...[
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: glassActions),
+              ],
               const SizedBox(height: 28),
               Expanded(child: glassBody),
             ],
@@ -2494,21 +2647,64 @@ class _RsiScreenState extends State<RsiScreen> {
               ],
             ),
           ExpansionTile(
+            key: ValueKey('rsi-audit-${run['id']}'),
             title: Text(t('过程记录', 'Process record')),
+            onExpansionChanged: (expanded) {
+              if (expanded &&
+                  run['has_result'] == true &&
+                  (_auditRun != run['id'] || _auditEvents.isEmpty)) {
+                unawaited(_loadAudit(run['id'].toString()));
+              }
+            },
             children: [
-              for (final event in _events)
+              for (final event
+                  in run['has_result'] == true
+                      ? (_auditRun == run['id']
+                            ? _auditEvents
+                            : const <Map<String, Object?>>[])
+                      : _events)
                 ListTile(
                   dense: true,
                   title: Text(
                     '${event['sequence']} · ${stage(event['event'], role: map(event['data'])['role'], activity: map(event['data'])['activity'])} · ${event['time']}',
                   ),
                 ),
+              if (_auditRun == run['id'] && run['has_result'] == true)
+                if (_auditLoading)
+                  const CupertinoActivityIndicator()
+                else if (_auditMore)
+                  TextButton(
+                    onPressed: () => _loadAudit(run['id'].toString()),
+                    child: Text(
+                      _auditFailed ? t('重试', 'Retry') : t('加载更多', 'Load more'),
+                    ),
+                  ),
             ],
           ),
-          if (result.isNotEmpty)
+          if (run['has_result'] == true || result.isNotEmpty)
             TextButton.icon(
               key: const ValueKey('rsi-export-report'),
-              onPressed: () => _export(result, 'rsi-${run['id']}.json'),
+              onPressed: () {
+                final filename = 'rsi-${run['id']}.json';
+                if (run['has_result'] != true) {
+                  unawaited(_export(result, filename));
+                  return;
+                }
+                unawaited(
+                  _mutate(() async {
+                    final location = await getSaveLocation(
+                      suggestedName: filename,
+                    );
+                    if (location != null) {
+                      await widget.controller.exportRsiResult(
+                        widget.agentId,
+                        run['id'].toString(),
+                        location.path,
+                      );
+                    }
+                  }),
+                );
+              },
               icon: const Icon(CupertinoIcons.square_arrow_down, size: 16),
               label: Text(t('导出完整记录', 'Export full record')),
             ),
@@ -2537,34 +2733,70 @@ class _RsiScreenState extends State<RsiScreen> {
             '${map(test['case'])['id']} · ${map(test['grade'])['score']} · ${map(test['grade'])['passed'] == true ? t('通过', 'Passed') : t('失败', 'Failed')}',
           ),
           children: [
-            heading(t('测试问题', 'Test question')),
-            text(map(test['case'])['input']?.toString() ?? ''),
-            heading(t('评测标准', 'Rubric')),
-            text(map(test['case'])['rubric']?.toString() ?? ''),
-            heading(t('回答', 'Response')),
-            text(map(test['observation'])['output']?.toString() ?? ''),
-            heading(t('评价结果', 'Evaluation')),
-            text(map(test['grade'])['rationale']?.toString() ?? ''),
-            if (rows(test['trials']).isEmpty) ...dialogue(test),
-            for (final trial in rows(test['trials']).asMap().entries)
-              ExpansionTile(
-                title: Text(
-                  '${t('测试次数', 'Trial')} ${trial.key + 1} · ${map(trial.value['grade'])['score']}',
-                ),
-                children: [
-                  text(
-                    map(trial.value['observation'])['output']?.toString() ?? '',
-                  ),
-                  text(
-                    map(trial.value['grade'])['rationale']?.toString() ?? '',
-                  ),
-                  ...dialogue(trial.value),
-                ],
-              ),
+            if (test['result_part'] case final int part)
+              Builder(
+                builder: (_) {
+                  final runId = _run!['id'].toString();
+                  final key = '$runId/$part';
+                  final future = _caseDetails.putIfAbsent(
+                    key,
+                    () => widget.controller.rsiResultCase(
+                      widget.agentId,
+                      runId,
+                      'cases/$part',
+                    ),
+                  );
+                  if (_caseDetails.length > 24)
+                    _caseDetails.remove(_caseDetails.keys.first);
+                  return FutureBuilder<Map<String, Object?>>(
+                    future: future,
+                    builder: (_, snapshot) {
+                      if (snapshot.hasError) {
+                        return TextButton(
+                          onPressed: () =>
+                              setState(() => _caseDetails.remove(key)),
+                          child: Text(t('重试', 'Retry')),
+                        );
+                      }
+                      if (!snapshot.hasData)
+                        return const CupertinoActivityIndicator();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: evaluationCase(snapshot.data!),
+                      );
+                    },
+                  );
+                },
+              )
+            else
+              ...evaluationCase(test),
           ],
         ),
     ],
   );
+
+  List<Widget> evaluationCase(Map<String, Object?> test) => [
+    heading(t('测试问题', 'Test question')),
+    text(map(test['case'])['input']?.toString() ?? ''),
+    heading(t('评测标准', 'Rubric')),
+    text(map(test['case'])['rubric']?.toString() ?? ''),
+    heading(t('回答', 'Response')),
+    text(map(test['observation'])['output']?.toString() ?? ''),
+    heading(t('评价结果', 'Evaluation')),
+    text(map(test['grade'])['rationale']?.toString() ?? ''),
+    if (rows(test['trials']).isEmpty) ...dialogue(test),
+    for (final trial in rows(test['trials']).asMap().entries)
+      ExpansionTile(
+        title: Text(
+          '${t('测试次数', 'Trial')} ${trial.key + 1} · ${map(trial.value['grade'])['score']}',
+        ),
+        children: [
+          text(map(trial.value['observation'])['output']?.toString() ?? ''),
+          text(map(trial.value['grade'])['rationale']?.toString() ?? ''),
+          ...dialogue(trial.value),
+        ],
+      ),
+  ];
   List<Widget> dialogue(Map<String, Object?> trial) => [
     for (final turn in rows(trial['dialogue'])) ...[
       text('${t('对话轮次', 'Dialogue turn')} ${turn['turn']}'),

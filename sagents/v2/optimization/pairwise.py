@@ -72,10 +72,13 @@ def fingerprint(value):
 
 def comparison_summary(grades):
     """Count pairs, never treating the two presentation orders as two samples."""
-    counts = dict(wins=0, ties=0, losses=0, both_failed=0, order_disagreements=0, pairs=0)
+    counts = dict(wins=0, ties=0, losses=0, both_failed=0, missing=0, order_disagreements=0, pairs=0)
     for grade in grades:
         details = grade.scorer_details.get('pairwise', {})
         outcome = details.get('outcome')
+        if outcome == 'missing':
+            counts['missing'] += 1
+            continue
         if outcome == 'both_failed':
             counts['both_failed'] += 1
             counts['pairs'] += 1
@@ -85,6 +88,8 @@ def comparison_summary(grades):
         counts[{'win': 'wins', 'tie': 'ties', 'loss': 'losses'}[outcome]] += 1
         counts['pairs'] += 1
         counts['order_disagreements'] += int(details.get('order_disagreement', False))
+    if not counts['missing']:
+        counts.pop('missing')  # Preserve existing complete-measurement decision bindings.
     n = counts['pairs']
     return {**counts, 'win_rate': counts['wins'] / n if n else None,
         'tie_rate': counts['ties'] / n if n else None,
@@ -317,8 +322,18 @@ async def compare_evaluations(engine, previous, candidate, *, max_concurrency=1)
             candidate_key = after.grade.scorer_details.get('pairwise', {}).get('artifact_key')
             if not reference_key or not candidate_key:
                 raise PairwiseMeasurementError('Comparison requires frozen per-trial artifacts')
-            grades.append(await engine.compare_prepared(current.case, trial=index,
-                reference_key=reference_key, candidate_key=candidate_key))
+            try:
+                grade = await engine.compare_prepared(current.case, trial=index,
+                    reference_key=reference_key, candidate_key=candidate_key)
+            except Exception as error:
+                if not getattr(error, 'rsi_evaluation_measurement_missing', False):
+                    raise
+                grade = OptimizationGrade(score=0., passed=False,
+                    rationale='Evaluation unavailable; missing measurement, not an execution loss.',
+                    scorer_details={'pairwise': {'outcome': 'missing', 'trial': index,
+                        'error_type': type(error).__name__, 'artifact_key': candidate_key,
+                        'reference_artifact_key': reference_key}})
+            grades.append(grade)
         from sagents.v2.optimization.contracts import OptimizationCaseTrial
         updated_trials = tuple(sample.model_copy(update={'grade': grade}) for sample, grade in zip(new_trials, grades, strict=True))
         summary_grade = grades[0] if not current.trials else OptimizationGrade(
@@ -342,7 +357,8 @@ async def compare_evaluations(engine, previous, candidate, *, max_concurrency=1)
     summaries = {}
     for split, cases in by_split.items():
         summary = comparison_summary(g for grades in cases for g in grades)
-        summary['preference_score'] = sum(sum(g.score for g in grades) / len(grades) for grades in cases) / len(cases)
+        summary['preference_score'] = (None if summary.get('missing', 0) else
+            sum(sum(g.score for g in grades) / len(grades) for grades in cases) / len(cases))
         summaries[split] = summary
     if 'validation' not in summaries:
         raise PairwiseMeasurementError('Comparison requires independent validation pairs')

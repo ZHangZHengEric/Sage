@@ -55,6 +55,7 @@ class RsiPairwiseSummary extends StatelessWidget {
     this.expectedPairs,
     this.errors = 0,
     this.embedded = false,
+    this.showWinRate = true,
   });
   final List<Map<String, Object?>> grades;
   final Map<String, Object?>? summary;
@@ -64,6 +65,7 @@ class RsiPairwiseSummary extends StatelessWidget {
   final int? expectedPairs;
   final int errors;
   final bool embedded;
+  final bool showWinRate;
 
   @override
   Widget build(BuildContext context) {
@@ -137,11 +139,12 @@ class RsiPairwiseSummary extends StatelessWidget {
                   '$losses',
                   dark ? const Color(0xFFFF8895) : const Color(0xFFAD263E),
                 ),
-                metric(
-                  tr('胜率', 'Win rate'),
-                  complete && count > 0 ? percent(wins / count) : '—',
-                  theme.colorScheme.onSurface,
-                ),
+                if (showWinRate)
+                  metric(
+                    tr('胜率', 'Win rate'),
+                    complete && count > 0 ? percent(wins / count) : '—',
+                    theme.colorScheme.onSurface,
+                  ),
               ],
             ),
             if (!complete || errors > 0) ...[

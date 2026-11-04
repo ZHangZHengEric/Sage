@@ -68,6 +68,68 @@ class _FilePanelState extends State<_FilePanel> {
     }
   }
 
+  Future<void> _moveToTrash(WorkspaceFileNode node) async {
+    final workspace = controller.localWorkspaceRootFor(node);
+    if (workspace == null) return;
+    try {
+      await const MethodChannel(
+        'sage_desktop_v2/workspace_files',
+      ).invokeMethod<void>('moveToTrash', {
+        'workspace': workspace,
+        'path': node.path,
+      });
+      if (mounted && controller.workspaceFilesRoot == workspace) {
+        await controller.refreshFiles();
+      }
+    } on PlatformException {
+      if (mounted) {
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('workspace.moveToTrashFailed'),
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _openHtml(WorkspaceFileNode node) async {
+    final group = controller.selectedGroup;
+    final workspace =
+        group.project?.path ?? controller.settings.agentWorkspacePath;
+    try {
+      if (workspace.isEmpty)
+        throw const FileSystemException('Workspace unavailable');
+      final root = await Directory(workspace).resolveSymbolicLinks();
+      final rootUri = Uri.directory(root);
+      final file = File.fromUri(rootUri.resolveUri(Uri(path: node.path)));
+      final resolved = Uri.file(await file.resolveSymbolicLinks());
+      if (!resolved.toString().startsWith(rootUri.toString()) ||
+          !await file.exists()) {
+        throw const FileSystemException('Workspace file unavailable');
+      }
+      final target = resolved.toFilePath();
+      final result = Platform.isMacOS
+          ? await Process.run('/usr/bin/open', [target])
+          : Platform.isWindows
+          ? await Process.run('rundll32.exe', [
+              'url.dll,FileProtocolHandler',
+              resolved.toString(),
+            ])
+          : await Process.run('xdg-open', [target]);
+      if (result.exitCode != 0) {
+        throw const FileSystemException('Could not open HTML file');
+      }
+    } on Object {
+      if (mounted) {
+        DesktopNoticeHost.show(
+          context,
+          message: context.l10n.text('workspace.openBrowserFailed'),
+          isError: true,
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -85,7 +147,13 @@ class _FilePanelState extends State<_FilePanel> {
             _FileBrowserHeader(
               groupName: controller.selectedGroup.name,
               selectedPath: controller.selectedFile?.path,
-              selectedNode: controller.selectedFile,
+              selectedNode: selectedFile,
+              onOpenBrowser:
+                  selectedFile != null &&
+                      !selectedFile.isDirectory &&
+                      workspaceFileIsHtml(selectedFile.name)
+                  ? () => _openHtml(selectedFile)
+                  : null,
               previewMode: _previewMode,
               onPreviewModeChanged: (mode) =>
                   setState(() => _previewMode = mode),
@@ -136,6 +204,11 @@ class _FilePanelState extends State<_FilePanel> {
                             filter: _filter,
                             expandedDirectories: _expandedDirectories,
                             onToggleDirectory: _toggleDirectory,
+                            onMoveToTrash:
+                                Platform.isMacOS &&
+                                    controller.hasLocalWorkspaceFiles
+                                ? _moveToTrash
+                                : null,
                             onFilterChanged: (_) => setState(() {}),
                           ),
                         ),
@@ -171,6 +244,7 @@ class _FileBrowserHeader extends StatelessWidget {
     this.onToggleTree,
     required this.onRefresh,
     required this.onReference,
+    this.onOpenBrowser,
   });
 
   final String groupName;
@@ -183,6 +257,7 @@ class _FileBrowserHeader extends StatelessWidget {
   final VoidCallback? onToggleTree;
   final VoidCallback onRefresh;
   final VoidCallback onReference;
+  final VoidCallback? onOpenBrowser;
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +326,15 @@ class _FileBrowserHeader extends StatelessWidget {
             ),
             const SizedBox(width: 6),
           ],
+          if (onOpenBrowser != null) ...[
+            _HeaderIconButton(
+              keyValue: 'file-header-open-browser',
+              tooltip: context.l10n.text('workspace.openBrowser'),
+              icon: CupertinoIcons.arrow_up_right_square,
+              onTap: onOpenBrowser,
+            ),
+            const SizedBox(width: 4),
+          ],
           if (selectedNode != null) ...[
             _HeaderIconButton(
               keyValue: referenced
@@ -299,6 +383,7 @@ class _FileTreeOverlay extends StatelessWidget {
     required this.filter,
     required this.expandedDirectories,
     required this.onToggleDirectory,
+    this.onMoveToTrash,
     required this.onFilterChanged,
   });
 
@@ -306,6 +391,7 @@ class _FileTreeOverlay extends StatelessWidget {
   final TextEditingController filter;
   final Set<String> expandedDirectories;
   final ValueChanged<String> onToggleDirectory;
+  final ValueChanged<WorkspaceFileNode>? onMoveToTrash;
   final ValueChanged<String> onFilterChanged;
 
   @override
@@ -402,7 +488,11 @@ class _FileTreeOverlay extends StatelessWidget {
                         node,
                       );
                       return _FileTreeRow(
+                        key: ValueKey(node.path),
                         node: node,
+                        onMoveToTrash: node.isDirectory || onMoveToTrash == null
+                            ? null
+                            : () => onMoveToTrash!(node),
                         depth: value.depth,
                         selected: selected,
                         expanded: expanded,
@@ -424,7 +514,9 @@ class _FileTreeOverlay extends StatelessWidget {
 
 class _FileTreeRow extends StatefulWidget {
   const _FileTreeRow({
+    super.key,
     required this.node,
+    this.onMoveToTrash,
     required this.depth,
     required this.selected,
     required this.expanded,
@@ -434,6 +526,7 @@ class _FileTreeRow extends StatefulWidget {
   });
 
   final WorkspaceFileNode node;
+  final VoidCallback? onMoveToTrash;
   final int depth;
   final bool selected;
   final bool expanded;
@@ -447,18 +540,32 @@ class _FileTreeRow extends StatefulWidget {
 
 class _FileTreeRowState extends State<_FileTreeRow> {
   bool _hovered = false;
+  final _menu = GlassMenuController();
+  Offset _menuAnchor = Offset.zero;
+
+  void _openMenuAt(TapUpDetails details) {
+    final row = context.findRenderObject() as RenderBox;
+    final anchor = row.globalToLocal(details.globalPosition);
+    setState(() => _menuAnchor = anchor);
+    // GlassMenu captures its trigger position after the anchor is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _menuAnchor == anchor) _menu.open();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final node = widget.node;
-    return MouseRegion(
+    final moveToTrash = widget.onMoveToTrash;
+    final row = MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: InkWell(
         key: ValueKey('file-tree-row:${node.path}'),
         borderRadius: BorderRadius.circular(7),
         onTap: widget.onTap,
+        onSecondaryTapUp: moveToTrash == null ? null : _openMenuAt,
         child: Container(
           height: 29,
           padding: EdgeInsets.only(left: 7 + widget.depth * 14, right: 7),
@@ -517,6 +624,42 @@ class _FileTreeRowState extends State<_FileTreeRow> {
           ),
         ),
       ),
+    );
+    if (moveToTrash == null) return row;
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.centerLeft,
+      children: [
+        row,
+        Positioned(
+          left: _menuAnchor.dx,
+          top: _menuAnchor.dy,
+          child: GlassMenu(
+            controller: _menu,
+            trigger: const SizedBox.shrink(),
+            morphFromZero: true,
+            menuAlignment: GlassMenuAlignment.topLeft,
+            autoAdjustToScreen: true,
+            menuWidth: 148,
+            menuBorderRadius: 9,
+            itemBorderRadius: 6,
+            menuPadding: const EdgeInsets.all(3),
+            settings: _composerGlassSettings(context),
+            items: [
+              GlassMenuItem(
+                key: ValueKey('file-tree-trash:${node.path}'),
+                title: context.l10n.text('workspace.moveToTrash'),
+                titleStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.error,
+                ),
+                icon: Icon(CupertinoIcons.trash, size: 14, color: colors.error),
+                height: 28,
+                onTap: moveToTrash,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

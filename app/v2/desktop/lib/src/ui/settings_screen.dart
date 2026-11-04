@@ -586,8 +586,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _rsiAgent = null;
           _syncedAgentId = '';
         }),
-        frameBuilder: (title, action, body) => _SettingsContent(
+        frameBuilder: (title, titleBar, action, body) => _SettingsContent(
           title: title,
+          titleBar: titleBar,
           action: action,
           stackedActions: true,
           fillRemaining: true,
@@ -1111,17 +1112,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           _SettingsActionButton(
-            key: const ValueKey('settings-agent-edit'),
-            onTap: _saving || loadingSelection ? null : _toggleAgentEditing,
-            icon: Icon(
-              _editingAgent ? CupertinoIcons.checkmark : CupertinoIcons.pencil,
-              size: 15,
-            ),
-            label: context.l10n.text(
-              _editingAgent ? 'common.save' : 'common.edit',
-            ),
-          ),
-          _SettingsActionButton(
             key: const ValueKey('settings-agent-rsi'),
             onTap: _saving || loadingSelection || _editingAgent
                 ? null
@@ -1142,13 +1132,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : 'Version history',
             width: 116,
           ),
+          GlassMenu(
+            menuWidth: 148,
+            autoAdjustToScreen: true,
+            settings: _glass(context),
+            triggerBuilder: (context, toggle) => IconButton(
+              key: const ValueKey('settings-agent-more'),
+              tooltip: context.l10n.text('workspace.moreActions'),
+              onPressed: _saving || loadingSelection ? null : toggle,
+              icon: const Icon(CupertinoIcons.ellipsis, size: 17),
+            ),
+            items: [
+              GlassMenuItem(
+                key: const ValueKey('settings-agent-clone'),
+                title: context.l10n.text('common.copy'),
+                icon: const Icon(CupertinoIcons.doc_on_doc, size: 15),
+                onTap: () => _createAgent(sourceId: agent.id),
+              ),
+            ],
+          ),
           _SettingsActionButton(
-            key: const ValueKey('settings-agent-clone'),
-            onTap: _saving || loadingSelection
-                ? null
-                : () => _createAgent(sourceId: agent.id),
-            icon: const Icon(CupertinoIcons.doc_on_doc, size: 15),
-            label: context.l10n.text('common.copy'),
+            key: const ValueKey('settings-agent-edit'),
+            onTap: _saving || loadingSelection ? null : _toggleAgentEditing,
+            icon: Icon(
+              _editingAgent ? CupertinoIcons.checkmark : CupertinoIcons.pencil,
+              size: 15,
+            ),
+            label: context.l10n.text(
+              _editingAgent ? 'common.save' : 'common.edit',
+            ),
           ),
         ],
       ),
@@ -4060,6 +4072,7 @@ class _SettingsContent extends StatelessWidget {
     required this.title,
     required this.children,
     this.action,
+    this.titleBar,
     this.listAction,
     this.stackedActions = false,
     this.status = false,
@@ -4068,6 +4081,7 @@ class _SettingsContent extends StatelessWidget {
   final String title;
   final List<Widget> children;
   final Widget? action;
+  final Widget? titleBar;
   final Widget? listAction;
   final bool stackedActions;
   final bool status;
@@ -4080,25 +4094,25 @@ class _SettingsContent extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    key: const ValueKey('settings-content-title'),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+            titleBar ??
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        key: const ValueKey('settings-content-title'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
                     ),
-                  ),
+                    if (status)
+                      const CupertinoActivityIndicator(
+                        key: ValueKey('settings-saving'),
+                      ),
+                  ],
                 ),
-                if (status)
-                  const CupertinoActivityIndicator(
-                    key: ValueKey('settings-saving'),
-                  ),
-              ],
-            ),
             if (action != null) ...[
               const SizedBox(height: 12),
               Align(alignment: Alignment.centerLeft, child: action),

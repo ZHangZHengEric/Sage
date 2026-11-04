@@ -50,7 +50,7 @@ class DesktopPurposeModel:
 async def desktop_run_inputs(service, context, dependencies):
     run = dependencies.require("execution.environment")
     user_id = run.context.actor.principal_id
-    if run.context.actor.tenant_id != user_id:
+    if run.context.actor.tenant_id != service._context(user_id).actor.tenant_id:
         raise PermissionError("Desktop Run owner and tenant must match")
     environment = await service._environment_for_command(run.command, user_id, run.run_id)
     if environment is None:
@@ -160,7 +160,7 @@ def desktop_registrations(service):
             return None
         async def authorize(request, request_context):
             if (request_context.actor.principal_id != agent.user_id
-                    or request_context.actor.tenant_id != agent.user_id
+                    or request_context.actor.tenant_id != service._context(agent.user_id).actor.tenant_id
                     or request_context.actor.delegated_by):
                 raise PermissionError("Only the Agent owner can change its capabilities")
         return SelfConfigurationService(
