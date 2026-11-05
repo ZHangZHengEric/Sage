@@ -7,7 +7,7 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationRule,
 )
 from sagents.v2.agent.policy.plugins._shared.continuation_rules import (
-    BudgetRule, ExplicitStatusRequiredRule, ExplicitStatusRule, FlowBoundaryRule, InspectionProgressRule, LoopCorrectionRule, LoopRecoveryRule, ResponseLimitRule, ToolOrTextRule, ToolOrTextRuleForPendingCalls,
+    QuestionnaireRule, BudgetRule, ExplicitStatusRequiredRule, ExplicitStatusRule, FlowBoundaryRule, InspectionProgressRule, LoopCorrectionRule, LoopRecoveryRule, ResponseLimitRule, ToolOrTextRule, ToolOrTextRuleForPendingCalls,
 )
 
 
@@ -22,6 +22,7 @@ class CompositeContinuationPolicy:
 
     def __init__(self, rules: tuple[ContinuationRule, ...] | None = None) -> None:
         self.rules = rules or (
+            QuestionnaireRule(),
             BudgetRule(),
             ResponseLimitRule(),
             ExplicitStatusRule(),
@@ -49,6 +50,7 @@ class ExplicitStatusContinuationPolicy:
 
     def __init__(self, *, repeat_threshold: int = 3) -> None:
         self.rules = (
+            QuestionnaireRule(),
             BudgetRule(),
             ResponseLimitRule(),
             ExplicitStatusRule(),

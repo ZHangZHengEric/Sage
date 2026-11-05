@@ -657,7 +657,8 @@ class _MessageListState extends State<_MessageList> {
         ? pendingInteraction
         : null;
     final completedQuestionnaire = pendingQuestionnaire == null
-        ? _latestValidatedToolQuestionnaire(conversation)
+        ? conversation.completedQuestionnaire ??
+              _latestValidatedToolQuestionnaire(conversation)
         : null;
     final inlineQuestionnaire = pendingQuestionnaire ?? completedQuestionnaire;
     final questionnairePanelId =
@@ -667,18 +668,25 @@ class _MessageListState extends State<_MessageList> {
         message.role == 'assistant' &&
         _panelForMessage(message)?.id == questionnairePanelId;
     Widget questionnaireCard() => IgnorePointer(
-      ignoring: widget.readOnly,
+      ignoring:
+          widget.readOnly ||
+          (completedQuestionnaire != null &&
+              conversation.status != RunStatus.completed),
       child: _InlineQuestionnaireCard(
         key: ValueKey('inline-questionnaire:${inlineQuestionnaire!.id}'),
         interaction: inlineQuestionnaire,
         onReply: completedQuestionnaire != null
             ? (decision, {text = '', payload = const {}}) async {
-                if (decision != 'submit') return;
+                if (decision != 'submit' ||
+                    conversation.status != RunStatus.completed) {
+                  return;
+                }
                 final rawAnswers = payload['answers'];
                 final answers = rawAnswers is Map
                     ? rawAnswers.cast<String, Object?>()
                     : const <String, Object?>{};
-                await widget.controller.send(
+                await widget.controller.sendQuestionnaire(
+                  completedQuestionnaire,
                   _questionnaireResponseMessage(
                     completedQuestionnaire,
                     answers,

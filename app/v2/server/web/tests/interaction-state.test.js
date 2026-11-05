@@ -58,3 +58,15 @@ test('live new Run start clears an earlier question even without its close event
   await agent.runAgent({ runId: 'new', tools: [], context: [] })
   assert.equal(shown.at(-1), null)
 })
+
+
+test('completed questionnaire stays answerable without requiring resume and clears on a new Run', () => {
+  const payload = { title: 'Target', questions: [{ id: 'target', title: 'Which target?' }] }
+  const events = [start('old'), custom('sage.continuation.decided', {
+    action: 'complete_run', details: { questionnaire: payload },
+  }), { type: 'RUN_FINISHED', threadId: 'thread', runId: 'old' }]
+  const shown = pendingInteraction(events)
+  assert.equal(shown.reply_as_new_run, true)
+  assert.deepEqual(shown.payload, payload)
+  assert.equal(pendingInteraction([...events, start('new')]), null)
+})

@@ -2055,7 +2055,8 @@ class WorkspaceController extends ChangeNotifier {
       ..status = RunStatus.idle
       ..thinking = false
       ..messages = replacement.messages
-      ..pendingInteraction = null;
+      ..pendingInteraction = null
+      ..completedQuestionnaire = null;
     target.runtimeEvents.clear();
     target.processPanels
       ..clear()
@@ -2240,6 +2241,20 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  Future<void> sendQuestionnaire(
+    PendingInteraction questionnaire,
+    String text,
+  ) async {
+    final conversation = selectedConversation;
+    if (conversation == null ||
+        conversation.status != RunStatus.completed ||
+        !canSend) {
+      return;
+    }
+    conversation.completedQuestionnaire ??= questionnaire;
+    await send(text);
+  }
+
   Future<void> send(
     String text, {
     Map<String, Object?>? openUiAction,
@@ -2258,6 +2273,7 @@ class WorkspaceController extends ChangeNotifier {
         selectedAgentId.isEmpty) {
       return;
     }
+    final previousQuestionnaire = conversation.completedQuestionnaire;
     final selectedAttachments = List<UploadedAttachment>.of(attachments);
     if (conversation.status == RunStatus.running ||
         conversation.status == RunStatus.starting ||
@@ -2347,7 +2363,48 @@ class WorkspaceController extends ChangeNotifier {
           ? _id('desktop')
           : 'openui:${openUiAction['surface_id']}:${openUiAction['revision']}',
     };
-    _listen(conversation, _api.startRun(body));
+    if (previousQuestionnaire != null) {
+      final cached = previousQuestionnaire.payload['_start_request'];
+      if (cached is Map &&
+          cached['agent_id'] == body['agent_id'] &&
+          cached['session_id'] == body['session_id'] &&
+          jsonEncode(cached['messages']) == jsonEncode(body['messages'])) {
+        body
+          ..clear()
+          ..addAll(cached.cast<String, Object?>());
+      }
+      conversation.completedQuestionnaire = PendingInteraction(
+        id: previousQuestionnaire.id,
+        type: previousQuestionnaire.type,
+        allowedDecisions: previousQuestionnaire.allowedDecisions,
+        payload: {...previousQuestionnaire.payload, '_start_request': body},
+      );
+      _persist();
+    }
+    _listen(
+      conversation,
+      _api.startRun(body),
+      onStartAccepted: previousQuestionnaire == null
+          ? null
+          : () {
+              conversation.completedQuestionnaire = null;
+              error = null;
+            },
+      onStartFailure: previousQuestionnaire == null
+          ? null
+          : () {
+              // No acceptance frame was received. Keep the same request for a retry;
+              // the server's idempotency key reconciles a lost acceptance response.
+              conversation.status = RunStatus.completed;
+              conversation.thinking = false;
+              conversation.messages.removeWhere(
+                (message) => message.id == userMessage.id,
+              );
+              conversation.processPanels.removeWhere(
+                (panel) => panel.anchorMessageId == userMessage.id,
+              );
+            },
+    );
   }
 
   void setPreferInteractiveUi(bool enabled) {
@@ -2611,11 +2668,22 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
-  void _listen(Conversation conversation, Stream<Map<String, Object?>> stream) {
+  void _listen(
+    Conversation conversation,
+    Stream<Map<String, Object?>> stream, {
+    VoidCallback? onStartAccepted,
+    VoidCallback? onStartFailure,
+  }) {
+    var accepted = false;
     unawaited(_streams.remove(conversation.id)?.cancel());
     late final StreamSubscription<Map<String, Object?>> subscription;
     subscription = stream.listen(
       (event) {
+        if (!accepted &&
+            (event['kind'] == 'stream.opened' || event['run_id'] != null)) {
+          accepted = true;
+          onStartAccepted?.call();
+        }
         _reconnectAttempts[conversation.id] = 0;
         _applyEvent(conversation, event);
       },
@@ -2625,7 +2693,9 @@ class WorkspaceController extends ChangeNotifier {
         if (_disposed) return;
         conversation.thinking = false;
         error = exception.toString();
-        if (conversation.runId.isEmpty) {
+        if (!accepted && onStartFailure != null) {
+          onStartFailure();
+        } else if (conversation.runId.isEmpty) {
           _applyTerminalState(
             conversation,
             RunStatus.failed,
@@ -2640,6 +2710,12 @@ class WorkspaceController extends ChangeNotifier {
       onDone: () {
         if (!identical(_streams[conversation.id], subscription)) return;
         _streams.remove(conversation.id);
+        if (!_disposed && !accepted && onStartFailure != null) {
+          onStartFailure();
+          notifyListeners();
+          _persist();
+          return;
+        }
         if (!_disposed &&
             !_startingApprovedPlans.contains(conversation.id) &&
             conversation.runId.isNotEmpty &&
@@ -2845,6 +2921,17 @@ class WorkspaceController extends ChangeNotifier {
       _trackToolResult(conversation, eventData);
     } else if (type == 'turn.started') {
       conversation.status = RunStatus.running;
+    } else if (type == 'continuation.decided') {
+      final details = eventData['details'];
+      final questionnaire = details is Map ? details['questionnaire'] : null;
+      if (eventData['action'] == 'complete_run' && questionnaire is Map) {
+        conversation.completedQuestionnaire = PendingInteraction(
+          id: 'questionnaire:${conversation.runId}:$sequence',
+          type: 'questionnaire',
+          allowedDecisions: const ['submit'],
+          payload: questionnaire.cast<String, Object?>(),
+        );
+      }
     } else if (type == 'interaction.requested') {
       conversation.pendingInteraction = PendingInteraction.fromJson(eventData);
     } else if (type == 'run.suspend_requested') {

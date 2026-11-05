@@ -14,6 +14,7 @@ from pydantic import Field
 
 from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.agent.policy.plugins._shared.continuation_rules import (
+    QuestionnaireRule,
     BudgetRule,
     ResponseLimitRule,
     ExplicitStatusRule,
@@ -406,55 +407,30 @@ class LLMContinuationJudge:
                 usage=usage,
                 metadata=metadata,
             )
-        if decision in {"completed", "need_user_input"}:
-            if not context.response.text.strip():
-                return ContinuationDecision(
-                    action=ContinuationAction.CONTINUE_STEP,
-                    reason_code="judge.explanation_required",
-                    reason=(
-                        "Judge completion requires user-facing final text"
-                        if decision == "completed"
-                        else "Judge need_user_input requires a user-facing question"
-                    ),
-                    usage=usage,
-                    metadata=metadata,
-                )
+        # A Judge verdict closes this conversational Run; approval and recovery
+        # interactions retain a suspended execution that must be resumed.
+        if not context.response.text.strip():
             return ContinuationDecision(
-                action=ContinuationAction.COMPLETE_RUN,
-                reason_code=f"judge.{decision}",
-                reason=reason,
+                action=ContinuationAction.CONTINUE_STEP,
+                reason_code="judge.explanation_required",
+                reason={
+                    "completed": "Judge completion requires user-facing final text",
+                    "need_user_input": "Judge need_user_input requires a user-facing question",
+                    "blocked": "Judge blocked requires a user-facing explanation",
+                }[decision],
                 usage=usage,
-                metadata={
-                    **metadata,
-                    **(
-                        {
-                            "completion_status": "need_user_input",
-                            "needs_user_input": True,
-                        }
-                        if decision == "need_user_input"
-                        else {}
-                    ),
-                },
+                metadata=metadata,
             )
         return ContinuationDecision(
-            action=ContinuationAction.REQUEST_INTERACTION,
+            action=ContinuationAction.COMPLETE_RUN,
             reason_code=f"judge.{decision}",
             reason=reason,
-            interaction=InteractionDraft(
-                interaction_type=f"judge_{decision}",
-                allowed_decisions=("submit", "cancel"),
-                payload={
-                    **recovery_payload(
-                        "recovery.input_prompt",
-                        context.language,
-                        reason_code=f"judge.{decision}",
-                    ),
-                    "status": decision,
-                    "prompt": context.response.text.strip() or reason,
-                },
-            ),
             usage=usage,
-            metadata=metadata,
+            metadata={
+                **metadata,
+                **({"completion_status": decision} if decision != "completed" else {}),
+                **({"needs_user_input": True} if decision == "need_user_input" else {}),
+            },
         )
 
     @staticmethod
@@ -552,6 +528,9 @@ class LLMJudgeContinuationPolicy:
         )
 
     async def decide(self, context: ContinuationContext) -> ContinuationDecision:
+        questionnaire = await QuestionnaireRule().evaluate(context)
+        if questionnaire is not None:
+            return questionnaire
         if context.requested_interaction is not None:
             return ContinuationDecision(
                 action=ContinuationAction.REQUEST_INTERACTION,
@@ -632,6 +611,7 @@ class HybridContinuationPolicy:
     ) -> None:
         self.judge = judge
         self._rules = (
+            QuestionnaireRule(),
             BudgetRule(),
             ResponseLimitRule(),
             ExplicitStatusRule(),
@@ -688,26 +668,6 @@ def _v1_protocol_decision(
     context: ContinuationContext,
 ) -> ContinuationDecision | None:
     text = context.response.text.strip()
-    if _has_inline_questionnaire(text):
-        return ContinuationDecision(
-            action=ContinuationAction.REQUEST_INTERACTION,
-            reason_code="judge.inline_questionnaire",
-            reason="inline questionnaire requires user input",
-            interaction=InteractionDraft(
-                interaction_type="judge_need_user_input",
-                allowed_decisions=("submit", "cancel"),
-                payload={
-                    **recovery_payload(
-                        "recovery.input_prompt",
-                        context.language,
-                        reason_code="judge.inline_questionnaire",
-                    ),
-                    "status": "need_user_input",
-                    "prompt": text,
-                },
-            ),
-            metadata={"policy": "llm_judge", "implementation": "v1"},
-        )
     if _has_ling_action(text):
         return ContinuationDecision(
             action=ContinuationAction.COMPLETE_RUN,
@@ -723,33 +683,6 @@ def _v1_protocol_decision(
             metadata={"policy": "llm_judge", "implementation": "v1"},
         )
     return None
-
-
-def _has_inline_questionnaire(text: str) -> bool:
-    decoded = unescape(text)
-    for fragment in decoded.split("<")[1:]:
-        raw_tag = fragment.split(">", 1)[0].strip()
-        if not raw_tag or raw_tag[0] in "/!?":
-            continue
-        name = raw_tag.split(None, 1)[0].rstrip("/").lower()
-        if name == "questionnaire" or (
-            name.endswith("-questionnaire") and name != "-questionnaire"
-        ):
-            return True
-    for line in decoded.splitlines():
-        stripped = line.strip()
-        if len(stripped) < 4 or stripped[0] not in {"`", "'"}:
-            continue
-        character = stripped[0]
-        fence_length = len(stripped) - len(stripped.lstrip(character))
-        if fence_length < 3:
-            continue
-        name = stripped[fence_length:].strip().lower()
-        if name == "questionnaire" or (
-            name.endswith("-questionnaire") and name != "-questionnaire"
-        ):
-            return True
-    return False
 
 
 def _has_ling_action(text: str) -> bool:

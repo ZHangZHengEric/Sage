@@ -19,6 +19,7 @@ from sagents.v2.agent.policy import (
     LLMContinuationJudge,
     LLMJudgeContinuationPolicy,
 )
+from sagents.v2.agent.policy.plugins.continuation import CompositeContinuationPolicy
 from sagents.v2.agent.policy.plugins.judge.prompts import LEGACY_V1_TASK_COMPLETE_TEMPLATE
 from sagents.v2.contracts.items import JsonBlock, TextBlock, UsageSummary
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -188,7 +189,7 @@ async def test_llm_judge_never_skips_an_unsettled_tool_result():
             ContinuationAction.COMPLETE_RUN,
             "judge.need_user_input",
         ),
-        ("blocked", ContinuationAction.REQUEST_INTERACTION, "judge.blocked"),
+        ("blocked", ContinuationAction.COMPLETE_RUN, "judge.blocked"),
     ],
 )
 @pytest.mark.asyncio
@@ -224,10 +225,42 @@ async def test_llm_judge_need_user_input_completes_without_interaction():
     assert decision.metadata["needs_user_input"] is True
 
 
+@pytest.mark.parametrize("policy_type", [LLMJudgeContinuationPolicy, HybridContinuationPolicy])
 @pytest.mark.asyncio
-async def test_llm_judge_preserves_explicit_questionnaire_interaction():
+async def test_judge_blocked_completes_without_interaction(policy_type):
+    model = ScriptedModelProvider((_judge_step("blocked", reason="Access is denied."),))
+    policy = policy_type(LLMContinuationJudge(cast(ModelProvider, model)))
+
+    decision = await policy.decide(_context(response=_response("Access is denied.")))
+
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.reason_code == "judge.blocked"
+    assert decision.reason == "Access is denied."
+    assert decision.interaction is None
+    assert decision.metadata["completion_status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_judge_blocked_requires_user_facing_explanation():
+    model = ScriptedModelProvider((_judge_step("blocked", reason="Access is denied."),))
+    judge = LLMContinuationJudge(cast(ModelProvider, model))
+
+    decision = await judge.decide(_context(response=_response("")))
+
+    assert decision.action == ContinuationAction.CONTINUE_STEP
+    assert decision.reason_code == "judge.explanation_required"
+    assert decision.interaction is None
+
+
+@pytest.mark.parametrize("policy_type", [LLMJudgeContinuationPolicy, HybridContinuationPolicy, CompositeContinuationPolicy, ExplicitStatusContinuationPolicy])
+@pytest.mark.asyncio
+async def test_explicit_questionnaire_completes_without_interaction(policy_type):
     model = ScriptedModelProvider(())
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
+    policy = (
+        policy_type(LLMContinuationJudge(cast(ModelProvider, model)))
+        if policy_type in {LLMJudgeContinuationPolicy, HybridContinuationPolicy}
+        else policy_type()
+    )
     questionnaire = InteractionDraft(
         interaction_type="questionnaire",
         allowed_decisions=("submit", "cancel"),
@@ -263,10 +296,11 @@ async def test_llm_judge_preserves_explicit_questionnaire_interaction():
         )
     )
 
-    assert decision.action == ContinuationAction.REQUEST_INTERACTION
-    assert decision.reason_code == "interaction.requested"
-    assert decision.interaction == questionnaire
-    assert decision.metadata["source"] == "explicit_interaction"
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.reason_code == "questionnaire.ready"
+    assert decision.interaction is None
+    assert decision.metadata["questionnaire"] == questionnaire.payload
+    assert decision.metadata["source"] == "explicit_questionnaire"
     assert model.requests == []
 
 
@@ -552,3 +586,19 @@ async def test_truncated_text_continues_without_spending_a_judge_call(
     assert (
         await policies[policy_name].decide(limited)
     ).action != ContinuationAction.CONTINUE_STEP
+
+
+@pytest.mark.parametrize("policy_type", [LLMJudgeContinuationPolicy, HybridContinuationPolicy])
+@pytest.mark.parametrize("text", [
+    '<questionnaire title="Target" />',
+    'Choose a target.\n```yiii-questionnaire\ntitle: Target\n```',
+])
+@pytest.mark.asyncio
+async def test_inline_questionnaire_completes_without_interaction(policy_type, text):
+    model = ScriptedModelProvider(())
+    policy = policy_type(LLMContinuationJudge(cast(ModelProvider, model)))
+    decision = await policy.decide(_context(response=_response(text), no_progress_steps=5, repeated_fingerprint_count=5))
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.interaction is None
+    assert decision.metadata["awaiting_user_input"] is True
+    assert model.requests == []

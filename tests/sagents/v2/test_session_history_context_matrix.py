@@ -672,3 +672,37 @@ async def test_tool_call_and_result_items_reconstruct_a_complete_provider_pair()
     assert messages[1].tool_calls == (call,)
     assert messages[2].tool_call_id == "call_1"
     assert messages[2].content == (TextBlock(text="tool value"),)
+
+
+@pytest.mark.asyncio
+async def test_explicit_questionnaire_questions_reach_the_next_run():
+    from sagents.v2.agent.policy.continuation import ContinuationSignals, InteractionDraft
+    from sagents.v2.context.session_history import SessionEventModelProjector
+
+    runtime = ephemeral_runtime()
+    first = await runtime.start_run(command("Deploy the service", "ask-target"), CONTEXT)
+    questionnaire = {"title": "Deployment target", "questions": [
+        {"id": "target", "title": "Which target should receive the service?", "options": ["staging", "production"]},
+    ]}
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("Choose a target."),)),))
+    loop = AgentLoopEngine(
+        runtime=runtime, model=model,
+        tool_catalog=InMemoryToolCatalog(()), tool_executor=InMemoryToolExecutor({}, {}),
+        continuation_signal_provider=lambda run_id: ContinuationSignals(interaction=InteractionDraft(
+            interaction_type="questionnaire", allowed_decisions=("submit",), payload=questionnaire,
+        )),
+    )
+    assert (await loop.execute(first.run_id, CONTEXT)).state.value == "completed"
+    events = await runtime.session_store.read_events(first.run_id)
+    history = SessionEventModelProjector().project(events)
+    assert sum("Which target should receive" in block.text
+               for message in history for block in message.content if isinstance(block, TextBlock)) == 1
+
+    second = await runtime.start_run(command("staging", "answer-target", session_id=first.session_id), CONTEXT)
+    def verify_context(request):
+        texts = message_texts(request)
+        assert any("Which target should receive the service?" in text and "production" in text for _, text in texts)
+        assert any(role == "user" and text == "staging" for role, text in texts)
+    await execute(runtime, second, ScriptedModelProvider((ScriptedModelStep(
+        events=(completed("Deployed."),), assertion=verify_context,
+    ),)))

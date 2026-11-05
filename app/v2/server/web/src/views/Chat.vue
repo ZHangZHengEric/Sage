@@ -33,6 +33,7 @@ const supplementing = ref(false), queuedSupplements = shallowRef([])
 const displayMessages = computed(() => [...messages.value, ...queuedSupplements.value.map(item => ({ id: item.messageId, role: 'user', content: item.content, steeringPending: true }))])
 const appliedSupplements = new Set()
 let supplementAttempt = null
+let sendAttempt = null
 let agentBinding = 0
 const error = ref('')
 const hasModel = ref(true)
@@ -88,7 +89,7 @@ const composerPlaceholder = computed(() => pending.value ? '继续输入…' :
 const isStart = computed(() => !currentThread.value && !route?.query?.thread && !messages.value.length && !pending.value && !interaction.value && !historyLoading.value)
 const canSend = computed(() => configurationLoaded.value && !initializing.value && !setupFailed.value && !readOnly.value && !historyLoading.value && !historyFailed.value &&
   historyOffset.value >= historyTotal.value && (hasModel.value || Boolean(agentPackage.value)) && agentAvailable.value &&
-  !activeInteraction.value && !stopping.value && !supplementing.value &&
+  (!activeInteraction.value || activeInteraction.value.reply_as_new_run) && !stopping.value && !supplementing.value &&
   (!pending.value || streamStarted.value) && Boolean(userMessage.value))
 
 function inputKeydown(event) {
@@ -259,8 +260,15 @@ function startNew() {
 
 async function send() {
   const content = userMessage.value
-  if (!configurationLoaded.value || setupFailed.value || (!agentPackage.value && !hasModel.value) || !agentAvailable.value || readOnly.value || historyLoading.value || historyFailed.value || historyOffset.value < historyTotal.value || !content || pending.value || interaction.value) return
+  if (!configurationLoaded.value || setupFailed.value || (!agentPackage.value && !hasModel.value) || !agentAvailable.value || readOnly.value || historyLoading.value || historyFailed.value || historyOffset.value < historyTotal.value || !content || pending.value || (interaction.value && !interaction.value.reply_as_new_run)) return
   if (!threadId.value) threadId.value = newId('thread')
+  if (!sendAttempt || sendAttempt.threadId !== threadId.value || sendAttempt.agentId !== selectedAgentId.value || sendAttempt.content !== content) {
+    sendAttempt = { threadId: threadId.value, agentId: selectedAgentId.value, content, runId: newId('run'),
+      message: { id: crypto.randomUUID(), role: 'user', content },
+      messages: [...messages.value], interaction: interaction.value }
+  }
+  const attempt = sendAttempt
+  interaction.value = null
   text.value = ''
   selectedSkills.value = []
   nextTick(resizeInput)
@@ -268,11 +276,11 @@ async function send() {
   streamStarted.value = false; stopping.value = false
   appliedSupplements.clear(); supplementAttempt = null
   const revision = historyRevision
-  const runId = newId('run')
+  const runId = attempt.runId
   activeRunId.value = runId
   error.value = ''
-  const message = { id: crypto.randomUUID(), role: 'user', content }
-  baseline.value = [...messages.value, message]
+  const message = attempt.message
+  baseline.value = [...attempt.messages, message]
   try {
     await runAgui(agent.value, {
       threadId: threadId.value,
@@ -282,11 +290,23 @@ async function send() {
       agentPackage: agentPackage.value,
       notificationConnectionId: notificationConnectionId.value,
     })
+    if (sendAttempt === attempt) sendAttempt = null
     if (revision !== historyRevision) return
     await loadThreads()
     if (route?.query?.package) await router.replace({ path: '/', query: { thread: threadId.value } })
   } catch (exc) {
-    if (revision === historyRevision) error.value = exc.message
+    if (revision === historyRevision) {
+      error.value = exc.message
+      if (!streamStarted.value) {
+        interaction.value = attempt.interaction
+        text.value = content
+        selectedSkills.value = []
+        messages.value = attempt.messages
+        agent.value.setMessages(attempt.messages)
+      } else {
+        sendAttempt = null
+      }
+    }
   } finally {
     if (revision === historyRevision) {
       pending.value = false; stopping.value = false; streamStarted.value = false
@@ -351,6 +371,11 @@ async function stop() {
 async function decide({ decision, payload }) {
   if (readOnly.value || pending.value || !interaction.value || !interaction.value.allowed_decisions?.includes(decision)) return
   if (['submit', 'change_direction'].includes(decision) && (typeof payload?.text !== 'string' || !payload.text.trim())) return
+  if (interaction.value.reply_as_new_run) {
+    text.value = payload.text
+    await send()
+    return
+  }
   const asked = interaction.value, revision = historyRevision, shown = messages.value
   deciding.value = asked; decisionError.value = ''
   interaction.value = null

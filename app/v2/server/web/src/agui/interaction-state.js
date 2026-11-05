@@ -8,6 +8,14 @@ const CLOSED = new Set([
 export function interactionAfterEvent(pending, event) {
   if (event.type === 'RUN_STARTED' || event.type === 'RUN_ERROR') return null
   if (event.type !== 'CUSTOM') return pending
+  if (event.name === 'sage.continuation.decided' && event.value?.action === 'complete_run' && event.value?.details?.questionnaire) {
+    return {
+      interaction_type: 'questionnaire',
+      allowed_decisions: ['submit'],
+      payload: event.value.details.questionnaire,
+      reply_as_new_run: true,
+    }
+  }
   if (event.name === 'sage.interaction.requested') return event.value || null
   if (CLOSED.has(event.name)) {
     return event.value?.interaction_id === pending?.interaction_id ? null : pending

@@ -108,7 +108,9 @@ class GoalStateService:
             if event.type == "continuation.decided"
             and isinstance(event.data, ContinuationEventData)
         ]
-        if decisions and decisions[-1].reason_code == "tool.questionnaire_ready":
+        if decisions and decisions[-1].reason_code in {
+            "tool.questionnaire_ready", "questionnaire.ready", "judge.inline_questionnaire"
+        }:
             return previous_id
         return None
 

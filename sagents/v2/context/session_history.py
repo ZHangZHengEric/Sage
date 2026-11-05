@@ -8,7 +8,7 @@ from typing import Protocol
 
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.contracts.commands import StartRun
-from sagents.v2.contracts.events import ItemEventData, RuntimeEvent
+from sagents.v2.contracts.events import ContinuationEventData, ItemEventData, RuntimeEvent
 from sagents.v2.contracts.errors import error_diagnostic_message
 from sagents.v2.contracts.items import (
     ItemStatus,
@@ -101,6 +101,25 @@ class SessionEventModelProjector:
         seen_items: set[str] = set()
         for event in events:
             data = event.data
+            if (
+                event.type == "continuation.decided"
+                and isinstance(data, ContinuationEventData)
+                and data.action == "complete_run"
+                and isinstance(data.details.get("questionnaire"), dict)
+            ):
+                # Explicit questionnaires live in policy events rather than tool
+                # Items. Preserve the actual questions for the next Run too.
+                projected.append(_ProjectedMessage(
+                    message=ModelMessage(
+                        role="assistant",
+                        content=(TextBlock(text="Questionnaire presented to the user:\n" + json.dumps(
+                            data.details["questionnaire"], ensure_ascii=False,
+                        )),),
+                        metadata={"source": "questionnaire", "run_id": event.run_id},
+                    ),
+                    step_key=(event.run_id, event.turn_id, event.step_id),
+                ))
+                continue
             if not isinstance(data, ItemEventData) or data.item is None:
                 continue
             if data.operation not in {"completed", "snapshot"}:

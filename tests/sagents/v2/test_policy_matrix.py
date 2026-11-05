@@ -97,12 +97,12 @@ def continuation_context(**updates):
                 "explicit_status": "need_user_input",
                 "explicit_status_note": "Please choose a target.",
             },
-            ContinuationAction.REQUEST_INTERACTION,
+            ContinuationAction.COMPLETE_RUN,
             "status.need_user_input",
         ),
         (
             {"explicit_status": "blocked"},
-            ContinuationAction.REQUEST_INTERACTION,
+            ContinuationAction.COMPLETE_RUN,
             "status.blocked",
         ),
         (
@@ -154,7 +154,7 @@ async def test_default_continuation_decision_matrix(updates, action, reason):
 
 
 @pytest.mark.asyncio
-async def test_explicit_input_status_preserves_prompt_and_allowed_decisions():
+async def test_explicit_input_status_finishes_without_reserving_session():
     decision = await CompositeContinuationPolicy().decide(
         continuation_context(
             explicit_status="need_user_input",
@@ -162,14 +162,10 @@ async def test_explicit_input_status_preserves_prompt_and_allowed_decisions():
         )
     )
 
-    assert decision.interaction is not None
-    assert decision.interaction.allowed_decisions == ("submit", "cancel")
-    assert decision.interaction.payload["status"] == "need_user_input"
-    assert decision.interaction.payload["prompt"] == (
-        "Which environment should I deploy to?"
-    )
-    assert decision.interaction.payload["questions"]
-    assert decision.interaction.payload["language"] == "en"
+    assert decision.action == ContinuationAction.COMPLETE_RUN
+    assert decision.interaction is None
+    assert decision.reason == "Which environment should I deploy to?"
+    assert decision.metadata["needs_user_input"] is True
 
 
 @pytest.mark.asyncio

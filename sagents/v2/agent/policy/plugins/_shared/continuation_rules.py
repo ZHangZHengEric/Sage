@@ -1,6 +1,8 @@
 """Shared deterministic rules for continuation plugins."""
 from __future__ import annotations
 
+from html import unescape
+
 from sagents.v2.agent.policy.continuation import (
     ContinuationAction, ContinuationContext, ContinuationDecision, InteractionDraft,
 )
@@ -8,6 +10,45 @@ from sagents.v2.i18n import recovery_payload, tr
 
 
 _OUTPUT_LIMIT_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
+
+
+class QuestionnaireRule:
+    """Publish a questionnaire without reserving the Session for a reply."""
+
+    async def evaluate(self, context: ContinuationContext):
+        draft = context.requested_interaction
+        if draft is None:
+            if (
+                not context.pending_tool_calls
+                and not context.response.tool_calls
+                and context.response.finish_reason not in _OUTPUT_LIMIT_REASONS
+                and _has_inline_questionnaire(context.response.text)
+            ):
+                return ContinuationDecision(
+                    action=ContinuationAction.COMPLETE_RUN,
+                    reason_code="judge.inline_questionnaire",
+                    reason="inline questionnaire answers arrive as a new user Run",
+                    metadata={"awaiting_user_input": True, "source": "inline_questionnaire"},
+                )
+            return None
+        if not (
+            draft.interaction_type == "questionnaire"
+            or (
+                draft.interaction_type == "user_input"
+                and draft.payload.get("source") == "questionnaire_async"
+            )
+        ):
+            return None
+        return ContinuationDecision(
+            action=ContinuationAction.COMPLETE_RUN,
+            reason_code="questionnaire.ready",
+            reason="questionnaire answers arrive as a new user Run",
+            metadata={
+                "source": "explicit_questionnaire",
+                "awaiting_user_input": True,
+                "questionnaire": draft.payload,
+            },
+        )
 
 
 class BudgetRule:
@@ -123,19 +164,14 @@ class ExplicitStatusRule:
                     ),
                 )
             prompt = context.explicit_status_note or context.response.text.strip()
-            interaction = context.requested_interaction or InteractionDraft(
-                interaction_type="agent_input_required",
-                allowed_decisions=("submit", "cancel"),
-                payload={
-                    **recovery_payload(
-                        "recovery.input_prompt",
-                        context.language,
-                        reason_code="status.need_user_input",
-                    ),
-                    "status": status,
-                    "prompt": prompt,
-                },
-            )
+            if context.requested_interaction is None:
+                return ContinuationDecision(
+                    action=ContinuationAction.COMPLETE_RUN,
+                    reason_code="status.need_user_input",
+                    reason=prompt,
+                    metadata={"completion_status": "need_user_input", "needs_user_input": True},
+                )
+            interaction = context.requested_interaction
             return ContinuationDecision(
                 action=ContinuationAction.REQUEST_INTERACTION,
                 reason_code="status.need_user_input",
@@ -154,22 +190,10 @@ class ExplicitStatusRule:
                 )
             prompt = context.explicit_status_note or context.response.text.strip()
             return ContinuationDecision(
-                action=ContinuationAction.REQUEST_INTERACTION,
+                action=ContinuationAction.COMPLETE_RUN,
                 reason_code="status.blocked",
                 reason=prompt,
-                interaction=InteractionDraft(
-                    interaction_type="agent_blocked",
-                    allowed_decisions=("submit", "cancel"),
-                    payload={
-                        **recovery_payload(
-                            "recovery.input_prompt",
-                            context.language,
-                            reason_code="status.blocked",
-                        ),
-                        "status": status,
-                        "prompt": prompt,
-                    },
-                ),
+                metadata={"completion_status": "blocked"},
             )
         if status in {"failed", "error"}:
             return ContinuationDecision(
@@ -356,3 +380,30 @@ class ToolOrTextRuleForPendingCalls:
                 reason="tool calls must complete before the run can finish",
             )
         return None
+
+
+def _has_inline_questionnaire(text: str) -> bool:
+    decoded = unescape(text)
+    for fragment in decoded.split("<")[1:]:
+        raw_tag = fragment.split(">", 1)[0].strip()
+        if not raw_tag or raw_tag[0] in "/!?":
+            continue
+        name = raw_tag.split(None, 1)[0].rstrip("/").lower()
+        if name == "questionnaire" or (
+            name.endswith("-questionnaire") and name != "-questionnaire"
+        ):
+            return True
+    for line in decoded.splitlines():
+        stripped = line.strip()
+        if len(stripped) < 4 or stripped[0] not in {"`", "'"}:
+            continue
+        character = stripped[0]
+        fence_length = len(stripped) - len(stripped.lstrip(character))
+        if fence_length < 3:
+            continue
+        name = stripped[fence_length:].strip().lower()
+        if name == "questionnaire" or (
+            name.endswith("-questionnaire") and name != "-questionnaire"
+        ):
+            return True
+    return False

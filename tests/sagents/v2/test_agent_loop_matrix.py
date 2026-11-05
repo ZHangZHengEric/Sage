@@ -798,7 +798,7 @@ async def test_continue_work_signal_is_one_step_and_then_final_text_completes():
 
 
 @pytest.mark.asyncio
-async def test_need_user_input_signal_suspends_and_resumes_with_canonical_input():
+async def test_need_user_input_signal_finishes_and_next_run_receives_canonical_input():
     model = ScriptedModelProvider(
         (
             ScriptedModelStep(events=(completed("Which target should I use?"),)),
@@ -815,32 +815,16 @@ async def test_need_user_input_signal_suspends_and_resumes_with_canonical_input(
         model, continuation_signal_provider=signals
     )
 
-    suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
-
-    assert suspended.state == RunState.SUSPENDED
-    assert interaction.allowed_decisions == ("submit", "cancel")
-    assert interaction.payload["status"] == "need_user_input"
-    assert interaction.payload["prompt"] == "Choose production or staging."
-    assert interaction.payload["questions"]
-    assert interaction.payload["language"] == "en"
-    await runtime.reply_interaction(
-        ReplyInteraction(
-            run_id=handle.run_id,
-            suspension_id=suspension.suspension_id,
-            interaction_id=interaction.interaction_id,
-            expected_revision=suspended.revision,
-            expected_suspension_revision=suspension.expected_revision,
-            expected_interaction_revision=interaction.expected_revision,
-            decision="submit",
-            payload={"text": "Use staging."},
-            idempotency_key="submit-target",
-        ),
-        CONTEXT,
-    )
-    completed_run = await loop.resume(handle.run_id, CONTEXT)
-
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert not any(event.type in {"run.suspended", "interaction.requested"} for event in events)
+    next_run = await runtime.start_run(StartRun(
+        session_id=handle.session_id, agent_id="agent_test",
+        input=(InputItem(role="user", content=(TextBlock(text="Use staging."),)),),
+        resolved_spec_hash="sha256:agent", idempotency_key="submit-target",
+    ), CONTEXT)
+    completed_run = await loop.execute(next_run.run_id, CONTEXT)
     assert completed_run.state == RunState.COMPLETED
     assert model.requests[1].messages[-1].content == (TextBlock(text="Use staging."),)
 
@@ -938,13 +922,17 @@ async def test_validated_questionnaire_result_completes_without_calling_judge(
 
 
 @pytest.mark.asyncio
-async def test_empty_questionnaire_reply_reasks_instead_of_failing_the_run():
+async def test_empty_recovery_reply_reasks_instead_of_failing_the_run():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(completed("Which target should I use?"),)),)
     )
     signals = SignalSequence(
         ContinuationSignals(
             explicit_status="need_user_input",
+            interaction=InteractionDraft(
+                interaction_type="loop_recovery", allowed_decisions=("submit", "cancel"),
+                payload={"prompt": "Provide recovery guidance."},
+            ),
             explicit_status_note="Choose production or staging.",
         )
     )
@@ -985,7 +973,7 @@ async def test_empty_questionnaire_reply_reasks_instead_of_failing_the_run():
 
 
 @pytest.mark.asyncio
-async def test_blocked_signal_suspends_with_recoverable_interaction():
+async def test_blocked_signal_finishes_and_releases_session():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(completed("Repository access is required."),)),)
     )
@@ -999,19 +987,19 @@ async def test_blocked_signal_suspends_with_recoverable_interaction():
         model, continuation_signal_provider=signals
     )
 
-    suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
+    result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     decision = next(event for event in events if event.type == "continuation.decided")
-
-    assert suspended.state == RunState.SUSPENDED
-    assert interaction.interaction_type.value == "user_input"
-    assert interaction.allowed_decisions == ("submit", "cancel")
-    assert interaction.payload["status"] == "blocked"
-    assert interaction.payload["prompt"] == ("Grant repository access, then continue.")
-    assert interaction.payload["questions"]
+    assert result.state == RunState.COMPLETED
+    assert not any(event.type in {"run.suspended", "interaction.requested"} for event in events)
     assert cast(ContinuationEventData, decision.data).reason_code == "status.blocked"
+    assert cast(ContinuationEventData, decision.data).details["completion_status"] == "blocked"
+    next_run = await runtime.start_run(StartRun(
+        session_id=handle.session_id, agent_id="agent_test",
+        input=(InputItem(role="user", content=(TextBlock(text="Access granted."),)),),
+        resolved_spec_hash="sha256:agent", idempotency_key="continue-after-blocked",
+    ), CONTEXT)
+    assert next_run.state == RunState.QUEUED
 
 
 @pytest.mark.asyncio
@@ -1101,17 +1089,18 @@ async def test_judge_usage_and_metadata_are_committed_to_run_events():
     ]
 
 
+@pytest.mark.parametrize("verdict", ["need_user_input", "blocked", "questionnaire"])
 @pytest.mark.asyncio
-async def test_judge_need_user_input_completes_without_suspension():
+async def test_judge_waiting_verdict_completes_and_allows_next_run(verdict):
     model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(completed("Which target should I use?"),)),)
+        (ScriptedModelStep(events=(completed("Deployment requires access to the target."),)),)
     )
     judge = ScriptedModelProvider(
         (
             ScriptedModelStep(
                 events=(
                     completed(
-                        '{"decision":"need_user_input",'
+                        f'{{"decision":"{verdict}",'
                         '"reason":"A deployment target is required."}'
                     ),
                 )
@@ -1119,9 +1108,18 @@ async def test_judge_need_user_input_completes_without_suspension():
         )
     )
     policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge)))
+    questionnaire = InteractionDraft(
+        interaction_type="questionnaire",
+        allowed_decisions=("submit",),
+        payload={"title": "Target", "questions": [{"id": "target", "title": "Target?"}]},
+    )
     runtime, handle, loop, _ = await setup_loop(
         model,
         continuation_policy=policy,
+        continuation_signal_provider=(
+            (lambda run_id: ContinuationSignals(interaction=questionnaire))
+            if verdict == "questionnaire" else None
+        ),
     )
 
     result = await loop.execute(handle.run_id, CONTEXT)
@@ -1130,9 +1128,28 @@ async def test_judge_need_user_input_completes_without_suspension():
 
     assert result.state == RunState.COMPLETED
     assert cast(ContinuationEventData, decision.data).action == "complete_run"
-    assert cast(ContinuationEventData, decision.data).reason_code == "judge.need_user_input"
-    assert cast(ContinuationEventData, decision.data).details["completion_status"] == "need_user_input"
+    if verdict == "questionnaire":
+        assert cast(ContinuationEventData, decision.data).reason_code == "questionnaire.ready"
+        assert cast(ContinuationEventData, decision.data).details["questionnaire"] == questionnaire.payload
+        assert judge.requests == []
+    else:
+        assert cast(ContinuationEventData, decision.data).reason_code == f"judge.{verdict}"
+        assert cast(ContinuationEventData, decision.data).details["completion_status"] == verdict
     assert not any(event.type == "run.suspended" for event in events)
+
+    assert not any(event.type == "interaction.requested" for event in events)
+    next_handle = await runtime.start_run(
+        StartRun(
+            agent_id="agent_test",
+            session_id=handle.session_id,
+            input=(InputItem(role="user", content=(TextBlock(text="Access is fixed; continue."),)),),
+            resolved_spec_hash="sha256:agent",
+            idempotency_key="start_after_waiting_verdict",
+        ),
+        CONTEXT,
+    )
+    assert next_handle.state == RunState.QUEUED
+    assert next_handle.session_id == handle.session_id
 
 
 @pytest.mark.asyncio

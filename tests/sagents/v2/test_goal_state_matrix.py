@@ -57,12 +57,12 @@ def tool_events(run_id, name, arguments, *, succeeded=True):
     return events
 
 
-def questionnaire_boundary():
+def questionnaire_boundary(reason_code="tool.questionnaire_ready"):
     return SimpleNamespace(
         type="continuation.decided",
         data=ContinuationEventData(
             action="complete_run",
-            reason_code="tool.questionnaire_ready",
+            reason_code=reason_code,
             reason="Awaiting an answer",
             decision_hash="test",
         ),
@@ -103,14 +103,15 @@ class Journal:
         return self.sessions[session_id][:limit]
 
 
+@pytest.mark.parametrize("reason_code", ["tool.questionnaire_ready", "questionnaire.ready", "judge.inline_questionnaire"])
 @pytest.mark.asyncio
-async def test_approved_plan_survives_questionnaire_chain_and_ignores_future_runs():
+async def test_approved_plan_survives_questionnaire_chain_and_ignores_future_runs(reason_code):
     journal = Journal()
     journal.add(
         "plan", "plan", tool_events("plan", "goal_submit", {"content": "Ship it"})
     )
-    journal.add("question1", "goal", [questionnaire_boundary()])
-    journal.add("question2", "goal", [questionnaire_boundary()])
+    journal.add("question1", "goal", [questionnaire_boundary(reason_code)])
+    journal.add("question2", "goal", [questionnaire_boundary(reason_code)])
     journal.add("answer", "goal")
     journal.add(
         "future",

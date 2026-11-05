@@ -1101,6 +1101,7 @@ class Conversation {
     this.thinking = false,
     List<ChatMessage>? messages,
     this.pendingInteraction,
+    this.completedQuestionnaire,
     this.approvalMode = ApprovalMode.highRisk,
     this.invocationMode = InvocationMode.normal,
     this.preferInteractiveUi = false,
@@ -1136,6 +1137,7 @@ class Conversation {
   bool thinking;
   List<ChatMessage> messages;
   PendingInteraction? pendingInteraction;
+  PendingInteraction? completedQuestionnaire;
   ApprovalMode approvalMode;
   InvocationMode invocationMode;
   bool preferInteractiveUi;
@@ -1241,6 +1243,11 @@ class Conversation {
       pendingInteraction: rawInteraction is Map
           ? PendingInteraction.fromJson(rawInteraction.cast<String, Object?>())
           : null,
+      completedQuestionnaire: json['completed_questionnaire'] is Map
+          ? PendingInteraction.fromJson(
+              (json['completed_questionnaire'] as Map).cast<String, Object?>(),
+            )
+          : null,
       approvalMode: approvalModeFromWire(json['approval_mode']?.toString()),
       invocationMode: invocationModeFromWire(
         json['invocation_mode']?.toString() ??
@@ -1329,6 +1336,7 @@ class Conversation {
     'status': status.name,
     'messages': [for (final value in messages) value.toJson()],
     'pending_interaction': pendingInteraction?.toJson(),
+    'completed_questionnaire': completedQuestionnaire?.toJson(),
     'approval_mode': approvalMode.wireValue,
     'invocation_mode': invocationMode.wireValue,
     'prefer_interactive_ui': preferInteractiveUi,

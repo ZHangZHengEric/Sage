@@ -1175,6 +1175,18 @@ class _SteeringProcessApi extends _ControlledProcessApi {
   }
 }
 
+class _QuestionnaireRetryApi extends _FakeApi {
+  final starts = <Map<String, Object?>>[];
+  @override
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) {
+    starts.add(Map<String, Object?>.of(body));
+    if (starts.length == 1) {
+      return Stream.error(StateError('connection lost before acceptance'));
+    }
+    return super.startRun(body);
+  }
+}
+
 class _ControlledProcessApi extends _FakeApi {
   final _events = StreamController<Map<String, Object?>>();
   String _runState = 'running';
@@ -4614,8 +4626,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    const source =
-        '/workspace/uploads/示例图片 copy.jpeg';
+    const source = '/workspace/uploads/示例图片 copy.jpeg';
     final persisted = _persistedBranchableConversation();
     persisted['messages'] = const [
       {
@@ -7799,72 +7810,178 @@ void main() {
   }
 
   testWidgets(
-    'validated questionnaire tool result stays inline after run completion',
+    'completed questionnaire event preserves answers without locking input',
     (tester) async {
-      tester.view.physicalSize = const Size(1200, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      SharedPreferences.setMockInitialValues({
-        'sage.desktop_v2.conversations.v1': jsonEncode({
-          WorkspaceController.agentWorkspaceId: [
-            _persistedCompletedQuestionnaireConversation(),
-          ],
-        }),
-      });
-      final api = _FakeApi();
-      final controller = _newController(
-        api: api,
-        preferencesLoader: SharedPreferences.getInstance,
-      );
+      SharedPreferences.setMockInitialValues({});
+      final api = _ControlledProcessApi();
+      final controller = await _controller(api: api);
       addTearDown(() => _disposeController(controller));
-
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await controller.send('Choose deployment target');
+      api.emitRunningProcess();
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      expect(controller.selectedConversation?.status, RunStatus.completed);
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('thread-message-list')),
-          matching: find.byKey(const ValueKey('questionnaire-block')),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('部署目标'), findsOneWidget);
-      expect(find.text('请选择部署目标'), findsOneWidget);
-      expect(find.text('请选择下一步的部署目标。'), findsNothing);
-      final processPanel = find.byKey(const ValueKey('process-panel'));
-      final questionnaire = find.byKey(const ValueKey('questionnaire-block'));
-      expect(
-        find.descendant(
-          of: processPanel,
-          matching: find.byIcon(CupertinoIcons.chevron_right),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        tester.getBottomLeft(processPanel).dy,
-        lessThan(tester.getTopLeft(questionnaire).dy),
-      );
-
-      await tester.tap(
-        find.byKey(
-          const ValueKey('interaction-question-target-option-staging'),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 140));
-      await tester.tap(find.byKey(const ValueKey('interaction-submit-submit')));
-      await tester.pump(const Duration(milliseconds: 300));
-
-      final messages = api.lastRunBody?['messages'] as List?;
-      final sent = (messages?.single as Map?)?['text']?.toString() ?? '';
-      expect(sent, contains('问卷回复：部署目标'));
-      expect(sent, contains('1. 请选择部署目标'));
-      expect(sent, contains('预发布'));
-      expect(find.byKey(const ValueKey('questionnaire-block')), findsNothing);
+      final payload = {
+        'title': 'Deployment target',
+        'questions': [
+          {'id': 'target', 'type': 'text', 'title': 'Which target?'},
+        ],
+      };
+      for (final entry in [
+        {
+          'type': 'continuation.decided',
+          'run_sequence': 10,
+          'data': {
+            'action': 'complete_run',
+            'details': {'questionnaire': payload},
+          },
+        },
+        {
+          'type': 'run.completed',
+          'run_sequence': 11,
+          'data': <String, Object?>{},
+        },
+      ]) {
+        api._events.add({
+          ...entry,
+          'run_id': 'run_controlled',
+          'session_id': 'session_controlled',
+        });
+      }
+      await tester.pump(const Duration(milliseconds: 100));
+      final conversation = controller.selectedConversation!;
+      expect(conversation.status, RunStatus.completed);
+      expect(conversation.pendingInteraction, isNull);
+      expect(conversation.completedQuestionnaire?.payload, payload);
+      expect(controller.canSend, isTrue);
+      final restored = Conversation.fromJson(conversation.toJson());
+      expect(restored.completedQuestionnaire?.payload, payload);
+      expect(restored.pendingInteraction, isNull);
     },
   );
+
+  for (final brightness in Brightness.values) {
+    for (final source in ['tool', 'explicit']) {
+      testWidgets(
+        'completed questionnaire from $source submits a new Run in ${brightness.name}',
+        (tester) async {
+          tester.view.physicalSize = const Size(1200, 800);
+          tester.view.devicePixelRatio = 1;
+          tester.platformDispatcher.platformBrightnessTestValue = brightness;
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          SharedPreferences.setMockInitialValues({
+            'sage.desktop_v2.conversations.v1': jsonEncode({
+              WorkspaceController.agentWorkspaceId: [
+                (() {
+                  final conversation =
+                      _persistedCompletedQuestionnaireConversation();
+                  if (source == 'explicit') {
+                    final panels = conversation['process_panels'] as List;
+                    final activities =
+                        (panels.single as Map)['activities'] as List;
+                    final result =
+                        jsonDecode(
+                              (activities.single as Map)['result'] as String,
+                            )
+                            as Map;
+                    conversation['completed_questionnaire'] = {
+                      'interaction_id': 'completed-questionnaire',
+                      'interaction_type': 'questionnaire',
+                      'allowed_decisions': ['submit'],
+                      'payload': result,
+                    };
+                    conversation['process_panels'] = <Object>[];
+                  }
+                  return conversation;
+                })(),
+              ],
+            }),
+          });
+          final api = _QuestionnaireRetryApi();
+          final controller = _newController(
+            api: api,
+            preferencesLoader: SharedPreferences.getInstance,
+          );
+          addTearDown(() => _disposeController(controller));
+
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 500));
+
+          expect(controller.selectedConversation?.status, RunStatus.completed);
+          expect(
+            find.descendant(
+              of: find.byKey(const ValueKey('thread-message-list')),
+              matching: find.byKey(const ValueKey('questionnaire-block')),
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('部署目标'), findsOneWidget);
+          expect(find.text('请选择部署目标'), findsOneWidget);
+          expect(
+            find.text('请选择下一步的部署目标。'),
+            source == 'tool' ? findsNothing : findsOneWidget,
+          );
+          expect(controller.canSend, isTrue);
+          final processPanel = find.byKey(const ValueKey('process-panel'));
+          final questionnaire = find.byKey(
+            const ValueKey('questionnaire-block'),
+          );
+          if (source == 'tool') {
+            expect(
+              find.descendant(
+                of: processPanel,
+                matching: find.byIcon(CupertinoIcons.chevron_right),
+              ),
+              findsOneWidget,
+            );
+            expect(
+              tester.getBottomLeft(processPanel).dy,
+              lessThan(tester.getTopLeft(questionnaire).dy),
+            );
+          }
+
+          await tester.tap(
+            find.byKey(
+              const ValueKey('interaction-question-target-option-staging'),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 140));
+          await tester.tap(
+            find.byKey(const ValueKey('interaction-submit-submit')),
+          );
+          await tester.pump(const Duration(milliseconds: 300));
+
+          expect(controller.canSend, isTrue);
+          expect(
+            find.byKey(const ValueKey('questionnaire-block')),
+            findsOneWidget,
+          );
+          expect(api.starts, hasLength(1));
+          await tester.tap(
+            find.byKey(const ValueKey('interaction-submit-submit')),
+          );
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(api.starts, hasLength(2));
+          expect(api.starts[1], api.starts[0]);
+          expect(controller.error, isNull);
+          final messages = api.lastRunBody?['messages'] as List?;
+          final sent = (messages?.single as Map?)?['text']?.toString() ?? '';
+          expect(sent, contains('问卷回复：部署目标'));
+          expect(sent, contains('1. 请选择部署目标'));
+          expect(sent, contains('预发布'));
+          expect(
+            find.byKey(const ValueKey('questionnaire-block')),
+            findsNothing,
+          );
+        },
+      );
+    }
+  }
 
   for (final brightness in Brightness.values) {
     testWidgets(
