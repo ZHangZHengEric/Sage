@@ -549,13 +549,56 @@ def test_agent_composition_does_not_discover_or_select_plugins():
     assert offenders == []
 
 
+def _source_symlinks(root: Path) -> list[str]:
+    """Allow npm links only when both ends stay inside installed dependencies."""
+    offenders = []
+    for path in root.rglob("*"):
+        if not path.is_symlink():
+            continue
+        relative = path.relative_to(root)
+        # The node_modules directory itself must not redirect the source tree.
+        if "node_modules" in relative.parts[:-1]:
+            dependency_root = root.joinpath(*relative.parts[:relative.parts.index("node_modules") + 1])
+            try:
+                if path.resolve(strict=True).is_relative_to(dependency_root.resolve(strict=True)):
+                    continue
+            except (OSError, RuntimeError):
+                pass
+        offenders.append(str(relative))
+    return offenders
+
+
 def test_v2_contains_no_symlink_to_repository_owned_code():
-    offenders = [
-        str(path.relative_to(V2_ROOT))
-        for path in V2_ROOT.rglob("*")
-        if path.is_symlink()
-    ]
+    offenders = _source_symlinks(V2_ROOT)
     assert offenders == []
+
+
+def test_source_symlinks_distinguish_dependency_bins_from_source_redirects(tmp_path: Path):
+    source = tmp_path / "source.py"
+    source.write_text("", encoding="utf-8")
+    dependencies = tmp_path / "lint" / "node_modules"
+    binary = dependencies / "eslint" / "bin" / "eslint.js"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("", encoding="utf-8")
+    bins = dependencies / ".bin"
+    bins.mkdir()
+    (bins / "eslint").symlink_to("../eslint/bin/eslint.js")
+    assert _source_symlinks(tmp_path) == []
+
+    (tmp_path / "source_alias.py").symlink_to(source)
+    (bins / "source").symlink_to(source)
+    (bins / "broken").symlink_to("../missing.js")
+    external = tmp_path.parent / (tmp_path.name + "-outside.js")
+    external.write_text("", encoding="utf-8")
+    (bins / "external").symlink_to(external)
+    redirected = tmp_path / "redirected"
+    redirected.mkdir()
+    (redirected / "node_modules").symlink_to(dependencies, target_is_directory=True)
+    assert set(_source_symlinks(tmp_path)) == {
+        "source_alias.py", "lint/node_modules/.bin/source",
+        "lint/node_modules/.bin/broken", "lint/node_modules/.bin/external",
+        "redirected/node_modules",
+    }
 
 
 @pytest.mark.timeout(30)

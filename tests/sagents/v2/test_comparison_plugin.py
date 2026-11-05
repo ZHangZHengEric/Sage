@@ -72,7 +72,11 @@ async def test_capture_ids_separate_identical_outputs_across_trials_and_versions
 
 
 def test_wire_schemas_reject_absolute_results_and_empty_artifacts():
-    from sagents.v2.optimization.pairwise import PairwiseDecision
+    from sagents.v2.optimization import PairwiseDecision as PublicDecision, PairwiseMeasurementError as PublicError
+    from sagents.v2.optimization.pairwise import PairwiseDecision, PairwiseMeasurementError
+    from sagents.v2.optimization.pairwise_contracts import PairwiseDecision as WireDecision, PairwiseMeasurementError as WireError
+    assert PublicDecision is PairwiseDecision is WireDecision
+    assert PublicError is PairwiseMeasurementError is WireError
     with pytest.raises(ValueError):
         PairwiseDecision.model_validate({'score': 1, 'passed': True, 'rationale': 'Not a comparison'})
     with pytest.raises(ValueError):

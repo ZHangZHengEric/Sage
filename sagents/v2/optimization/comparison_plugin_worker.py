@@ -10,7 +10,7 @@ import sys
 from sagents.v2.optimization.comparison_plugin import (
     ComparisonPreparationRequest, ComparisonRequest, PreparedComparisonArtifact,
 )
-from sagents.v2.optimization.pairwise import PairwiseDecision
+from sagents.v2.optimization.pairwise_contracts import PairwiseDecision
 from sagents.v2.optimization.scorer_dependencies import DependencyCapture, worker_request
 
 

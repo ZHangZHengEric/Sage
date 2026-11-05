@@ -16,7 +16,7 @@ from sagents.v2.optimization.contracts import (
     OptimizationCase, OptimizationDiagnosis, OptimizationDiagnosisSummary, OptimizationGrade,
     OptimizationObservation,
 )
-from sagents.v2.optimization.pairwise import PairwiseDecision
+from sagents.v2.optimization.pairwise_contracts import PairwiseDecision
 from sagents.v2.optimization.scoring import ScoringResult
 
 

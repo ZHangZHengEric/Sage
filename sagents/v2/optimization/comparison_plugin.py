@@ -10,7 +10,7 @@ from pydantic import Field, model_validator
 
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.optimization.contracts import OptimizationCase, OptimizationObservation
-from sagents.v2.optimization.pairwise import PairwiseDecision
+from sagents.v2.optimization.pairwise_contracts import PairwiseDecision, PairwiseMeasurementError
 from sagents.v2.optimization.scoring import ScorerDescriptor
 from sagents.v2.optimization.python_scorer import PythonExecutionScorer, ScorerExecutionError
 
@@ -31,7 +31,6 @@ class FrozenComparisonFile(StrictModel):
     media_type: str = Field(min_length=1, max_length=128)
 
     def verify(self):
-        from sagents.v2.optimization.pairwise import PairwiseMeasurementError
         path = Path(self.path)
         try:
             if not path.is_absolute() or path.is_symlink() or not path.is_file() or path.stat().st_size != self.size_bytes:
