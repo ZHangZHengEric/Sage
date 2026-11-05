@@ -292,8 +292,8 @@ class WorkspaceController extends ChangeNotifier {
         conversation == null) {
       return false;
     }
-    if (conversation.pendingInteraction != null ||
-        conversation.status == RunStatus.suspended ||
+    if ((conversation.pendingInteraction != null &&
+            conversation.status != RunStatus.suspended) ||
         conversation.status == RunStatus.suspending) {
       return false;
     }

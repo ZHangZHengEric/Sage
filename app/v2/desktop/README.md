@@ -123,7 +123,7 @@ flutter test test/unified_sidecar_test.dart
 
 - 客户端直接消费 `sage.runtime/v2` NDJSON 事件，并按 `run_sequence` 续订。
 - 关闭界面或切换会话只 detach observer，不发送 Cancel。
-- 暂停、恢复、取消、steer、审批和用户输入使用独立 v2 Command。
+- 暂停、恢复、取消、steer、审批和用户输入使用独立 v2 Command。挂起时仍可发送普通消息：后端先取消旧 Run 并关闭其待答交互，再在同一 Session 创建新 Run；原审批不视为同意。普通错误在有限自动重试耗尽后进入失败，不因 `retryable` 或 `safe_to_resume` 自动挂起。
 - `DesktopRunRequest` 可声明 `serial`、`snapshot_isolated` 或 `fork`；Session API
   可读取 commit proposal，Run/Proposal API 提供 propose、publish 和 reject。
 - 侧栏顶部“新对话”创建 Agent Workspace 会话；项目区只显示注册 Project。Agent Workspace 是 Desktop 的默认共享工作区，不作为 Project 节点展示。
@@ -168,7 +168,7 @@ sidecar revision 6 新增 `PATCH /api/v2/settings`，请求体只包含需要更
 
 Desktop V2 正常运行路径的主模型、成员与辅助模型共用宿主模型调用额度，默认 8；可通过 `DesktopV2Service(max_concurrent_model_calls=...)` 配置。此额度不代表工具进程、内存或全局队列预算。
 
-模型调用等待队列默认最多 128 项、最长等待 60 秒，宿主可用 `max_waiting_model_calls` 与 `model_queue_timeout_seconds` 配置。排队满或超时保留具体错误码；直接 API 返回 HTTP 429，运行中的 Agent 通过错误恢复交互暂停，名额恢复后可重试同一任务。等待超时不会作为模型执行时限。
+模型调用等待队列默认最多 128 项、最长等待 60 秒，宿主可用 `max_waiting_model_calls` 与 `model_queue_timeout_seconds` 配置。排队满或超时保留具体错误码；直接 API 返回 HTTP 429，运行中的 Agent 在有限自动重试耗尽后明确失败，名额恢复后可发送新消息重试。等待超时不会作为模型执行时限。
 
 ## Agent 复制与创建配置（sidecar revision 7）
 

@@ -219,6 +219,8 @@ Run 一律交给后台任务驱动，不跑在请求自己的任务上：Run 是
 
 挂起后保留持久化 Run、事件和审批记录；执行任务退出、释放调度槽并销毁本轮沙箱及其中进程，工作区文件保留。恢复时重建执行资源，因此旧后台 Shell 作业不会跨审批挂起继续存活。宿主共享服务仍常驻。一个宿主维护任务每分钟清理过期审批，答复入口也检查有效期；不为每条审批创建等待任务。
 
+普通错误在有限自动重试耗尽后明确失败，不因 `retryable` 或 `safe_to_resume` 自动转成挂起。Web 或外部 Run 入口在同一串行 Session 收到新的用户请求时，会先取消当前挂起 Run、关闭旧交互，再创建新 Run；审批回复仍使用独立的决定接口，新消息不会自动批准旧操作。
+
 ### 审批消息与续跑
 
 Sage 的"挂起 Run + 待答 Interaction"对应 A2A 的 `input-required` Task，回答就是一条带 `taskId` 的普通 Message。Task 的 `metadata` 会带上 `sage.interactionId`、`sage.interactionType`、`sage.allowedDecisions` 和 `sage.payload`：A2A 只说"需要输入"，不说需要哪种输入，不把决策词表交出去的话，客户端只能从给人看的散文里猜。

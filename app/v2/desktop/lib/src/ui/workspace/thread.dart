@@ -153,8 +153,8 @@ class _ThreadPanelState extends State<_ThreadPanel> {
                     ),
                   ),
                 ),
-              )
-            else if (!readOnly)
+              ),
+            if (!readOnly)
               Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 820),

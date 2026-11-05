@@ -426,6 +426,7 @@ class RunService:
                 await self.host.im.notifications.track(command, user_id)
             loaded = await self._load_run_agent(command, user_id)
             command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
+            await self.session_access.supersede_suspended_run(command, context)
             with log_duration(LOGGER, "server.run.accepted", "运行接纳结束",
                               session_id=session_id, attributes={"interface": interface}):
                 stream = await application.run_interface(

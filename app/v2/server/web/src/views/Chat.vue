@@ -89,7 +89,7 @@ const composerPlaceholder = computed(() => pending.value ? '继续输入…' :
 const isStart = computed(() => !currentThread.value && !route?.query?.thread && !messages.value.length && !pending.value && !interaction.value && !historyLoading.value)
 const canSend = computed(() => configurationLoaded.value && !initializing.value && !setupFailed.value && !readOnly.value && !historyLoading.value && !historyFailed.value &&
   historyOffset.value >= historyTotal.value && (hasModel.value || Boolean(agentPackage.value)) && agentAvailable.value &&
-  (!activeInteraction.value || activeInteraction.value.reply_as_new_run) && !stopping.value && !supplementing.value &&
+  !deciding.value && !stopping.value && !supplementing.value &&
   (!pending.value || streamStarted.value) && Boolean(userMessage.value))
 
 function inputKeydown(event) {
@@ -260,7 +260,7 @@ function startNew() {
 
 async function send() {
   const content = userMessage.value
-  if (!configurationLoaded.value || setupFailed.value || (!agentPackage.value && !hasModel.value) || !agentAvailable.value || readOnly.value || historyLoading.value || historyFailed.value || historyOffset.value < historyTotal.value || !content || pending.value || (interaction.value && !interaction.value.reply_as_new_run)) return
+  if (!configurationLoaded.value || setupFailed.value || (!agentPackage.value && !hasModel.value) || !agentAvailable.value || readOnly.value || historyLoading.value || historyFailed.value || historyOffset.value < historyTotal.value || !content || pending.value || deciding.value) return
   if (!threadId.value) threadId.value = newId('thread')
   if (!sendAttempt || sendAttempt.threadId !== threadId.value || sendAttempt.agentId !== selectedAgentId.value || sendAttempt.content !== content) {
     sendAttempt = { threadId: threadId.value, agentId: selectedAgentId.value, content, runId: newId('run'),

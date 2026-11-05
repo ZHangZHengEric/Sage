@@ -276,17 +276,14 @@ async def test_automatic_recall_preserves_selected_query_failure_for_recovery():
 
     result = await loop.execute(handle.run_id, CONTEXT)
 
-    assert result.state.value == "suspended"
+    assert result.state.value == "failed"
     events = await runtime.session_store.read_events(handle.run_id)
-    assert events[-1].type == "run.suspended"
-    assert not any(event.type == "run.failed" for event in events)
-    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
-    error = interaction.payload["error"]
-    assert error["code"] == "memory.recall_query.test_failure"
-    assert error["retryable"] is True
-    assert interaction.payload["resumable"] is True
-    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
+    assert events[-1].type == "run.failed"
+    assert not any(event.type == "interaction.requested" for event in events)
+    error = events[-1].data.error
+    assert error.code == "memory.recall_query.test_failure"
+    assert error.retryable is True
+    assert error.metadata["recovery_questionnaire"]["resumable"] is False
     assert getattr(loop.model, 'requests') == []
 
 

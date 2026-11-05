@@ -1867,6 +1867,30 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                     )
 
             if new_state in {RunState.CANCELLED, RunState.FAILED}:
+                # A terminal Run cannot keep an answerable pause/approval.
+                # Persist closure with the terminal transition, not in a
+                # separate command that could race a late interaction reply.
+                pending_suspension = self._suspensions.get(row.suspension_id)
+                if pending_suspension is not None and suspension is None:
+                    suspension = pending_suspension.model_copy(update={
+                        "status": SuspensionStatus.CANCELLED,
+                        "expected_revision": pending_suspension.expected_revision + 1,
+                    })
+                    pending_interaction = self._interactions.get(pending_suspension.interaction_id)
+                    if pending_interaction is not None and pending_interaction.status == InteractionStatus.PENDING and interaction is None:
+                        interaction = pending_interaction.model_copy(update={
+                            "status": InteractionStatus.CANCELLED,
+                            "expected_revision": pending_interaction.expected_revision + 1,
+                        })
+                        drafts = (EventDraft(
+                            type="interaction.cancelled",
+                            data=InteractionEventData(
+                                interaction_id=interaction.interaction_id,
+                                interaction_type=interaction.interaction_type.value,
+                                state="cancelled",
+                                revision=interaction.expected_revision,
+                            ),
+                        ), *drafts)
                 drafts = self._interrupted_item_drafts_locked(row, new_state) + drafts
             rejected_steers, rejection_drafts = self._prepare_steer_rejections_locked(
                 row, new_state, drafts

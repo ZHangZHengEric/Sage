@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { createRenderer, nextTick, ssrContextKey } from 'vue'
 import { createServer } from 'vite'
 
-for (const mode of ['approval', 'questionnaire', 'ordinary-message', 'questionnaire-retry']) {
+for (const mode of ['approval', 'questionnaire', 'ordinary-message', 'suspended-message', 'questionnaire-retry']) {
   test(`chat ${mode} uses the expected Run endpoint`, async (t) => {
     const server = await createServer({
       server: { middlewareMode: true, watch: null, hmr: false, ws: false },
@@ -57,7 +57,7 @@ for (const mode of ['approval', 'questionnaire', 'ordinary-message', 'questionna
     state.agents = [{ id: 'agent-test' }]
     state.selectedAgentId = 'agent-test'
     state.hasModel = true
-    state.interaction = mode === 'approval' ? {
+    state.interaction = ['approval', 'suspended-message'].includes(mode) ? {
       allowed_decisions: ['approve_once'],
       payload: { tool_name: 'execute_shell_command', arguments: { command: 'echo ok' } },
     } : {
@@ -67,7 +67,7 @@ for (const mode of ['approval', 'questionnaire', 'ordinary-message', 'questionna
       reply_as_new_run: true,
     }
 
-    if (mode === 'ordinary-message') {
+    if (['ordinary-message', 'suspended-message'].includes(mode)) {
       state.text = 'Continue without answering'
       assert.equal(state.canSend, true)
       await state.submit()

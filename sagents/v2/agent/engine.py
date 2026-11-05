@@ -1494,7 +1494,7 @@ class AgentLoopEngine:
             return _DriveIteration(await self._suspend_at_safe_point(run, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
         budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
         if budget.error is not None:
-            return _DriveIteration(await self._fail(run, state, None, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+            return _DriveIteration(await self._fail(run, state, None, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
         if state.provider_retry_at is not None:
             delay = max(0, (state.provider_retry_at - self.clock()).total_seconds())
             if budget.deadline is not None:
@@ -1516,7 +1516,7 @@ class AgentLoopEngine:
             run = current
             budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
             if budget.error is not None:
-                return _DriveIteration(await self._fail(run, state, None, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+                return _DriveIteration(await self._fail(run, state, None, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             state = state.model_copy(update={
                 "provider_retry_at": None, "automatic_resume_at": None,
                 "automatic_resume_reason": None,
@@ -1638,7 +1638,7 @@ class AgentLoopEngine:
             request = prepared_step.request
             budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
             if budget.error is not None:
-                return _DriveIteration(await self._fail(run, state, step_id, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+                return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             if budget.remaining_tokens is not None:
                 request = request.model_copy(update={"max_output_tokens": min(
                     request.max_output_tokens or budget.remaining_tokens,
@@ -1792,7 +1792,7 @@ class AgentLoopEngine:
         if response.tool_calls:
             budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
             if budget.error is not None:
-                return _DriveIteration(await self._fail(run, state, step_id, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+                return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             # Phase 4: proposal and policy decision are committed before any
             # external ToolExecutor receives the call.
             settled = {
@@ -2030,7 +2030,7 @@ class AgentLoopEngine:
         repeated = repeated_cycles(state.response_fingerprints)
         budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
         if budget.error is not None:
-            return _DriveIteration(await self._fail(run, state, step_id, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+            return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
         signals = await self._continuation_signals(run.run_id, state)
         # Phase 5: completion is policy, not an implicit consequence of EOF
         # or a provider finish_reason.
@@ -3590,7 +3590,7 @@ class AgentLoopEngine:
         if state is None:
             raise SageV2Error(result.error)
         return await self._fail(
-            run, state, step_id, result.error, context, allow_recovery=False
+            run, state, step_id, result.error, context
         ), None
 
     @staticmethod
@@ -4654,7 +4654,7 @@ class AgentLoopEngine:
         await self._release_run_resources(run.run_id)
         return completed
 
-    async def _fail(self, run, state, step_id, error, context, *, allow_recovery=True) -> RunSnapshot:
+    async def _fail(self, run, state, step_id, error, context) -> RunSnapshot:
         require_execution_ownership()
         if is_lease_loss(error):
             raise SageV2Error(error)
@@ -4663,29 +4663,12 @@ class AgentLoopEngine:
         if current.state in TERMINAL_RUN_STATES:
             await self._release_run_resources(run.run_id)
             return current
-        resumable = allow_recovery and (error.safe_to_resume or error.retryable)
+        # Retryability describes execution safety, not a reason to lock the
+        # conversation behind a pending interaction. Explicit approvals, manual
+        # pauses and uncertain side effects have dedicated suspension paths.
         if error.metadata.get("budget_scope") == "run_tree":
             from sagents.v2.runtime.execution.budgets import stop_budget_descendants
             await stop_budget_descendants(self.runtime, current, context)
-        if current.state == RunState.RUNNING and resumable:
-            decision = ContinuationDecision(
-                action=ContinuationAction.REQUEST_INTERACTION,
-                reason_code=error.code,
-                reason=error.message,
-                interaction=InteractionDraft(
-                    interaction_type="error_recovery",
-                    allowed_decisions=("retry", "change_direction", "cancel"),
-                    payload=error_recovery_payload(
-                        error, context.language, resumable=True
-                    ),
-                ),
-            )
-            current = await self._record_continuation(
-                current, decision, context, state.turn_id, step_id
-            )
-            return await self._suspend_for_continuation_interaction(
-                current, state, decision, context, step_id
-            )
         recovery = error_recovery_payload(error, context.language, resumable=False)
         error = error.model_copy(
             update={

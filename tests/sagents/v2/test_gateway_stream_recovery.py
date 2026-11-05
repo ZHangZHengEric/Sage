@@ -46,6 +46,6 @@ async def test_new_classification_uses_native_bounded_retry_without_tool_replay(
         tool_policy=native.DefaultToolPolicy(approval_strategy=native.ApprovalStrategy.AUTO_APPROVE))
     result = await loop.execute(handle.run_id, native.CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
-    assert result.state == (native.RunState.COMPLETED if recover else native.RunState.SUSPENDED)
+    assert result.state == (native.RunState.COMPLETED if recover else native.RunState.FAILED)
     assert len([e for e in events if e.type == 'step.retry_scheduled']) == 3
     assert len([e for e in events if e.type == 'tool.call.started']) == 1

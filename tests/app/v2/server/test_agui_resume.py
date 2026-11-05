@@ -265,3 +265,23 @@ def test_an_answered_question_stops_being_pending(tmp_path):
     assert [item["interaction_id"] for item in resolved] == [
         item["interaction_id"] for item in asked
     ]
+
+
+@pytest.mark.timeout(30)
+def test_new_user_message_replaces_suspended_run_and_closes_old_approval(tmp_path):
+    with TestClient(create_app(service=_asking_service(tmp_path))) as client:
+        token = register_and_login(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        _ask(client, token)
+        agents = client.get("/api/agents", headers=headers).json()["data"]
+        response = client.post("/api/agent", headers=headers, json={
+            "threadId": "thread-1", "runId": "replacement-run", "state": {},
+            "messages": [{"id": "new-message", "role": "user", "content": "Do this instead"}],
+            "tools": [], "context": [], "forwardedProps": {"agentId": agents[0]["id"]},
+        })
+        assert response.status_code == 200, response.text
+        assert "RUN_FINISHED" in _kinds(_frames(response.text))
+        page = client.get("/api/threads/thread-1/events?limit=2000", headers=headers).json()["data"]
+        assert _custom(page["events"], "sage.interaction.cancelled")
+        cancelled = _custom(page["events"], "sage.run.cancelled")
+        assert any(item.get("reason") == "superseded_by_user_message" for item in cancelled)

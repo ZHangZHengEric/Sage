@@ -334,18 +334,15 @@ async def test_unconfigured_run_preserves_lazy_loading_and_emits_no_skill_state(
 
 
 @pytest.mark.asyncio
-async def test_partial_failure_retry_after_restart_does_not_reinject_completed_defaults(tmp_path):
-    from sagents.v2.contracts.commands import ReplyInteraction
+async def test_partial_failure_allows_fresh_run_after_restart(tmp_path):
     store = FilesystemSessionStore(tmp_path)
     runtime, provider = HarnessRuntime(cast('SessionStore', store)), source()
     run = await start(runtime)
     requests = model(done())
     result = await engine(runtime, requests, loader(provider, budget=200),
                           ("alpha", "beta", "gamma")).execute(run.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert requests.requests == []
-    suspension = await store.get_suspension(result.suspension_id)
-    interaction = await store.get_interaction(suspension.interaction_id)
     await store.close()
     provider._bundles["gamma"] = SkillBundle(
         descriptor=SkillDescriptor(name="gamma", description="gamma", source_id="test"),
@@ -353,18 +350,16 @@ async def test_partial_failure_retry_after_restart_does_not_reinject_completed_d
     reopened = FilesystemSessionStore(tmp_path)
     try:
         runtime = HarnessRuntime(cast('SessionStore', reopened))
-        await runtime.reply_interaction(ReplyInteraction(
-            run_id=run.run_id, suspension_id=suspension.suspension_id,
-            interaction_id=interaction.interaction_id, expected_revision=result.revision,
-            expected_suspension_revision=suspension.expected_revision,
-            expected_interaction_revision=interaction.expected_revision,
-            decision="retry", idempotency_key="retry"), CONTEXT)
+        fresh = await start(runtime, session_id=run.session_id, key="retry-new-run")
         requests = model(done())
         result = await engine(runtime, requests, loader(provider, budget=200),
-                              ("alpha", "beta", "gamma")).resume(run.run_id, CONTEXT)
+                              ("alpha", "beta", "gamma")).execute(fresh.run_id, CONTEXT)
         assert result.state == RunState.COMPLETED
         assert "Follow gamma" in content(requests.requests[0])
-        assert provider.fetches == [(run.run_id, name) for name in ("alpha", "beta", "gamma")]
+        assert provider.fetches == [
+            (run.run_id, "alpha"), (run.run_id, "beta"),
+            *((fresh.run_id, name) for name in ("alpha", "beta", "gamma")),
+        ]
     finally:
         await reopened.close()
 
@@ -379,7 +374,7 @@ async def test_run_grant_can_narrow_preloads_but_never_expand_permissions():
     run = await start(runtime, enabled=("beta",))
     requests = model(done())
     result = await engine(runtime, requests, loaded).execute(run.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert requests.requests == []
     errors = [cast(RunEventData, event.data).error for event in await runtime.session_store.read_events(run.run_id)
               if getattr(event.data, "error", None)]

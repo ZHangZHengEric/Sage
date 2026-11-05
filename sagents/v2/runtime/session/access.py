@@ -71,6 +71,44 @@ class AuthorizedSessionAccess:
     async def find_start_run(self, session_id: str, idempotency_key: str, context: RequestContext):
         return await self._session_store.find_start_run(session_id, idempotency_key, context)
 
+    async def supersede_suspended_run(self, command: StartRun, context: RequestContext) -> None:
+        """Let fresh user input replace a suspended serial Run, never a running one."""
+        from sagents.v2.contracts.commands import CancelRun
+        from sagents.v2.contracts.errors import SageV2Error
+        from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
+
+        # Explicit revision callers retain the store's strict snapshot/CAS
+        # contract; ordinary chat messages target the latest Session revision.
+        if (not command.session_id or command.parent_run_id
+                or command.base_session_revision is not None
+                or command.session_concurrency_mode != SessionConcurrencyMode.SERIAL
+                or not any(item.role == "user" for item in command.input)):
+            return
+        # Replaying an admitted request must never cancel that request's Run.
+        if await self.find_start_run(command.session_id, command.idempotency_key, context):
+            return
+        try:
+            session = await self.get_session(command.session_id, context)
+        except SageV2Error as exc:
+            if exc.info.code in {"session.not_found", "session_not_found"}:
+                return
+            raise
+        if not session.active_serial_run_id:
+            return
+        run = await self.get_run(session.active_serial_run_id, context)
+        if run.state != RunState.SUSPENDED:
+            return
+        receipt = await self.runtime.cancel_run(
+            CancelRun(
+                run_id=run.run_id,
+                expected_revision=run.revision,
+                idempotency_key=f"supersede:{run.run_id}:{run.revision}",
+                reason="superseded_by_user_message",
+            ), context,
+        )
+        if receipt.error is not None:
+            raise SageV2Error(receipt.error)
+
     async def get_checkpoint(self, checkpoint_id: str, context: RequestContext):
         checkpoint = await self._session_store.get_checkpoint(checkpoint_id)
         await self._authorize(checkpoint.session_id, context)

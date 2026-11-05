@@ -4926,6 +4926,49 @@ void main() {
     },
   );
 
+  for (final brightness in Brightness.values) {
+    testWidgets('suspended conversation accepts a new message in $brightness', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.platformBrightnessTestValue = brightness;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [
+            _persistedSuspendedConversation(),
+          ],
+        }),
+      });
+      final api = _SuspendedRunApi();
+      final controller = _newController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      expect(controller.selectedConversation!.status, RunStatus.suspended);
+      expect(controller.selectedConversation!.pendingInteraction, isNotNull);
+      expect(controller.canSend, isTrue);
+      final composer = find.byKey(const ValueKey('agent-composer'));
+      await tester.enterText(composer, 'Change direction');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('thread-send-button')));
+      await tester.pumpAndSettle();
+      expect(api.lastRunBody?['session_id'], 'session_suspended');
+      expect(
+        (api.lastRunBody?['messages'] as List).single['text'],
+        'Change direction',
+      );
+      expect(api.repliedDecision, isNull);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   test(
     'cancelling a suspended run clears approval state and permits deletion',
     () async {
@@ -8112,7 +8155,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(panel, findsOneWidget);
         expect(tester.takeException(), isNull);
-        expect(find.byKey(const ValueKey('agent-composer')), findsNothing);
+        expect(find.byKey(const ValueKey('agent-composer')), findsOneWidget);
         expect(
           find.byKey(const ValueKey('plan-decision-composer')),
           findsOneWidget,

@@ -92,6 +92,7 @@ class Model:
         self.suspend = suspend
         self.initial = initial
         self.requests = []
+        self.waiting_for_input = set()
 
     async def capabilities(self, binding):
         return ModelCapabilities(
@@ -118,14 +119,11 @@ class Model:
                     while not (self.root / "fast-completed").exists():
                         await asyncio.sleep(0.01)
                 if self.suspend:
-                    raise SageV2Error(
-                        RuntimeErrorInfo(
-                            code="model.provider_permanent",
-                            category=ErrorCategory.PROVIDER_PERMANENT,
-                            message="temporary unavailable model",
-                            safe_to_resume=True,
-                        )
-                    )
+                    # Exercise a genuine user-input suspension, rather than
+                    # relying on ordinary provider failures to suspend Runs.
+                    self.waiting_for_input.add(request.run_id)
+                    yield completion("Please confirm the next step.")
+                    return
                 (self.root / "ready").write_text("waiting for LLM with saved tools")
                 await asyncio.Event().wait()
             yield completion(f"done {name}")
@@ -258,10 +256,24 @@ def team_factory(root, runtime, model, *, crash=False, unknown=False):
             content=(TextBlock(text=f"saved {name}"),),
         )
 
+    def input_signal(run_id):
+        from sagents.v2.agent.policy.continuation import ContinuationSignals, InteractionDraft
+        if run_id in model.waiting_for_input:
+            model.waiting_for_input.remove(run_id)
+            return ContinuationSignals(
+                explicit_status="need_user_input",
+                interaction=InteractionDraft(
+                    interaction_type="user_input", allowed_decisions=("retry", "cancel"),
+                    payload={"prompt": "Please confirm the next step."},
+                ),
+            )
+        return ContinuationSignals()
+
     def compose(descriptor, run_id, catalog, executor):
         return AgentLoopEngine(
             runtime=runtime,
             model=model,
+            continuation_signal_provider=input_signal,
             tool_catalog=catalog,
             tool_executor=executor,
             tool_policy=DefaultToolPolicy(

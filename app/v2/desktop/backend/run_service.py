@@ -203,6 +203,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             command = command.model_copy(update={
                 "agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash,
             })
+            await self.session_access.supersede_suspended_run(command, context)
             stream = await cast(ApplicationEntrypoint, self.application.entrypoint()).run_stream(command, context, agent=loaded)
             accepted_handle = stream.handle
             if action_surface is not None:

@@ -209,3 +209,95 @@ async def test_owner_and_principal_type_persist_with_legacy_derivation():
     # read-side payload is not rewritten as a migration side effect.
     assert "owner" not in payload["sessions"][0]
     assert "principal_type" not in payload["start_idempotency"][0]
+
+
+async def suspend_access_run(store, access, run_id):
+    from sagents.v2.contracts.checkpoint import Checkpoint, Suspension, SuspensionReason
+    from sagents.v2.contracts.common import new_id, utc_now
+
+    run = await store.get_run(run_id)
+    running = await store.commit_run(
+        run_id=run_id, expected_revision=run.revision,
+        expected_states={RunState.QUEUED}, new_state=RunState.RUNNING,
+        drafts=(), context=OWNER, idempotency_key=f"running:{run_id}",
+    )
+    run = running.run
+    checkpoint = Checkpoint(
+        checkpoint_id=new_id("checkpoint"), checkpoint_codec_version="test/1",
+        session_id=run.session_id, run_id=run_id,
+        run_sequence=run.last_run_sequence,
+        session_revision=(await store.get_session(run.session_id)).revision,
+        state={}, resolved_spec_hash=run.resolved_spec_hash, created_at=utc_now(),
+    )
+    return await access.runtime.commit_suspension(
+        run_id=run_id, expected_revision=run.revision, checkpoint=checkpoint,
+        suspension=Suspension(
+            suspension_id=new_id("suspension"), run_id=run_id,
+            reason=SuspensionReason.MANUAL_PAUSE, blocking_scope="run",
+            checkpoint_id=checkpoint.checkpoint_id,
+            checkpoint_sequence=run.last_run_sequence,
+            resume_policy="explicit", requested_at=utc_now(),
+        ), context=OWNER, idempotency_key=f"suspend:{run_id}",
+    )
+
+
+def replacement_command(session_id, key="replacement"):
+    return StartRun(
+        session_id=session_id, agent_id="agent",
+        input=(InputItem(role="user", content=(TextBlock(text="new direction"),)),),
+        resolved_spec_hash="sha256:access", idempotency_key=key,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fresh_user_input_cancels_suspended_run_before_starting_same_session():
+    store, access, handle = await setup_access()
+    old = await suspend_access_run(store, access, handle.run_id)
+    command = replacement_command(handle.session_id)
+    await access.supersede_suspended_run(command, OWNER)
+    assert (await store.get_run(old.run_id)).state == RunState.CANCELLED
+    assert (await store.get_suspension(old.suspension_id)).status.value == "cancelled"
+    fresh = await access.runtime.start_run(command, OWNER)
+    assert fresh.session_id == handle.session_id
+    assert fresh.run_id != old.run_id
+    assert (await store.read_events(old.run_id))[-1].data.reason == "superseded_by_user_message"
+    await suspend_access_run(store, access, fresh.run_id)
+    # A replay of either admitted request cannot cancel the active suspended Run.
+    original = await store.get_start_command(old.run_id)
+    await access.supersede_suspended_run(original.model_copy(update={"session_id": handle.session_id}), OWNER)
+    await access.supersede_suspended_run(command, OWNER)
+    assert (await store.get_run(fresh.run_id)).state == RunState.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_fresh_input_never_cancels_running_or_foreign_runs():
+    store, access, handle = await setup_access()
+    command = replacement_command(handle.session_id)
+    await access.supersede_suspended_run(command, OWNER)
+    assert (await store.get_run(handle.run_id)).state == RunState.QUEUED
+    await suspend_access_run(store, access, handle.run_id)
+    with pytest.raises(SageV2Error, match="does not own"):
+        await access.supersede_suspended_run(command, OTHER)
+    assert (await store.get_run(handle.run_id)).state == RunState.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_replacement_does_not_cancel_a_run_that_resumed_concurrently(monkeypatch):
+    store, access, handle = await setup_access()
+    old = await suspend_access_run(store, access, handle.run_id)
+    cancel = access.runtime.cancel_run
+
+    async def race(command, context):
+        await store.commit_run(
+            run_id=old.run_id, expected_revision=old.revision,
+            expected_states={RunState.SUSPENDED}, new_state=RunState.RESUMING,
+            drafts=(), context=context, idempotency_key="concurrent-resume",
+        )
+        return await cancel(command, context)
+
+    monkeypatch.setattr(access.runtime, "cancel_run", race)
+    with pytest.raises(SageV2Error) as rejected:
+        await access.supersede_suspended_run(replacement_command(handle.session_id), OWNER)
+    assert rejected.value.info.code == "run.revision_conflict"
+    assert (await store.get_run(old.run_id)).state == RunState.RESUMING
+    assert len(await store.list_session_runs(handle.session_id)) == 1

@@ -1760,7 +1760,7 @@ async def test_missing_actor_scope_denies_without_interaction_or_dispatch():
         ),
     ],
 )
-async def test_model_failure_matrix_requests_typed_recovery_questionnaire(
+async def test_model_failure_matrix_fails_without_blocking_session(
     step, error_code, monkeypatch
 ):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
@@ -1769,13 +1769,13 @@ async def test_model_failure_matrix_requests_typed_recovery_questionnaire(
     )
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
-    assert result.state == RunState.SUSPENDED
-    assert events[-1].type == "run.suspended"
-    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
-    assert interaction.payload["reason_code"] == error_code
-    assert interaction.payload["questions"]
-    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
+    assert result.state == RunState.FAILED
+    assert events[-1].type == "run.failed"
+    assert not any(event.type == "interaction.requested" for event in events)
+    assert result.suspension_id is None
+    error = cast(RunEventData, events[-1].data).error
+    assert error.code == error_code
+    assert (await runtime.session_store.get_session(handle.session_id)).active_serial_run_id is None
 
 
 @pytest.mark.asyncio
@@ -2093,14 +2093,13 @@ async def test_repeated_empty_semantic_responses_explain_exhausted_retries():
 
     result = await loop.execute(handle.run_id, CONTEXT)
 
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert len(model.requests) == 3
-    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
-    error = interaction.payload["error"]
-    assert error["code"] == "model.empty_semantic_response"
-    assert error["metadata"]["transparent_retries_exhausted"] == 2
-    assert "没有返回可用的文本" in interaction.payload["prompt"]
+    events = await runtime.session_store.read_events(handle.run_id)
+    error = cast(RunEventData, events[-1].data).error
+    assert error.code == "model.empty_semantic_response"
+    assert error.metadata["transparent_retries_exhausted"] == 2
+    assert not any(event.type == "interaction.requested" for event in events)
 
 
 @pytest.mark.asyncio
@@ -2150,7 +2149,7 @@ async def test_reasoning_only_response_does_not_pollute_next_model_request():
 
 
 @pytest.mark.asyncio
-async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatch(
+async def test_automatic_memory_recall_failure_releases_session(
     monkeypatch,
 ):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
@@ -2182,26 +2181,12 @@ async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatc
         automatic_memory_recall=True,
         memory_recall_query_generator=RecallQuery(),
     )
-    suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
-    await runtime.reply_interaction(
-        ReplyInteraction(
-            run_id=handle.run_id,
-            suspension_id=suspension.suspension_id,
-            interaction_id=interaction.interaction_id,
-            expected_revision=suspended.revision,
-            expected_suspension_revision=suspension.expected_revision,
-            expected_interaction_revision=interaction.expected_revision,
-            decision="cancel",
-            idempotency_key="cancel_after_memory_recall",
-        ),
-        CONTEXT,
-    )
-
-    result = await loop.resume(handle.run_id, CONTEXT)
-
-    assert result.state == RunState.CANCELLED
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.FAILED
+    assert result.suspension_id is None
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert not any(event.type == "interaction.requested" for event in events)
+    assert (await runtime.session_store.get_session(handle.session_id)).active_serial_run_id is None
 
 
 @pytest.mark.asyncio
@@ -4080,7 +4065,7 @@ async def test_output_self_check_numeric_repair_reaches_author_and_completes():
     "phase", ["tool_selection", "memory_recall", "request_preparation"]
 )
 @pytest.mark.parametrize("typed", [True, False])
-async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, typed, monkeypatch):
+async def test_pre_model_failure_fails_without_blocking_session(phase, typed, monkeypatch):
     # Retry scheduling/cancellation has its own timing tests. Keep every retry
     # here, but avoid real provider backoff in a recovery-questionnaire test.
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
@@ -4123,43 +4108,20 @@ async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, ty
 
     if phase == "request_preparation":
         loop.step_request_builder.prepare = prepare
-    suspended = await loop.execute(handle.run_id, CONTEXT)
-    assert suspended.state == RunState.SUSPENDED
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.FAILED
     events = await runtime.session_store.read_events(handle.run_id)
-    assert events[-1].type == "run.suspended"
-    assert any(event.type == "interaction.requested" for event in events)
-    assert not any(event.type in {"run.completed", "run.failed"} for event in events)
+    assert events[-1].type == "run.failed"
+    assert not any(event.type == "interaction.requested" for event in events)
     assert model.requests == []
     assert executor.calls == []
-    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
-    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
-    assert interaction.payload["questions"]
-    assert interaction.payload["error"]["code"] == (
-        failure.code
-        if typed
-        else "loop.request_preparation_failed"
-        if phase == "request_preparation"
-        else "loop.preparation_failed"
+    error = cast(RunEventData, events[-1].data).error
+    assert error.code == (
+        failure.code if typed else "loop.request_preparation_failed"
+        if phase == "request_preparation" else "loop.preparation_failed"
     )
-    assert interaction.payload["resumable"] is True
-    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
-    should_fail = False
-    await runtime.reply_interaction(
-        ReplyInteraction(
-            run_id=handle.run_id,
-            suspension_id=suspension.suspension_id,
-            interaction_id=interaction.interaction_id,
-            expected_revision=suspended.revision,
-            expected_suspension_revision=suspension.expected_revision,
-            expected_interaction_revision=interaction.expected_revision,
-            decision="retry",
-            idempotency_key="retry_preparation",
-        ),
-        CONTEXT,
-    )
-    result = await loop.resume(handle.run_id, CONTEXT)
-    assert result.state == RunState.COMPLETED
-    assert len(model.requests) == 1
+    assert error.metadata["recovery_questionnaire"]["resumable"] is False
+    assert (await runtime.session_store.get_session(handle.session_id)).active_serial_run_id is None
 
 
 @pytest.mark.asyncio
@@ -4289,7 +4251,7 @@ async def test_model_argument_repair_is_bounded_by_attempts_steps_and_tokens(
         model, max_steps=max_steps, max_total_tokens=max_total_tokens
     )
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert len(model.requests) == expected_calls
     events = await runtime.session_store.read_events(handle.run_id)
     assert not any(e.type == "tool.call.started" for e in events)
@@ -4298,7 +4260,7 @@ async def test_model_argument_repair_is_bounded_by_attempts_steps_and_tokens(
         == expected_calls * 10
     )
     checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
-    assert checkpoint.state["total_output_tokens"] == expected_calls * 10
+    assert checkpoint.state["total_output_tokens"] == (expected_calls - 1) * 10
 
 
 @pytest.mark.asyncio
@@ -4347,7 +4309,7 @@ async def test_argument_recovery_budget_survives_pause_and_new_engine():
         tool_executor=executor,
     )
     result = await fresh.resume(handle.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert len(fresh_model.requests) == 2
     final_checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
     assert final_checkpoint.state["model_argument_recovery_attempts"] == 2
@@ -4364,7 +4326,7 @@ async def test_unsafe_model_error_with_similar_code_is_not_automatically_retried
     model = ScriptedModelProvider((ScriptedModelStep(events=(), error=error),))
     runtime, handle, loop, _ = await setup_loop(model)
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert len(model.requests) == 1
     assert not any(
         e.type == "step.retry_scheduled"
@@ -4780,7 +4742,7 @@ async def test_transient_model_retries_preserve_completed_tool_work(
     )
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
-    assert result.state == (RunState.COMPLETED if recover else RunState.SUSPENDED)
+    assert result.state == (RunState.COMPLETED if recover else RunState.FAILED)
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 3
     assert len([e for e in events if e.type == "tool.call.started"]) == 1
     assert all(req.messages == model.requests[1].messages for req in model.requests[2:])
@@ -4984,7 +4946,7 @@ async def test_responses_stream_failure_recovers_through_real_adapter_and_loop(
     )
     setattr(assembler, 'history', SimpleNamespace(reader=runtime.session_store))
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == (RunState.COMPLETED if recover else RunState.SUSPENDED)
+    assert result.state == (RunState.COMPLETED if recover else RunState.FAILED)
     context_error = upstream_code == "context_length_exceeded"
     assert len(responses.calls) == (
         (2 if recover else 3) if context_error else (2 if recover else 4)
@@ -4995,7 +4957,7 @@ async def test_responses_stream_failure_recovers_through_real_adapter_and_loop(
     assert len(retries) == (
         (1 if recover else 3) if context_error else (1 if recover else 3)
     )
-    assert any(e.type == "interaction.requested" for e in events) != recover
+    assert not any(e.type == "interaction.requested" for e in events)
     if context_error:
         assert summary_requests
         assert "<conversation_summary>" in str(responses.calls[1]["input"])
@@ -5054,7 +5016,7 @@ async def test_context_recovery_stops_after_six_retries_without_executing_tools(
         model, context_assembler=assembler
     )
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert len(model.requests) == 7
     events = await runtime.session_store.read_events(handle.run_id)
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 6

@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from sagents.v2.runtime.session.contracts import SessionStore
 
-from sagents.v2.contracts.events import InteractionEventData
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.contracts.events import RunEventData
 
@@ -511,7 +510,7 @@ async def test_schedule_accepted_run_submission_failure_is_durable():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["primary", "tool_selection"])
-async def test_model_connection_failure_streams_recovery_before_suspension(
+async def test_model_connection_failure_streams_terminal_failure(
     phase, monkeypatch
 ):
     from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
@@ -552,19 +551,15 @@ async def test_model_connection_failure_streams_recovery_before_suspension(
 
     events = await asyncio.wait_for(collect(), timeout=2)
     final = await stream.wait()
-    assert final.state == RunState.SUSPENDED
-    assert events[-1].type == "run.suspended"
-    interaction = next(
-        event for event in events if event.type == "interaction.requested"
-    )
-    assert cast(InteractionEventData, interaction.data).payload["reason_code"] == failure.code
-    assert cast(InteractionEventData, interaction.data).payload["questions"]
-    assert cast(InteractionEventData, interaction.data).allowed_decisions == ("retry", "change_direction", "cancel")
-    assert not any(event.type == "run.completed" for event in events)
+    assert final.state == RunState.FAILED
+    assert events[-1].type == "run.failed"
+    assert not any(event.type == "interaction.requested" for event in events)
+    failure_event = events[-1]
+    assert failure_event.data.error.code == failure.code
     assert len(model.requests) == (4 if phase == "primary" else 0)
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 3
     replay = await runtime.session_store.read_events(final.run_id)
-    assert any(event.event_id == interaction.event_id for event in replay)
+    assert any(event.event_id == failure_event.event_id for event in replay)
     await agent.close()
 
 

@@ -4541,3 +4541,40 @@ async def test_desktop_recovers_repeated_outages_without_reusing_closed_bindings
         assert len(model.requests) == 3
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_new_message_replaces_suspended_approval_without_executing_old_tool(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step
+    from sagents.v2.contracts.interactions import InteractionStatus
+    from sagents.v2.model.contracts import ModelToolCall
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+
+    model = ScriptedModelProvider((
+        step(ModelToolCall(tool_call_id="plan", name="goal_submit", arguments={"content": "Old plan"})),
+        step(text="New request completed."),
+    ))
+    service, _, _ = desktop(tmp_path, model=model)
+    try:
+        old, _, _ = await execute(service, request=DesktopRunRequest(
+            agent_id="sage", invocation_mode="plan",
+            messages=[RunMessage(role="user", text="Plan it")],
+        ))
+        assert old.state.value == "suspended"
+        suspension = await service.session_store.get_suspension(old.suspension_id)
+        fresh, _, _ = await execute(service, request=DesktopRunRequest(
+            agent_id="sage", session_id=old.session_id,
+            messages=[RunMessage(role="user", text="Do this instead")],
+        ))
+        assert fresh.state.value == "completed"
+        assert fresh.session_id == old.session_id
+        assert fresh.run_id != old.run_id
+        assert (await service.session_store.get_run(old.run_id)).state.value == "cancelled"
+        assert (await service.session_store.get_interaction(suspension.interaction_id)).status == InteractionStatus.CANCELLED
+        events = await service.session_store.read_events(old.run_id)
+        assert not any(event.type == "tool.call.started" for event in events)
+        assert any(message.role == "user" and any(
+            getattr(block, "text", "").find("Do this instead") >= 0 for block in message.content
+        ) for message in model.requests[-1].messages)
+    finally:
+        await service.close()
