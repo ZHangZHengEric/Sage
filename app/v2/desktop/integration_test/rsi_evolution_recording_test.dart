@@ -36,6 +36,8 @@ const internalModelName = String.fromEnvironment(
   'RSI_RECORD_INTERNAL_MODEL_NAME',
 );
 const startHelper = String.fromEnvironment('RSI_RECORD_START_HELPER');
+const sageRoot = String.fromEnvironment('RSI_RECORD_SAGE_ROOT');
+const helperPython = String.fromEnvironment('RSI_RECORD_PYTHON');
 const resumeAgent = String.fromEnvironment('RSI_RECORD_AGENT');
 const resumeRun = String.fromEnvironment('RSI_RECORD_RUN');
 const questionCount = int.fromEnvironment(
@@ -46,6 +48,29 @@ const concurrency = int.fromEnvironment(
   'RSI_RECORD_CONCURRENCY',
   defaultValue: 3,
 );
+
+Directory _startHelperRoot() {
+  final candidates = [
+    if (sageRoot.isNotEmpty)
+      Directory(sageRoot).absolute
+    else ...[
+      Directory.current.absolute,
+      File(Platform.resolvedExecutable).parent,
+    ],
+  ];
+  for (var directory in candidates) {
+    while (true) {
+      if (Directory('${directory.path}/sagents').existsSync() &&
+          File('${directory.path}/app/v2/desktop/pubspec.yaml').existsSync()) {
+        return directory;
+      }
+      final parent = directory.parent;
+      if (sageRoot.isNotEmpty || parent.path == directory.path) break;
+      directory = parent;
+    }
+  }
+  throw StateError('Cannot find the Sage checkout. Set RSI_RECORD_SAGE_ROOT.');
+}
 
 class RecordingApi extends V2ApiClient {
   RecordingApi({super.httpClient});
@@ -64,11 +89,24 @@ class RecordingApi extends V2ApiClient {
   ) async {
     final Map<String, Object?> value;
     if (startHelper.isNotEmpty) {
-      final result = await Process.run(
-        '/Users/zhangzheng/zavixai/Sage/.venv/bin/python',
-        [startHelper, agentId, jsonEncode(body)],
-        workingDirectory: '/Users/zhangzheng/zavixai/Sage',
+      final root = _startHelperRoot();
+      final venvPython = File(
+        Platform.isWindows
+            ? '${root.path}/.venv/Scripts/python.exe'
+            : '${root.path}/.venv/bin/python',
       );
+      final python = helperPython.isNotEmpty
+          ? helperPython
+          : venvPython.existsSync()
+          ? venvPython.path
+          : Platform.isWindows
+          ? 'python'
+          : 'python3';
+      final result = await Process.run(python, [
+        startHelper,
+        agentId,
+        jsonEncode(body),
+      ], workingDirectory: root.path);
       if (result.exitCode != 0) {
         throw StateError('MCP start failed: ${result.stderr}');
       }

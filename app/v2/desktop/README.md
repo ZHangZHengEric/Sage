@@ -220,6 +220,8 @@ Agent 配置中的“进化”入口打开独立 RSI 对话矩阵；“版本历
 
 `integration_test/rsi_evolution_recording_test.dart` 用真实 sidecar 和模型录制原生进化页面，不自动应用候选。显式设置 `RSI_RECORD_LIVE=true`、`RSI_RECORD_DIR=<绝对目录>`（可选 `RSI_RECORD_PROVIDER=<已配置 provider ID>`；省略则保留出厂默认模型） 后以 `flutter test ... -d macos` 运行；可通过 `RSI_RECORD_VALIDATION_COUNT` 和 `RSI_RECORD_CONCURRENCY` 调整题量、并发。需要本机 FFmpeg；输出包含 MP4、逐帧阶段索引和真实运行报告。演示测试要求训练与固定验证集稳定达标、验证均分至少 0.95、真实改进，以及生成工具的实现和成功执行证据；任务仅结束但未达标会使测试失败。也可先启动 Desktop，再用 `flutter test test/rsi_live_recording_test.dart --dart-define=RSI_RECORD_HEADLESS=true` 加上上述显式开关直接录制 Flutter 帧，仍调用真实 sidecar 与模型；`RSI_RECORD_AGENT` 可复用默认 Agent，`RSI_RECORD_RUN` 可接着录制已有任务，避免重复启动模型调用。
 
+`RSI_RECORD_START_HELPER` 可指定启动 RSI 的 Python 脚本，支持相对于 Sage 仓库根目录的路径。录制测试从当前目录或测试可执行文件所在目录向上查找仓库，也可通过 `--dart-define=RSI_RECORD_SAGE_ROOT=<仓库绝对路径>` 显式指定。默认使用仓库的 `.venv`，找不到时使用 PATH 中的 `python3`（Windows 为 `python`）。可通过 `--dart-define=RSI_RECORD_PYTHON=<解释器绝对路径>` 指定其他已安装 Sage 依赖的 Python。
+
 
 ### RSI stdio MCP
 
