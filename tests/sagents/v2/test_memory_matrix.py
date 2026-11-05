@@ -710,22 +710,22 @@ def test_child_memory_keeps_external_user_after_recovery_and_respects_new_worksp
     from sagents.v2.memory.identity import command_memory_scope
 
     external = CONTEXT.model_copy(update={"memory_identity": MemoryIdentity(
-        user_id="wishseen-user", workspace_id="shared-agent-workspace",
+        user_id="external-user", workspace_id="shared-agent-workspace",
     )})
     parent = bind_memory_identity(command(), external)
     child = command().model_copy(update={"parent_run_id": "parent-run", "idempotency_key": "child"})
     restored = bind_memory_identity(child, CONTEXT, parent_command=parent)
-    assert command_memory_scope(restored).principal_id == "wishseen-user"
+    assert command_memory_scope(restored).principal_id == "external-user"
     assert command_memory_scope(restored).workspace_id == "shared-agent-workspace"
     switched = external.model_copy(update={"memory_identity": MemoryIdentity(
-        user_id="wishseen-user", workspace_id="another-workspace",
+        user_id="external-user", workspace_id="another-workspace",
     )})
     assert command_memory_scope(bind_memory_identity(
         child, switched, parent_command=parent,
     )).workspace_id == "another-workspace"
     child.config.metadata["workspace_policy"] = "private_child"
     private = command_memory_scope(bind_memory_identity(child, CONTEXT, parent_command=parent))
-    assert private.principal_id == "wishseen-user"
+    assert private.principal_id == "external-user"
     assert private.workspace_id != "shared-agent-workspace"
     legacy = command_memory_scope(bind_memory_identity(child, CONTEXT, parent_command=command()))
     assert legacy.workspace_id != "agent_1"

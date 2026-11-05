@@ -266,7 +266,7 @@ def test_questionnaire_and_followup_keep_session_identity(tmp_path):
         token = setup_agent(client)
         configured = client.put(f"/api/agents/{client.headers['SAGE-AGENT-ID']}",
                                 headers={"Authorization": f"Bearer {token}"},
-                                json={"name": "Palune", "tools": ["questionnaire_async"]})
+                                json={"name": "Example Agent", "tools": ["questionnaire_async"]})
         assert configured.status_code == 200, configured.text
         first = client.post("/api/agent", headers=headers(), json=body(session_id="Question-ID"))
         assert first.status_code == 200, first.text

@@ -35,7 +35,7 @@ def setup_agent(client):
     response = client.post(
         "/api/agents",
         headers={"Authorization": f"Bearer {token}"},
-        json={"name": "Palune", "instructions": "Say hello"},
+        json={"name": "Example Agent", "instructions": "Say hello"},
     )
     assert response.status_code == 200, response.text
     client.cookies.clear()
@@ -173,7 +173,7 @@ async def test_disconnect_only_detaches_reader(tmp_path):
     try:
         owner = await host.identity.register("owner", "secret1")
         agent = await host.catalog.create_agent(
-            owner.user_id, {"id": "palune-agent", "name": "Palune"}
+            owner.user_id, {"id": "example-agent", "name": "Example Agent"}
         )
         service = host.conversations
         request = RunAgentInput(

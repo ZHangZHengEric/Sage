@@ -23,7 +23,7 @@ def test_external_routes_require_machine_credential(tmp_path, method, suffix, bo
         del client.headers["Authorization"]
         url = f"/api/agents/{agent}{suffix}"
         for authorization in (None, "Bearer invalid", f"Bearer {token}"):
-            headers = {"SAGE-TENANT-ID": "wishseen-user"}
+            headers = {"SAGE-TENANT-ID": "external-user"}
             if authorization:
                 headers["Authorization"] = authorization
             response = client.request(method, url, headers=headers, json=body)

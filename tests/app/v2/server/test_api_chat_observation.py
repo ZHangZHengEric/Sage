@@ -36,7 +36,7 @@ def test_api_chat_exports_semantic_spans_without_diagnostic_chunks(
         agent_id = client.headers["SAGE-AGENT-ID"]
         response = (
             client.post(
-                f"/api/agents/{agent_id}/runs?workspace_path=projects/artwork-1",
+                f"/api/agents/{agent_id}/runs?workspace_path=projects/project-1",
                 headers={"SAGE-TENANT-ID": "business-user-123"},
                 json={
                     "threadId": "work-1",
@@ -46,7 +46,7 @@ def test_api_chat_exports_semantic_spans_without_diagnostic_chunks(
                     ],
                     "runtimeContext": {
                         "session_id": "work-1",
-                        "wishseen_project": {"id": "artwork-1"},
+                        "project_metadata": {"id": "project-1"},
                     },
                 },
             )

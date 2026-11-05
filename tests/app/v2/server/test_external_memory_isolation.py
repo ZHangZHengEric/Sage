@@ -1,4 +1,4 @@
-"""WishSeen accounts share an Agent, never its long-term Memory namespace."""
+"""External accounts share an Agent, never its long-term Memory namespace."""
 
 from typing import TYPE_CHECKING, cast
 
@@ -30,7 +30,7 @@ class MemoryTestModel(CompletingJudgeModel):
 
 
 @pytest.mark.timeout(30)
-def test_wishseen_accounts_have_separate_durable_memory(tmp_path):
+def test_external_accounts_have_separate_durable_memory(tmp_path):
     host = make_host(tmp_path, steps=20)
     host.execution.fallback_model = MemoryTestModel(host.execution.fallback_model)
     with TestClient(create_app(host)) as client:
@@ -38,16 +38,16 @@ def test_wishseen_accounts_have_separate_durable_memory(tmp_path):
         agent_id = client.headers["SAGE-AGENT-ID"]
         configured = client.put(f"/api/agents/{agent_id}",
             headers={"Authorization": f"Bearer {token}"},
-            json={"name": "WishSeen memory acceptance", "tools": ["search_memory"]})
+            json={"name": "Shared Memory Test Agent", "tools": ["search_memory"]})
         assert configured.status_code == 200, configured.text
         missing_user = client.post(f"/api/agents/{agent_id}/runs", json={
             "threadId": "no-user", "runId": "create", "messages": [],
         })
         assert missing_user.status_code == 422
         for account, thread, content in (
-            ("wishseen-alice", "alice-project-one", "Remember cobaltcoffee preference"),
-            ("wishseen-bob", "bob-project-one", "Remember ambertea preference"),
-            ("wishseen-alice", "alice-project-two", "hello again"),
+            ("tenant-alice", "alice-project-one", "Remember cobaltcoffee preference"),
+            ("tenant-bob", "bob-project-one", "Remember ambertea preference"),
+            ("tenant-alice", "alice-project-two", "hello again"),
         ):
             response = client.post(
                 f"/api/agents/{agent_id}/runs", headers={"SAGE-TENANT-ID": account},
@@ -69,8 +69,8 @@ def test_wishseen_accounts_have_separate_durable_memory(tmp_path):
                 scopes.append(command_memory_scope(command))
             assert scopes[0] == scopes[2]
             assert scopes[0] != scopes[1]
-            assert scopes[0].principal_id == "wishseen-alice"
-            assert scopes[1].principal_id == "wishseen-bob"
+            assert scopes[0].principal_id == "tenant-alice"
+            assert scopes[1].principal_id == "tenant-bob"
             assert scopes[0].workspace_id == agent_id
             # Query the same SDK provider the actual successful Runs wrote into.
             import asyncio

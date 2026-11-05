@@ -106,19 +106,19 @@ test('new chat preserves drafts when configuration fails, disables sends without
   let prevented = false
   state.inputKeydown({ key: 'Enter', isComposing: true, preventDefault() { prevented = true } })
   assert.equal(prevented, false); assert.equal(fetch.mock.calls.length, 0)
-  state.selectedSkills = ['wishseen-project', 'review']
+  state.selectedSkills = ['project-planning', 'review']
   state.notificationConnectionId = 'im_mine'
   await state.send()
   assert.equal(fetch.mock.calls.length, 1)
   assert.equal(JSON.parse(fetch.mock.calls[0].arguments[1].body).notification_connection_id, 'im_mine')
   assert.equal(state.isStart, false); assert.equal(state.agentLocked, true)
   assert.equal(state.text, '')
-  assert.equal(JSON.parse(fetch.mock.calls[0].arguments[1].body).messages[0].content, '<skill>wishseen-project</skill> <skill>review</skill> 保留这段草稿')
+  assert.equal(JSON.parse(fetch.mock.calls[0].arguments[1].body).messages[0].content, '<skill>project-planning</skill> <skill>review</skill> 保留这段草稿')
   assert.deepEqual(state.selectedSkills, [])
-  state.selectedSkills = ['wishseen-project']
+  state.selectedSkills = ['project-planning']
   assert.equal(state.canSend, true)
   await state.send()
-  assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).messages.at(-1).content, '<skill>wishseen-project</skill>')
+  assert.equal(JSON.parse(fetch.mock.calls[1].arguments[1].body).messages.at(-1).content, '<skill>project-planning</skill>')
   state.selectedSkills = ['review']
   state.startNew()
   assert.equal(state.notificationConnectionId, '')
@@ -196,15 +196,15 @@ test('live chat accepts supplemental input once, preserves failures, and cancels
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(state.pending, true); assert.equal(state.streamStarted, true)
   state.text = '补充要求'
-  state.selectedSkills = ['wishseen-project']
+  state.selectedSkills = ['project-planning']
   assert.equal(state.canSend, true)
   await state.submit()
   assert.equal(state.text, '补充要求'); assert.match(state.error, /补充发送失败/)
-  assert.deepEqual(state.selectedSkills, ['wishseen-project'])
+  assert.deepEqual(state.selectedSkills, ['project-planning'])
   failSteer = false
   await state.submit()
   assert.equal(supplements[0].messageId, supplements[1].messageId)
-  assert.equal(supplements[1].text, '<skill>wishseen-project</skill> 补充要求')
+  assert.equal(supplements[1].text, '<skill>project-planning</skill> 补充要求')
   assert.deepEqual(state.selectedSkills, [])
   assert.equal(state.text, ''); assert.equal(state.queuedSupplements.length, 1)
   assert.equal(fetch.mock.calls.length, 1)

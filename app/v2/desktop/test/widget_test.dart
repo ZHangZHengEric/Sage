@@ -4615,7 +4615,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     const source =
-        '/Users/zhangzheng/sage/agent_workspace/uploads/小凤筝 copy.jpeg';
+        '/workspace/uploads/示例图片 copy.jpeg';
     final persisted = _persistedBranchableConversation();
     persisted['messages'] = const [
       {
@@ -4643,7 +4643,7 @@ void main() {
     );
     expect(fileChip, findsOneWidget);
     expect(find.text('@$source'), findsNothing);
-    expect(find.text('小凤筝 copy.jpeg'), findsOneWidget);
+    expect(find.text('示例图片 copy.jpeg'), findsOneWidget);
     expect(find.text('这个图片里有什么呢？'), findsOneWidget);
     expect(
       find.descendant(of: fileChip, matching: find.byIcon(CupertinoIcons.doc)),
