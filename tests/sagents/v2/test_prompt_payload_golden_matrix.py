@@ -171,3 +171,38 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
         assert "cache_control" not in json.dumps(payload, sort_keys=True)
     assert anthropic["system"][-1]["cache_control"] == {"type": "ephemeral"}
     assert anthropic["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert anthropic["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra", "automatic", "explicit"),
+    [
+        ({}, True, True),
+        ({"automatic_prompt_cache": False}, False, True),
+        ({"prompt_cache": False}, False, False),
+    ],
+)
+async def test_messages_cache_policy_survives_route_construction(extra, automatic, explicit):
+    from sagents.v2.model.protocols import create_registered_model_provider
+    from sagents.v2.package.manifest.models import (
+        ModelCapabilityDeclaration,
+        ModelRequestDefaults,
+        ModelRoute,
+    )
+
+    provider = create_registered_model_provider(
+        ModelRoute(
+            provider="anthropic-messages",
+            model="claude-test",
+            capabilities=ModelCapabilityDeclaration(tool_calling=True, multimodal=True),
+            request=ModelRequestDefaults(extra=extra),
+        ),
+        client=_UnusedClient(),
+    )
+    payload = provider.diagnostic_request(await normalized_request())
+    assert ("cache_control" in payload) is automatic
+    assert ("cache_control" in payload["tools"][-1]) is explicit
+    assert ("cache_control" in payload["system"][-1]) is explicit
+    assert "prompt_cache" not in payload
+    assert "automatic_prompt_cache" not in payload

@@ -259,6 +259,8 @@ def create_registered_model_provider(
         **common,
         reasoning_effort=route.request.reasoning_effort,
         anthropic_version=str(extra.pop("anthropic_version", "2023-06-01")),
+        prompt_cache=extra.pop("prompt_cache", True),
+        automatic_prompt_cache=extra.pop("automatic_prompt_cache", True),
         extra_headers=dict(extra.pop("extra_headers", {})),
         extra_body=extra,
     )

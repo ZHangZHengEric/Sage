@@ -76,6 +76,7 @@ class AnthropicMessagesConfig(StrictModel):
     invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
     prompt_cache: bool = True
+    automatic_prompt_cache: bool = True
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
@@ -237,6 +238,10 @@ class AnthropicMessagesModelProvider:
             or self.config.default_max_output_tokens,
             "stream": True,
         }
+        if self.config.prompt_cache and self.config.automatic_prompt_cache:
+            # Keep stable-prefix breakpoints while the server advances the
+            # fourth breakpoint with the growing conversation.
+            payload["cache_control"] = {"type": "ephemeral"}
         if system:
             payload["system"] = system
         if request.tools:
