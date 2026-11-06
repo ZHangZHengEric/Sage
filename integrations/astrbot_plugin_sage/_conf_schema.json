@@ -1,0 +1,71 @@
+{
+  "enabled": {
+    "description": "启用 Sage 桥接",
+    "type": "bool",
+    "default": false
+  },
+  "server_url": {
+    "description": "Sage Server 根地址",
+    "type": "string",
+    "default": "http://sage:8090",
+    "hint": "可带反向代理路径前缀，不包含 /a2a/v1。跨主机部署使用 HTTPS。"
+  },
+  "request_timeout_seconds": {
+    "description": "单次请求超时（秒）",
+    "type": "float",
+    "default": 30
+  },
+  "wait_seconds": {
+    "description": "提交后等待结果的最长时间（秒）",
+    "type": "float",
+    "default": 15,
+    "hint": "范围 0–60。超时后任务继续执行，通过 /sage status 获取结果。"
+  },
+  "poll_interval_seconds": {
+    "description": "查询间隔（秒）",
+    "type": "float",
+    "default": 1
+  },
+  "max_image_bytes": {
+    "description": "单条消息图片总大小上限（字节）",
+    "type": "int",
+    "default": 4194304
+  },
+  "bindings": {
+    "description": "机器人与 Sage 凭据绑定",
+    "type": "template_list",
+    "default": [],
+    "templates": {
+      "sage": {
+        "name": "Sage Agent 连接",
+        "display_item": "platform_id",
+        "items": {
+          "platform_id": {
+            "description": "AstrBot 机器人配置 ID",
+            "type": "string",
+            "default": "",
+            "hint": "使用机器人配置的唯一 ID，不是 lark、telegram 等平台类型，也不是群 ID。"
+          },
+          "api_key_env": {
+            "description": "Sage API Key 所在环境变量名",
+            "type": "string",
+            "default": "",
+            "hint": "在 AstrBot 服务端设置此环境变量。凭据绑定 Sage 用户和 Agent；插件不保存凭据明文。"
+          },
+          "allowed_sender_ids": {
+            "description": "允许发送人 ID",
+            "type": "list",
+            "default": [],
+            "hint": "必须明确配置，空列表不允许启用该绑定。使用平台原始用户 ID，不使用昵称。"
+          },
+          "allowed_origins": {
+            "description": "允许的会话来源（UMO）",
+            "type": "list",
+            "default": [],
+            "hint": "留空允许已授权发送人的所有会话。填写后只允许精确匹配的 UMO。"
+          }
+        }
+      }
+    }
+  }
+}

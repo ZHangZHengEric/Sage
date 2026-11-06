@@ -1,0 +1,7 @@
+name: astrbot_plugin_sage
+display_name: Sage Server
+desc: 将指定机器人的文本与图片交给 Sage Server v2，多连接隔离、发送人白名单和持久会话。
+version: v0.1.0
+author: Eric ZZ
+repo: ""
+astrbot_version: ">=4.29.1,<5"

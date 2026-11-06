@@ -372,6 +372,10 @@ python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill
 
 回填只提取时间字段，幂等写入；不能凭历史数据补造缺失的初始化边界。
 
+## AstrBot 多平台接入
+
+[AstrBot Sage Bridge](../../../integrations/astrbot_plugin_sage/README.md) 是安装在 AstrBot 服务端的独立插件，通过 Server 现有 A2A 接口调用 Agent。支持按机器人绑定用户/Agent 专用凭据、发送人白名单、持久会话、文本/图片及任务查询/取消。平台配置与连接由 AstrBot 管理，Sage 保留执行授权和任务事实；无需 Desktop。安装、配置与首版边界见插件说明。
+
 ## 飞书 IM 接入
 
 飞书通过官方 Python SDK 长连接接入，仅填写 App ID / App Secret，不配置企业租户 ID、公网事件回调或飞书环境变量，支持本人配对、文本私聊、`/new`、`/stop`、现有 Sage 审批链接和持久收发恢复。平台适配器由现有 ExtensionHost 加载，执行复用 RunAdmission、RunService 与 SessionStore。用户通过一级菜单「IM管理」（`/im`）或 `/api/im/connections` 自助配置本人连接，只绑定自己的 Agent；凭据使用服务端自动生成并持久化的独立主密钥加密保存。内置 `im_notify` 支持模型准备最终通知正文，Run 完成后投递；网页可选择本人已配对连接，外部定时调度可通过 Run API 指定 `notification_connection_id`。部署与联调见 [IM 接入说明](im/README.md)。
