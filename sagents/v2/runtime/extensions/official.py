@@ -19,6 +19,7 @@ from sagents.v2.runtime.execution.plugins.ephemeral_binding import (
 from sagents.v2.runtime.execution.plugins.local_binding.registration import (
     local_execution_binding_registration,
 )
+from sagents.v2.runtime.execution.plugins.cube_binding import cube_execution_binding_registration
 from sagents.v2.runtime.execution.sandbox.registrations import register_sandbox_plugins
 from sagents.v2.runtime.execution.scheduler.registrations import (
     register_scheduler_plugins,
@@ -45,6 +46,7 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
     """Aggregate domain registrations and mark the new built-ins as trusted."""
     existing = {value.descriptor.plugin_id for value in registry.registrations()}
     registry.register(local_execution_binding_registration())
+    registry.register(cube_execution_binding_registration())
     registry.register(ephemeral_execution_binding_registration())
     registry.register(run_environment_registration())
     register_policy_plugins(registry)

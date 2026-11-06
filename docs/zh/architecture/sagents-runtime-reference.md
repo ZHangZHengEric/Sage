@@ -647,6 +647,18 @@ Standard derived-state.store implementation with declared dependencies and lifec
 
 没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
+### sage.execution.binding.cube-volume
+
+可选的外置工作区与执行绑定。每个工作区身份对应持久 Cube Volume，Run 使用独立计算环境，
+结束时释放计算环境并保留文件。需要安装 `cube` extra，默认不启用。
+
+版本：`1.0.0`；作用域：process；提供能力：`execution.binding:default`（API `2`）。
+
+配置包括 `workspace_user_id`、`agent_id`、`api_url`、`template_id`、`proxy_node_ip`，
+以及可选的 `api_key`、`volume_driver`、`policy` 和 `child_workspace_policy`。
+字段校验以插件公开 schema 为准；Server 使用受认证身份约束的宿主适配器。
+部署与当前边界见 [Cube 外置工作区与执行](sagents-v2-cube-workspace.md)。
+
 ### sage.execution.binding.ephemeral
 
 Independent virtual files with explicit process-local recovery limits.

@@ -51,6 +51,12 @@ def test_cube_file_bridge_preserves_binary_data_and_rejects_symlinks(tmp_path):
         cube_file_call(sandbox, "stat", "../nested/data.bin", root=root)
 
 
+def test_cube_file_bridge_does_not_import_modules_from_the_workspace(tmp_path):
+    (tmp_path / "json.py").write_text("raise RuntimeError('workspace module executed')")
+    response = cube_file_call(LocalCommandSandbox(), "stat", "", root=str(tmp_path))
+    assert response["is_directory"]
+
+
 class FakeCubeSandbox:
     sandbox_id = "cube_1"
 

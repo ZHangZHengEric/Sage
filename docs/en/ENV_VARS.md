@@ -16,6 +16,12 @@ ref: v2-ENV_VARS
 
 | Variable | Default / role |
 | --- | --- |
+| `SAGE_SERVER_SANDBOX_PLUGIN` | `sage.sandbox.local-workspace`; explicitly select `sage.sandbox.cube-volume` for a single Server. |
+| `SAGE_SERVER_CUBE_API_URL` | Empty; Cube control-plane URL, required in Cube mode. |
+| `SAGE_SERVER_CUBE_TEMPLATE_ID` | Empty; Linux template ID, required in Cube mode. |
+| `SAGE_SERVER_CUBE_PROXY_NODE_IP` | Empty; data-plane proxy address, required in Cube mode. |
+| `SAGE_SERVER_CUBE_API_KEY` | Empty; Cube API credential, excluded from Run snapshots. |
+| `SAGE_SERVER_CUBE_VOLUME_DRIVER` | Empty; use Cube's default persistent volume driver or select one explicitly. |
 | `SAGE_SERVER_REDIS_URL` | Optional Redis URL for Session archival; requires MySQL. |
 | `SAGE_SERVER_SESSION_STORE_PLUGIN` | Unset: select MySQL or Redis/MySQL from configured URLs. `sage.session.redis-mysql` supports shared state across instances. |
 | `SAGE_SERVER_SCHEDULER_PLUGIN` | `sage.scheduler.ephemeral`; select `sage.scheduler.redis-distributed` explicitly for shared Run scheduling and `sage.job.redis-distributed`. Requires MySQL and Redis. Workspace files remain node-local. |

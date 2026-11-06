@@ -16,6 +16,12 @@ ref: v2-ENV_VARS
 
 | 变量 | 默认值 / 用途 |
 | --- | --- |
+| `SAGE_SERVER_SANDBOX_PLUGIN` | `sage.sandbox.local-workspace`；单 Server 可显式选择 `sage.sandbox.cube-volume`。 |
+| `SAGE_SERVER_CUBE_API_URL` | 默认空；Cube 模式必填的控制面地址。 |
+| `SAGE_SERVER_CUBE_TEMPLATE_ID` | 默认空；Cube 模式必填的 Linux 模板 ID。 |
+| `SAGE_SERVER_CUBE_PROXY_NODE_IP` | 默认空；Cube 模式必填的数据面代理地址。 |
+| `SAGE_SERVER_CUBE_API_KEY` | 默认空；Cube API 凭据，不写入 Run 配置快照。 |
+| `SAGE_SERVER_CUBE_VOLUME_DRIVER` | 默认空；使用 Cube 默认持久卷驱动，可显式指定。 |
 | `SAGE_SERVER_REDIS_URL` | 可选的 Session 归档 Redis 地址；需要同时配置 MySQL。 |
 | `SAGE_SERVER_SESSION_STORE_PLUGIN` | 默认未设置，按连接地址选择 MySQL 或 Redis/MySQL。`sage.session.redis-mysql` 支持多实例共享状态。 |
 | `SAGE_SERVER_SCHEDULER_PLUGIN` | 默认 `sage.scheduler.ephemeral`；显式设为 `sage.scheduler.redis-distributed` 时启用共享 Run 调度及 `sage.job.redis-distributed`，须同时配置 MySQL、Redis 地址。工作区文件仍为节点本地目录。 |

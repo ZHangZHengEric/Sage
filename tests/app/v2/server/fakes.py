@@ -203,6 +203,9 @@ class MemoryCatalogStore:
 
 
 class MemoryThreadIndex:
+    async def workspace_tenants(self, *, owner_id, agent_id):
+        return tuple(sorted({binding.tenant_id for binding in self._bindings.values()
+                             if binding.owner_id == owner_id and binding.agent_id == agent_id}))
     def __init__(self) -> None:
         self._threads: dict[str, ThreadRecord] = {}
         self._bindings = {}

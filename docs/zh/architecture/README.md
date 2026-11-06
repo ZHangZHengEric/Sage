@@ -47,3 +47,5 @@ flowchart TB
 ## 部署边界
 
 内置调度器和会话存储不构成分布式运行时。SQL 持久化、用户配额与 fencing 是不同的保证。Server 支持单 worker。本机进程执行不等于容器隔离，安全边界取决于所选 provider 实际执行的约束。
+
+- [Cube 外置工作区与执行](sagents-v2-cube-workspace.md)

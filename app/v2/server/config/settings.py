@@ -77,6 +77,12 @@ class ServerSettings:
     max_managed_applications: int = 32
     max_managed_builds: int = 4
     execution_shell_mode: str = "sandboxed"
+    sandbox_plugin: str = "sage.sandbox.local-workspace"
+    cube_api_url: str = ""
+    cube_template_id: str = ""
+    cube_proxy_node_ip: str = ""
+    cube_api_key: str | None = field(default=None, repr=False)
+    cube_volume_driver: str | None = None
     # Host-only ceiling; deliberately has no environment-variable binding.
     sandbox_network_mode: str = "unrestricted"
     linux_execution_uid: int | None = None
@@ -86,6 +92,17 @@ class ServerSettings:
     plugin_overrides: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
+        if self.sandbox_plugin not in {"sage.sandbox.local-workspace", "sage.sandbox.cube-volume"}:
+            raise ValueError("Unsupported Server sandbox_plugin")
+        if self.sandbox_plugin == "sage.sandbox.cube-volume":
+            from urllib.parse import urlsplit
+            endpoint = urlsplit(self.cube_api_url)
+            if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname or endpoint.username
+                    or endpoint.password or endpoint.query or endpoint.fragment
+                    or not self.cube_template_id or not self.cube_proxy_node_ip):
+                raise ValueError("Cube execution requires an API URL, template ID and proxy node IP")
+            if self.scheduler_plugin != "sage.scheduler.ephemeral":
+                raise ValueError("Cube execution currently requires a single Server with the ephemeral scheduler")
         if (len(self.jwt_secret.encode()) < 32 or self.jwt_secret == DEFAULT_JWT_SECRET
                 or self.jwt_secret.startswith("replace-with-")):
             raise ValueError("SAGE_SERVER_JWT_SECRET must be a private secret of at least 32 bytes")
@@ -210,6 +227,12 @@ class ServerSettings:
             max_managed_applications=int(_env("SAGE_SERVER_MAX_MANAGED_APPLICATIONS", "32")),
             max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
             execution_shell_mode=_choice_env("SAGE_SERVER_EXECUTION_SHELL_MODE", "sandboxed", frozenset({"ask", "sandboxed", "deny"})),
+            sandbox_plugin=_env("SAGE_SERVER_SANDBOX_PLUGIN", "sage.sandbox.local-workspace"),
+            cube_api_url=_env("SAGE_SERVER_CUBE_API_URL"),
+            cube_template_id=_env("SAGE_SERVER_CUBE_TEMPLATE_ID"),
+            cube_proxy_node_ip=_env("SAGE_SERVER_CUBE_PROXY_NODE_IP"),
+            cube_api_key=_env("SAGE_SERVER_CUBE_API_KEY") or None,
+            cube_volume_driver=_env("SAGE_SERVER_CUBE_VOLUME_DRIVER") or None,
             approval_timeout_seconds=int(_env("SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS", "86400")),
             linux_execution_uid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_UID")) else None,
             linux_execution_gid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_GID")) else None,

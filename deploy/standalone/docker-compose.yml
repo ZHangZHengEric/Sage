@@ -5,6 +5,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/images/Dockerfile.server_v2
+      args:
+        SAGE_INSTALL_CUBE: ${SAGE_INSTALL_CUBE:-false}
     image: sage-server:v2
     container_name: sage-server-v2
     volumes:

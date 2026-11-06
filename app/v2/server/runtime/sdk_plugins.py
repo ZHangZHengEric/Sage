@@ -174,6 +174,10 @@ def server_registrations(host):
         from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
         from app.v2.server.storage.workspaces import workspace_user
         run, command, frozen, user = await run_inputs(host, context, deps)
+        if host.settings.sandbox_plugin == "sage.sandbox.cube-volume":
+            # This service edits host-local capability files; remote workspace
+            # self-configuration needs its own storage adapter.
+            return None
         key_id, admitted = frozen_execution(command, catalog_agent_id=frozen.agent.id)
         if (run.command.parent_run_id or command.invocation_mode == "plan" or key_id is not None
                 or "server_v2.im" in command.config.metadata or admitted.shell == "deny"):
@@ -208,8 +212,18 @@ def server_registrations(host):
         factory=lambda context, deps: ServerWorkspaceBindingProvider(host, context.config, deps.require("session.store")),
         config_model=ServerExecutionBindingConfig,
     )
+    from app.v2.server.runtime.cube_binding import ServerCubeBindingConfig, ServerCubeBindingProvider
+    cube_binding = ExtensionRegistration(
+        descriptor=binding.descriptor.model_copy(update={
+            "plugin_id": "com.sage.server.execution-binding.cube-volume",
+            "name": "Server Cube workspace binding",
+            "config_schema": ServerCubeBindingConfig.model_json_schema(),
+        }),
+        factory=lambda context, deps: ServerCubeBindingProvider(host, context.config, deps.require("session.store")),
+        config_model=ServerCubeBindingConfig,
+    )
     return (
-        management, binding,
+        management, binding, cube_binding,
         run_registration("model.provider", model, dependencies=dependency),
         run_registration("skill.provider", skills, dependencies=dependency),
         run_registration("tool.provider", tools, dependencies=dependency),
@@ -249,6 +263,17 @@ def execution_selection(host, *, owner, agent_id, command, sandbox, settings=Non
     from sagents.v2.runtime.execution.configuration import LocalExecutionPolicy
     from sagents.v2.runtime.execution.sandbox import FileOperation
     settings = settings or host.settings
+    if settings.sandbox_plugin == "sage.sandbox.cube-volume":
+        from sagents.v2.runtime.execution.plugins.cube_binding import CubeExecutionPolicy
+        policy = CubeExecutionPolicy.model_validate({
+            "network": agent_network_policy(sandbox, settings).model_dump(mode="json"),
+            "process": SERVER_PROCESS_DEFAULTS,
+        })
+        if command is not None and command.invocation_mode == "plan":
+            policy = policy.narrow({"filesystem": {"allowed_operations": ["read", "list"]},
+                                    "process": {"read_only": True}})
+        return CapabilitySelection(plugin="com.sage.server.execution-binding.cube-volume", config={
+            "owner": owner, "agent_id": agent_id, "policy": policy.model_dump(mode="json")})
     raw = dict(settings.plugin_overrides.get("execution.binding", {}).get("config", {}))
     configured_policy = raw.pop("policy", {})
     policy = LocalExecutionPolicy.model_validate({

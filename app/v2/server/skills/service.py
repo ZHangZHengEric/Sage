@@ -331,6 +331,17 @@ class SkillCatalogService:
         """Copy-on-write into the tenant workspace. Catalog artifacts stay intact."""
 
         skill_name = normalize_skill_name(name)
+        if getattr(self, "workspace_storage", None) is not None:
+            inspect_skill_markdown(name=skill_name, content=content)
+            current = await skill_io(self.workspace_storage.skill_files, user_id, agent_id, skill_name)
+            if current is None:
+                source = await self._catalog_source(user_id, skill_name)
+                if source is None:
+                    raise ValueError("Skill is not bound")
+                package = await skill_io(inspect_skill_directory, source)
+                current = dict(package.files)
+            current["SKILL.md"] = (content if content.endswith("\n") else content + "\n").encode()
+            return await finish_skill_write(self.workspace_storage.write_skill, user_id, agent_id, skill_name, current)
         target = await skill_io(workspace_skill_path, self.data_root, user_id, agent_id, skill_name)
         source = None
         if not await skill_io(target.is_dir):
@@ -357,6 +368,15 @@ class SkillCatalogService:
         return target
 
     async def workspace_status(self, *, user_id: str, agent_id: str, name: str) -> str:
+        if getattr(self, "workspace_storage", None) is not None:
+            current = await skill_io(self.workspace_storage.skill_files, user_id, agent_id, name)
+            if current is None:
+                return "missing"
+            source = await self._catalog_source(user_id, name)
+            if source is None:
+                return "local"
+            package = await skill_io(inspect_skill_directory, source)
+            return "current" if current == package.files else "modified"
         target = await skill_io(workspace_skill_path, self.data_root, user_id, agent_id, name)
         if not await skill_io(target.is_dir):
             return "missing"

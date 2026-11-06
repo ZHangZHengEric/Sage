@@ -43,8 +43,10 @@ ENV SAGE_SERVER_LINUX_EXECUTION_UID=10001 \
     SAGE_SERVER_LINUX_EXECUTION_GID=10001
 
 # Cache runtime and build dependencies independently of application source.
+ARG SAGE_INSTALL_CUBE=false
 COPY pyproject.toml /tmp/sage-pyproject.toml
 RUN python - <<'PYTHON'
+import os
 import subprocess
 import sys
 import tomllib
@@ -56,6 +58,7 @@ subprocess.run([
     sys.executable, '-m', 'pip', 'install', '--no-cache-dir',
     'setuptools>=68', 'wheel', *project['dependencies'],
     *extras['server'], *extras['otel'],
+    *(extras['cube'] if os.environ.get('SAGE_INSTALL_CUBE') == 'true' else []),
 ], check=True)
 PYTHON
 

@@ -121,9 +121,8 @@ def import_workspace_file(paths: ServerPaths, tenant_id: str, agent_id: str,
         os.close(root)
 
 
-def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
-                           directory: str, encoded_files: dict[str, str]) -> int:
-    """Create missing files; retries accept identical files and reject conflicting data."""
+def decode_workspace_files(directory: str, encoded_files: dict[str, str]):
+    """Validate an import completely before either storage backend writes files."""
     root_parts = workspace_parts(directory)
     if len(encoded_files) > MAX_FILES:
         raise ValueError("too many workspace files")
@@ -141,6 +140,13 @@ def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
         if len(data) > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
             raise ValueError("workspace file quota exceeded")
         decoded[parts] = data
+    return root_parts, decoded
+
+
+def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
+                           directory: str, encoded_files: dict[str, str]) -> int:
+    """Create missing files; retries accept identical files and reject conflicting data."""
+    root_parts, decoded = decode_workspace_files(directory, encoded_files)
     root = paths.workspace_dir(tenant_id, agent_id)
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:

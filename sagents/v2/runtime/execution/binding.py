@@ -75,6 +75,10 @@ class RunExecutionBinding:
 
     async def initialize_workspace(self, initializer):
         """Apply the selected initializer to the host-bound workspace."""
+        remote = getattr(self.sandbox, "initialize_workspace", None)
+        if callable(remote):
+            await remote(initializer)
+            return
         if self.host_workspace is not None:
             from pathlib import Path
             import inspect

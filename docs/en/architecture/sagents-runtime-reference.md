@@ -678,6 +678,20 @@ Provides: `derived-state.store:default` (API `2`)。
 
 No fixed configuration fields; consult the public schema for additional parameters.
 
+### sage.execution.binding.cube-volume
+
+Optional external workspace and execution binding. Each workspace identity maps to a persistent
+Cube Volume; Runs own separate compute that is released while workspace files remain.
+Requires the `cube` extra and is disabled by default.
+
+Version: `1.0.0`; scope: process; provides `execution.binding:default` (API `2`).
+
+Configuration includes `workspace_user_id`, `agent_id`, `api_url`, `template_id`, `proxy_node_ip`,
+and optional `api_key`, `volume_driver`, `policy`, and `child_workspace_policy`.
+The public plugin schema defines field validation. Server uses a host adapter constrained by
+authenticated identities. See [Cube external workspace and execution](sagents-v2-cube-workspace.md)
+for deployment and current limits.
+
 ### sage.execution.binding.ephemeral
 
 Independent virtual files with explicit process-local recovery limits.

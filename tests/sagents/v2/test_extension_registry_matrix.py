@@ -112,6 +112,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.workspace.initializer.bare",
         "sage.workspace.initializer.claw",
         "sage.execution.binding.local-workspace",
+        "sage.execution.binding.cube-volume",
         "sage.execution.binding.ephemeral",
         "sage.execution.environment",
         "sage.execution.tool-runtime",

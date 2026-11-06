@@ -119,6 +119,11 @@ class ServerHost:
             self.catalog,
         )
         self.execution = ProcessExecution(fallback_model=model_provider)
+        self.workspace_storage = None
+        if settings.sandbox_plugin == "sage.sandbox.cube-volume":
+            from app.v2.server.storage.cube_workspaces import CubeWorkspaceStorage
+            self.workspace_storage = CubeWorkspaceStorage(self)
+        self.skill_catalog.workspace_storage = self.workspace_storage
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._background_closing = False

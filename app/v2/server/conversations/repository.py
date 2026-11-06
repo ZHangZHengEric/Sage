@@ -17,6 +17,7 @@ from app.v2.server.conversations.records import (
 
 
 class ThreadIndex(Protocol):
+    async def workspace_tenants(self, *, owner_id: str, agent_id: str) -> tuple[str, ...]: ...
     async def binding(self, session_id: str) -> SessionBinding | None: ...
     async def bind(self, binding: SessionBinding) -> None: ...
     async def page(self, *, user_id: str | None = None, limit: int = 50, cursor: str | None = None, search: str = "", agent_id: str = "", matching_agent_ids: tuple[str, ...] = (), include_unassigned: bool = False) -> ThreadPage: ...
@@ -40,6 +41,12 @@ class ThreadIndex(Protocol):
 class DatabaseThreadIndex:
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    async def workspace_tenants(self, *, owner_id, agent_id):
+        async with self.database.session() as session:
+            rows = await session.scalars(select(SessionBindingRow.tenant_id).where(
+                SessionBindingRow.owner_id == owner_id, SessionBindingRow.agent_id == agent_id).distinct())
+            return tuple(sorted(rows))
 
     async def binding(self, session_id: str) -> SessionBinding | None:
         async with self.database.session() as session:

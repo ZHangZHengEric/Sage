@@ -394,7 +394,11 @@ class InteractionReply(BaseModel):
 async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep, service: ConversationDep):
     try:
         async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
-            count = await finish_file_operation(import_workspace_files, host.paths,
+            if host.workspace_storage is not None:
+                count = await finish_file_operation(host.workspace_storage.import_files,
+                    caller.tenant_id, caller.agent_id, body.directory, body.files)
+            else:
+                count = await finish_file_operation(import_workspace_files, host.paths,
                                                 caller.tenant_id, caller.agent_id,
                                                 body.directory, body.files)
     except FileExistsError as exc:
@@ -422,8 +426,12 @@ async def put_workspace_file(request: Request, caller: CallerDep, host: HostDep,
                 await finish_file_operation(source.write, chunk)
             await finish_file_operation(source.seek, 0)
             async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
-                await finish_file_operation(import_workspace_file, host.paths,
-                                            caller.tenant_id, caller.agent_id, path, source)
+                if getattr(host, "workspace_storage", None) is not None:
+                    await finish_file_operation(host.workspace_storage.import_file,
+                        caller.tenant_id, caller.agent_id, path, source)
+                else:
+                    await finish_file_operation(import_workspace_file, host.paths,
+                                                caller.tenant_id, caller.agent_id, path, source)
     except FileExistsError as exc:
         raise _error("workspace_conflict", ErrorCategory.CONFLICT,
                      "workspace file conflicts with existing data") from exc
@@ -447,9 +455,13 @@ async def delete_workspace_files(caller: CallerDep, host: HostDep,
     async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
         await require_idle(service, caller.tenant_id, caller.agent_id, owner_id=caller.api_key.owner_user_id)
         try:
-            deleted = await finish_file_operation(
-                delete_workspace_path, host.paths, caller.tenant_id,
-                caller.agent_id, path, recursive=recursive)
+            if host.workspace_storage is not None:
+                deleted = await finish_file_operation(host.workspace_storage.delete_path,
+                    caller.tenant_id, caller.agent_id, path, recursive=recursive)
+            else:
+                deleted = await finish_file_operation(
+                    delete_workspace_path, host.paths, caller.tenant_id,
+                    caller.agent_id, path, recursive=recursive)
         except OSError as exc:
             if exc.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
                 status, code = 403, "workspace_permission_denied"
@@ -546,10 +558,15 @@ async def download_run_files(thread_id: str, run_id: str, caller: CallerDep,
         service, tenant_id=caller.tenant_id, agent_id=caller.agent_id,
         thread_id=thread_id, run_id=run_id,
     )
-    root = host.paths.workspace_path(caller.tenant_id, caller.agent_id)
-    prepared = await file_operation(prepare_download, root, directory,
-                                    max_bytes=32 << 20, max_entries=512,
-                                    exclude_root_entry=exclude)
+    if host.workspace_storage is not None:
+        prepared = await file_operation(host.workspace_storage.prepare_download,
+            caller.tenant_id, caller.agent_id, directory, max_bytes=32 << 20, max_entries=512,
+            exclude_root_entry=exclude)
+    else:
+        root = host.paths.workspace_path(caller.tenant_id, caller.agent_id)
+        prepared = await file_operation(prepare_download, root, directory,
+                                        max_bytes=32 << 20, max_entries=512,
+                                        exclude_root_entry=exclude)
     try:
         # A newer run may have started while the archive was being built.
         await access.current_run_workspace(

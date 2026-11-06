@@ -49,26 +49,24 @@ async def sync_bound_agent_skills(host, *, owner_id: str, agent_id: str) -> dict
         await host.catalog.get_agent(owner_id, agent_id)
         records = await host.skill_catalog.bound_skills(owner_user_id=owner_id, agent_id=agent_id)
         try:
-            tenants = await skill_io(discover_agent_workspaces, Path(host.paths.data_root), agent_id)
+            tenants = await _workspace_tenants(host, owner_id, agent_id)
         except Exception as exc:
             return _response(False, [{"name": record.name, **_failure(exc)} for record in records])
         results = []
         for record in records:
             try:
-                result = await _sync_bound_skill(host, record, agent_id, tenants)
+                result = await _sync_bound_skill(host, record, agent_id, tenants, owner_id=owner_id)
                 results.append({"name": record.name, "success": True, **result})
             except Exception as exc:
                 results.append({"name": record.name, **_failure(exc)})
         return _response(False, results)
 
 
-async def _sync_bound_skill(host, record, agent_id: str, tenants: tuple[str, ...]) -> dict:
+async def _sync_bound_skill(host, record, agent_id: str, tenants: tuple[str, ...], *, owner_id: str) -> dict:
     package = await skill_io(lambda: inspect_skill_directory(record.absolute_path(host.paths.data_root)))
     if package.package_sha256 != record.package_sha256:
         raise ValueError("Skill artifact no longer matches its catalog version")
-    workspace = await finish_skill_write(
-        sync_workspaces, Path(host.paths.data_root), agent_id, {record.name: package.files}, tenants=tenants,
-    )
+    workspace = await _sync_workspaces(host, owner_id, agent_id, {record.name: package.files}, tenants)
     return {"changed": workspace["changed_workspaces"] > 0, "workspaces": workspace["workspaces"]}
 
 
@@ -90,7 +88,7 @@ async def sync_agent_guidance(host, *, owner_id: str, agent_id: str, prompt: str
         if prompt_changed:
             await host.catalog.update_agent_instructions(owner_id, agent_id, prompt)
         try:
-            tenants = await skill_io(discover_agent_workspaces, Path(host.paths.data_root), agent_id)
+            tenants = await _workspace_tenants(host, owner_id, agent_id)
         except Exception as exc:
             return _response(prompt_changed, [{"filename": filename, **_failure(exc)} for filename, _ in files])
         results = []
@@ -123,12 +121,32 @@ async def _sync_one_skill(host, *, owner_id: str, agent_id: str,
         record = await host.skill_catalog.publish_package(package, owner_user_id=owner_id)
         if name not in agent["skills"]:
             await host.catalog.bind_agent_skills(owner_id, agent_id, [*agent["skills"], name])
-    workspace = await finish_skill_write(
-        sync_workspaces, Path(host.paths.data_root), agent_id, {name: package.files}, tenants=tenants,
-    )
+    workspace = await _sync_workspaces(host, owner_id, agent_id, {name: package.files}, tenants)
     current = await host.catalog.get_agent(owner_id, agent_id)
     if name not in current["skills"] or record.package_sha256 != package.package_sha256:
         raise RuntimeError("Skill synchronization verification failed")
     return {"name": name, "changed": previous is None or previous.version_id != record.version_id
             or name not in agent["skills"] or workspace["changed_workspaces"] > 0,
             "workspaces": workspace["workspaces"]}
+
+
+async def _workspace_tenants(host, owner, agent):
+    if getattr(host, "workspace_storage", None) is None:
+        return await skill_io(discover_agent_workspaces, Path(host.paths.data_root), agent)
+    return tuple(sorted({owner, *await host.threads.workspace_tenants(owner_id=owner, agent_id=agent)}))
+
+
+async def _sync_workspaces(host, owner, agent, packages, tenants):
+    if getattr(host, "workspace_storage", None) is None:
+        return await finish_skill_write(sync_workspaces, Path(host.paths.data_root), agent, packages, tenants=tenants)
+    from app.v2.server.conversations.cleanup import require_idle
+    changed = 0
+    for tenant in tenants:
+        async with host.conversations.runs.workspace_guard(tenant, agent):
+            await require_idle(host.conversations, tenant, agent, owner_id=owner)
+            for name, files in packages.items():
+                current = await skill_io(host.workspace_storage.skill_files, tenant, agent, name)
+                if current != files:
+                    await finish_skill_write(host.workspace_storage.replace_skill, tenant, agent, name, files)
+                    changed += 1
+    return {"workspaces": len(tenants), "changed_workspaces": changed}

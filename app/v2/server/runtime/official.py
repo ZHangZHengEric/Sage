@@ -44,6 +44,12 @@ def file_sandbox_registrations(settings):
     grants = service_registration("server.file-grants", issuer)
     template = service_registration("server.file-sandbox", None, ownership="owned")
     async def create(context, deps):
+        if settings.sandbox_plugin == "sage.sandbox.cube-volume":
+            from sagents.v2.runtime.execution.sandbox.plugins.cube import CubeVolumeSandboxProvider
+            return CubeVolumeSandboxProvider(deps.require("server.file-grants").verification_key,
+                api_url=settings.cube_api_url, template_id=settings.cube_template_id,
+                proxy_node_ip=settings.cube_proxy_node_ip, api_key=settings.cube_api_key,
+                volume_driver=settings.cube_volume_driver)
         provider = LocalWorkspaceSandboxProvider(
             deps.require("server.file-grants").verification_key,
             linux_execution_uid=settings.linux_execution_uid,

@@ -91,6 +91,9 @@ async def workspace_files(user: ReadUser, caller: CurrentUser, host: HostDep,
                           path: str = Query(default="", max_length=4096),
                           thread_id: str | None = Query(default=None, min_length=1, max_length=256),
                           agent_id: str | None = Query(default=None, min_length=1, max_length=256)):
+    if host.workspace_storage is not None:
+        owner, selected = await workspace_identity(host, caller, user, thread_id, agent_id)
+        return success(await file_operation(host.workspace_storage.list_directory, owner, selected, path))
     root = await workspace_root(host, caller, user, thread_id, agent_id)
     if not root.exists() and not path:
         return success([])
@@ -102,6 +105,9 @@ async def workspace_download(user: ReadUser, caller: CurrentUser, host: HostDep,
                              path: str = Query(default="", max_length=4096),
                              thread_id: str | None = Query(default=None, min_length=1, max_length=256),
                           agent_id: str | None = Query(default=None, min_length=1, max_length=256)):
+    if host.workspace_storage is not None:
+        owner, selected = await workspace_identity(host, caller, user, thread_id, agent_id)
+        return download_response(await file_operation(host.workspace_storage.prepare_download, owner, selected, path))
     root = await workspace_root(host, caller, user, thread_id, agent_id)
     return download_response(await file_operation(prepare_download, root, path))
 
@@ -122,8 +128,12 @@ async def workspace_delete(user: CurrentUser, host: HostDep, service: Conversati
     async with service.runs.workspace_guard(owner_id, agent_id):
         await require_idle(service, owner_id, agent_id, owner_id=user.user_id)
         try:
-            deleted = await finish_file_operation(
-                delete_workspace_path, host.paths, owner_id, agent_id, path, recursive=recursive)
+            if host.workspace_storage is not None:
+                deleted = await finish_file_operation(host.workspace_storage.delete_path,
+                    owner_id, agent_id, path, recursive=recursive)
+            else:
+                deleted = await finish_file_operation(
+                    delete_workspace_path, host.paths, owner_id, agent_id, path, recursive=recursive)
         except OSError as exc:
             if exc.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
                 status, code = 403, "workspace_permission_denied"

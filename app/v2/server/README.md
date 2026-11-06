@@ -1,5 +1,7 @@
 # Sage Server
 
+可选启用单 Server 的 [Cube 外置工作区与执行](../../../docs/zh/architecture/sagents-v2-cube-workspace.md)；默认仍使用本地沙箱。
+
 [code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
 
 

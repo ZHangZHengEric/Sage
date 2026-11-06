@@ -12,19 +12,18 @@ import hashlib
 import hmac
 import json
 import re
-import shlex
-import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 import importlib
+from uuid import uuid4
 
-from sagents.v2.contracts.common import new_id, utc_now
+from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.execution.sandbox.plugins._shared.admission import validate_resource_support
 from sagents.v2.runtime.execution.sandbox.contracts import (
     MUTATING_FILE_OPERATIONS, FileOperation, FileStat, FileSystemMode,
-    IsolationLevel, NetworkMode, ProcessCapabilities, ProcessResult,
+    IsolationLevel, NetworkMode, ProcessCapabilities,
     ResourceLimitCapabilities, SandboxCapabilities, SandboxRef,
     SandboxDurability, SandboxReleaseDisposition, SandboxReleaseReceipt, SandboxSnapshot,
     SandboxState, TerminateMode,
@@ -33,6 +32,7 @@ from sagents.v2.runtime.execution.sandbox.plugins.cube.files import (
     cube_file_call,
     relative_parts,
 )
+from sagents.v2.runtime.execution.sandbox.plugins.cube.process import run_cube_process
 
 
 def cube_volume_name(user_id: str, agent_id: str, *, private_run_id: str | None = None) -> str:
@@ -55,7 +55,10 @@ class CubeVolumeClient:
                  api_key: str | None = None, volume_driver: str | None = None):
         if not api_url or not template_id or not proxy_node_ip:
             raise ValueError("Cube API URL, template ID and proxy node IP are required")
-        sdk = importlib.import_module("cubesandbox")
+        try:
+            sdk = importlib.import_module("cubesandbox")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("Cube execution requires the optional dependency: install '.[cube]'") from exc
         Config, Sandbox, Volume = sdk.Config, sdk.Sandbox, sdk.Volume
         VolumeNotFoundError = importlib.import_module("cubesandbox._exceptions").VolumeNotFoundError
 
@@ -86,16 +89,20 @@ class CubeVolumeClient:
                 raise RuntimeError("Cube returned an unexpected Volume ID")
             return created
 
-    def create_sandbox(self, name: str, *, timeout: int | None = None):
+    def create_sandbox(self, name: str, *, timeout: int | None = None,
+                       read_only: bool = False, network: str = "none"):
         volume = self.ensure_volume(name)
+        if read_only:
+            mount = importlib.import_module("cubesandbox").VolumeMount
+            volume = mount(volume, read_only=True)
         # Cube documents 0.0.0.0/0 as its full-deny egress rule.
         return self.sandbox_class.create(
             template=self.template_id,
             timeout=timeout,
             config=self.config,
             volume_mounts={"/workspace": volume},
-            allow_internet_access=False,
-            network={"deny_out": ["0.0.0.0/0"]},
+            allow_internet_access=network == "unrestricted",
+            network={"deny_out": ["0.0.0.0/0"]} if network == "none" else {},
         )
 
 
@@ -189,7 +196,7 @@ class _CubeProcess:
     async def run(self, request, *, intent, grant):
         self.provider._verify(self.row, "process.run", intent, grant)
         policy = self.row.spec.process
-        if not policy.enabled or policy.read_only:
+        if not policy.enabled:
             raise PermissionError("process execution is disabled")
         if (intent.argv != request.argv or intent.executable != request.argv[0]
                 or intent.path != request.cwd
@@ -211,19 +218,8 @@ class _CubeProcess:
         async with self.row.process_slots:
             if self.row.state != SandboxState.READY:
                 raise PermissionError("sandbox is not ready")
-            started = time.monotonic()
-            result = await asyncio.to_thread(
-                self.row.sandbox.commands.run, shlex.join(request.argv),
-                cwd=cwd, envs=request.env, timeout=timeout,
-            )
-        stdout, stderr = result.stdout.encode(), result.stderr.encode()
-        limit = policy.max_output_bytes
-        truncated = len(stdout) + len(stderr) > limit
-        return ProcessResult(
-            process_id=new_id("process"), argv=request.argv, exit_code=result.exit_code,
-            stdout=stdout[:limit], stderr=stderr[:max(0, limit-len(stdout))],
-            duration_seconds=time.monotonic()-started, truncated=truncated,
-        )
+            return await run_cube_process(self.row.sandbox, request.argv, cwd=cwd,
+                env=request.env, timeout=timeout, max_output_bytes=policy.max_output_bytes)
 
 
 class _CubeNoNetwork:
@@ -268,6 +264,7 @@ class CubeVolumeSandboxProvider:
                  api_url: str = "", template_id: str = "", proxy_node_ip: str = "",
                  api_key: str | None = None, volume_driver: str | None = None):
         self.verification_key = verification_key
+        self.process_instance = uuid4().hex
         self.client = client or CubeVolumeClient(
             api_url=api_url, template_id=template_id, proxy_node_ip=proxy_node_ip,
             api_key=api_key, volume_driver=volume_driver,
@@ -280,7 +277,7 @@ class CubeVolumeSandboxProvider:
         return SandboxCapabilities(
             isolation_level=IsolationLevel.VM, os="linux", architectures=("native",),
             filesystem_modes=frozenset({FileSystemMode.WORKSPACE}),
-            network_modes=frozenset({NetworkMode.NONE}),
+            network_modes=frozenset({NetworkMode.NONE, NetworkMode.UNRESTRICTED}),
             process=ProcessCapabilities(available=True, supports_argv=True, supports_shell=True,
                                         supports_stdio=False),
             resources=ResourceLimitCapabilities(wall_time=True),
@@ -295,16 +292,18 @@ class CubeVolumeSandboxProvider:
         validate_resource_support(spec, await self.capabilities())
         if spec.workspace_root != "/workspace" or spec.filesystem_mode != FileSystemMode.WORKSPACE:
             raise ValueError("Cube Volume sandbox requires /workspace and workspace mode")
-        if spec.network.mode != NetworkMode.NONE or spec.mounts:
-            raise ValueError("Cube Volume sandbox supports only a Volume mount with no egress")
-        if spec.process.read_only or spec.process.allow_background_jobs:
+        if spec.network.mode not in {NetworkMode.NONE, NetworkMode.UNRESTRICTED} or spec.mounts:
+            raise ValueError("Cube Volume sandbox supports only a Volume mount and none/unrestricted network")
+        if spec.network.mode == NetworkMode.UNRESTRICTED and spec.network.deny_private_networks:
+            raise ValueError("Cube unrestricted network cannot enforce private-network filtering")
+        if spec.process.allow_background_jobs:
             raise ValueError("Cube SDK cannot enforce this process policy")
         if spec.filesystem.max_total_bytes is not None:
             raise ValueError("Cube Volume provider cannot enforce an aggregate workspace byte limit")
         if (spec.filesystem.max_file_bytes is not None
                 and spec.filesystem.max_file_bytes > 8 * 1024 * 1024):
             raise ValueError("Cube Volume file API supports files up to 8 MiB")
-        if spec.filesystem.protected_paths and spec.process.enabled:
+        if spec.filesystem.protected_paths and spec.process.enabled and not spec.process.read_only:
             raise ValueError("writable processes cannot enforce protected file paths")
         if spec.lifecycle.durability != SandboxDurability.DURABLE_EXTERNAL:
             raise ValueError("Cube Volume workspace requires durable_external lifecycle")
@@ -318,14 +317,26 @@ class CubeVolumeSandboxProvider:
             raise ValueError("trusted Cube Agent identity is required")
         if private_run_id is not None and private_run_id != run_id:
             raise ValueError("private Cube workspace must belong to this Run")
-        name = cube_volume_name(
-            context.actor.principal_id, agent_id, private_run_id=private_run_id
-        )
+        workspace_user = spec.metadata.get("cube_workspace_user_id", context.actor.principal_id)
+        scope = spec.metadata.get("cube_workspace_scope") or private_run_id
+        name = cube_volume_name(workspace_user, agent_id, private_run_id=scope)
         if spec.metadata.get("cube_volume_name") not in {None, name}:
             raise PermissionError("Cube Volume name does not match signed workspace identity")
-        sandbox = await asyncio.to_thread(
-            self.client.create_sandbox, name, timeout=spec.lifecycle.idle_ttl_seconds
-        )
+        options = {"timeout": spec.lifecycle.idle_ttl_seconds}
+        if spec.process.read_only:
+            options["read_only"] = True
+        if spec.network.mode == NetworkMode.UNRESTRICTED:
+            options["network"] = "unrestricted"
+        create = asyncio.create_task(asyncio.to_thread(self.client.create_sandbox, name, **options))
+        try:
+            sandbox = await asyncio.shield(create)
+        except asyncio.CancelledError:
+            from sagents.v2.runtime.execution.sandbox.plugins.cube.process import _settle
+            from anyio import CancelScope
+            with CancelScope(shield=True):
+                sandbox = await _settle(create)
+                await _settle(asyncio.create_task(asyncio.to_thread(sandbox.kill)))
+            raise
         now = utc_now()
         ref = SandboxRef(
             sandbox_id=sandbox.sandbox_id, provider_id=self.provider_id,
@@ -383,7 +394,12 @@ class CubeVolumeSandboxProvider:
             return
         row.state = SandboxState.LOST
         try:
-            await asyncio.to_thread(row.sandbox.kill)
+            def destroy():
+                row.sandbox.kill()
+                close = getattr(row.sandbox, "close", None)
+                if close is not None:
+                    close()
+            await asyncio.to_thread(destroy)
         except BaseException:
             row.state = SandboxState.LOST
             raise
@@ -400,6 +416,19 @@ class CubeVolumeSandboxProvider:
         self._used_nonces = {nonce: expiry for nonce, expiry in self._used_nonces.items()
                              if expiry > now}
         self._receipts = {key: value for key, value in self._receipts.items() if key[0] != ref.sandbox_id}
+
+    async def close(self):
+        async def dispose(row):
+            if row.state != SandboxState.TERMINATED:
+                await self.terminate(row.ref, TerminateMode.FORCE)
+            if row.attached_clients == 0:
+                await self.purge_terminated(row.ref)
+        results = await asyncio.gather(
+            *(dispose(row) for row in tuple(self._rows.values())), return_exceptions=True,
+        )
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise RuntimeError("Cube compute cleanup failed") from errors[0]
 
     def _row(self, ref):
         row = self._rows.get(ref.sandbox_id)
