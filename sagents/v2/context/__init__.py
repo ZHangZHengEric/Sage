@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from sagents.v2.context.plugins.summary_ephemeral import InMemoryConversationSummaryStore as InMemoryConversationSummaryStore
     from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer as ModelConversationSummarizer
     from sagents.v2.context.plugins.persistent_reducer import PersistentSummaryContextReducer as PersistentSummaryContextReducer
+    from sagents.v2.context.plugins.summary_only import SummaryOnlyContextReducer as SummaryOnlyContextReducer
     from sagents.v2.context.runtime_metadata import RunMetadataContextProvider as RunMetadataContextProvider
     from sagents.v2.context.plugins.summary_session import SessionDerivedConversationSummaryStore as SessionDerivedConversationSummaryStore
     from sagents.v2.context.session_history import SessionEventModelProjector as SessionEventModelProjector
@@ -82,6 +83,10 @@ _EXPORTS = {
         "sagents.v2.context.plugins.persistent_reducer",
         "PersistentSummaryContextReducer",
     ),
+    "SummaryOnlyContextReducer": (
+        "sagents.v2.context.plugins.summary_only",
+        "SummaryOnlyContextReducer",
+    ),
     "RunMetadataContextProvider": (
         "sagents.v2.context.runtime_metadata",
         "RunMetadataContextProvider",
@@ -130,6 +135,7 @@ __all__ = [
     "InMemoryConversationSummaryStore",
     "ModelConversationSummarizer",
     "PersistentSummaryContextReducer",
+    "SummaryOnlyContextReducer",
     "RunMetadataContextProvider",
     "SessionDerivedConversationSummaryStore",
     "SessionEventModelProjector",

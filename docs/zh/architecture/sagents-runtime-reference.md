@@ -293,7 +293,7 @@ scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离
 | `session-memory.provider` | `sage.session-memory.sqlite-bm25` | `root=R/session-memory`；会话记忆索引 |
 | `skill.loading` | `sage.skill.loading.lazy` | 按需激活 Skill，默认活动内容上限 24000 字符 |
 | `agent.continuation-policy` | `sage.agent.continuation.llm-judge` | 模型判断后续执行/结束 |
-| `context.reducer` | `sage.context.reducer.persistent-summary` | 持久化摘要压缩上下文 |
+| `context.reducer` | `sage.context.reducer.summary-only` | 持久化摘要压缩上下文，不将工具正文替换成引用 |
 | `context.summarizer` | `sage.context.summarizer.model` | 主模型生成摘要 |
 | `context.summary-store` | `sage.context.summary-store.session-derived` | 使用会话派生状态存摘要 |
 | `memory.recall-query` | `sage.memory.recall-query.llm` | 模型生成记忆检索查询 |
@@ -326,7 +326,7 @@ capabilities:
     plugin: sage.observability.local
     config: {log_stream: stderr, log_level: debug, log_format: json}
   context.reducer:
-    plugin: sage.context.reducer.persistent-summary
+    plugin: sage.context.reducer.summary-only
     config: {summary_target_tokens: 1536, protected_recent_units: 6}
   execution.scheduler:
     plugin: sage.scheduler.filesystem
@@ -537,6 +537,19 @@ Summarizes complete history only after API rejection or reported usage reaches a
 | `max_summary_source_tokens` | `integer` | 否 | `24000` | `{"minimum":1}` |
 
 `max_summary_source_tokens` 作为已有配置字段被 schema 接受；当前内置 reducer 工厂不以它控制输入长度。需要配置摘要源预算时，使用所选 summarizer 能力的正式参数。
+
+### sage.context.reducer.summary-only
+
+与 `sage.context.reducer.persistent-summary` 使用相同的配置、摘要存储、摘要生成器和压力触发条件，
+但不会将工具结果正文替换成引用。摘要成功后持久保存历史覆盖范围，后续请求继续复用。
+摘要范围选择及恢复行为保持一致。此插件是默认上下文压缩器，显式指定的其他插件保持不变。
+
+```yaml
+capabilities:
+  context.reducer:
+    plugin: sage.context.reducer.summary-only
+    scope: run
+```
 
 ### sage.context.reducer.window
 

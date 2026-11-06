@@ -8,7 +8,7 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 
 AGENT_DEFAULTS = {
     "context.summarizer": "sage.context.summarizer.model",
-    "context.reducer": "sage.context.reducer.persistent-summary",
+    "context.reducer": "sage.context.reducer.summary-only",
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
     "tool.selection-policy": "sage.tool-selection.llm",
     "tool.result-processor": "sage.tool.result-processor.file",

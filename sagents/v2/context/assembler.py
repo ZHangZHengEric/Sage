@@ -23,8 +23,8 @@ from sagents.v2.context.contracts import (
     ContextSegmentProvider,
     ContextStability,
 )
-from sagents.v2.context.plugins.persistent_reducer import (
-    PersistentSummaryContextReducer,
+from sagents.v2.context.plugins.summary_only import (
+    SummaryOnlyContextReducer,
 )
 from sagents.v2.context.plugins.summary_ephemeral import (
     InMemoryConversationSummaryStore,
@@ -131,7 +131,7 @@ class DefaultContextAssembler:
         self.budget = budget
         self._compression_requested = {}
         self._projection_signatures = OrderedDict()
-        self.reducer = reducer or PersistentSummaryContextReducer(
+        self.reducer = reducer or SummaryOnlyContextReducer(
             InMemoryConversationSummaryStore()
         )
         self.history = (

@@ -434,7 +434,11 @@ async def test_latest_real_user_and_everything_after_it_are_never_summarized():
 
 
 @pytest.mark.asyncio
-async def test_oversized_protected_tool_unit_uses_explicit_durable_reference():
+@pytest.mark.parametrize("protected_recent_units", [1, 2, 4, 8])
+@pytest.mark.parametrize("parallel_results", [1, 3])
+async def test_references_compact_old_batches_and_preserve_recent_bodies(
+    protected_recent_units, parallel_results
+):
     call = ModelToolCall(tool_call_id="call_large", name="read_large", arguments={})
     source = (
         ModelMessage(role="user", content=(TextBlock(text="inspect it"),)),
@@ -451,8 +455,30 @@ async def test_oversized_protected_tool_unit_uses_explicit_durable_reference():
             },
         ),
     )
+    old_batch = source[1:]
+    recent_batches = []
+    for index in range(protected_recent_units):
+        calls = tuple(
+            ModelToolCall(tool_call_id=f"recent_{index}_{n}", name="read", arguments={})
+            for n in range(parallel_results)
+        )
+        recent_batches.append((
+            ModelMessage(role="assistant", tool_calls=calls),
+            *(ModelMessage(
+                role="tool",
+                tool_call_id=call.tool_call_id,
+                content=(TextBlock(text=f"latest body {call.tool_call_id} " * 500),),
+                metadata={"context_reference": {"uri": f"artifact://{call.tool_call_id}"}},
+            ) for call in calls),
+        ))
+    recent = tuple(message for batch in recent_batches for message in batch)
+    source = (*source, *recent)
+    original = tuple(message.model_dump_json() for message in source)
+    summarizer = RecordingSummarizer()
     reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(), protected_recent_units=2
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        protected_recent_units=protected_recent_units,
     )
 
     projection = await reducer.reduce(
@@ -462,11 +488,14 @@ async def test_oversized_protected_tool_unit_uses_explicit_durable_reference():
     )
 
     assert projection.strategy == "reference_compaction"
-    assert projection.historical_messages == (source[-1],)
-    assert projection.messages[-1].metadata["context_compacted_to_reference"]
+    assert projection.historical_messages == (old_batch[-1],)
+    assert projection.messages[2].metadata["context_compacted_to_reference"]
     assert "artifact://tool-result/call_large" in (
-        projection.messages[-1].content[0].text
+        projection.messages[2].content[0].text
     )
+    assert projection.messages[-len(recent):] == recent
+    assert not summarizer.requests
+    assert tuple(message.model_dump_json() for message in source) == original
 
 
 def _summary_completion(text: str) -> ModelStreamEvent:

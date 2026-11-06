@@ -881,6 +881,27 @@ test('capability parameters and change preview reflect draft configuration inste
   assert.match(html, /本次变更/)
 })
 
+test('summary-only default retains the summarizer dependency and hides the unused source limit', async t => {
+  const { mount } = await setup(t, 'PluginConfig', 'components')
+  const reducer = 'sage.context.reducer.summary-only'
+  const state = await mount({ catalogData: {
+    configurable: ['context.reducer', 'context.summarizer'],
+    defaults: { 'context.reducer': reducer, 'context.summarizer': 'sage.context.summarizer.model' },
+    plugins: [
+      { id: reducer, capabilities: ['context.reducer'], schema: { properties: {
+        summary_target_tokens: { type: 'integer', default: 1024 },
+        max_summary_source_tokens: { type: 'integer', default: 24000 },
+      } } },
+      { id: 'sage.context.summarizer.model', capabilities: ['context.summarizer'], schema: {} },
+    ],
+  } })
+  state.active = 'context.reducer'
+  assert.equal(state.current.id, reducer)
+  assert.ok(state.links.some(([from, to]) => from === 'context.reducer' && to === 'context.summarizer'))
+  assert.ok('summary_target_tokens' in state.parameterSchema.properties)
+  assert.ok(!('max_summary_source_tokens' in state.parameterSchema.properties))
+})
+
 test('agent configuration starts at the first tab and continuous scrolling includes the canvas', async t => {
   const { mount, Component } = await setup(t, 'AgentEditor', 'components')
   const props = { agentId: 'existing', form: { name: 'Agent', tools: [], execution_policy: { shell: 'ask' } } }

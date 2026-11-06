@@ -21,7 +21,7 @@ const currentNode = computed(() => nodes.value.find(node => node.id === active.v
 const current = computed(() => effective(active.value))
 const parameterSchema = computed(() => {
   const schema = current.value.definition?.schema || {}
-  const hidden = new Set(current.value.id === 'sage.context.reducer.persistent-summary' ? ['max_summary_source_tokens'] : [])
+  const hidden = new Set(['sage.context.reducer.persistent-summary', 'sage.context.reducer.summary-only'].includes(current.value.id) ? ['max_summary_source_tokens'] : [])
   if (active.value === 'tool.selection-policy' && current.value.id !== 'sage.tool-selection.llm') hidden.add('model_timeout_seconds')
   return { ...schema, properties: Object.fromEntries(Object.entries(schema.properties || {}).filter(([key]) => !hidden.has(key))) }
 })
@@ -29,7 +29,7 @@ const options = computed(() => catalog.value?.plugins?.filter(plugin => plugin.c
 const explanation = computed(() => pluginExplanation(current.value.definition || current.value.id, current.value.config))
 const links = computed(() => {
   const result = []
-  if (effective('context.reducer').id === 'sage.context.reducer.persistent-summary') result.push(['context.reducer', 'context.summarizer'])
+  if (['sage.context.reducer.persistent-summary', 'sage.context.reducer.summary-only'].includes(effective('context.reducer').id)) result.push(['context.reducer', 'context.summarizer'])
   for (const [capability, ids] of [
     ['tool.selection-policy', ['sage.tool-selection.llm']],
     ['context.summarizer', ['sage.context.summarizer.model']],

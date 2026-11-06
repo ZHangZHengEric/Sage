@@ -157,6 +157,50 @@ async def test_continuing_usage_pressure_after_reference_compaction_summarizes()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("parallel_results", [1, 3])
+async def test_consecutive_file_reads_keep_new_results_readable_under_usage_pressure(
+    parallel_results,
+):
+    summary = Summary()
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=1000),
+        reducer=PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore(), summarizer=summary,
+        ),
+    )
+    source = [message("Read and compare the files", "user")]
+    strategies = []
+    for index in range(10):
+        calls = tuple(
+            ModelToolCall(
+                tool_call_id=f"read_{index}_{n}", name="read_file",
+                arguments={"path": f"file_{index}_{n}.py"},
+            )
+            for n in range(parallel_results)
+        )
+        batch = (
+            ModelMessage(role="assistant", tool_calls=calls),
+            *(message(
+                f"file contents {call.tool_call_id} " * 500,
+                "tool", tool_call_id=call.tool_call_id,
+                metadata={"context_reference": {"uri": f"artifact://{call.tool_call_id}"}},
+            ) for call in calls),
+        )
+        # The prior response schedules pressure before its tools finish.
+        if index >= 4:
+            assembler.observe_usage("run", 1200)
+        source.extend(batch)
+        original = tuple(item.model_dump_json() for item in source)
+        projection = await assembler.prepare_projection(command(), tuple(source), run_id="run")
+        strategies.append(projection.strategy)
+        assert projection.messages[-len(batch):] == batch
+        assert tuple(item.model_dump_json() for item in source) == original
+    assert "reference_compaction" in strategies
+    assert "persistent_summary" in strategies
+    assert summary.requests
+
+
+@pytest.mark.asyncio
 async def test_no_fresh_history_still_allows_required_checkpoint_recovery():
     summary = Summary()
     assembler = DefaultContextAssembler(
@@ -609,12 +653,15 @@ async def test_identical_reference_projection_is_not_sent_twice_after_rejection(
             tool_call_id="tool",
             metadata={"context_reference": {"uri": "artifact://durable/result"}},
         ),
+        message("follow up", "user"),
     )
-    assembler = DefaultContextAssembler()
+    assembler = DefaultContextAssembler(reducer=PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(), protected_recent_units=1,
+    ))
     await assembler.prepare_messages(command(), source, run_id="run")
     assembler.request_compression("run")
     first = await assembler.prepare_messages(command(), source, run_id="run")
-    assert first[-1].metadata["context_compacted_to_reference"]
+    assert first[2].metadata["context_compacted_to_reference"]
     assembler.request_compression("run")
     second = await assembler.prepare_messages(command(), source, run_id="run")
     assert second != first

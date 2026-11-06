@@ -18,7 +18,7 @@ const names = {
   'sage.agent.continuation.deterministic': '无工具调用即完成', 'sage.agent.continuation.llm-judge': '无工具调用 + LLM Judge',
   'sage.agent.continuation.hybrid': '混合完成判定', 'sage.agent.continuation.explicit-status': '结束工具（turn_status）',
   'sage.context.summarizer.model': '模型摘要', 'sage.context.summarizer.extractive': '抽取式摘要',
-  'sage.context.reducer.persistent-summary': '持久摘要', 'sage.context.reducer.window': '窗口裁剪',
+  'sage.context.reducer.persistent-summary': '持久摘要', 'sage.context.reducer.summary-only': '纯摘要', 'sage.context.reducer.window': '窗口裁剪',
   'sage.context.summary-store.session-derived': 'Session 派生存储', 'sage.context.summary-store.ephemeral': '临时摘要存储',
   'sage.context.token-estimator.json-heuristic': 'JSON 启发式估算', 'sage.context.token-estimator.unicode-heuristic': 'Unicode 启发式估算', 'sage.context.token-estimator.tiktoken': 'Tiktoken 估算',
   'sage.memory.filesystem-bm25': '本地 BM25 记忆', 'sage.memory.noop': '关闭长期记忆',

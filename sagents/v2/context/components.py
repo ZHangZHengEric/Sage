@@ -10,6 +10,7 @@ from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     InMemoryConversationSummaryStore,
     PersistentSummaryContextReducer,
+    SummaryOnlyContextReducer,
     ContextReducer,
     WindowContextReducer,
 )
@@ -34,7 +35,7 @@ class ContextComponentBundle:
     protected_recent_units: int = 4
     max_summary_source_tokens: int = 24_000
     max_summary_calls: int = 64
-    reducer_id: str = "persistent-summary"
+    reducer_id: str = "summary-only"
     reducer: ContextReducer | None = None
 
     def create_reducer(self):
@@ -45,10 +46,14 @@ class ContextComponentBundle:
 
         if self.reducer_id == "window":
             return WindowContextReducer()
-        if self.reducer_id != "persistent-summary":
+        reducer_type = {
+            "persistent-summary": PersistentSummaryContextReducer,
+            "summary-only": SummaryOnlyContextReducer,
+        }.get(self.reducer_id)
+        if reducer_type is None:
             raise ValueError(f"unknown context reducer {self.reducer_id!r}")
 
-        return PersistentSummaryContextReducer(
+        return reducer_type(
             self.summary_store,
             summarizer=self.summarizer,
             summary_target_tokens=self.summary_target_tokens,

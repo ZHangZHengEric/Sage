@@ -2081,7 +2081,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         "sage.agent.continuation.explicit-status",
     }
     assert by_id["context.reducer"]["active"]["plugin_id"] == (
-        "sage.context.reducer.persistent-summary"
+        "sage.context.reducer.summary-only"
     )
     assert by_id["memory.recall-query"]["active"]["plugin_id"] == (
         "sage.memory.recall-query.direct"

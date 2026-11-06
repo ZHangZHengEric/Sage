@@ -14,7 +14,7 @@ from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.agent.policy import CompositeContinuationPolicy
 from sagents.v2.agent.policy.continuation import ContinuationPolicy
 from sagents.v2.context import (
-    PersistentSummaryContextReducer,
+    SummaryOnlyContextReducer,
     SessionDerivedConversationSummaryStore,
 )
 from sagents.v2.context.components import ContextComponentBundle
@@ -67,7 +67,7 @@ class AgentComponents:
         )
         context_reducer = await open_capability(
             capability="context.reducer",
-            default_plugin=PersistentSummaryContextReducer.plugin_id,
+            default_plugin=SummaryOnlyContextReducer.plugin_id,
             agent_id=agent_id,
         )
         skill_loading = await open_capability(

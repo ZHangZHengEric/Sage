@@ -8,7 +8,7 @@ DEFAULT_COMPONENTS = {
     "skill.provider": "sage.skill.filesystem",
     "skill.loading": "sage.skill.loading.lazy",
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
-    "context.reducer": "sage.context.reducer.persistent-summary",
+    "context.reducer": "sage.context.reducer.summary-only",
     "context.summarizer": "sage.context.summarizer.model",
     "context.summary-store": "sage.context.summary-store.session-derived",
     "memory.provider": "sage.memory.filesystem-bm25",
@@ -69,7 +69,7 @@ def effective_runtime(runtime: RuntimeConfig) -> RuntimeConfig:
     implicit = {
         "context.summary-store": "sage.context.summary-store.session-derived",
         "context.summarizer": "sage.context.summarizer.model",
-        "context.reducer": "sage.context.reducer.persistent-summary",
+        "context.reducer": "sage.context.reducer.summary-only",
         "skill.loading": "sage.skill.loading.lazy",
         "agent.continuation-policy": "sage.agent.continuation.deterministic",
         "memory.recall-query": "sage.memory.recall-query.direct",
@@ -80,6 +80,7 @@ def effective_runtime(runtime: RuntimeConfig) -> RuntimeConfig:
     choices = {**{key: CapabilitySelection(plugin=plugin) for key, plugin in implicit.items()}, **runtime.capabilities}
     from sagents.v2.runtime.extensions.contracts import ExtensionScope
     run_plugins = {"sage.context.summarizer.model", "sage.context.reducer.persistent-summary",
+                   "sage.context.reducer.summary-only",
                    "sage.agent.continuation.llm-judge", "sage.memory.recall-query.llm"}
     for capability, choice in tuple(choices.items()):
         if isinstance(choice, CapabilitySelection) and choice.scope is None and choice.plugin in run_plugins:

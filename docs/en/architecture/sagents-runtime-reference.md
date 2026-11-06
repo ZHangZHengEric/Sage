@@ -306,7 +306,7 @@ R denotes Path(session_root).expanduser().resolve(), with session_root=.runtime/
 | `session-memory.provider` | `sage.session-memory.sqlite-bm25` | root=R/session-memory; Session memory index |
 | `skill.loading` | `sage.skill.loading.lazy` | On-demand Skill activation, up to 24000 active characters |
 | `agent.continuation-policy` | `sage.agent.continuation.llm-judge` | Model judges continuation/completion |
-| `context.reducer` | `sage.context.reducer.persistent-summary` | Persistent summary compression |
+| `context.reducer` | `sage.context.reducer.summary-only` | Persistent summaries without tool-result reference replacement |
 | `context.summarizer` | `sage.context.summarizer.model` | Primary model generates summaries |
 | `context.summary-store` | `sage.context.summary-store.session-derived` | Session-derived summary state |
 | `memory.recall-query` | `sage.memory.recall-query.llm` | Model-generated recall queries |
@@ -343,7 +343,7 @@ capabilities:
     plugin: sage.observability.local
     config: {log_stream: stderr, log_level: debug, log_format: json}
   context.reducer:
-    plugin: sage.context.reducer.persistent-summary
+    plugin: sage.context.reducer.summary-only
     config: {summary_target_tokens: 1536, protected_recent_units: 6}
   execution.scheduler:
     plugin: sage.scheduler.filesystem
@@ -566,6 +566,21 @@ Provides: `context.reducer:default` (API `2`)。
 | `max_summary_source_tokens` | `integer` | No | `24000` | `{"minimum":1}` |
 
 `max_summary_source_tokens` 作为已有配置字段被 schema 接受；当前内置 reducer 工厂不以它控制输入长度。需要配置摘要源预算时，使用所选 summarizer 能力的正式Parameter。
+
+### sage.context.reducer.summary-only
+
+Uses the same configuration, summary store, summarizer and pressure triggers as
+`sage.context.reducer.persistent-summary`, but never replaces tool-result bodies
+with references. Completed summaries persist their history coverage and are reused
+by subsequent requests. Summary selection and recovery behavior are unchanged.
+This is the default context reducer; explicit selections of other reducers are preserved.
+
+```yaml
+capabilities:
+  context.reducer:
+    plugin: sage.context.reducer.summary-only
+    scope: run
+```
 
 ### sage.context.reducer.window
 

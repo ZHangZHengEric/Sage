@@ -24,6 +24,7 @@ def test_fresh_deployment_pins_current_server_plugin_defaults(tmp_path):
     settings = make_settings(tmp_path, mysql_url="mysql+aiomysql://test:test@localhost/sage")
     assert not ServerPluginConfig(tmp_path).path.exists()
     capabilities = server_v2_manifest(settings).runtime.capabilities
+    assert cast(CapabilitySelection, capabilities["context.reducer"]).plugin == "sage.context.reducer.summary-only"
     for capability, plugin in SERVER_DEFAULTS.items():
         assert cast(CapabilitySelection, capabilities[capability]).plugin == plugin
     assert cast(CapabilitySelection, capabilities["context.summarizer"]).config == {"model_binding": "primary"}

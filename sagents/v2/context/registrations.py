@@ -7,6 +7,7 @@ from sagents.v2.context import (
     InMemoryConversationSummaryStore,
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
+    SummaryOnlyContextReducer,
     SessionDerivedConversationSummaryStore,
     WindowContextReducer,
 )
@@ -29,39 +30,40 @@ def register_context_plugins(registry: ExtensionRegistry) -> None:
         config_schema={"type": "object", "additionalProperties": False},
     )
 
-    register_plugin(
-        registry,
-        PersistentSummaryContextReducer,
-        "context.reducer",
-        lambda context, dependencies: PersistentSummaryContextReducer(
-            dependencies.require_unique("context.summary-store"),
-            summarizer=dependencies.require_unique("context.summarizer"),
-            summary_target_tokens=int(
-                context.config.get("summary_target_tokens", 1024)
+    for reducer_type in (PersistentSummaryContextReducer, SummaryOnlyContextReducer):
+        register_plugin(
+            registry,
+            reducer_type,
+            "context.reducer",
+            lambda context, dependencies, implementation=reducer_type: implementation(
+                dependencies.require_unique("context.summary-store"),
+                summarizer=dependencies.require_unique("context.summarizer"),
+                summary_target_tokens=int(
+                    context.config.get("summary_target_tokens", 1024)
+                ),
+                protected_recent_units=int(context.config.get("protected_recent_units", 4)),
+                max_summary_calls=int(context.config.get("max_summary_calls", 64)),
             ),
-            protected_recent_units=int(context.config.get("protected_recent_units", 4)),
-            max_summary_calls=int(context.config.get("max_summary_calls", 64)),
-        ),
-        dependencies=(
-            ExtensionDependency(capability="context.summary-store"),
-            ExtensionDependency(capability="context.summarizer"),
-        ),
-        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "summary_target_tokens": {"type": "integer", "minimum": 1},
-                "protected_recent_units": {"type": "integer", "minimum": 1},
-                "max_summary_calls": {"type": "integer", "minimum": 1},
-                "max_summary_source_tokens": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 24_000,
+            dependencies=(
+                ExtensionDependency(capability="context.summary-store"),
+                ExtensionDependency(capability="context.summarizer"),
+            ),
+            scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+            config_schema={
+                "type": "object",
+                "properties": {
+                    "summary_target_tokens": {"type": "integer", "minimum": 1},
+                    "protected_recent_units": {"type": "integer", "minimum": 1},
+                    "max_summary_calls": {"type": "integer", "minimum": 1},
+                    "max_summary_source_tokens": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 24_000,
+                    },
                 },
+                "additionalProperties": False,
             },
-            "additionalProperties": False,
-        },
-    )
+        )
 
     register_plugin(
         registry,

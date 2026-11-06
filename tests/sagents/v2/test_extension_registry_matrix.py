@@ -50,6 +50,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.artifact.ephemeral",
         "sage.artifact.filesystem",
         "sage.context.reducer.persistent-summary",
+        "sage.context.reducer.summary-only",
         "sage.context.reducer.window",
         "sage.context.summarizer.extractive",
         "sage.context.summarizer.model",

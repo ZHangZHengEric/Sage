@@ -826,25 +826,31 @@ def _with_runtime_capabilities(package, **capabilities):
 
 
 @pytest.mark.asyncio
-async def test_updated_agent_uses_new_selection_with_one_app_dispatcher(tmp_path):
+@pytest.mark.parametrize("reducer_plugin", [
+    "sage.context.reducer.window", "sage.context.reducer.summary-only",
+])
+async def test_updated_agent_uses_new_selection_with_one_app_dispatcher(tmp_path, reducer_plugin):
     from tests.sagents.v2.test_standard_execution_configuration import response, run, CONTEXT
     package = BuiltinPackageFactory.create("assistant", package_id="test.updated-context")
     app = await build_registered_package(tmp_path, models=TEST_MODELS,
-        model=ScriptedModelProvider((response(), response())), package=package)
+        model=ScriptedModelProvider((response(), response())), package=package,
+        runtime=RuntimeConfig(capabilities={"context.reducer": CapabilitySelection(
+            plugin="sage.context.reducer.persistent-summary",
+        )}))
     try:
         original = app.loaded_agents[-1]
         dispatcher = app.service("execution.dispatcher")
         config = app.runtime_configuration
         await app.update_runtime(config.model_copy(update={"capabilities": {**config.capabilities,
-            "context.reducer": CapabilitySelection(plugin="sage.context.reducer.window")}}))
+            "context.reducer": CapabilitySelection(plugin=reducer_plugin)}}))
         updated = await app.update_agent(agent=original, package=package)
         assert original.composition_hash != updated.composition_hash
         assert app.service("execution.dispatcher") is dispatcher
         result, events = await run(app, updated, "updated-context")
         assert result.state.value == "completed", events
         report = await app.run_configuration(result.run_id, CONTEXT)
-        assert report["runtime"]["capabilities"]["context.reducer"]["plugin"] == "sage.context.reducer.window"
-        assert any(item["plugin_id"] == "sage.context.reducer.window" for item in report["plugins"])
+        assert report["runtime"]["capabilities"]["context.reducer"]["plugin"] == reducer_plugin
+        assert any(item["plugin_id"] == reducer_plugin for item in report["plugins"])
     finally:
         await app.close()
 
