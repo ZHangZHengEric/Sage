@@ -27,8 +27,9 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_LANGUAGE` | `zh` |
 | `SAGE_SERVER_JWT_SECRET` | Configure your own secret, at least 32 bytes |
 | `SAGE_SERVER_JWT_EXPIRE_HOURS` | `72` |
+| `SAGE_SERVER_COOKIE_SECURE` | `true`; explicitly use `false` only for local HTTP development |
 | `SAGE_SERVER_ADMIN_USERNAME` | `admin` (initial administrator) |
-| `SAGE_SERVER_ADMIN_PASSWORD` | `admin12345` (replace before deployment) |
+| `SAGE_SERVER_ADMIN_PASSWORD` | No default; required when creating the initial administrator |
 | `SAGE_SERVER_EXECUTION_SHELL_MODE` | `sandboxed`; `ask` / `sandboxed` / `deny` |
 | `SAGE_SERVER_LINUX_EXECUTION_UID` | Unset; Linux sandbox execution user ID. Set together with GID; both must be integers from `1` to `4294967294` (non-root). |
 | `SAGE_SERVER_LINUX_EXECUTION_GID` | Unset; Linux sandbox execution group ID. Set together with UID; both must be integers from `1` to `4294967294` (non-root). |

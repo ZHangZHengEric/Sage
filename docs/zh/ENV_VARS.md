@@ -27,8 +27,9 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_LANGUAGE` | `zh` |
 | `SAGE_SERVER_JWT_SECRET` | 配置自己的密钥，至少 32 字节 |
 | `SAGE_SERVER_JWT_EXPIRE_HOURS` | `72` |
+| `SAGE_SERVER_COOKIE_SECURE` | `true`；仅本地 HTTP 开发显式设为 `false` |
 | `SAGE_SERVER_ADMIN_USERNAME` | `admin` (初始管理员) |
-| `SAGE_SERVER_ADMIN_PASSWORD` | `admin12345` (部署前修改) |
+| `SAGE_SERVER_ADMIN_PASSWORD` | 无默认值；首次创建管理员必须配置 |
 | `SAGE_SERVER_EXECUTION_SHELL_MODE` | `sandboxed`；可选 `ask` / `sandboxed` / `deny` |
 | `SAGE_SERVER_LINUX_EXECUTION_UID` | 默认未设置；Linux 沙箱执行用户 ID。须与 GID 一起设置，两者均须为 `1` 至 `4294967294` 的整数（非 root）。 |
 | `SAGE_SERVER_LINUX_EXECUTION_GID` | 默认未设置；Linux 沙箱执行组 ID。须与 UID 一起设置，两者均须为 `1` 至 `4294967294` 的整数（非 root）。 |

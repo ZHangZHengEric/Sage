@@ -83,6 +83,7 @@ async def test_standard_network_policy_is_frozen_for_accepted_run(tmp_path, ceil
 
 
 def test_server_network_ceiling_has_no_environment_binding(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://unused/unused")
     monkeypatch.setenv("SAGE_SERVER_SANDBOX_NETWORK_MODE", "invalid")
     assert ServerSettings.from_env(data_root=tmp_path).sandbox_network_mode == "unrestricted"

@@ -1,26 +1,30 @@
-const TOKEN_KEY = 'sage.server_v2.token'
-const USER_KEY = 'sage.server_v2.user'
+import { shallowRef } from 'vue'
 
-export function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || ''
+const user = shallowRef(null)
+
+function removeLegacySession() {
+  localStorage.removeItem('sage.server_v2.token')
+  localStorage.removeItem('sage.server_v2.user')
 }
 
 export function getUser() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_KEY) || 'null')
-  } catch {
-    return null
-  }
+  return user.value
 }
 
-export function setSession(token, user) {
-  localStorage.setItem(TOKEN_KEY, token)
-  localStorage.setItem(USER_KEY, JSON.stringify(user))
+export function setSession(value) {
+  removeLegacySession()
+  user.value = value
 }
 
 export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(USER_KEY)
+  removeLegacySession()
+  user.value = null
+}
+
+export function csrfHeaders() {
+  const cookie = globalThis.document?.cookie || ''
+  const value = cookie.split('; ').find(item => item.startsWith('sage_server_v2_csrf='))?.split('=')[1]
+  return value ? { 'X-CSRF-Token': decodeURIComponent(value) } : {}
 }
 
 export function isAdmin() {

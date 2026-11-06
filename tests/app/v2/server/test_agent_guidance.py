@@ -23,7 +23,7 @@ def test_agent_guidance_zip_batch_resolves_agent_and_is_idempotent(client, servi
     owner = {"Authorization": f"Bearer {owner_token}"}
     agent = client.get("/api/agents", headers=owner).json()["data"][0]
     agent_id = agent["id"]
-    machine = {}
+    machine = {"X-CSRF-Token": client.cookies.get("sage_server_v2_csrf")}
     path = f"/api/agents/{agent_id}/guidance"
     zipped = _skill_zip()
 

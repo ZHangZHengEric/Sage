@@ -1,6 +1,6 @@
 import { updateToolStates } from './tool-state.js'
 import { HttpAgent } from '@ag-ui/client'
-import { getToken } from '../auth.js'
+import { csrfHeaders } from '../auth.js'
 import { createResumableFetch } from './resume.js'
 import { interactionAfterEvent } from './interaction-state.js'
 
@@ -13,7 +13,7 @@ class SageHttpAgent extends HttpAgent {
   notificationConnectionId = ''
 
   requestInit(input) {
-    const init = super.requestInit(input)
+    const init = { ...super.requestInit(input), credentials: 'same-origin' }
     if (!this.answer) {
       return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId, ...(this.notificationConnectionId ? { notification_connection_id: this.notificationConnectionId } : {}), ...(this.agentPackage ? { agent_package: this.agentPackage } : {}) }) }
     }
@@ -84,7 +84,7 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
 }
 
 export async function runAgui(agent, { threadId, runId, message, agentId = '', agentPackage = null, notificationConnectionId = '' }) {
-  agent.headers = { Authorization: `Bearer ${getToken()}` }
+  agent.headers = csrfHeaders()
   agent.threadId = threadId
   agent.agentPackage = agentPackage
   agent.notificationConnectionId = notificationConnectionId
@@ -99,7 +99,7 @@ export async function runAgui(agent, { threadId, runId, message, agentId = '', a
 }
 
 export async function resumeAgui(agent, { threadId, runId, decision, payload = {} }) {
-  agent.headers = { Authorization: `Bearer ${getToken()}` }
+  agent.headers = csrfHeaders()
   agent.threadId = threadId
   agent.url = `/api/threads/${encodeURIComponent(threadId)}/resume`
   agent.answer = { decision, payload }

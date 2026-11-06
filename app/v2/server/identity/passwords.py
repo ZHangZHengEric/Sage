@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import secrets
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, TypeVar
 
@@ -57,3 +60,24 @@ class PasswordExecutor:
                 await asyncio.gather(*self._pending, return_exceptions=True)
         finally:
             self._pool.shutdown(wait=False)
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), salt.encode(), 210_000
+    ).hex()
+    return f"pbkdf2$210000${salt}${digest}"
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        scheme, iterations, salt, digest = encoded.split("$", 3)
+    except ValueError:
+        return False
+    if scheme != "pbkdf2":
+        return False
+    candidate = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), salt.encode(), int(iterations)
+    ).hex()
+    return hmac.compare_digest(candidate, digest)

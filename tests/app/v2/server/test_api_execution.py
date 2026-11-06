@@ -139,7 +139,7 @@ async def test_execution_grant_persists_in_database(tmp_path):
     try:
         await create_host_schema(database)
         store = DatabaseUserStore(database)
-        original = UserRecord(user_id="user", username="alice", password_hash="hash",
+        original = UserRecord(user_id="user", username="alice",
             execution_policy=ExecutionPolicy(shell="deny", on_approval_required="deny"))
         await store.save(original)
         reloaded = await DatabaseUserStore(database).get_by_id("user")
@@ -158,7 +158,7 @@ async def test_admin_lookup_does_not_decode_unrelated_user_policies(tmp_path):
                 role="user", execution_policy="invalid-policy"))
         store = DatabaseUserStore(database)
         assert await store.admin() is None
-        admin = UserRecord(user_id="admin", username="admin", password_hash="hash", role="admin")
+        admin = UserRecord(user_id="admin", username="admin", role="admin")
         await store.save(admin)
         assert await store.admin() == admin
     finally:

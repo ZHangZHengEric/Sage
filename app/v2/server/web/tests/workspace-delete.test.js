@@ -8,9 +8,11 @@ async function setup(t) {
   const server = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
   t.after(() => server.close())
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => key.endsWith('.user') ? JSON.stringify({ user_id: 'alice' }) : '' } })
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => '', removeItem() {} } })
   t.after(() => previous ? Object.defineProperty(globalThis, 'localStorage', previous) : delete globalThis.localStorage)
   const { api } = await server.ssrLoadModule('/src/api.js')
+  const auth = await server.ssrLoadModule('/src/auth.js')
+  auth.setSession({ user_id: 'alice', role: 'user' })
   const { default: Panel } = await server.ssrLoadModule('/src/components/WorkspacePanel.vue')
   const { default: Tree } = await server.ssrLoadModule('/src/components/WorkspaceFileTree.vue')
   return { api, Tree, mount: async (props = {}) => {

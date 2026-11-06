@@ -15,6 +15,7 @@ const admin = computed(() => { route.path; return isAdmin() })
 const collapsed = ref(localStorage.getItem('sage.server_v2.sidebar.collapsed') === 'true')
 const mobileMenu = ref(false)
 const accountMenu = ref(null)
+const logoutError = ref('')
 const themePreference = ref(readThemePreference(localStorage))
 let themeController
 const resourceLinks = [
@@ -45,7 +46,10 @@ onMounted(() => {
 onUnmounted(() => { document.removeEventListener('pointerdown', dismissAccountMenu); themeController?.dispose() })
 function setTheme(value) { themeController?.setMode(value) }
 async function logout() {
-  try { await api.logout() } catch { /* Clear the local session even when offline. */ }
+  logoutError.value = ''
+  try { await api.logout() } catch (error) {
+    if (error.status !== 401) { logoutError.value = error.message; return }
+  }
   clearSession()
   router.push('/login')
 }
@@ -84,6 +88,7 @@ async function logout() {
           <summary class="nav-item" :title="user?.username"><span class="account-avatar">{{ user?.username?.[0]?.toUpperCase() || 'U' }}</span><span class="account-name">{{ user?.username }}</span><AppIcon class="nav-chevron" name="chevron" /></summary>
           <div class="account-actions">
             <fieldset class="theme-picker"><legend>外观</legend><div class="theme-options"><button v-for="option in themeOptions" :key="option.value" type="button" :aria-pressed="themePreference === option.value" :aria-label="`外观：${option.label}`" @click="setTheme(option.value)"><AppIcon :name="option.icon" /><span>{{ option.label }}</span></button></div></fieldset>
+            <p v-if="logoutError" class="error" role="alert">{{ logoutError }}</p>
             <button class="nav-item" type="button" @click="logout"><AppIcon name="logout" />退出登录</button>
           </div>
         </details>

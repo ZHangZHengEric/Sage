@@ -25,6 +25,7 @@ def test_mysql_selection_stays_available_without_redis(tmp_path):
 
 
 def test_redis_environment_requires_mysql_archive(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/sage")
     monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://localhost/1")
     settings = ServerSettings.from_env(data_root=tmp_path)

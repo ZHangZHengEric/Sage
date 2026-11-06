@@ -24,7 +24,7 @@ python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号。
+在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号和密码（无默认密码）。本地 HTTP 开发还需设置 `SAGE_SERVER_COOKIE_SECURE=false`；HTTPS 部署保持默认 `true`。
 
 ```bash
 cd app/v2/server/web
@@ -36,9 +36,11 @@ python -m app.v2.server
 
 打开 [http://127.0.0.1:8090](http://127.0.0.1:8090)，登录后配置模型和 Agent。`/studio` 管理 Agent 包，`/docs` 提供当前服务的 OpenAPI。
 
-开发前端时，在 `app/v2/server/web` 中运行 `npm run dev`，Vite 代理到 8090 端口。进程环境变量优先于组件 `.env` 文件。
+开发前端时，在 `app/v2/server/web` 中运行 `npm run dev`，Vite 代理到 8090 端口；开发时将 `SAGE_SERVER_PUBLIC_BASE_URL` 设为实际 Vite 地址（如 `http://localhost:5173`），以通过登录 Origin 校验。进程环境变量优先于组件 `.env` 文件。
 
-启动时幂等升级旧表：补齐缺失的 `threads.agent_id`，将 Skill 描述扩展为 `LONGTEXT`。数据库账号需要相应的 `ALTER` 权限。以前已截断的目录描述可重新导入原 Skill 文件修复。
+身份层在启动时自动、幂等迁移旧用户：保留用户 ID、角色、执行策略，将密码哈希复制到独立凭据表并建立用户名归一化索引；迁移失败阻止启动。旧 JWT 在升级后失效，需重新登录；API Key 保持有效。MySQL 使用数据库级命名锁协调并发迁移。
+
+启动时幂等升级其他旧表：补齐缺失的 `threads.agent_id`，将 Skill 描述扩展为 `LONGTEXT`。数据库账号需要相应的 `ALTER` 权限。以前已截断的目录描述可重新导入原 Skill 文件修复。
 
 ## 存储与部署边界
 

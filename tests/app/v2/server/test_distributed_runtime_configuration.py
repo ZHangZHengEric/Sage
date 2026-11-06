@@ -71,6 +71,7 @@ def test_default_selection_preserves_existing_store_and_scheduler(tmp_path, redi
 
 
 def test_environment_selects_storage_and_scheduler_independently(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://unused/test")
     monkeypatch.setenv("SAGE_SERVER_REDIS_URL", "redis://unused/0")
     monkeypatch.setenv("SAGE_SERVER_SESSION_STORE_PLUGIN", REDIS_STORE)

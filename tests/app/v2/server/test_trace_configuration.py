@@ -34,6 +34,7 @@ def test_langfuse_config_contains_only_credential_references(tmp_path, monkeypat
 
 
 def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/db")
     monkeypatch.setenv("SAGE_SERVER_TRACE_BACKEND", "langfuse")
     monkeypatch.setenv("SAGE_SERVER_LANGFUSE_BASE_URL", "https://lf.example")
@@ -130,6 +131,7 @@ def test_trace_health_and_admin_console(tmp_path: Path, monkeypatch, backend):
 def test_phoenix_environment_manifest_and_admin_selection(tmp_path, monkeypatch):
     from app.v2.server.config.plugins import ServerPluginConfig, revision
 
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/db")
     monkeypatch.setenv("SAGE_SERVER_TRACE_BACKEND", "phoenix")
     monkeypatch.setenv("SAGE_SERVER_PHOENIX_ENDPOINT", "https://phoenix.example/v1/traces")

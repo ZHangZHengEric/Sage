@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from typing import Literal
 from app.v2.server.runtime.policy import ExecutionPolicy
 
@@ -18,7 +19,6 @@ def default_user_execution_policy() -> ExecutionPolicy:
 class UserRecord:
     user_id: str
     username: str
-    password_hash: str
     role: Role = "user"
     execution_policy: ExecutionPolicy = field(default_factory=default_user_execution_policy)
 
@@ -31,22 +31,28 @@ class UserRecord:
         }
 
 
-def build_user_record(
-    username: str, password_hash: str, *, role: Role = "user"
-) -> UserRecord:
+@dataclass(frozen=True, slots=True)
+class PasswordCredential:
+    password_hash: str = field(repr=False)
+
+
+def username_key(username: str) -> str:
+    return hashlib.sha256(username.strip().casefold().encode()).hexdigest()
+
+
+def build_user_record(username: str, *, role: Role = "user") -> UserRecord:
     name = username.strip()
-    if len(name) < 2:
+    if not 2 <= len(name) <= 191:
         raise SageV2Error(
             RuntimeErrorInfo(
                 code="server.identity.users.validation",
                 category=ErrorCategory.VALIDATION,
-                message="username is too short",
+                message="username must contain 2 to 191 characters",
             )
         )
     return UserRecord(
         user_id=new_id("user"),
         username=name,
-        password_hash=password_hash,
         role=role,
     )
 

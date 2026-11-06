@@ -50,7 +50,9 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 
 启动按当前 ORM 元数据创建缺失表，不执行历史表结构升级或 Agent 数据回填。Agent 配置统一通过 `agents.package_ref` 读取标准包。Skill 描述列使用 `LONGTEXT`，列表描述不截断，加载内容受 Skill 文件大小限制。
 
-环境变量模板统一维护在根目录 [`.env.example`](../../../.env.example)。源码启动前执行 `cp .env.example app/v2/server/.env` 并填写配置，进程环境变量优先。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。未配置时的默认管理员：`admin` / `admin12345`；模板要求替换管理员密码。OpenAPI 在 `/docs`。
+环境变量模板统一维护在根目录 [`.env.example`](../../../.env.example)。源码启动前执行 `cp .env.example app/v2/server/.env` 并填写配置，进程环境变量优先。启动必须设置自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节，模板占位值会被拒绝）。初次启动还需设置 `SAGE_SERVER_ADMIN_PASSWORD`；已有管理员时可省略，不再提供默认密码。Cookie 默认仅用于 HTTPS；本地使用 `http://127.0.0.1:8090` 时，显式设置 `SAGE_SERVER_COOKIE_SECURE=false`。OpenAPI 在 `/docs`。
+
+身份模块的职责、SSO 扩展边界与启动迁移见 [`identity/README.md`](identity/README.md)。网页使用 HttpOnly Cookie，写请求携带 `X-CSRF-Token`；登录响应继续提供 Bearer JWT 供 API 客户端使用。退出登录会撤销对应服务端会话。升级前签发的 JWT 需要重新登录，原 API Key 不受影响。
 
 成功/失败 JSON 都带 `request_id`，并回写 `X-Request-ID`。可传入该请求头以透传。
 

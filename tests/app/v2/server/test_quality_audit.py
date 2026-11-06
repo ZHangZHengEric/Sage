@@ -44,7 +44,7 @@ async def test_registered_models_follow_authorized_run_not_stale_worker_context(
     await host.start()
     try:
         for owner in ("alice", "bob"):
-            await host.users.save(UserRecord(user_id=owner, username=owner, password_hash="unused"))
+            await host.users.save(UserRecord(user_id=owner, username=owner))
             await host.catalog.upsert_model(owner, {"model": owner, "api_key": "test", "is_default": True})
         worker_identity = ContextVar("unrelated_worker_identity")
         token = worker_identity.set("unrelated-worker")
@@ -70,7 +70,7 @@ async def test_loading_standard_revision_does_not_open_inference_client(tmp_path
     monkeypatch.setattr("app.v2.server.runtime.models._build_catalog_provider", lambda record: opened.append(record))
     await host.start()
     try:
-        await host.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
+        await host.users.save(UserRecord(user_id="user", username="user"))
         await _save_demo_model(cast(MemoryCatalogStore, host.catalog), "user")
         agent = (await host.catalog.get("user")).default_agent_id
         loaded = await load_catalog_agent(host, _command().model_copy(update={"agent_id": agent}), "user")
@@ -94,7 +94,7 @@ async def test_registered_run_uses_original_agent_and_skill_version(tmp_path, mo
         return values
     monkeypatch.setattr(sdk_plugins, "run_inputs", capture)
     try:
-        await host.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
+        await host.users.save(UserRecord(user_id="user", username="user"))
         catalog = await host.catalog.get("user")
         admitted = require_agent(catalog, catalog.default_agent_id).with_configuration(instructions="Admitted instructions")
         first = await host.skill_catalog.publish_markdown(name="demo",

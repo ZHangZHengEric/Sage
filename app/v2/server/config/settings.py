@@ -4,10 +4,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.v2.server.observability.logging import get_logger
-
-LOGGER = get_logger(__name__)
-
 DEFAULT_JWT_SECRET = "dev-only-change-me-sage-server-jwt-secret"
 
 
@@ -25,18 +21,6 @@ def _choice_env(name: str, default: str, choices: frozenset[str]) -> str:
     return value
 
 
-def _jwt_secret() -> str:
-    secret = _env("SAGE_SERVER_JWT_SECRET", DEFAULT_JWT_SECRET)
-    if secret == DEFAULT_JWT_SECRET:
-        LOGGER.warning(
-            "server.jwt.default_secret",
-            "using built-in JWT secret; set SAGE_SERVER_JWT_SECRET in production"
-        )
-    elif len(secret.encode()) < 32:
-        LOGGER.warning("server.jwt.short_secret", "SAGE_SERVER_JWT_SECRET is shorter than 32 bytes")
-    return secret
-
-
 @dataclass(frozen=True, slots=True)
 class ServerSettings:
     host: str
@@ -47,6 +31,7 @@ class ServerSettings:
     language: str
     admin_username: str
     admin_password: str
+    cookie_secure: bool = True
     log_level: str = "debug"
     log_format: str = "json"
     log_directory: str = ""
@@ -101,6 +86,11 @@ class ServerSettings:
     plugin_overrides: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
+        if (len(self.jwt_secret.encode()) < 32 or self.jwt_secret == DEFAULT_JWT_SECRET
+                or self.jwt_secret.startswith("replace-with-")):
+            raise ValueError("SAGE_SERVER_JWT_SECRET must be a private secret of at least 32 bytes")
+        if self.jwt_expire_hours <= 0:
+            raise ValueError("SAGE_SERVER_JWT_EXPIRE_HOURS must be positive")
         if self.session_store_plugin not in {None, "sage.session.mysql", "sage.session.redis-mysql"}:
             raise ValueError("Unsupported Server session_store_plugin")
         if self.session_store_plugin is not None and not self.mysql_url:
@@ -194,11 +184,12 @@ class ServerSettings:
             host=_env("SAGE_SERVER_HOST", "127.0.0.1"),
             port=int(_env("SAGE_SERVER_PORT", "8090")),
             data_root=root.expanduser().resolve(),
-            jwt_secret=_jwt_secret(),
+            jwt_secret=_env("SAGE_SERVER_JWT_SECRET"),
             jwt_expire_hours=int(_env("SAGE_SERVER_JWT_EXPIRE_HOURS", "72")),
             language=_env("SAGE_SERVER_LANGUAGE", "zh"),
             admin_username=_env("SAGE_SERVER_ADMIN_USERNAME", "admin"),
-            admin_password=_env("SAGE_SERVER_ADMIN_PASSWORD", "admin12345"),
+            admin_password=_env("SAGE_SERVER_ADMIN_PASSWORD"),
+            cookie_secure=_choice_env("SAGE_SERVER_COOKIE_SECURE", "true", frozenset({"true", "false"})) == "true",
             log_level=_choice_env(
                 "SAGE_SERVER_LOG_LEVEL",
                 "info",

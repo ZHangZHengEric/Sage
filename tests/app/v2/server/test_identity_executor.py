@@ -40,9 +40,9 @@ async def test_password_work_is_bounded_even_after_request_cancellation():
 
 @pytest.mark.asyncio
 async def test_identity_hash_and_verify_execute_off_the_event_loop(monkeypatch):
-    from app.v2.server.identity import service as identity_module
+    from app.v2.server.identity import local as identity_module
     from tests.app.v2.server.fakes import MemoryUserStore
-    service = identity_module.IdentityService(MemoryUserStore(), jwt_secret='test-secret', jwt_expire_hours=1)
+    service = identity_module.LocalPasswordAuth(MemoryUserStore())
     main_thread = threading.get_ident()
     operations = []
     hash_password, verify_password = identity_module.hash_password, identity_module.verify_password
@@ -55,7 +55,7 @@ async def test_identity_hash_and_verify_execute_off_the_event_loop(monkeypatch):
     monkeypatch.setattr(identity_module, 'hash_password', recorded_hash)
     monkeypatch.setattr(identity_module, 'verify_password', recorded_verify)
     try:
-        registered = await service.register('alice', 'secret1')
+        registered = await service.create('alice', 'secret1')
         assert (await service.authenticate('alice', 'secret1')).user_id == registered.user_id
         with pytest.raises(SageV2Error) as invalid:
             await service.authenticate('alice', 'wrong-pass')

@@ -22,9 +22,9 @@ async function submit() {
       await api.register(username.value, password.value)
     }
     const data = await api.login(username.value, password.value)
-    setSession(data.access_token, data.user)
+    setSession(data.user)
     const next = typeof route.query.next === 'string' ? route.query.next : '/'
-    router.push(next.startsWith('/') ? next : '/')
+    router.push(next.startsWith('/') && !next.startsWith('//') ? next : '/')
   } catch (exc) {
     error.value = exc.message
   } finally {

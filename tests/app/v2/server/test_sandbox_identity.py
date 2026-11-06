@@ -9,6 +9,7 @@ from tests.app.v2.server.conftest import make_settings, make_test_service
 
 
 async def test_execution_identity_reaches_host_provider_and_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://unused/unused")
     monkeypatch.setenv("SAGE_SERVER_LINUX_EXECUTION_UID", "10001")
     monkeypatch.setenv("SAGE_SERVER_LINUX_EXECUTION_GID", "10002")

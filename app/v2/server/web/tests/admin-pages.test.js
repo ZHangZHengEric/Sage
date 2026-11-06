@@ -88,7 +88,7 @@ async function setup(t, name, directory = 'views') {
   t.after(() => server.close())
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: key => key.endsWith('.user') ? JSON.stringify({ user_id: 'admin', role: 'admin' }) : '', setItem() {},
+    getItem: () => '', setItem() {}, removeItem() {},
   } })
   t.after(() => {
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous)
@@ -96,8 +96,10 @@ async function setup(t, name, directory = 'views') {
   })
   const navigation = { push: t.mock.fn(async () => {}), replace: t.mock.fn(async () => {}) }
   const { api } = await server.ssrLoadModule('/src/api.js')
+  const auth = await server.ssrLoadModule('/src/auth.js')
+  auth.setSession({ user_id: 'admin', role: 'admin' })
   const { default: Component } = await server.ssrLoadModule(`/src/${directory}/${name}.vue`)
-  return { api, navigation, Component, mount: async (props = {}) => {
+  return { api, auth, navigation, Component, mount: async (props = {}) => {
     const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode: () => null, nextSibling: () => null })
     const app = renderer.createApp({ ...Component, render: () => null }, props)
     app.provide(ssrContextKey, {})
@@ -955,8 +957,8 @@ test('system plugin form retains single implementations and unsaved drafts acros
 })
 
 test('ordinary users inspect system implementations without changing defaults or querying admin configuration', async t => {
-  const { api, mount } = await setup(t, 'Plugins')
-  t.mock.method(localStorage, 'getItem', key => key.endsWith('.user') ? JSON.stringify({ user_id: 'user', role: 'user' }) : '')
+  const { api, auth, mount } = await setup(t, 'Plugins')
+  auth.setSession({ user_id: 'user', role: 'user' })
   t.mock.method(api, 'listPlugins', async () => ({ configurable: ['context.summarizer'], defaults: { 'context.summarizer': 'sage.context.summarizer.extractive' }, plugins: [
     { id: 'sage.context.summarizer.extractive', capabilities: ['context.summarizer'], schema: {} },
   ] }))

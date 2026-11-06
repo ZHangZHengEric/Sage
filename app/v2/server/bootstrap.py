@@ -27,6 +27,8 @@ from app.v2.server.conversations.agui.service import ConversationService
 from app.v2.server.identity.credentials import CredentialService
 from app.v2.server.identity.context import RequestContexts
 from app.v2.server.identity.service import IdentityService
+from app.v2.server.identity.federation import DatabaseExternalIdentityStore
+from app.v2.server.identity.sessions import DatabaseLoginSessionStore
 from app.v2.server.config.manifest import server_v2_manifest
 from app.v2.server.runtime.official import install_sandbox
 from app.v2.server.conversations.runs import RunService
@@ -97,6 +99,8 @@ class ServerHost:
         self.threads = threads if threads is not None else DatabaseThreadIndex(database)
         self.identity = IdentityService(
             self.users,
+            sessions=DatabaseLoginSessionStore(database),
+            external_identities=DatabaseExternalIdentityStore(database),
             jwt_secret=settings.jwt_secret,
             jwt_expire_hours=settings.jwt_expire_hours,
         )

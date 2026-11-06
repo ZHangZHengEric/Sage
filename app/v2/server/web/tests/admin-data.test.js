@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { api, isForeign } from '../src/api.js'
+import { clearSession, setSession } from '../src/auth.js'
 
 function session(t, role = 'admin') {
-  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: key => key.endsWith('.user') ? JSON.stringify({ user_id: 'admin', role }) : 'token',
-  } })
-  t.after(() => {
-    if (previous) Object.defineProperty(globalThis, 'localStorage', previous)
-    else delete globalThis.localStorage
-  })
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { removeItem() {} } })
+  setSession({ user_id: 'admin', role })
+  t.after(() => { clearSession(); delete globalThis.localStorage })
 }
 const users = [{ user_id: 'admin', username: 'admin', role: 'admin' }, { user_id: 'alice', username: 'alice', role: 'user' }]
 
@@ -39,7 +35,8 @@ test('ordinary user agent summaries make one own-scope request', async t => {
 test('admin business lists include every owner and retain colliding names', async t => {
   session(t)
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    assert.equal(init.headers.Authorization, 'Bearer token')
+    assert.equal(init.credentials, 'same-origin')
+    assert.equal(init.headers.Authorization, undefined)
     return Response.json({ data: url === '/api/admin/users' ? users : [{ name: 'same-name' }] })
   })
   for (const method of ['listAgents', 'listKeys', 'packages', 'packageRuns']) {

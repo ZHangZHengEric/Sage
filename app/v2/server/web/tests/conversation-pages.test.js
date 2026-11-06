@@ -11,7 +11,7 @@ async function setup(t, name, target) {
   const values = new Map([['sage.server_v2.user', JSON.stringify({ user_id: 'me', role: 'admin' })]])
   const restorers = []
   for (const [key, value] of Object.entries({
-    localStorage: { getItem: key => values.get(key) || '', setItem: (key, value) => values.set(key, value) },
+    localStorage: { getItem: key => values.get(key) || '', setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) },
     document: { addEventListener() {}, removeEventListener() {}, getElementById: () => null },
   })) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, key)
@@ -19,6 +19,8 @@ async function setup(t, name, target) {
     restorers.push(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key])
   }
   const { api } = await server.ssrLoadModule('/src/api.js')
+  const auth = await server.ssrLoadModule('/src/auth.js')
+  auth.setSession({ user_id: 'me', role: 'admin' })
   const { default: Component } = await server.ssrLoadModule(`/src/views/${name}.vue`)
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }] })
   await router.push(target || '/?new=1')

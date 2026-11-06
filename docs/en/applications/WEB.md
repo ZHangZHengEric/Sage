@@ -24,7 +24,7 @@ python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`.
+Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`. There is no default administrator password. For local HTTP development set `SAGE_SERVER_COOKIE_SECURE=false`; keep the default `true` for HTTPS deployments.
 
 ```bash
 cd app/v2/server/web
@@ -36,9 +36,11 @@ python -m app.v2.server
 
 Open [http://127.0.0.1:8090](http://127.0.0.1:8090). Configure a model and an Agent after login. `/studio` manages Agent packages; `/docs` exposes the running server's OpenAPI.
 
-For frontend development use `npm run dev` in `app/v2/server/web`; Vite proxies to port 8090. Process environment variables override the component `.env` file.
+For frontend development use `npm run dev` in `app/v2/server/web`; Vite proxies to port 8090. During development, set `SAGE_SERVER_PUBLIC_BASE_URL` to the actual Vite origin (for example `http://localhost:5173`) so login Origin validation succeeds. Process environment variables override the component `.env` file.
 
 Startup idempotently upgrades legacy tables: it adds missing `threads.agent_id` and expands Skill descriptions to `LONGTEXT`. The database account needs `ALTER` privileges for these upgrades. Reimport original Skill files to repair descriptions previously truncated in the catalog.
+
+Startup automatically upgrades legacy users, preserving user IDs, roles, and execution policies while copying password hashes into a separate credential table and creating a normalized username index. A migration failure prevents startup. Existing JWTs require a new login after this upgrade; API keys remain valid. A MySQL named lock coordinates concurrent migrations.
 
 ## Storage and deployment boundary
 

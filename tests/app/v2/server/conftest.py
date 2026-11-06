@@ -64,6 +64,7 @@ def make_settings(tmp_path: Path, **overrides) -> ServerSettings:
         "language": "zh",
         "admin_username": "admin",
         "admin_password": "admin12345",
+        "cookie_secure": False,
     }
     values.update(overrides)
     return ServerSettings(**values)

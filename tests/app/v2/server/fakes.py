@@ -18,23 +18,24 @@ from app.v2.server.conversations.records import (
     apply_thread_upsert,
     require_owned_thread,
 )
-from app.v2.server.identity.users import UserRecord
+from app.v2.server.identity.users import PasswordCredential, UserRecord, reject_duplicate_username, username_key
 
 
 class MemoryUserStore:
     def __init__(self) -> None:
         self._users: dict[str, UserRecord] = {}
+        self._passwords: dict[str, PasswordCredential] = {}
 
     async def list_users(self) -> list[UserRecord]:
         return list(self._users.values())
 
     async def get_by_username(self, username: str) -> UserRecord | None:
-        needle = username.strip().lower()
+        needle = username_key(username)
         return next(
             (
                 user
                 for user in self._users.values()
-                if user.username.lower() == needle
+                if username_key(user.username) == needle
             ),
             None,
         )
@@ -47,6 +48,15 @@ class MemoryUserStore:
             (user for user in self._users.values() if user.role == "admin"),
             None,
         )
+
+    async def create(self, user: UserRecord, credential: PasswordCredential | None = None) -> None:
+        reject_duplicate_username(await self.get_by_username(user.username))
+        self._users[user.user_id] = user
+        if credential is not None:
+            self._passwords[user.user_id] = credential
+
+    async def get_password_credential(self, user_id: str) -> PasswordCredential | None:
+        return self._passwords.get(user_id)
 
     async def save(self, user: UserRecord) -> None:
         self._users[user.user_id] = user

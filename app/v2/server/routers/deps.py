@@ -12,6 +12,7 @@ from app.v2.server.conversations.a2a.service import A2AService
 from app.v2.server.conversations.agui.service import ConversationService
 from app.v2.server.identity.credentials import CredentialService
 from app.v2.server.identity.service import IdentityService
+from app.v2.server.identity.http import SESSION_COOKIE, validate_cookie_write
 from app.v2.server.skills.service import SkillCatalogService
 from app.v2.server.identity.users import UserRecord
 from app.v2.server.packages.management import ServerAgentManagement
@@ -20,7 +21,6 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from sagents.v2.contracts.principals import RequestContext
 
 _bearer = HTTPBearer(auto_error=False)
-_COOKIE = "sage_server_v2"
 
 
 def get_host(request: Request) -> ServerHost:
@@ -100,7 +100,7 @@ def _token_from(
 ) -> str:
     if credentials is not None and credentials.credentials.strip():
         return credentials.credentials.strip()
-    return (request.cookies.get(_COOKIE) or "").strip()
+    return (request.cookies.get(SESSION_COOKIE) or "").strip()
 
 
 async def get_optional_user(
@@ -112,9 +112,12 @@ async def get_optional_user(
     if not token:
         return None
     try:
-        return await service.from_token(token)
+        user = await service.from_token(token)
     except SageV2Error:
         return None
+    if user is not None and credentials is None:
+        validate_cookie_write(request, token, service)
+    return user
 
 
 async def get_current_user(
@@ -140,6 +143,8 @@ async def get_current_user(
                 message="authentication required",
             )
         )
+    if credentials is None:
+        validate_cookie_write(request, token, service)
     if request.headers.get("X-Sage-View-User") is not None and request.method != "GET":
         raise SageV2Error(RuntimeErrorInfo(
             code="server.routers.deps.forbidden",

@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { getToken, isAdmin } from './auth.js'
+import { getUser, isAdmin } from './auth.js'
 import Login from './views/Login.vue'
 import Chat from './views/Chat.vue'
 import History from './views/History.vue'
@@ -47,7 +47,7 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.public) return true
-  if (!getToken()) {
+  if (!getUser()) {
     return { path: '/login', query: { next: to.fullPath } }
   }
   if (to.meta.admin && !isAdmin()) return '/'

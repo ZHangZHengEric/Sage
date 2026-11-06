@@ -30,9 +30,9 @@ async def test_schema_creates_current_tables_and_only_checks_metadata_on_restart
             await create_host_schema(database)
         finally:
             event.remove(engine, "before_cursor_execute", capture)
-        assert len(statements) == 2
-        assert statements[0].lstrip().upper().startswith("SELECT")
-        assert statements[1].lstrip().upper().startswith("PRAGMA")
+        # Restarts inspect schema and check pending upgrades; never rebuild tables.
+        assert statements
+        assert not any(sql.lstrip().upper().startswith(("CREATE", "ALTER", "DROP", "UPDATE", "INSERT")) for sql in statements)
     finally:
         await database.stop()
 

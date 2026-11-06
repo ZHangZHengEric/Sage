@@ -1,109 +1,73 @@
-"""Account use cases. Password hashing stays here; the user store only persists rows."""
+"""Identity facade: providers resolve internal users; sessions carry no authority."""
 
-from __future__ import annotations
 from dataclasses import replace
-from app.v2.server.identity.passwords import PasswordExecutor
-from app.v2.server.runtime.policy import ExecutionPolicy
 
-from app.v2.server.identity.jwt import (
-    create_access_token,
-    decode_access_token,
-    hash_password,
-    verify_password,
+from app.v2.server.identity.federation import (
+    ExternalIdentityService,
+    ExternalIdentityStore,
 )
-from app.v2.server.identity.users import (
-    Role,
-    UserRecord,
-    build_user_record,
-    reject_duplicate_username,
-    reject_second_admin,
-)
+from app.v2.server.identity.local import LocalPasswordAuth
+from app.v2.server.identity.repository import UserStore
+from app.v2.server.identity.sessions import LoginSessions, LoginSessionStore
+from app.v2.server.identity.users import UserRecord
+from app.v2.server.runtime.policy import ExecutionPolicy
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 
 class IdentityService:
-    def __init__(self, users, *, jwt_secret: str, jwt_expire_hours: int) -> None:
+    def __init__(
+        self,
+        users: UserStore,
+        *,
+        sessions: LoginSessionStore,
+        external_identities: ExternalIdentityStore,
+        jwt_secret: str,
+        jwt_expire_hours: int,
+    ) -> None:
         self.users = users
-        self._jwt_secret = jwt_secret
-        self._jwt_expire_hours = jwt_expire_hours
-        self._passwords = PasswordExecutor()
+        self.local = LocalPasswordAuth(users)
+        self.external = ExternalIdentityService(users, external_identities)
+        self.sessions = LoginSessions(
+            sessions, secret=jwt_secret, expire_hours=jwt_expire_hours
+        )
 
     async def start(self) -> None:
-        if self._passwords.closed:
-            await self._passwords.close()
-            self._passwords = PasswordExecutor()
+        await self.local.start()
 
     async def close(self) -> None:
-        await self._passwords.close()
+        await self.local.close()
 
     async def get_by_id(self, user_id: str) -> UserRecord | None:
         return await self.users.get_by_id(user_id)
 
-    async def set_execution_policy(self, user_id: str, policy: ExecutionPolicy) -> UserRecord:
+    async def set_execution_policy(
+        self, user_id: str, policy: ExecutionPolicy
+    ) -> UserRecord:
         user = await self.get_by_id(user_id)
         if user is None:
-            raise SageV2Error(RuntimeErrorInfo(code="server.identity.not_found",
-                category=ErrorCategory.AUTHORIZATION, message="User no longer exists"))
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="server.identity.not_found",
+                    category=ErrorCategory.AUTHORIZATION,
+                    message="User no longer exists",
+                )
+            )
         updated = replace(user, execution_policy=policy)
         await self.users.save(updated)
         return updated
 
     async def from_token(self, token: str) -> UserRecord | None:
-        claims = decode_access_token(token, secret=self._jwt_secret)
-        return await self.get_by_id(str(claims.get("userid") or ""))
+        session = await self.sessions.authenticate(token)
+        return await self.get_by_id(session.user_id)
 
-    def issue_token(self, user: UserRecord) -> tuple[str, int]:
-        return create_access_token(
-            user_id=user.user_id,
-            username=user.username,
-            role=user.role,
-            secret=self._jwt_secret,
-            expire_hours=self._jwt_expire_hours,
-        )
+    async def issue_token(self, user: UserRecord) -> tuple[str, int]:
+        return await self.sessions.issue(user)
 
     async def register(self, username: str, password: str) -> UserRecord:
-        return await self._create(username, password, role="user")
+        return await self.local.create(username, password)
 
     async def authenticate(self, username: str, password: str) -> UserRecord:
-        user = await self.users.get_by_username(username)
-        if user is None or not await self._passwords.run(verify_password, password, user.password_hash):
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.identity.service.unauthenticated",
-                    category=ErrorCategory.AUTHENTICATION,
-                    message="invalid username or password",
-                )
-            )
-        return user
+        return await self.local.authenticate(username, password)
 
     async def ensure_admin(self, username: str, password: str) -> UserRecord:
-        existing = await self.users.admin()
-        if existing is not None:
-            return existing
-        named = await self.users.get_by_username(username)
-        if named is not None:
-            upgraded = UserRecord(
-                user_id=named.user_id,
-                username=named.username,
-                password_hash=named.password_hash,
-                role="admin",
-                execution_policy=named.execution_policy,
-            )
-            await self.users.save(upgraded)
-            return upgraded
-        return await self._create(username, password, role="admin")
-
-    async def _create(self, username: str, password: str, *, role: Role) -> UserRecord:
-        if len(password) < 6:
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.identity.service.validation",
-                    category=ErrorCategory.VALIDATION,
-                    message="password is too short",
-                )
-            )
-        record = build_user_record(username, await self._passwords.run(hash_password, password), role=role)
-        reject_duplicate_username(await self.users.get_by_username(record.username))
-        reject_second_admin(role, await self.users.admin())
-        await self.users.save(record)
-        return record
+        return await self.local.ensure_admin(username, password)

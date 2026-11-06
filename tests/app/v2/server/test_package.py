@@ -268,6 +268,7 @@ async def test_log_level_and_text_format_apply_to_both_outputs(tmp_path: Path, c
 async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
     from app.v2.server.config.settings import ServerSettings
 
+    monkeypatch.setenv("SAGE_SERVER_JWT_SECRET", "tests-only-32-byte-secret-abcdef012345")
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/test")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS", "24")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "6")
