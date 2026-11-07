@@ -1,4 +1,4 @@
-"""Trusted workspace lifecycle probes over existing Session snapshots/journals."""
+"""Trusted workspace lifecycle probes over revision-checked Run projections."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
@@ -34,8 +34,8 @@ class MysqlWorkspaceQueries:
     async def has_nonterminal_session_trees(self, session_ids):
         """Host-only boolean probe; callers supply verified ownership roots.
 
-        No execution aggregate or canonical event payload is installed. The
-        latest journal state, including Run deletions, supersedes compact state.
+        No execution aggregate or event payload is installed. A revision-checked
+        projection is used first; legacy state is recovered from the journal.
         """
         store = cast("_MysqlSessionState", self)
         return await store._has_nonterminal_sessions(session_ids, include_descendants=True)
@@ -46,52 +46,5 @@ class MysqlWorkspaceQueries:
         return await store._has_nonterminal_sessions(session_ids, include_descendants=False)
 
     async def _has_nonterminal_sessions(self, session_ids, *, include_descendants):
-        store = cast("_MysqlSessionState", self)
-        ids = tuple(dict.fromkeys(session_ids))
-        for offset in range(0, len(ids), 128):
-            batch = ids[offset:offset + 128]
-            marks = ','.join(['%s'] * len(batch))
-            descendants = f"""
-                    UNION DISTINCT
-                    SELECT child.session_id FROM {store._table('sessions')} child
-                    JOIN tree parent ON child.parent_session_id = parent.session_id
-            """ if include_descendants else ""
-            statement = f"""
-                WITH RECURSIVE tree AS (
-                    SELECT session_id FROM {store._table('sessions')} WHERE session_id IN ({marks})
-                    {descendants}
-                ), states AS (
-                    SELECT s.session_id, r.run_id, r.state,
-                        CAST(JSON_UNQUOTE(JSON_EXTRACT(s.compact_state, '$.sessions[0].revision')) AS UNSIGNED) revision
-                    FROM {store._table('sessions')} s JOIN tree ON tree.session_id = s.session_id,
-                        JSON_TABLE(s.compact_state, '$.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
-                    UNION ALL
-                    SELECT m.session_id, r.run_id, r.state, m.revision
-                    FROM {store._table('session_mutations')} m JOIN tree ON tree.session_id = m.session_id,
-                        JSON_TABLE(m.mutation, '$.upserts.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
-                    UNION ALL
-                    SELECT m.session_id, r.run_id, r.state, m.revision
-                    FROM {store._table('session_mutations')} m JOIN tree ON tree.session_id = m.session_id,
-                        JSON_TABLE(m.mutation, '$.patches.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
-                    WHERE r.state IS NOT NULL
-                    UNION ALL
-                    SELECT m.session_id, r.run_id, '__deleted__', m.revision
-                    FROM {store._table('session_mutations')} m JOIN tree ON tree.session_id = m.session_id,
-                        JSON_TABLE(m.mutation, '$.deletes.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$[0]')) r
-                ), latest AS (
-                    SELECT state, ROW_NUMBER() OVER (
-                        PARTITION BY session_id, run_id ORDER BY revision DESC) position
-                    FROM states
-                ) SELECT 1 FROM latest WHERE position = 1
-                    AND state NOT IN ('completed', 'failed', 'cancelled', '__deleted__') LIMIT 1
-            """
-            async with store._reader_connection() as connection:
-                async with connection.cursor() as cursor:
-                    await cursor.execute(statement, batch)
-                    if await cursor.fetchone() is not None:
-                        return True
-        return False
+        from .workspace_probe import has_nonterminal_sessions
+        return await has_nonterminal_sessions(self, session_ids, include_descendants=include_descendants)
