@@ -101,15 +101,23 @@ async def reply_run(service, *, tenant_id: str, agent_id: str, thread_id: str,
 async def current_run_workspace(service, *, tenant_id: str, agent_id: str,
                                 thread_id: str, run_id: str) -> str:
     """Return the bound relative path only while this run is latest."""
-    _, native_run_id, _, internal_thread, context, access, command = await selected_run(
-        service, tenant_id=tenant_id, agent_id=agent_id,
-        thread_id=thread_id, run_id=run_id,
-    )
-    runs = await access.list_session_runs(internal_thread, context)
-    latest = max(runs, key=lambda run: (
-        run.accepted_session_revision, run.created_at, run.run_id,
-    ))
-    if latest.run_id != native_run_id:
+    if not all(isinstance(value, str) and value.strip() for value in
+               (tenant_id, agent_id, thread_id, run_id)):
+        raise _error("invalid_identity", ErrorCategory.VALIDATION,
+                     "tenant, Agent, thread and run are required")
+    owner, internal_thread = await service._scope(tenant_id, agent_id, thread_id)
+    context = service.context_for(owner)
+    access = service.session_access
+    found = await service._find_client_run(internal_thread, run_id, context, external=True)
+    if found is None:
+        raise _error("result_not_found", ErrorCategory.VALIDATION, "Run not found")
+    _, command = found
+    if (command.agent_id != agent_id
+            or command.config.metadata.get("server_v2.workspace_user_id") != tenant_id):
+        raise _error("forbidden", ErrorCategory.AUTHORIZATION,
+                     "Run does not belong to the requested Agent and tenant")
+    latest = await access.latest_session_start_command(internal_thread, context)
+    if latest is None or latest.idempotency_key != command.idempotency_key:
         raise _error("stale_workspace", ErrorCategory.CONFLICT,
                      "Workspace has a newer Run")
     from app.v2.server.storage.external_workspaces import workspace_parts

@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
+import hashlib
 import json
 from urllib.parse import quote
 from pathlib import Path, PurePosixPath
@@ -70,6 +71,79 @@ def list_directory(root: Path, value: str) -> list[dict]:
 
 class SnapshotChangedError(ValueError):
     """The workspace changed while a download was being assembled."""
+
+
+def workspace_version(root: Path, value: str, *, max_bytes: int = MAX_ARCHIVE_BYTES,
+                      max_entries: int = MAX_ARCHIVE_ENTRIES,
+                      exclude_root_entry: str | None = None) -> dict:
+    """Hash bounded actual file contents without compression or a temporary ZIP.
+
+    A second metadata walk fences replacements and writes occurring after a file
+    was hashed. Timestamps are consistency checks, never content identity.
+    """
+    path = relative_path(value)
+    signatures, contents = {}, {}
+    total = [0, 0]
+    scanned = [0]
+
+    def signature(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+
+    def scan(fd, prefix, hashing, excluded=None):
+        opened = os.fstat(fd)
+        scanned[0] += 1
+        if scanned[0] > max_entries:
+            raise OverflowError("directory is too large to inspect")
+        result = {prefix: signature(opened)}
+        if stat.S_ISDIR(opened.st_mode):
+            if hashing:
+                total[0] += 1
+                if total[0] > max_entries:
+                    raise OverflowError("directory is too large to inspect")
+            for name in sorted(os.listdir(fd)):
+                if name == excluded:
+                    continue
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                    continue
+                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                try:
+                    result.update(scan(child, prefix + "/" + name, hashing))
+                finally:
+                    os.close(child)
+        elif hashing:
+            total[0] += 1
+            total[1] += opened.st_size
+            if total[0] > max_entries or total[1] > max_bytes:
+                raise OverflowError("directory is too large to inspect")
+            digest = hashlib.sha256()
+            remaining = opened.st_size
+            with os.fdopen(os.dup(fd), "rb") as source:
+                while remaining:
+                    chunk = source.read(min(remaining, 1 << 20))
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+            if remaining:
+                raise SnapshotChangedError("file changed while inspecting workspace")
+            contents[prefix.lstrip("/")] = digest.digest()
+        if signature(os.fstat(fd)) != signature(opened):
+            raise SnapshotChangedError("workspace changed while inspecting contents")
+        return result
+
+    with open_entry(root, path) as fd:
+        signatures = scan(fd, "", True, exclude_root_entry)
+        scanned[0] = 0
+        if scan(fd, "", False, exclude_root_entry) != signatures:
+            raise SnapshotChangedError("workspace changed while inspecting contents")
+    digest = hashlib.sha256()
+    for name, content in sorted(contents.items()):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content)
+    return {"version": digest.hexdigest(), "files": len(contents), "bytes": total[1]}
 
 
 def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",

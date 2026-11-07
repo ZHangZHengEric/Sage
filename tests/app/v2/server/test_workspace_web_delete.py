@@ -57,7 +57,7 @@ def test_web_delete_uses_thread_binding_and_keeps_admin_views_readonly(client, s
     bound = command.model_copy(update={"config": command.config.model_copy(update={"metadata": {
         **command.config.metadata, "server_v2.workspace_user_id": "external-user",
     }})})
-    monkeypatch.setattr(access, "get_start_command", AsyncMock(return_value=bound))
+    monkeypatch.setattr(access, "latest_session_start_command", AsyncMock(return_value=bound))
     admin_token = client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"}).json()["data"]["access_token"]
     admin = {"Authorization": f"Bearer {admin_token}"}
     params = {"thread_id": "thread-1", "path": "file.txt"}

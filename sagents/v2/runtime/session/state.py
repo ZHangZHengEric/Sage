@@ -2658,6 +2658,17 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             for removed_session_id in session_ids:
                 self._forget_attachment_bytes(removed_session_id)
 
+    async def latest_authorized_session_command(self, session_id, context):
+        """Read the newest admitted command without constructing Run history."""
+        async with self._session_read(session_id):
+            self._authorize_session_actor_locked(session_id, context)
+            row = max(
+                (row for row in self._runs.values() if row.session_id == session_id),
+                key=lambda row: (row.accepted_session_revision, row.created_at, row.run_id),
+                default=None,
+            )
+            return row.start_command if row is not None else None
+
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]:
         async with self._session_read(session_id):
             if session_id not in self._sessions:

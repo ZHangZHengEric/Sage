@@ -54,6 +54,8 @@ External routes require a target-bound `Authorization: Bearer <API Key>` and a `
 
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=uploads` optionally excludes one top-level entry from the Run workspace archive. Nested entries with the same name remain included. The remaining archive is subject to the existing 32 MiB and 512-entry limits.
 
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version?exclude=uploads` returns `{code:0,data:{version,files,bytes}}` under the same Agent API key and tenant authorization as downloads. `version` is lowercase SHA-256 over sorted relative file paths encoded as UTF-8, each followed by NUL and the raw 32-byte SHA-256 of its contents. Regular file bytes define identity, not modification times; empty directories do not affect it. The optional single root exclusion, symlink handling, 32 MiB and 512-entry limits match downloads. This operation hashes in a worker without creating a ZIP; Cube computes inside its bound volume and returns metadata only. The exact latest Run by persisted admission revision (not wall-clock time) is checked before and after hashing; an older Run returns409, concurrent writes503, quota overflow413, missing files404, and unsupported storage501. There is no ZIP fallback. Clients must hash downloads with the same recipe and reject a version mismatch before caching a derived snapshot.
+
 `POST /api/agents/{agent_id}/runs?workspace_path=...` accepts AG-UI input and optional `runtimeContext` for this Run without modifying shared configuration. Reads, replies, cancellation, and downloads identify the exact `thread_id` and `run_id` and check ownership; replies also require the expected interaction ID and revision.
 
 File downloads snapshot the Run-bound working directory, limited to 32 MiB and 512 entries. A directory superseded by a newer Run in the same Session returns 409; changes during packaging may return 503. Callers validate artifacts and Run identity. Sage does not interpret downstream business manifests or build customer projects.
@@ -119,6 +121,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/cancel` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |

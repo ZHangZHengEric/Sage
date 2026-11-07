@@ -80,25 +80,26 @@ class MysqlHistoryQueries:
                         SELECT admitted FROM (
                           SELECT JSON_EXTRACT(s.compact_state,
                                    CONCAT('$.runs[', r.pos - 1, '].start_command')) admitted,
-                                 r.created_at, r.run_id
+                                 r.accepted_revision, r.created_at, r.run_id
                           FROM {store._table('sessions')} s, JSON_TABLE(s.compact_state, '$.runs[*]'
                             COLUMNS (pos FOR ORDINALITY,
+                                     accepted_revision BIGINT PATH '$.accepted_session_revision',
                                      created_at VARCHAR(64) PATH '$.created_at',
                                      run_id VARCHAR(128) PATH '$.run_id')) r
                           WHERE s.session_id = %s
                           UNION ALL
                           SELECT JSON_EXTRACT(m.mutation,
                                    CONCAT('$.upserts.runs[', r.pos - 1, '].start_command')) admitted,
-                                 r.created_at, r.run_id
+                                 r.accepted_revision, r.created_at, r.run_id
                           FROM {store._table('session_mutations')} m, JSON_TABLE(m.mutation, '$.upserts.runs[*]'
                             COLUMNS (pos FOR ORDINALITY,
+                                     accepted_revision BIGINT PATH '$.accepted_session_revision',
                                      created_at VARCHAR(64) PATH '$.created_at',
                                      run_id VARCHAR(128) PATH '$.run_id')) r
                           WHERE m.session_id = %s
-                        ) commands ORDER BY created_at DESC, run_id DESC LIMIT 1
+                        ) commands ORDER BY accepted_revision DESC, created_at DESC, run_id DESC LIMIT 1
                     """, (session_id, session_id))
                     row = await cursor.fetchone()
                     return StartRun.model_validate(_decode(row[0])) if row and row[0] is not None else None
         await store.authorize_session_actor(session_id, context)
-        runs = await store.list_session_runs(session_id)
-        return await store.get_start_command(runs[-1].run_id) if runs else None
+        return await super().latest_authorized_session_command(session_id, context)

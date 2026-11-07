@@ -139,7 +139,7 @@ def test_workspace_honors_persisted_external_project_binding(client, service, mo
     bound = command.model_copy(update={"config": command.config.model_copy(update={"metadata": {
         **command.config.metadata, "server_v2.workspace_user_id": workspace_id,
     }})})
-    monkeypatch.setattr(access, "get_start_command", AsyncMock(return_value=bound))
+    monkeypatch.setattr(access, "latest_session_start_command", AsyncMock(return_value=bound))
     admin_token = client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"}).json()["data"]["access_token"]
     admin = {"Authorization": f"Bearer {admin_token}"}
     params = {"thread_id": "thread-1"}

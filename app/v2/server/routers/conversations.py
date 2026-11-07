@@ -36,7 +36,7 @@ from app.v2.server.routers.schemas.conversations import (
     ThreadCancelBody,
     ThreadSteerBody,
 )
-from app.v2.server.storage.downloads import prepare_download, prepare_session_export
+from app.v2.server.storage.downloads import prepare_download, prepare_session_export, workspace_version
 from app.v2.server.storage.external_workspaces import (
     MAX_BINARY_BYTES,
     delete_workspace_path,
@@ -542,6 +542,40 @@ async def cancel_run(thread_id: str, run_id: str, caller: CallerDep,
                                         agent_id=caller.agent_id, thread_id=thread_id,
                                         run_id=run_id)
     return success(result)
+
+
+@external_router.get("/runs/{thread_id}/{run_id}/files/version")
+async def get_run_files_version(thread_id: str, run_id: str, caller: CallerDep,
+                                service: ConversationDep, host: HostDep,
+                                exclude: str | None = Query(default=None, max_length=255)):
+    if exclude is not None:
+        try:
+            if len(workspace_parts(exclude)) != 1:
+                raise ValueError("not a top-level entry")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid archive exclusion") from exc
+    directory = await access.current_run_workspace(
+        service, tenant_id=caller.tenant_id, agent_id=caller.agent_id,
+        thread_id=thread_id, run_id=run_id,
+    )
+    if host.workspace_storage is not None:
+        operation = getattr(host.workspace_storage, "workspace_version", None)
+        if operation is None:
+            raise HTTPException(501, "workspace content versions are not supported")
+        version = await file_operation(operation, caller.tenant_id, caller.agent_id, directory,
+                                       max_bytes=32 << 20, max_entries=512,
+                                       exclude_root_entry=exclude)
+    else:
+        root = host.paths.workspace_path(caller.tenant_id, caller.agent_id)
+        version = await file_operation(workspace_version, root, directory,
+                                       max_bytes=32 << 20, max_entries=512,
+                                       exclude_root_entry=exclude)
+    # Admission may have advanced while bytes were being read.
+    await access.current_run_workspace(
+        service, tenant_id=caller.tenant_id, agent_id=caller.agent_id,
+        thread_id=thread_id, run_id=run_id,
+    )
+    return success(version)
 
 
 @external_router.get("/runs/{thread_id}/{run_id}/files")

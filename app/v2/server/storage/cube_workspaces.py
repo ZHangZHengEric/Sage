@@ -69,6 +69,22 @@ class CubeWorkspaceStorage:
 
         return self._operation(user, agent, read)
 
+    def workspace_version(self, user, agent, value, *, max_bytes=MAX_ARCHIVE_BYTES,
+                          max_entries=MAX_ARCHIVE_ENTRIES, exclude_root_entry=None):
+        path = relative_path(value).as_posix()
+
+        def read(sandbox):
+            try:
+                return cube_file_call(sandbox, "version", path,
+                                      max_bytes=max_bytes, max_entries=max_entries,
+                                      exclude_entry=exclude_root_entry)
+            except ValueError as exc:
+                if str(exc) == "workspace changed while inspecting contents":
+                    raise SnapshotChangedError(str(exc)) from exc
+                raise
+
+        return self._operation(user, agent, read)
+
     @staticmethod
     def _copy(sandbox, entry, target):
         remaining, offset = entry["size"], 0

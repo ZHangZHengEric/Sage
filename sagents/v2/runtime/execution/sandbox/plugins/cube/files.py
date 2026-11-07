@@ -13,7 +13,7 @@ import shlex
 
 
 _REMOTE = r'''
-import base64, errno, json, os, secrets, shutil, stat, sys
+import base64, errno, hashlib, json, os, secrets, shutil, stat, sys
 
 request = json.loads(base64.b64decode(sys.argv[1]))
 root = request["root"]
@@ -62,11 +62,64 @@ def entries(fd, prefix, recursive=False, exclude_entry=None):
             finally: os.close(child)
     return result
 
+def content_version(fd):
+    hashes, total, scanned = {}, [0, 0], [0]
+    def signature(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    def scan(fd, prefix, hashing, excluded=None):
+        opened = os.fstat(fd)
+        scanned[0] += 1
+        if scanned[0] > request["max_entries"]: raise OverflowError("too many workspace entries")
+        found = {prefix: signature(opened)}
+        if stat.S_ISDIR(opened.st_mode):
+            if hashing:
+                total[0] += 1
+                if total[0] > request["max_entries"]: raise OverflowError("too many workspace entries")
+            for name in sorted(os.listdir(fd)):
+                if name == excluded: continue
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)): continue
+                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                try: found.update(scan(child, prefix + "/" + name, hashing))
+                finally: os.close(child)
+        elif hashing:
+            if opened.st_nlink != 1: raise PermissionError("hard-linked file is not allowed")
+            total[0] += 1
+            total[1] += opened.st_size
+            if total[0] > request["max_entries"] or total[1] > request["max_bytes"]:
+                raise OverflowError("workspace exceeds content version quota")
+            digest, remaining = hashlib.sha256(), opened.st_size
+            with os.fdopen(os.dup(fd), "rb") as source:
+                while remaining:
+                    chunk = source.read(min(remaining, 1 << 20))
+                    if not chunk: break
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+            if remaining: raise ValueError("workspace changed while inspecting contents")
+            hashes[prefix.lstrip("/")] = digest.digest()
+        if signature(os.fstat(fd)) != signature(opened):
+            raise ValueError("workspace changed while inspecting contents")
+        return found
+    before = scan(fd, "", True, request.get("exclude_entry"))
+    scanned[0] = 0
+    if scan(fd, "", False, request.get("exclude_entry")) != before:
+        raise ValueError("workspace changed while inspecting contents")
+    digest = hashlib.sha256()
+    for name, content in sorted(hashes.items()):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content)
+    return {"version": digest.hexdigest(), "files": len(hashes), "bytes": total[1]}
+
 try:
     operation = request["operation"]
     if operation in ("list", "walk"):
         fd = directory(parts)
         try: result = entries(fd, "/".join(parts), operation == "walk", request.get("exclude_entry"))
+        finally: os.close(fd)
+    elif operation == "version":
+        fd = directory(parts)
+        try: result = content_version(fd)
         finally: os.close(fd)
     elif operation == "mkdir":
         fd = directory(parts, create=True)

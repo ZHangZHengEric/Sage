@@ -456,6 +456,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         self._loaded_session_ids.intersection_update(self._sessions)
         return result
 
+    async def latest_authorized_session_command(self, session_id, context):
+        await self._ensure_session_loaded(session_id)
+        return await super().latest_authorized_session_command(session_id, context)
+
     async def list_session_runs(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)

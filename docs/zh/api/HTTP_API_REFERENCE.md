@@ -54,6 +54,8 @@ parent: API
 
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=uploads` 可选排除 Run 工作区归档根下的一个条目；更深层的同名条目仍保留。剩余归档沿用 32 MiB 和 512 个条目的限制。
 
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version?exclude=uploads` 沿用文件下载的Agent Key与租户鉴权，返回 `{code:0,data:{version,files,bytes}}`。`version` 为64位小写SHA-256：按相对路径排序，依次写入路径UTF-8、NUL及文件原始字节的32字节SHA-256摘要，再计算总摘要；时间戳不作为内容身份，空目录不影响版本。单个顶层exclude、符号链接处理、32MiB与512条目限制沿用下载规则。worker只哈希，不创建ZIP；Cube在绑定卷内部计算，仅返回元数据。哈希前后均按持久化受理序号核对准确的最新Run，不以墙上时间判断先后；旧Run返回409、并发写入503、超额413、文件缺失404、存储不支持501，不回退下载ZIP。客户端须用相同算法验证下载快照，版本不一致时拒绝缓存派生结果。
+
 `POST /api/agents/{agent_id}/runs?workspace_path=...` 接收 AG-UI 请求，并可用 `runtimeContext` 为本次运行提供上下文，不改写共享配置。运行读取、回复、取消和文件下载都以准确的 `thread_id`、`run_id` 定位，并核对归属；交互回复还需匹配交互 ID 和预期修订号。
 
 文件下载读取运行绑定的工作目录快照，上限 32 MiB、512 项；旧运行目录已被同会话的新运行替代时返回 409，打包期间文件变化可能返回 503。调用方应核对产物与运行身份；Sage 不解释下游业务清单或执行客户项目构建。
@@ -119,6 +121,7 @@ parent: API
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/cancel` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
