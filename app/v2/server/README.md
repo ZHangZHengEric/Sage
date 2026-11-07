@@ -29,7 +29,7 @@ web/            前端
 
 会话列表 `GET /api/threads` 与管理员列表返回 `{items, next_cursor}`，支持游标、搜索与 Agent 筛选，Web 按页加载；历史深链接通过单条元数据接口解析身份。接口参数与返回结构见 [Server HTTP API](../../../docs/zh/api/HTTP_API_REFERENCE.md)。
 
-生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
+生产启动选择 MySQL（`SAGE_SERVER_MYSQL_URL`）或 PostgreSQL（`SAGE_SERVER_POSTGRES_URL`），只设置其中一个。Python 安装 PostgreSQL 支持使用 `pip install '.[server,postgres]'`，v2 镜像已包含驱动。PostgreSQL 覆盖宿主用户、catalog、会话索引和 SDK 会话存储；未配置 Redis 时选择 `sage.session.postgres`，配置 Redis 时选择 `sage.session.redis-postgres`，支持与 Redis/MySQL 相同的归档、跨实例订阅和分布式执行。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
 单进程并发可用 `SAGE_SERVER_MAX_CONCURRENT_RUNS`（默认 8）、`SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER`（默认 2）和 `SAGE_SERVER_MAX_PENDING_RUNS`（默认 1024）配置。参数必须为正数，分别约束总执行、每用户执行及等待队列，见[单机并发说明](../../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)。
 
@@ -37,7 +37,7 @@ Run 装配使用独立的 runtime/models 快照，不再修改进程 App 的默�
 
 MySQL 冷加载只解析、安装目标 Session，保留其他运行中的内存对象。已建立 owner 的历史分页直接查询既有事件表，在同一只读事务内核对身份、序号 head 与页面；最新启动命令也只返回一个 Run 的配置。旧 owner 缺失的数据沿用完整身份推导。MySQL/Redis-MySQL 的 Session 内存缓存默认最多 256 个、按序列化大小保守估算 256 MiB、空闲 300 秒，在操作结束时回收；插件配置 `max_cached_sessions`、`max_cached_bytes`、`cache_idle_seconds` 可调整。活动 Run、操作、订阅及未释放的 compute 受保护，必要时可超过缓存目标；这些值不是进程内存硬限制。回收只释放内存，保留业务、附件和派生数据。Redis 模式从权威热状态读取历史，不读取可能滞后的 MySQL 归档。
 
-Server 只支持单 worker：SessionStore 只接受一个 writer（`multi_process_writes: False`），订阅者留在进程内，Scheduler 与 JobRuntime 是内存实现。第二个进程会在获取独占 writer 锁时启动失败。MySQL 让 Session 状态跨重启存活，但不提供横向扩容。manifest 的 `required_guarantees` 在装配阶段校验 SessionStore 的事务性、持久性与 actor 授权能力。
+MySQL 和 PostgreSQL 的独立 SessionStore 使用单 worker（`multi_process_writes: False`），订阅者留在进程内，Scheduler 与 JobRuntime 是内存实现。Session CAS 拒绝过期提交；数据库持久化本身不提供横向扩容。Redis/MySQL 和 Redis/PostgreSQL 的分布式执行需显式配置对应调度器。manifest 的 `required_guarantees` 在装配阶段校验 SessionStore 的事务性、持久性与 actor 授权能力。
 
 ```bash
 # 后端依赖（仓库根目录，Python 3.12+ 环境）
@@ -46,7 +46,7 @@ python -m pip install -e '.[server]'
 python -m app.v2.server --data-root /tmp/sage-server-v2
 ```
 
-Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端和 Web，连接外部 MySQL；配置与命令见 [部署指南](../../../deploy/README.md)。
+Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端和 Web，连接外部 MySQL 或 PostgreSQL；配置与命令见 [部署指南](../../../deploy/README.md)。
 
 Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
 
@@ -62,13 +62,13 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 
 | 数据 | 生产 | 测试 |
 |---|---|---|
-| 用户 / catalog / 会话索引 | MySQL `users` / `catalogs` / `threads` | Memory mock |
-| Sage Session | `sage.session.mysql`（无表前缀） | filesystem（`data_root/runtime/sessions`） |
+| 用户 / catalog / 会话索引 | MySQL / PostgreSQL `users` / `catalogs` / `threads` | Memory mock |
+| Sage Session | `sage.session.mysql` / `sage.session.postgres`（无表前缀） | filesystem（`data_root/runtime/sessions`） |
 | AG-UI 回放 | Sage Session `run_events` | Sage Session `run_events` |
 | 工作区 | `{data_root}/tenants/{user_id}/{agent_id}/workspace/` | 同左 |
-| Skill catalog | MySQL `skills` / `skill_versions` / `agent_skill_selections`；artifact 相对路径 `{data_root}/skills/...` | Memory mock + 同左磁盘 |
+| Skill catalog | MySQL / PostgreSQL `skills` / `skill_versions` / `agent_skill_selections`；artifact 相对路径 `{data_root}/skills/...` | Memory mock + 同左磁盘 |
 | Agent / MCP / A2A peer | `agents.package_ref` 引用 `managed_agent_records` 中的标准包；`catalogs` 保存模型、MCP 和 A2A peer | 同左 |
-| A2A API Key | MySQL `api_keys`（只存哈希） | Memory mock |
+| A2A API Key | MySQL / PostgreSQL `api_keys`（只存哈希） | Memory mock |
 
 MySQL SessionStore 默认最多 16 个连接，同时最多 15 个读取，为写入保留容量；最多排队 64 个连接请求，获取连接最长等待 10 秒。插件参数 `max_connections`（至少 2）、`max_pending_connections` 和 `connection_acquire_timeout_seconds` 可调整这些资源预算，Redis/MySQL 的归档连接同样生效。队列已满或获取超时返回可重试的 `session_store.mysql_busy`，不对已获取连接的业务事务设置执行超时；取消请求会等待连接清理完成后再释放容量。
 
@@ -151,7 +151,7 @@ POST /api/agents/{agent_id}/rsi/runs/{run_id}/versions/{version_id}/apply
 
 `/studio` 提供完整包定义编辑、普通 Agent 导入、不可变版本、复制/切换版本、运行、事件、任务历史、反馈、人工审批和同 Session 续接。对应 HTTP 入口为 `/api/agent-packages`。普通 Agent 可选择 `agent_package_*` 工具，通过同一管理服务创建并调用其他 Agent。
 
-ServerHost 必须注入 Database；生产库存使用 MySQL `managed_agent_records`，测试使用 SQLite Database，不再使用独立的包库存文件。managed Session 使用独立 MySQL 前缀，验证用临时文件存储。普通对话与包任务共享运行/用户额度、模型额度和 JobRuntime。可通过 `SAGE_SERVER_MAX_MANAGED_APPLICATIONS`（默认 32）和 `SAGE_SERVER_MAX_MANAGED_BUILDS`（默认 4）控制实例与装配容量。
+ServerHost 必须注入 Database；生产库存使用 MySQL / PostgreSQL `managed_agent_records`，测试使用 SQLite Database，不再使用独立的包库存文件。managed Session 使用独立数据库表前缀，验证用临时文件存储。普通对话与包任务共享运行/用户额度、模型额度和 JobRuntime。可通过 `SAGE_SERVER_MAX_MANAGED_APPLICATIONS`（默认 32）和 `SAGE_SERVER_MAX_MANAGED_BUILDS`（默认 4）控制实例与装配容量。
 
 包模型使用 `provider=server`，`model` 指向本人模型 ID 或 `default`，不携带凭据和地址。源码插件默认关闭，只有宿主注册与明确授权后才能加载，且属于可信宿主代码。能力、API、部署成本和验证边界见 [Server V2 Agent 平台](../../../docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md)。
 
@@ -406,3 +406,34 @@ python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill
 ### External Run operating metrics
 
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` uses the existing Agent API key and tenant scope. It returns `acceptedAt`, `completedAt`, `activeMilliseconds` and the canonical `usage` counters (`reported`, `input_tokens`, `output_tokens`, `cached_input_tokens`). It never returns provider payloads or message content. Cached input is a subset of input. Terminal Run timings sum started/resumed-to-suspended/terminal segments, excluding queue and suspended waits; missing or oversized event histories remain null. Nonterminal usage and timings remain null. Queries are exact-run scoped and safe to replay for downstream idempotent snapshots.
+
+
+### PostgreSQL 存储
+
+`sage.session.postgres` 复用标准 Session 状态机与增量 journal：Session CAS、追加事件、启动幂等、检查点/暂停/审批恢复、steering、附件与备份、派生缓存和会话树删除均使用 PostgreSQL 事务。启动自动创建七张会话表和读取索引；并发建表使用事务 advisory lock。冷读取使用一致性快照，历史与 metadata 分页直接投影 JSONB，不安装执行聚合。缓存与连接预算参数与 MySQL 一致，连接不足返回 `session_store.postgres_busy`。关闭、取消与异常会先清理事务，再归还连接。
+
+CI 使用 PostgreSQL 16 做实库验证。SDK DSN 在插件声明的 `dsn` 中显式设置，支持 `postgresql://`、`postgres://` 和 `postgresql+psycopg://`；SSL、连接超时等参数保留。Server 使用空表前缀；SDK 默认前缀为 `sagent`，managed 应用使用隔离前缀。不要将此插件指向历史 PostgreSQL 版本的表并假设自动兼容；旧格式需先做备份和迁移验证。
+
+```bash
+SAGE_V2_TEST_POSTGRES_DSN=postgresql://postgres:password@localhost/sage_test \
+python -m pytest tests/sagents/v2/test_postgres_session_store.py tests/sagents/v2/test_sql_session_store_contract.py tests/app/v2/server/test_postgres_configuration.py
+```
+
+驱动与事务实现依据 [psycopg 连接池文档](https://www.psycopg.org/psycopg3/docs/advanced/pool.html)、[事务文档](https://www.psycopg.org/psycopg3/docs/basic/transactions.html)及 [PostgreSQL 锁文档](https://www.postgresql.org/docs/current/explicit-locking.html)。
+
+
+### PostgreSQL 与 MySQL 的业务对齐
+
+| 业务能力 | MySQL | PostgreSQL |
+| --- | --- | --- |
+| 独立 SQL 会话、事件、启动幂等、Session CAS | `sage.session.mysql` | `sage.session.postgres` |
+| Redis 热状态与增量 SQL 归档 | `sage.session.redis-mysql` | `sage.session.redis-postgres` |
+| 多实例写入、跨实例事件/预览订阅、租约失效隔离 | Redis/MySQL | Redis/PostgreSQL |
+| 检查点、暂停/审批恢复、steering、执行资源记录 | 支持 | 支持 |
+| snapshot proposal 发布/拒绝、fork、附件、树备份/恢复/删除 | 支持 | 支持 |
+| 授权历史分页、metadata/read views、冷加载、缓存淘汰与连接预算 | 支持 | 支持 |
+| Server Redis 分布式调度及后台任务 | 显式配置 | 相同配置 |
+
+SDK Redis/PostgreSQL 使用 `pip install '.[postgres,redis]'`，插件配置 `dsn`、`redis_url`、可选 `table_prefix` / `key_prefix`、归档/保留/协调/预览参数与 Redis/MySQL 一致。Redis 必须启用 AOF 和 `noeviction`。PostgreSQL 归档用连接级 advisory lock 跨多次事务固定同一 Session 的归档所有权，锁释放结果不确定时丢弃连接。显式备份恢复先校验每个 Session 的所有者，再在拓扑/Session 锁内恢复；普通旧写入者仍不能越过删除标记。
+
+业务对齐由 `test_sql_backend_feature_parity.py`、两种后端共同执行的 `test_redis_mysql_session_store.py` / `test_distributed_redis_mysql_session_store.py` 和 `test_mysql_incremental_archive.py` 验证；CI 同时提供 MySQL、PostgreSQL、启用 AOF 的 Redis，运行实库归档、重启、并发订阅、旧执行者隔离和远程调度。现有 MySQL 数据或历史 PostgreSQL 表不会自动迁移。

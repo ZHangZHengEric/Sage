@@ -140,22 +140,44 @@ class Archive:
         pass
 
 
-@pytest_asyncio.fixture
-async def stores():
+@pytest_asyncio.fixture(params=[("mysql", "fake"), ("postgres", "fake"), ("mysql", "live"), ("postgres", "live")])
+async def stores(request):
+    import os
+    from uuid import uuid4
+    backend, transport = request.param
+    if transport == "live":
+        redis_url = os.environ.get("SAGE_V2_TEST_REDIS_URL")
+        dsn = os.environ.get("SAGE_V2_TEST_" + backend.upper() + "_DSN")
+        if not redis_url or not dsn:
+            pytest.skip("set Redis and SQL DSNs for live distributed contracts")
+        from redis.asyncio import Redis
+        prefix = "distributed_" + uuid4().hex[:12]
+        key_prefix = "sage:test:{" + prefix + "}"
+    else:
+        redis_url = "redis://unused/0"
+        dsn = "postgresql://unused/test" if backend == "postgres" else "mysql://unused/test"
+        prefix = key_prefix = None
     server = fakeredis.FakeServer()
     archive = Archive()
     values = []
     for _ in range(2):
-        redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
-        redis.info = AsyncMock(return_value={"maxmemory_policy": "noeviction", "aof_enabled": 1})
-        value = RedisMysqlSessionStore(
-            "mysql://unused/test", redis_url="redis://unused/0", archive_interval_seconds=3600)
+        if transport == "live":
+            redis = Redis.from_url(redis_url, decode_responses=True)
+        else:
+            redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+            redis.info = AsyncMock(return_value={"maxmemory_policy": "noeviction", "aof_enabled": 1})
+        if backend == "postgres":
+            from sagents.v2.runtime.session.plugins.postgres.redis import RedisPostgresSessionStore
+            factory = RedisPostgresSessionStore
+        else:
+            factory = RedisMysqlSessionStore
+        value = factory(dsn, redis_url=redis_url, archive_interval_seconds=3600,
+                        table_prefix=prefix, key_prefix=key_prefix)
         value._redis = redis
-        value._archive = archive
-
+        if transport == "fake":
+            value._archive = archive
         async def idle():
             await asyncio.Event().wait()
-
         value._archive_loop = idle
         values.append(value)
     try:
@@ -163,6 +185,21 @@ async def stores():
     finally:
         for value in values:
             await value.close()
+        if transport == "live":
+            monitor = Redis.from_url(redis_url, decode_responses=True)
+            keys = [key async for key in monitor.scan_iter(match=key_prefix + ":*")]
+            if keys:
+                await monitor.delete(*keys)
+            await monitor.aclose()
+            cleanup = type(values[0]._archive)(dsn, table_prefix=prefix)
+            try:
+                async with cleanup._writer_connection() as connection:
+                    async with connection.cursor() as cursor:
+                        for name in ("attachments", "derived_state", "start_idempotency", "locations", "run_events", "session_mutations", "sessions"):
+                            await cursor.execute(f"DROP TABLE IF EXISTS {cleanup._table(name)}")
+                    await connection.commit()
+            finally:
+                await cleanup.close()
 
 
 async def transition(store, run_id, state, key):
@@ -425,7 +462,7 @@ async def test_expired_scheduler_owner_cannot_dispatch_a_session_mutation(stores
     before = await first.get_run(rid)
     schedulers = []
     for store in (first, second):
-        scheduler = RedisDistributedScheduler(redis_url=store.redis_url, key_prefix="scheduler-fence-test")
+        scheduler = RedisDistributedScheduler(redis_url=store.redis_url, key_prefix=store.key_prefix + ":scheduler-fence-test")
         scheduler._redis = store._redis
         schedulers.append(scheduler)
     try:
@@ -588,7 +625,7 @@ async def test_submitter_future_finishes_when_another_dispatcher_executes_the_ru
     schedulers = []
     for store in stores:
         scheduler = RedisDistributedScheduler(
-            redis_url=store.redis_url, key_prefix="remote-dispatch-test")
+            redis_url=store.redis_url, key_prefix=store.key_prefix + ":remote-dispatch-test")
         scheduler._redis = store._redis
         schedulers.append(scheduler)
     original_claim = schedulers[0].claim

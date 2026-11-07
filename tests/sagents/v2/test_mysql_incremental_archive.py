@@ -2,7 +2,6 @@
 from typing import cast
 
 import asyncio
-import json
 import os
 import uuid
 
@@ -15,29 +14,43 @@ from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.runtime.session.plugins.mysql.distributed_archive import DistributedMysqlSessionArchive as MysqlSessionArchive
-from sagents.v2.runtime.session.plugins.mysql.state import _SCHEMA_TABLES, parse_mysql_dsn
+from sagents.v2.runtime.session.plugins.mysql.state import _SCHEMA_TABLES
+from sagents.v2.runtime.session.plugins._shared.aggregate import _decode_json
 from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
-from tests.sagents.v2.test_mysql_session_store_matrix import CONTEXT, command, mysql_dsn as mysql_dsn
+from tests.sagents.v2.test_mysql_session_store_matrix import CONTEXT, command
 from tests.sagents.v2.test_redis_mysql_session_store import store, transition
 
 
-@pytest.fixture
-async def mysql_archive(mysql_dsn):
+@pytest.fixture(params=["mysql", "postgres"])
+async def mysql_archive(request):
+    dsn = os.environ.get("SAGE_V2_TEST_" + request.param.upper() + "_DSN", "").strip()
+    if not dsn:
+        pytest.skip("set the SQL backend test DSN for live archive parity tests")
+    if request.param == "postgres":
+        from sagents.v2.runtime.session.plugins.postgres.distributed_archive import DistributedPostgresSessionArchive
+        factory = DistributedPostgresSessionArchive
+    else:
+        factory = MysqlSessionArchive
     prefix = f"sage_v2_{uuid.uuid4().hex[:12]}"
-    archive = MysqlSessionArchive(mysql_dsn, table_prefix=prefix)
+    archive = factory(dsn, table_prefix=prefix)
     try:
         yield archive
     finally:
-        await archive.close()
-        import aiomysql
-        connection = await aiomysql.connect(**parse_mysql_dsn(mysql_dsn))
+        cleanup = factory(dsn, table_prefix=prefix)
         try:
-            async with connection.cursor() as cursor:
-                for name in reversed(_SCHEMA_TABLES):
-                    await cursor.execute(f"DROP TABLE IF EXISTS {archive._table(name)}")
-            await connection.commit()
+            async with cleanup._writer_connection() as connection:
+                async with connection.cursor() as cursor:
+                    for name in reversed(_SCHEMA_TABLES):
+                        await cursor.execute(f"DROP TABLE IF EXISTS {cleanup._table(name)}")
+                await connection.commit()
         finally:
-            connection.close()
+            await cleanup.close()
+            await archive.close()
+
+
+@pytest.fixture
+def mysql_dsn(mysql_archive):
+    return mysql_archive.dsn
 
 
 @pytest.mark.asyncio
@@ -108,7 +121,7 @@ async def test_incremental_archive_retries_after_a_committed_prefix_without_dupl
 async def test_cold_suspended_filter_uses_latest_delta_without_installing_history(mysql_archive, mysql_dsn):
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     value = store(redis, mysql_archive)
-    cold_archive = MysqlSessionArchive(mysql_dsn, table_prefix=mysql_archive.table_prefix)
+    cold_archive = type(mysql_archive)(mysql_dsn, table_prefix=mysql_archive.table_prefix)
     cold = store(fakeredis.aioredis.FakeRedis(decode_responses=True), cold_archive)
     try:
         created = await value.create_run(command(), CONTEXT)
@@ -127,7 +140,7 @@ async def test_cold_suspended_filter_uses_latest_delta_without_installing_histor
                 compact, = await cursor.fetchone()
                 await cursor.execute(f"SELECT COUNT(*) FROM {mysql_archive._table('session_mutations')} WHERE session_id = %s", (sid,))
                 mutation_count, = await cursor.fetchone()
-        assert json.loads(compact)["runs"][0]["state"] == "suspended"
+        assert _decode_json(compact)["runs"][0]["state"] == "suspended"
         assert mutation_count == 1
 
         async def reject_history_load(*args, **kwargs):
@@ -162,7 +175,12 @@ async def test_live_chunked_snapshot_survives_hot_and_cold_reopen_and_active_run
     opened = []
 
     def reopen():
-        value = RedisMysqlSessionStore(mysql_dsn, redis_url=live_redis_url,
+        if mysql_archive.backend == "postgres":
+            from sagents.v2.runtime.session.plugins.postgres.redis import RedisPostgresSessionStore
+            factory = RedisPostgresSessionStore
+        else:
+            factory = RedisMysqlSessionStore
+        value = factory(mysql_dsn, redis_url=live_redis_url,
             table_prefix=mysql_archive.table_prefix, key_prefix=key_prefix,
             archive_interval_seconds=0.05, retention_seconds=60)
         value.snapshot_interval = 2

@@ -29,10 +29,11 @@ from tests.app.v2.server.test_a2a_resume import _step
 from tests.app.v2.server.test_external_chat import setup_agent
 
 
-def test_public_run_analyzes_image_with_mysql_and_reads_it_after_restart(tmp_path):
-    dsn = os.environ.get("SAGE_V2_TEST_MYSQL_DSN", "").strip()
+@pytest.mark.parametrize("backend", ["mysql", "postgres"])
+def test_public_run_analyzes_image_with_mysql_and_reads_it_after_restart(tmp_path, backend):
+    dsn = os.environ.get("SAGE_V2_TEST_" + backend.upper() + "_DSN", "").strip()
     if not dsn:
-        pytest.skip("set SAGE_V2_TEST_MYSQL_DSN to run live MySQL tests")
+        pytest.skip("set SQL backend test DSN to run live image tests")
     model = ScriptedModelProvider(
         (
             # Relative tool paths resolve inside the admitted workspace on
@@ -41,7 +42,7 @@ def test_public_run_analyzes_image_with_mysql_and_reads_it_after_restart(tmp_pat
             _step(2, "Image received."),
         )
     )
-    settings = make_settings(tmp_path, mysql_url=dsn)
+    settings = make_settings(tmp_path, **{backend + "_url": dsn})
     thread_id = "image-thread-" + uuid.uuid4().hex
 
     def host():

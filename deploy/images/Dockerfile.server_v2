@@ -57,7 +57,7 @@ extras = project['optional-dependencies']
 subprocess.run([
     sys.executable, '-m', 'pip', 'install', '--no-cache-dir',
     'setuptools>=68', 'wheel', *project['dependencies'],
-    *extras['server'], *extras['otel'],
+    *extras['server'], *extras['postgres'], *extras['otel'],
     *(extras['cube'] if os.environ.get('SAGE_INSTALL_CUBE') == 'true' else []),
 ], check=True)
 PYTHON
@@ -71,7 +71,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
 
 COPY . .
 # Dependencies from the same project metadata are already cached above.
-RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation '.[server,otel]'
+RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation '.[server,postgres,otel]'
 
 EXPOSE 8090
 ENTRYPOINT ["python", "-m", "app.v2.server"]

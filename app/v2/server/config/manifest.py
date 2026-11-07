@@ -20,9 +20,13 @@ from app.v2.server.runtime.official import default_agent_tools
 def distributed_runtime_prefix(settings, component):
     import hashlib
     import json
-    from sagents.v2.runtime.session.plugins.mysql import parse_mysql_dsn
-    identity = parse_mysql_dsn(settings.mysql_url)
-    identity.pop("password")
+    if settings.postgres_url:
+        from sagents.v2.runtime.session.plugins.postgres.identity import postgres_storage_identity
+        identity = postgres_storage_identity(settings.postgres_url)
+    else:
+        from sagents.v2.runtime.session.plugins.mysql import parse_mysql_dsn
+        identity = parse_mysql_dsn(settings.mysql_url)
+        identity.pop("password")
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
     return f"sage:{component}:{{{digest}}}:distributed"
 
@@ -148,9 +152,9 @@ def _required_guarantees(
         "transactional_suspension": True,
         "supports_actor_authorization": True,
     }
-    if settings is not None and settings.mysql_url:
+    if settings is not None and settings.session_database_url:
         store["durable_across_process_restart"] = True
-    if settings is not None and settings.redis_url and settings.session_store_plugin != "sage.session.mysql":
+    if settings is not None and settings.redis_session_store:
         store.update(multi_process_writes=True, cross_process_subscribe=True, atomic_worker_fence=True)
     if settings is not None and settings.scheduler_plugin == "sage.scheduler.redis-distributed":
         return {"session.store": store, "execution.scheduler": {
@@ -206,13 +210,13 @@ def _runtime_capabilities(
                 "max_pending_items": settings.max_pending_runs,
             },
         )
-    if settings is not None and settings.mysql_url:
+    if settings is not None and settings.session_database_url:
         capabilities["session.store"] = CapabilitySelection(
-            plugin=settings.session_store_plugin or ("sage.session.redis-mysql" if settings.redis_url else "sage.session.mysql"),
+            plugin=settings.effective_session_store_plugin,
             config={
-                "dsn": settings.mysql_url,
+                "dsn": settings.session_database_url,
                 "table_prefix": "",
-                **({"redis_url": settings.redis_url} if settings.redis_url and settings.session_store_plugin != "sage.session.mysql" else {}),
+                **({"redis_url": settings.redis_url} if settings.redis_session_store else {}),
                 **({"key_prefix": settings.session_store_key_prefix} if settings.session_store_key_prefix else {}),
             },
         )

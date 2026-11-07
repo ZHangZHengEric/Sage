@@ -41,6 +41,10 @@ async def create_host_schema(database: Database) -> None:
                 await connection.commit()
         else:
             async with connection.begin():
+                if connection.dialect.name == "postgresql":
+                    await connection.execute(text(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_database() || ':' || current_schema() || ':' || :purpose, 0))"
+                    ), {"purpose": "sage-host-schema"})
                 if connection.dialect.name == "sqlite":
                     await connection.exec_driver_sql("BEGIN IMMEDIATE")
                 await connection.run_sync(_create_missing_host_tables)

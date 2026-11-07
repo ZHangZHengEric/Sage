@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from sqlalchemy import event, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -162,8 +162,13 @@ class Database:
             try:
                 async with self.transaction() as session:
                     return await operation(session)
-            except OperationalError as error:
-                if _mysql_error_code(error) not in _TRANSIENT_MYSQL_CODES or attempt >= attempts:
+            except DBAPIError as error:
+                original = getattr(error, "orig", None)
+                retryable = (
+                    _mysql_error_code(error) in _TRANSIENT_MYSQL_CODES
+                    or getattr(original, "sqlstate", None) in {"40001", "40P01"}
+                )
+                if not retryable or attempt >= attempts:
                     raise
                 delay = delay_base * (2 ** (attempt - 1))
                 logger.warning(

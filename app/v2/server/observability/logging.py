@@ -102,7 +102,7 @@ def init_logging(settings: LoggingSettings, *, service_name: str, sink: LogSink 
         "a2a.utils.telemetry",
     ):
         logging.getLogger(name).setLevel(logging.WARNING)
-    for name in ("aiomysql", "redis"):
+    for name in ("aiomysql", "redis", "psycopg", "psycopg.pool"):
         logging.getLogger(name).setLevel(logging.INFO)
     logging.getLogger("websockets").setLevel(logging.INFO)
     return sink

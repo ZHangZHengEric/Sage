@@ -95,9 +95,27 @@ class Archive:
         return self.attachments[(sid, identity)]
 
 
+STORE_CLASS = RedisMysqlSessionStore
+STORE_DSN = "mysql://unused/test"
+
+
+@pytest.fixture(params=["mysql", "postgres"], autouse=True)
+def redis_sql_backend(request, monkeypatch):
+    if request.param == "postgres":
+        from sagents.v2.runtime.session.plugins.postgres.redis import RedisPostgresSessionStore
+        monkeypatch.setattr(__import__(__name__, fromlist=["STORE_CLASS"]), "STORE_CLASS", RedisPostgresSessionStore)
+        monkeypatch.setattr(__import__(__name__, fromlist=["STORE_DSN"]), "STORE_DSN", "postgresql://unused/test")
+
+
 def store(redis, archive, *, background=False, key_prefix=None):
     redis.info = AsyncMock(side_effect=lambda section: {"maxmemory_policy": "noeviction", "aof_enabled": 1})
-    value = RedisMysqlSessionStore("mysql://unused/test", redis_url="redis://unused/0",
+    factory, dsn = STORE_CLASS, STORE_DSN
+    options = {}
+    if getattr(archive, "backend", None) == "postgres":
+        from sagents.v2.runtime.session.plugins.postgres.redis import RedisPostgresSessionStore
+        factory, dsn = RedisPostgresSessionStore, archive.dsn
+        options["table_prefix"] = archive.table_prefix
+    value = factory(dsn, **options, redis_url="redis://unused/0",
                                    archive_interval_seconds=3600, key_prefix=key_prefix)
     value._redis = redis
     value._archive = archive

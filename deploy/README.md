@@ -10,7 +10,7 @@
 
 `deploy/compose_v2.sh` 使用 `deploy/standalone/docker-compose.yml`，仅启动 `sage-server-v2`、`sage-web-v2`。后端通过 Python 3.12 执行 `python -m app.v2.server`；Web 构建自 `app/v2/server/web`，Nginx 代理 `/api`、`/a2a` 等 v2 路由并支持 SSE。
 
-V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心依赖及 `server,otel` extras。镜像先读取元数据安装依赖以保留缓存，再通过 `--no-deps` 安装源码。Desktop 使用 `desktop` extra；v1 独立使用 `app/v1/requirements.txt`。
+V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心依赖及 `server,postgres,otel` extras。镜像先读取元数据安装依赖以保留缓存，再通过 `--no-deps` 安装源码。Desktop 使用 `desktop` extra；v1 独立使用 `app/v1/requirements.txt`。
 
 该镜像不预装旧版抓取和文档处理工具包；在容器内执行需要这些包的 Skill 或自定义 MCP 子进程时，需在自定义镜像中按其要求安装依赖。修改业务源码仍可复用依赖层，修改 V2 专用依赖文件才会使该层重新安装（前置构建层不变时）。
 
@@ -18,7 +18,7 @@ V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心�
 
 ```bash
 cp .env.example deploy/standalone/.env
-# 编辑 deploy/standalone/.env，填写 MySQL URL、随机 JWT 密钥和管理员密码
+# 编辑 deploy/standalone/.env，填写 MySQL 或 PostgreSQL URL、随机 JWT 密钥和管理员密码
 # JWT 密钥可用 openssl rand -hex 32 生成
 deploy/compose_v2.sh up -d --build
 ```
@@ -33,6 +33,14 @@ SAGE_SERVER_JWT_SECRET=replace-with-a-random-secret-at-least-32-bytes
 SAGE_SERVER_ADMIN_USERNAME=admin
 SAGE_SERVER_ADMIN_PASSWORD=change_this_admin_password
 ```
+
+使用 PostgreSQL 时，删除或注释 `SAGE_SERVER_MYSQL_URL`，改为：
+
+```dotenv
+SAGE_SERVER_POSTGRES_URL=postgresql://sage:password@host.docker.internal:5432/sage_v2
+```
+
+两种 URL 只能设置一个。v2 镜像包含 PostgreSQL 驱动；数据库需预先创建并允许该账号建表、建索引。未配置 Redis 时 PostgreSQL 自动选择 `sage.session.postgres`；配置 `SAGE_SERVER_REDIS_URL` 后自动选择 `sage.session.redis-postgres`，提供共享状态、跨实例订阅、原子执行权校验和 PostgreSQL 归档。设置 `SAGE_SERVER_SCHEDULER_PLUGIN=sage.scheduler.redis-distributed` 可启用分布式调度及后台任务，与 Redis/MySQL 使用相同执行协议。MySQL 与 PostgreSQL 的现有数据不会自动互相迁移。远程连接可在 URL 中设置 `sslmode=verify-full` 等 libpq 连接参数。
 
 MySQL 请准备独立的 `sage_v2` 数据库及账号权限，不与 v1 共用业务表。URL 中用户名和密码的特殊字符需要百分号编码，例如 `@` 写为 `%40`。同机 MySQL 使用 `host.docker.internal` 和宿主机映射端口；远程 MySQL 使用可访问的 IP 或域名。Compose 不启动 MySQL、Redis、RustFS 或观测服务，也不依赖外部共享网络。
 

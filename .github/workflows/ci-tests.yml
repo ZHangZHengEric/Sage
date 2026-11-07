@@ -192,3 +192,80 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
+  postgres-tests:
+    name: MySQL and PostgreSQL storage parity
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sage-test-root-password
+          MYSQL_DATABASE: sage_test
+          MYSQL_USER: sage
+          MYSQL_PASSWORD: sage-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7.4.12
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sage
+          POSTGRES_PASSWORD: sage-test-password
+          POSTGRES_DB: sage_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sage -d sage_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SAGE_V2_TEST_POSTGRES_DSN: postgresql://sage:sage-test-password@localhost:5432/sage_test
+      SAGE_V2_TEST_MYSQL_DSN: mysql://sage:sage-test-password@localhost:3306/sage_test
+      SAGE_V2_TEST_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Enable required Redis durability
+        run: |
+          docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET appendonly yes
+          docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET maxmemory-policy noeviction
+      - run: python -m pip install -e '.[server,postgres,test]'
+      - name: Verify PostgreSQL runtime and Server contracts
+        run: >-
+          python -m pytest tests/sagents/v2/test_postgres_session_store.py
+          tests/sagents/v2/test_postgres_connection_budget.py
+          tests/sagents/v2/test_postgres_archive_guard.py
+          tests/sagents/v2/test_redis_guard_cleanup.py
+          tests/sagents/v2/test_sql_backend_feature_parity.py
+          tests/sagents/v2/test_redis_mysql_session_store.py
+          tests/sagents/v2/test_distributed_redis_mysql_session_store.py
+          tests/sagents/v2/test_mysql_incremental_archive.py
+          tests/sagents/v2/test_sql_session_store_contract.py
+          tests/app/v2/server/test_postgres_configuration.py
+          tests/app/v2/server/test_mysql_image_run.py
+          tests/app/v2/server/test_distributed_runtime_configuration.py
+          -q --basetemp="${{ runner.temp }}/pytest"

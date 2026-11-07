@@ -40,7 +40,7 @@ def test_builtin_inventory_contains_only_real_factories():
     inventory = {value["plugin_id"]: value for value in registry.inventory()}
 
     assert {key for key in inventory if key.startswith("sage.session.")} == {
-        "sage.session.ephemeral", "sage.session.filesystem", "sage.session.mysql", "sage.session.redis-mysql",
+        "sage.session.ephemeral", "sage.session.filesystem", "sage.session.mysql", "sage.session.postgres", "sage.session.redis-mysql", "sage.session.redis-postgres",
     }
     assert {
         "sage.agent.continuation.deterministic",
@@ -66,7 +66,9 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.memory.recall-query.llm",
         "sage.session.filesystem",
         "sage.session.mysql",
+        "sage.session.postgres",
         "sage.session.redis-mysql",
+        "sage.session.redis-postgres",
         "sage.session.ephemeral",
         "sage.session-memory.noop",
         "sage.session-memory.sqlite-bm25",

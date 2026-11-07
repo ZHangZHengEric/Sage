@@ -19,6 +19,7 @@ from sagents.v2.contracts.principals import (
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
+from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 
 
@@ -43,9 +44,9 @@ def command():
 
 
 
-@pytest.fixture
-async def durable_store_factory():
-    backend = "MYSQL"
+@pytest.fixture(params=["MYSQL", "POSTGRES"])
+async def durable_store_factory(request):
+    backend = request.param
     variable = f"SAGE_V2_TEST_{backend}_DSN"
     dsn = os.environ.get(variable, "").strip()
     if not dsn:
@@ -55,7 +56,8 @@ async def durable_store_factory():
     stores = []
 
     def open_store():
-        store = MysqlSessionStore(dsn, **options)
+        factory = MysqlSessionStore if backend == "MYSQL" else PostgresSessionStore
+        store = factory(dsn, **options)
         stores.append(store)
         return store
 

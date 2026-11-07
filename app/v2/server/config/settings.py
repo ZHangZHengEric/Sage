@@ -36,6 +36,7 @@ class ServerSettings:
     log_format: str = "json"
     log_directory: str = ""
     mysql_url: str | None = None
+    postgres_url: str | None = field(default=None, repr=False)
     redis_url: str | None = None
     session_store_plugin: str | None = None
     session_store_key_prefix: str | None = None
@@ -108,24 +109,33 @@ class ServerSettings:
             raise ValueError("SAGE_SERVER_JWT_SECRET must be a private secret of at least 32 bytes")
         if self.jwt_expire_hours <= 0:
             raise ValueError("SAGE_SERVER_JWT_EXPIRE_HOURS must be positive")
-        if self.session_store_plugin not in {None, "sage.session.mysql", "sage.session.redis-mysql"}:
+        if self.mysql_url and self.postgres_url:
+            raise ValueError("Configure either mysql_url or postgres_url, not both")
+        if self.postgres_url:
+            from sagents.v2.runtime.session.plugins.postgres import parse_postgres_dsn
+            parse_postgres_dsn(self.postgres_url)
+            if self.session_store_plugin not in {None, "sage.session.postgres", "sage.session.redis-postgres"}:
+                raise ValueError("postgres_url requires the PostgreSQL SessionStore")
+        if self.session_store_plugin in {"sage.session.postgres", "sage.session.redis-postgres"} and not self.postgres_url:
+            raise ValueError("PostgreSQL SessionStore requires postgres_url")
+        if self.session_store_plugin not in {None, "sage.session.mysql", "sage.session.redis-mysql", "sage.session.postgres", "sage.session.redis-postgres"}:
             raise ValueError("Unsupported Server session_store_plugin")
-        if self.session_store_plugin is not None and not self.mysql_url:
+        if self.session_store_plugin in {"sage.session.mysql", "sage.session.redis-mysql"} and not self.mysql_url:
             raise ValueError("session_store_plugin requires mysql_url")
-        if self.session_store_plugin == "sage.session.redis-mysql" and not self.redis_url:
+        if self.session_store_plugin in {"sage.session.redis-mysql", "sage.session.redis-postgres"} and not self.redis_url:
             raise ValueError("Redis SessionStore plugin requires redis_url")
-        if self.redis_url and not self.mysql_url:
-            raise ValueError("redis_url requires mysql_url for Session archival")
+        if self.redis_url and not self.session_database_url:
+            raise ValueError("redis_url requires mysql_url or postgres_url for Session archival")
         if self.scheduler_plugin not in {"sage.scheduler.ephemeral", "sage.scheduler.redis-distributed"}:
             raise ValueError("Unsupported Server scheduler_plugin")
         if self.scheduler_plugin == "sage.scheduler.redis-distributed" and (
-            not self.mysql_url or not self.redis_url or self.session_store_plugin == "sage.session.mysql"
+            not self.redis_session_store
         ):
-            raise ValueError("Distributed scheduler requires Redis + MySQL SessionStore")
+            raise ValueError("Distributed scheduler requires Redis + SQL SessionStore")
         if self.session_store_key_prefix is not None and (
-            not self.session_store_key_prefix.strip() or not self.redis_url or self.session_store_plugin == "sage.session.mysql"
+            not self.session_store_key_prefix.strip() or not self.redis_session_store
         ):
-            raise ValueError("session_store_key_prefix requires Redis + MySQL SessionStore and a nonempty prefix")
+            raise ValueError("session_store_key_prefix requires Redis + SQL SessionStore and a nonempty prefix")
         if self.sandbox_network_mode not in {"none", "unrestricted"}:
             raise ValueError("sandbox_network_mode must be none or unrestricted")
         ids = (self.linux_execution_uid, self.linux_execution_gid)
@@ -183,7 +193,27 @@ class ServerSettings:
             return self.jaeger_public_url
         return ""
 
+    @property
+    def effective_session_store_plugin(self) -> str:
+        if self.session_store_plugin:
+            return self.session_store_plugin
+        backend = "postgres" if self.postgres_url else "mysql"
+        return "sage.session." + ("redis-" if self.redis_url else "") + backend
+
+    @property
+    def redis_session_store(self) -> bool:
+        return bool(self.session_database_url and self.redis_url and self.effective_session_store_plugin in {
+            "sage.session.redis-mysql", "sage.session.redis-postgres",
+        })
+
+    @property
+    def session_database_url(self) -> str | None:
+        return self.postgres_url or self.mysql_url
+
     def database_url(self) -> str:
+        if self.postgres_url:
+            from sagents.v2.runtime.session.plugins.postgres import parse_postgres_dsn
+            return parse_postgres_dsn(self.postgres_url).replace("postgresql://", "postgresql+psycopg://", 1)
         if not self.mysql_url:
             raise ValueError("MySQL URL is required")
         url = self.mysql_url
@@ -194,8 +224,9 @@ class ServerSettings:
     @classmethod
     def from_env(cls, *, data_root: Path | None = None) -> ServerSettings:
         mysql_url = _env("SAGE_SERVER_MYSQL_URL")
-        if not mysql_url:
-            raise ValueError("SAGE_SERVER_MYSQL_URL is required")
+        postgres_url = _env("SAGE_SERVER_POSTGRES_URL")
+        if not mysql_url and not postgres_url:
+            raise ValueError("SAGE_SERVER_MYSQL_URL is required unless SAGE_SERVER_POSTGRES_URL is set")
         root = data_root or Path(_env("SAGE_SERVER_DATA", "data/server_v2"))
         return cls(
             host=_env("SAGE_SERVER_HOST", "127.0.0.1"),
@@ -236,7 +267,8 @@ class ServerSettings:
             approval_timeout_seconds=int(_env("SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS", "86400")),
             linux_execution_uid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_UID")) else None,
             linux_execution_gid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_GID")) else None,
-            mysql_url=mysql_url,
+            mysql_url=mysql_url or None,
+            postgres_url=postgres_url or None,
             redis_url=_env("SAGE_SERVER_REDIS_URL") or None,
             session_store_plugin=_env("SAGE_SERVER_SESSION_STORE_PLUGIN") or None,
             session_store_key_prefix=_env("SAGE_SERVER_SESSION_STORE_KEY_PREFIX") or None,

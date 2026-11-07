@@ -3,6 +3,8 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from sagents.v2.runtime.session.plugins.postgres.redis import RedisPostgresSessionStore as RedisPostgresSessionStore
+    from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore as PostgresSessionStore
     from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore as RedisMysqlSessionStore
     from sagents.v2.runtime.session.access import AuthorizedSessionAccess as AuthorizedSessionAccess
     from sagents.v2.runtime.session.contracts import CommitResult as CommitResult
@@ -30,6 +32,8 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "RedisPostgresSessionStore": ("sagents.v2.runtime.session.plugins.postgres.redis", "RedisPostgresSessionStore"),
+    "PostgresSessionStore": ("sagents.v2.runtime.session.plugins.postgres", "PostgresSessionStore"),
     "RedisMysqlSessionStore": (
         "sagents.v2.runtime.session.plugins.mysql.redis", "RedisMysqlSessionStore",
     ),
@@ -107,6 +111,8 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "RedisPostgresSessionStore",
+    "PostgresSessionStore",
     "RedisMysqlSessionStore",
     "AuthorizedSessionAccess",
     "CommitResult",

@@ -1324,6 +1324,61 @@ Provides: `session.store:default`, `derived-state.store:default`, `artifact.stor
 | `dsn` | `string` | Yes | Not declared | `{"minLength":1}` |
 | `table_prefix` | `string` | No | Not declared | `{}` |
 
+### sage.session.postgres
+
+Durable per-Session PostgreSQL storage with atomic Session CAS, incremental journals,
+appended events, attachments, checkpoints and owner-checked history/metadata pages.
+Install `sage[postgres]` (or `.[postgres]` from source). Direct SQL execution and subscriptions are single-process. Select
+`sage.session.redis-postgres` for Redis hot state, PostgreSQL archival, multi-instance
+writes, shared previews/subscriptions and atomic worker fencing.
+
+```yaml
+capabilities:
+  session.store:
+    plugin: sage.session.postgres
+    config:
+      dsn: postgresql://user:password@localhost/sage
+      table_prefix: sagent
+      max_connections: 16
+      max_pending_connections: 64
+      connection_acquire_timeout_seconds: 10
+```
+
+`dsn` is required. `table_prefix` defaults to `sagent` and may be empty; nonempty
+prefixes match `[a-z][a-z0-9_]{0,32}`. `max_cached_sessions` (256),
+`max_cached_bytes` (268435456) and `cache_idle_seconds` (300) bound idle aggregate
+retention. PostgreSQL connection options, including SSL, are preserved. Startup
+creates tables transactionally. This storage format does not automatically migrate
+historical PostgreSQL tables. Server selects it with `SAGE_SERVER_POSTGRES_URL`;
+leave `SAGE_SERVER_MYSQL_URL` unset and install `.[server,postgres]`.
+
+### sage.session.redis-postgres
+
+Redis execution state with canonical history, immutable attachments and incremental
+journals archived to PostgreSQL. The Redis publication, recovery, deletion, fencing,
+subscriptions and preview protocol is shared with `sage.session.redis-mysql`.
+Install `sage[postgres,redis]` (or `.[postgres,redis]` from source).
+
+```yaml
+capabilities:
+  session.store:
+    plugin: sage.session.redis-postgres
+    config:
+      dsn: postgresql://user:password@localhost/sage
+      redis_url: redis://localhost/1
+      table_prefix: sagent
+      archive_interval_seconds: 1
+      retention_seconds: 3600
+```
+
+All configuration fields and business capability flags match `sage.session.redis-mysql`,
+including cache/connection budgets, `key_prefix`, coordination timeouts and preview
+retention. Redis requires AOF and `noeviction`. PostgreSQL session advisory locks protect
+an archive across multiple commits; revision comparisons make retries idempotent.
+Server selects this plugin automatically when PostgreSQL and Redis URLs are configured.
+Distributed scheduling and jobs use the existing `sage.scheduler.redis-distributed` and
+`sage.job.redis-distributed` plugins; they must share the SessionStore's Redis URL.
+
 ### sage.session.redis-mysql
 
 Redis execution state shared by Sage instances, with canonical history and attachment bytes archived to MySQL. Supports multi-process writes, cross-process subscriptions and atomic worker fencing. Redis requires AOF and noeviction. Scheduling is selected independently.

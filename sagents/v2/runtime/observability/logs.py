@@ -132,6 +132,7 @@ _ROUTINE_TIMINGS = frozenset(
         "agent.preparation.completed",
         "server.admission.phase",
         "session.mysql.archived",
+        "session.postgres.archived",
     }
 )
 _SLOW_OPERATION_MS = 100

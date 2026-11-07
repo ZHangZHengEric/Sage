@@ -1,3 +1,9 @@
+## 2026-11-08 补齐 PostgreSQL 会话存储和 Server 接入
+
+- 新增可选 `sage.session.postgres`：事务 Session CAS、增量 journal、事件追加、附件、检查点与审批恢复、授权历史/metadata 分页、会话树清理及有界连接池。复用数据库无关的状态加载和持久化流程，保持 MySQL/Redis 兼容。
+- 修复 Redis guard 在重复取消和 WATCH 竞争时遗留锁的问题，并支持删除后显式备份恢复；授权校验、拓扑/Session guard 与旧写入者隔离保持有效。PostgreSQL 工作区清理与 MySQL 一样在规范 Run 状态缺失时拒绝清理。
+- Server 可通过 `SAGE_SERVER_POSTGRES_URL` 同时使用 PostgreSQL 宿主数据库和会话存储；补齐驱动依赖、Docker/Compose 配置、文档与 PostgreSQL 实库 CI。新增 `sage.session.redis-postgres`，与 Redis/MySQL 共享多实例写入、增量归档、订阅/预览、执行权校验、删除标记和恢复协议；Server 支持相同的分布式调度和后台任务配置。
+
 ## 2026-10-28 15:35 完善退役预算的升级兼容与文档链接
 
 - 删除无效预算的运行时配置与 SDK 参数；仅在包和执行图归档层保留历史摘要数据，保护旧不可变版本引用及暂停任务恢复，不放宽恢复校验。补充旧版本真实 Run/checkpoint、子 Agent 图和四种 SessionStore 门面的回归覆盖，修正中英文 RSI 文档的源码链接。（Eric ZZ）

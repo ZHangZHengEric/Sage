@@ -110,9 +110,14 @@ def test_distributed_plugins_keep_independent_public_ids_names_and_capabilities(
     (REDIS_STORE, "sage.scheduler.redis-distributed", "redis://other/0", "sage.job.redis-distributed", "runtime.distributed_redis_mismatch"),
     (REDIS_STORE, "sage.scheduler.redis-distributed", "redis://unused/0", "sage.job.ephemeral", "runtime.capability_guarantee_unsatisfied"),
 ])
+@pytest.mark.parametrize("backend", ["mysql", "postgres"])
 async def test_real_builder_selects_plugins_and_rejects_unsafe_pairs(
-    tmp_path, monkeypatch, store_plugin, scheduler_plugin, scheduler_url, jobs_plugin, expected_error
+    tmp_path, monkeypatch, store_plugin, scheduler_plugin, scheduler_url, jobs_plugin, expected_error, backend
 ):
+    if backend == "postgres":
+        pytest.importorskip("psycopg")
+        if store_plugin == REDIS_STORE:
+            store_plugin = "sage.session.redis-postgres"
     import fakeredis
     import fakeredis.aioredis
     from unittest.mock import AsyncMock
@@ -134,7 +139,8 @@ async def test_real_builder_selects_plugins_and_rejects_unsafe_pairs(
         required_guarantees={"execution.job-runtime": {"multi_process_writes": True, "supports_remote_cancel": True}}
         if scheduler_plugin == "sage.scheduler.redis-distributed" else {}, capabilities={
         "session.store": CapabilitySelection(plugin=store_plugin,
-            config={"dsn": "mysql://unused/test", "redis_url": "redis://unused/0"} if store_plugin == REDIS_STORE else {}),
+            config={"dsn": "postgresql://unused/test" if backend == "postgres" else "mysql://unused/test", "redis_url": "redis://unused/0"}
+            if store_plugin in {REDIS_STORE, "sage.session.redis-postgres"} else {}),
         "execution.scheduler": CapabilitySelection(plugin=scheduler_plugin,
             config={"redis_url": scheduler_url} if scheduler_url else {}),
         "execution.job-runtime": CapabilitySelection(plugin=jobs_plugin,
@@ -175,8 +181,9 @@ def test_removed_or_incompatible_deployment_selections_are_rejected(tmp_path, co
 
 
 @pytest.mark.parametrize("scheduler_plugin", ["sage.scheduler.ephemeral", "sage.scheduler.redis-distributed"])
+@pytest.mark.parametrize("backend", ["mysql", "postgres"])
 async def test_managed_apps_isolate_explicit_redis_namespaces_and_validation_stays_local(
-    service, tmp_path, scheduler_plugin
+    service, tmp_path, scheduler_plugin, backend
 ):
     """An explicit Server prefix must not merge two managed Apps' Redis state."""
     from dataclasses import replace
@@ -193,14 +200,16 @@ async def test_managed_apps_isolate_explicit_redis_namespaces_and_validation_sta
         bundle = AgentPackageBundle.model_validate(await management.queries.template(context))
         factory = management.package_builder_factory
         factory.settings = replace(factory.settings,
-            mysql_url="mysql://unused/test", redis_url="redis://unused/0",
+            mysql_url="mysql://unused/test" if backend == "mysql" else None,
+            postgres_url="postgresql://unused/test" if backend == "postgres" else None,
+            redis_url="redis://unused/0",
             session_store_key_prefix="existing-server", scheduler_plugin=scheduler_plugin)
         first = await factory.build(bundle, tmp_path / "managed-a", context, management)
         second = await factory.build(bundle, tmp_path / "managed-b", context, management)
         validation = await factory.build(bundle, tmp_path / "validate-a", context, management)
         first_store = first.runtime.capabilities["session.store"]
         second_store = second.runtime.capabilities["session.store"]
-        assert first_store.plugin == second_store.plugin == REDIS_STORE
+        assert first_store.plugin == second_store.plugin == (REDIS_STORE if backend == "mysql" else "sage.session.redis-postgres")
         assert first_store.config["table_prefix"] != second_store.config["table_prefix"]
         assert first_store.config["key_prefix"] != second_store.config["key_prefix"]
         assert first_store.config["key_prefix"].startswith("existing-server:")

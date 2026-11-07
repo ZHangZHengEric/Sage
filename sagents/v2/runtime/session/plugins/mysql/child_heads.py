@@ -3,30 +3,13 @@
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from sagents.v2.runtime.session.plugins.mysql._redis_persistence import _RedisMysqlPersistence
     from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
 
-from sagents.v2.runtime.session.child_heads import ManagedSessionHeadQueries, child_heads
+from sagents.v2.runtime.session.child_heads import child_heads
 from .run_metadata import mysql_metadata_cte, decode_metadata
 
 
-class RedisManagedSessionHeads:
-    async def _direct_child_ids_for_run(self, run_id):
-        store = cast("_RedisMysqlPersistence", self)
-        await store._ensure_ready()
-        sid = await store._locate_session('run_id', run_id)
-        if sid is None or await store._redis.hget(store._session_key(sid), 'deleted') == '1':
-            raise store._not_found('run.not_found', run_id)
-        ids = set(await store._archive.list_direct_child_session_ids(sid))
-        ids.update(child for child, parent in (await store._redis.hgetall(store._key('parents'))).items() if parent == sid)
-        return sorted(ids)
-
-    async def managed_session_heads(self, run_id):
-        # Redis owns unarchived metadata; the MySQL implementation is not an
-        # authoritative reader until those revisions have reached the archive.
-        store = cast("_RedisMysqlPersistence", self)
-        return await ManagedSessionHeadQueries.managed_session_heads(store, run_id)
-
+from .._shared.redis_heads import RedisManagedSessionHeads as RedisManagedSessionHeads
 
 
 class MysqlManagedSessionHeads:
