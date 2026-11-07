@@ -237,6 +237,12 @@ class CubeExecutionBindingProvider:
         self._lock = asyncio.Lock()
         self._closed = False
 
+    @property
+    def idle(self):
+        return not self._lock.locked() and all(
+            binding.closed for binding in self.bindings
+        )
+
     def _environment(self):
         return {
             "process_instance": self.sandbox_provider.process_instance,

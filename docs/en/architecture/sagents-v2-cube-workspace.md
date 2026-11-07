@@ -76,7 +76,8 @@ explicitly; the remote wall-time limit remains active.
   bounded chunks before publication and validating idempotent retries. Downloads
   support bounded reads, directory ZIP archives and top-level entry exclusions.
 - Process networking supports `none` and `unrestricted`; allowlists, proxies and
-  private-address filtering are unsupported.
+  private-address filtering are unsupported. The sandbox `network.request` HTTP
+  interface is not provided by this plugin.
 - CPU, memory and aggregate disk hard limits depend on the Cube deployment and
   template. Requests requiring limits the plugin cannot enforce are rejected.
 

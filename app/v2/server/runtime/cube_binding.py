@@ -8,15 +8,15 @@ from pydantic import Field
 
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot
-from sagents.v2.runtime.execution.plugins._shared.binding import (
-    incompatible_configuration,
-)
 from sagents.v2.runtime.execution.plugins.cube_binding import (
     CubeExecutionBindingConfig,
     CubeExecutionBindingProvider,
     CubeExecutionPolicy,
 )
 from app.v2.server.storage.workspaces import workspace_user
+from app.v2.server.runtime.workspace_binding import (
+    _incompatible_configuration as incompatible_configuration,
+)
 
 
 class ServerCubeBindingConfig(StrictModel):
@@ -48,9 +48,7 @@ class ServerCubeBindingProvider:
             for key, provider in tuple(self._providers.items()):
                 if len(self._providers) < 64:
                     break
-                if not provider._lock.locked() and all(
-                    binding.closed for binding in provider.bindings
-                ):
+                if provider.idle:
                     self._providers.pop(key)
             settings = self.host.settings
             config = CubeExecutionBindingConfig(

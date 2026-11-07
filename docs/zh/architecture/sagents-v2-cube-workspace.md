@@ -69,7 +69,8 @@ Shell 沿用本地 JobRuntime，通过 `process.run` 在 Cube 执行。远程监
 - 文件工具单文件上限为 8 MiB；外部导入仍受原 4 MiB/文件、16 MiB/请求限制。
   二进制上传接口支持最大 64 MiB，分块暂存后发布并校验幂等重试；
   下载支持有界分块读取、目录 ZIP 及顶层目录排除。
-- 支持 `none` / `unrestricted` 进程网络策略，不支持 allowlist、代理或私网过滤。
+- 支持 `none` / `unrestricted` 进程网络策略，不支持 allowlist、代理或私网过滤；
+  此插件暂不提供沙箱 `network.request` HTTP 接口。
 - CPU、内存和总磁盘硬额度依赖 Cube 模板与底层部署。插件不声称强制执行这些额度，
   显式要求硬限制或总工作区字节上限时拒绝。
 
