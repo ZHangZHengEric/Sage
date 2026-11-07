@@ -50,6 +50,10 @@ parent: API
 
 `PUT /api/agents/{agent_id}/workspace/files` 导入 `{directory, files}`，文件内容使用 base64；只创建缺失文件，相同内容可重复导入，冲突返回 409。上限为 256 个文件、单文件 4 MiB、总计 16 MiB。删除通过同一路径的 DELETE 操作，受工作区空闲状态与路径检查约束。
 
+`PUT /api/agents/{agent_id}/workspace/file?path=projects/site/uploads/clip.mp4` 导入单个非空原始二进制请求体，最大 64 MiB。相同内容可幂等重试；已有内容不同时返回 409，路径无效或请求体为空时返回 422，超限返回 413。路径相对于租户和 Agent 的工作区，不跟随符号链接。
+
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=uploads` 可选排除 Run 工作区归档根下的一个条目；更深层的同名条目仍保留。剩余归档沿用 32 MiB 和 512 个条目的限制。
+
 `POST /api/agents/{agent_id}/runs?workspace_path=...` 接收 AG-UI 请求，并可用 `runtimeContext` 为本次运行提供上下文，不改写共享配置。运行读取、回复、取消和文件下载都以准确的 `thread_id`、`run_id` 定位，并核对归属；交互回复还需匹配交互 ID 和预期修订号。
 
 文件下载读取运行绑定的工作目录快照，上限 32 MiB、512 项；旧运行目录已被同会话的新运行替代时返回 409，打包期间文件变化可能返回 503。调用方应核对产物与运行身份；Sage 不解释下游业务清单或执行客户项目构建。
@@ -117,6 +121,7 @@ parent: API
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
+| `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `GET` | `/api/approvals` | `conversations` |

@@ -53,6 +53,14 @@ def _exercise_run_routes(client, base, agent_id):
                       json={"directory": "projects/site", "files": seed})).status_code == 200
     assert (client.put(base + "/workspace/files", headers=_headers(),
                       json={"directory": "../escape", "files": seed})).status_code == 422
+    path = {"path": "projects/site/user-uploads/reference.mov"}
+    video = b"v" * ((4 << 20) + 1)
+    for _ in range(2):
+        uploaded = client.put(base + "/workspace/file", params=path,
+                              headers=_headers(), content=video)
+        assert uploaded.status_code == 200, uploaded.text
+    assert client.put(base + "/workspace/file", params=path,
+                      headers=_headers(), content=b"different").status_code == 409
     assert _run(client, agent_id).status_code == 200
     result = client.get(base + "/runs/thread-a/run-a", headers=_headers())
     assert result.status_code == 200, result.text
@@ -68,6 +76,16 @@ def _exercise_run_routes(client, base, agent_id):
     assert downloaded.status_code == 200, downloaded.text
     with ZipFile(BytesIO(downloaded.content)) as archive:
         assert archive.read("site/index.html") == b"<html></html>"
+        assert archive.read("site/user-uploads/reference.mov") == video
+    filtered = client.get(base + "/runs/thread-a/run-a/files", headers=_headers(),
+                          params={"exclude": "user-uploads"})
+    assert filtered.status_code == 200, filtered.text
+    with ZipFile(BytesIO(filtered.content)) as archive:
+        assert "site/index.html" in archive.namelist()
+        assert "site/user-uploads/reference.mov" not in archive.namelist()
+    for exclusion in ("../escape", "nested/uploads", ".sage", ""):
+        assert client.get(base + "/runs/thread-a/run-a/files", headers=_headers(),
+                          params={"exclude": exclusion}).status_code == 422
     cancelled = client.post(base + "/runs/thread-a/run-a/cancel", headers=_headers())
     assert cancelled.status_code == 200
     assert cancelled.json()["data"]["cancelled"] is False

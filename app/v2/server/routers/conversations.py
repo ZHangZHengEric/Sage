@@ -3,6 +3,7 @@
 import errno
 import asyncio
 import sqlite3
+from tempfile import SpooledTemporaryFile
 from typing import Annotated, Literal
 
 import httpx
@@ -37,7 +38,9 @@ from app.v2.server.routers.schemas.conversations import (
 )
 from app.v2.server.storage.downloads import prepare_download, prepare_session_export
 from app.v2.server.storage.external_workspaces import (
+    MAX_BINARY_BYTES,
     delete_workspace_path,
+    import_workspace_file,
     import_workspace_files,
     workspace_parts,
 )
@@ -403,6 +406,33 @@ async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: Ho
     return success({"directory": body.directory, "file_count": count})
 
 
+@external_router.put("/workspace/file")
+async def put_workspace_file(request: Request, caller: CallerDep, host: HostDep,
+                             service: ConversationDep, path: str = Query(max_length=4096)):
+    try:
+        workspace_parts(path)
+        with SpooledTemporaryFile(max_size=1 << 20, mode="w+b") as source:
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_BINARY_BYTES:
+                    raise HTTPException(status_code=413, detail="workspace file quota exceeded")
+                # Rollover and disk writes must not block the event loop. Wait
+                # for cancelled workers before the context closes their file.
+                await finish_file_operation(source.write, chunk)
+            await finish_file_operation(source.seek, 0)
+            async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
+                await finish_file_operation(import_workspace_file, host.paths,
+                                            caller.tenant_id, caller.agent_id, path, source)
+    except FileExistsError as exc:
+        raise _error("workspace_conflict", ErrorCategory.CONFLICT,
+                     "workspace file conflicts with existing data") from exc
+    except (ValueError, OSError) as exc:
+        raise _error("invalid_workspace", ErrorCategory.VALIDATION,
+                     "invalid workspace file") from exc
+    return success({"path": path})
+
+
 @external_router.delete("/workspace/files")
 async def delete_workspace_files(caller: CallerDep, host: HostDep,
                                  service: ConversationDep,
@@ -496,14 +526,22 @@ async def cancel_run(thread_id: str, run_id: str, caller: CallerDep,
 
 @external_router.get("/runs/{thread_id}/{run_id}/files")
 async def download_run_files(thread_id: str, run_id: str, caller: CallerDep,
-                             service: ConversationDep, host: HostDep):
+                             service: ConversationDep, host: HostDep,
+                             exclude: str | None = Query(default=None, max_length=255)):
+    if exclude is not None:
+        try:
+            if len(workspace_parts(exclude)) != 1:
+                raise ValueError("not a top-level entry")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid archive exclusion") from exc
     directory = await access.current_run_workspace(
         service, tenant_id=caller.tenant_id, agent_id=caller.agent_id,
         thread_id=thread_id, run_id=run_id,
     )
     root = host.paths.workspace_path(caller.tenant_id, caller.agent_id)
     prepared = await file_operation(prepare_download, root, directory,
-                                    max_bytes=32 << 20, max_entries=512)
+                                    max_bytes=32 << 20, max_entries=512,
+                                    exclude_root_entry=exclude)
     try:
         # A newer run may have started while the archive was being built.
         await access.current_run_workspace(

@@ -310,6 +310,8 @@ CREATE INDEX sessions_parent_id ON sessions (parent_session_id);
 
 内网业务接口使用 `SAGE-TENANT-ID`，Agent 取 URL 中的 `agent_id`，必须同时提供 `Authorization: Bearer <Agent API Key>`。所有运行、结果、回复、取消、文件和删除接口统一鉴权；GET 使用 `a2a:read`，调用和文件修改使用 `a2a:invoke`，回复交互使用 `a2a:approve`（沿用现有 API Key 权限名称）。Key 只能访问其绑定的 Agent，撤销后请求立即拒绝。业务后端必须从已验证的登录态提取用户 ID；Key 不应交给最终用户或前端。
 
+- `PUT /api/agents/{agent_id}/workspace/file?path=projects/example/user-uploads/clip.mp4`：将请求体中的原始二进制写入当前租户和 Agent 的 workspace。每个请求单文件，最大 64 MiB；相同文件可幂等重试，路径已存在且内容不同时返回 409。
+- `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=user-uploads`：下载当前 Run 的工作区归档，可选排除归档根下一个指定条目。
 - `DELETE /api/agents/{agent_id}/workspace/files?path=assets/site&recursive=true`：删除该租户、该 Agent workspace 内的相对文件或目录。`recursive` 默认 false，仅能删除文件、链接或空目录；true 可递归删除目录。不绑定业务实体或目录前缀。
 - 成功返回 `data: {"path":"assets/site","deleted":true}`；目标不存在返回 200，`deleted:false`，不创建工作空间。禁止空路径、绝对路径、路径穿越和隐藏管理目录。路径祖先不能是符号链接；目标链接及子目录中的链接只删除链接本身，保留链接指向的数据。
 - 错误通过 `error_detail` 区分：422 `invalid_workspace_path`；403 `workspace_permission_denied`；409 `workspace_busy` 或 `workspace_not_empty`；500 `workspace_storage_failure`。递归失败可能已删除部分内容，修复原因后可用相同请求重试；接口不会回滚已删除的文件。

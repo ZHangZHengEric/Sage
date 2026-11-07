@@ -50,6 +50,10 @@ External routes require a target-bound `Authorization: Bearer <API Key>` and a `
 
 `PUT /api/agents/{agent_id}/workspace/files` imports `{directory, files}` with base64 file contents. It creates missing files only, accepts identical content again, and returns 409 on conflicts. Limits are 256 files, 4 MiB per file, and 16 MiB total. DELETE on the same route checks paths and workspace idleness.
 
+`PUT /api/agents/{agent_id}/workspace/file?path=projects/site/uploads/clip.mp4` imports one nonempty raw binary request body, up to 64 MiB. Identical retries succeed; different existing content returns 409, invalid paths or empty bodies return 422, and oversized bodies return 413. Paths are relative to the tenant and Agent workspace; symbolic links are not followed.
+
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=uploads` optionally excludes one top-level entry from the Run workspace archive. Nested entries with the same name remain included. The remaining archive is subject to the existing 32 MiB and 512-entry limits.
+
 `POST /api/agents/{agent_id}/runs?workspace_path=...` accepts AG-UI input and optional `runtimeContext` for this Run without modifying shared configuration. Reads, replies, cancellation, and downloads identify the exact `thread_id` and `run_id` and check ownership; replies also require the expected interaction ID and revision.
 
 File downloads snapshot the Run-bound working directory, limited to 32 MiB and 512 entries. A directory superseded by a newer Run in the same Session returns 409; changes during packaging may return 503. Callers validate artifacts and Run identity. Sage does not interpret downstream business manifests or build customer projects.
@@ -117,6 +121,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
+| `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `GET` | `/api/approvals` | `conversations` |

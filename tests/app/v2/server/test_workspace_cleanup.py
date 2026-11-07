@@ -1,6 +1,7 @@
 """Run admission and deletion must not cross while a filesystem worker runs."""
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -48,7 +49,8 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
 
     service = RunService(application=SimpleNamespace(run_interface=run_interface,
         resolved_plan=SimpleNamespace(entrypoint_agent_id="agent")),
-        session_access=None, execution=SimpleNamespace(driving=lambda _: False))
+        session_access=SimpleNamespace(supersede_suspended_run=AsyncMock()),
+        execution=SimpleNamespace(driving=lambda _: False))
 
     async def load_agent(*args):
         return SimpleNamespace(id="agent", composition_hash="sha256:test")
@@ -93,7 +95,8 @@ async def test_unrelated_workspace_admission_proceeds_while_another_workspace_is
         return SimpleNamespace(handle=SimpleNamespace(run_id="r", state=RunState.COMPLETED), detach=detach)
 
     service = RunService(application=SimpleNamespace(run_interface=run_interface),
-        session_access=None, execution=SimpleNamespace(driving=lambda _: False))
+        session_access=SimpleNamespace(supersede_suspended_run=AsyncMock()),
+        execution=SimpleNamespace(driving=lambda _: False))
     async def load_agent(command, owner):
         return SimpleNamespace(id=command.agent_id, composition_hash="sha256:test")
     setattr(service, '_load_run_agent', load_agent)

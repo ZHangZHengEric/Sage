@@ -73,7 +73,8 @@ class SnapshotChangedError(ValueError):
 
 
 def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
-                     max_bytes: int = MAX_ARCHIVE_BYTES, max_entries: int = MAX_ARCHIVE_ENTRIES):
+                     max_bytes: int = MAX_ARCHIVE_BYTES, max_entries: int = MAX_ARCHIVE_ENTRIES,
+                     exclude_root_entry: str | None = None):
     path = relative_path(value)
     output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
     try:
@@ -101,7 +102,8 @@ def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
                 total = [0, 0]
                 with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
                     _archive_directory(fd, archive, path.name or archive_name, total,
-                                       max_bytes=max_bytes, max_entries=max_entries)
+                                       max_bytes=max_bytes, max_entries=max_entries,
+                                       exclude_entry=exclude_root_entry)
         output.seek(0)
         return output, filename
     except BaseException:
@@ -111,13 +113,16 @@ def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
 
 def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
                        *, max_bytes: int = MAX_ARCHIVE_BYTES,
-                       max_entries: int = MAX_ARCHIVE_ENTRIES):
+                       max_entries: int = MAX_ARCHIVE_ENTRIES,
+                       exclude_entry: str | None = None):
     total[0] += 1
     if total[0] > max_entries:
         raise OverflowError("directory is too large to archive")
     archive.writestr(f"{prefix}/", b"")
     with os.scandir(fd) as entries:
         for entry in entries:
+            if entry.name == exclude_entry:
+                continue
             info = entry.stat(follow_symlinks=False)
             if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
                 continue

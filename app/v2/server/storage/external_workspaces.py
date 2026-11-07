@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 import shutil
 from pathlib import PurePosixPath
 import stat
+from uuid import uuid4
 
 from app.v2.server.storage.paths import ServerPaths, identity_segment
 
 MAX_FILES = 256
 MAX_FILE_BYTES = 4 << 20
 MAX_TOTAL_BYTES = 16 << 20
+MAX_BINARY_BYTES = 64 << 20
 
 
 def workspace_parts(value: str) -> tuple[str, ...]:
@@ -58,6 +61,64 @@ def ensure_workspace_directory(paths: ServerPaths, tenant_id: str, agent_id: str
         os.close(child)
     finally:
         os.close(fd)
+
+
+def import_workspace_file(paths: ServerPaths, tenant_id: str, agent_id: str,
+                          path: str, source) -> None:
+    """Atomically publish a bounded binary file, accepting identical retries."""
+    parts = workspace_parts(path)
+    root = os.open(paths.workspace_dir(tenant_id, agent_id),
+                   os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        parent = _directory(root, parts[:-1], paths)
+        try:
+            temporary = ".import-" + uuid4().hex
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o644, dir_fd=parent)
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    if paths.linux_execution_uid is not None and os.geteuid() == 0:
+                        os.fchown(output.fileno(), paths.linux_execution_uid, paths.linux_execution_gid)
+                    digest = hashlib.sha256()
+                    size = 0
+                    while chunk := source.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > MAX_BINARY_BYTES:
+                            raise ValueError("workspace file quota exceeded")
+                        digest.update(chunk)
+                        output.write(chunk)
+                if size == 0:
+                    raise ValueError("empty workspace file")
+                try:
+                    os.link(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent,
+                            follow_symlinks=False)
+                except FileExistsError:
+                    existing = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                       dir_fd=parent)
+                    with os.fdopen(existing, "rb") as current:
+                        info = os.fstat(current.fileno())
+                        if not stat.S_ISREG(info.st_mode) or info.st_size != size:
+                            raise FileExistsError("workspace file conflicts with existing data")
+                        existing_digest = hashlib.sha256()
+                        remaining = size
+                        while remaining:
+                            chunk = current.read(min(remaining, 1024 * 1024))
+                            if not chunk:
+                                break
+                            existing_digest.update(chunk)
+                            remaining -= len(chunk)
+                        after = os.fstat(current.fileno())
+                        if (remaining or info.st_size != after.st_size
+                                or info.st_mtime_ns != after.st_mtime_ns
+                                or info.st_ctime_ns != after.st_ctime_ns
+                                or existing_digest.digest() != digest.digest()):
+                            raise FileExistsError("workspace file conflicts with existing data")
+            finally:
+                os.unlink(temporary, dir_fd=parent)
+        finally:
+            os.close(parent)
+    finally:
+        os.close(root)
 
 
 def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
