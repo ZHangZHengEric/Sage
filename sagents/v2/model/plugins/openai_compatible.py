@@ -37,7 +37,11 @@ from sagents.v2.contracts.items import (
     TextBlock,
     UsageSummary,
 )
-from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
+from sagents.v2.contracts.provider_state import (
+    MAX_PROVIDER_STATE_BYTES,
+    make_provider_state,
+    read_provider_state,
+)
 from sagents.v2.model.plugins._shared.wire import (
     parse_tool_arguments,
     provider_error,
@@ -301,6 +305,8 @@ class OpenAICompatibleModelProvider:
         finish_reason = "unknown"
         usage = UsageSummary(models=(self.config.model,))
         tool_fragments: dict[int, dict[str, str]] = {}
+        tool_signatures: dict[int, str] = {}
+        signature_bytes = 0
         observed_choice_fields: set[str] = set()
         observed_delta_fields: set[str] = set()
         observed_delta_field_types: dict[str, set[str]] = {}
@@ -397,6 +403,26 @@ class OpenAICompatibleModelProvider:
                         accumulator = tool_fragments.setdefault(
                             index, {"id": "", "name": "", "arguments": ""}
                         )
+                        extra = wire_value(tool_delta, "extra_content")
+                        google = wire_value(extra, "google")
+                        if google is not None:
+                            if not isinstance(google, Mapping):
+                                raise self._invalid_tool_state(
+                                    "invalid Google tool metadata"
+                                )
+                            if "thought_signature" in google:
+                                signature = self._tool_signature(
+                                    google["thought_signature"]
+                                )
+                                signature_bytes += len(signature.encode("utf-8")) - len(
+                                    tool_signatures.get(index, "").encode("utf-8")
+                                )
+                                if signature_bytes > MAX_PROVIDER_STATE_BYTES:
+                                    raise self._invalid_tool_state(
+                                        "tool signatures exceed provider state limit"
+                                    )
+                                # Signatures are opaque snapshots, not text deltas.
+                                tool_signatures[index] = signature
                         tool_id = wire_value(tool_delta, "id")
                         if tool_id:
                             accumulator["id"], _ = self._merge_stream_text(
@@ -435,6 +461,7 @@ class OpenAICompatibleModelProvider:
             )
 
         tool_calls: list[ModelToolCall] = []
+        signatures_by_id: dict[str, str] = {}
         for index in sorted(tool_fragments):
             fragment = tool_fragments[index]
             tool_calls.append(
@@ -450,6 +477,12 @@ class OpenAICompatibleModelProvider:
                     },
                 )
             )
+            if index in tool_signatures:
+                signatures_by_id[tool_calls[-1].tool_call_id] = tool_signatures[index]
+        if tool_signatures and len({call.tool_call_id for call in tool_calls}) != len(
+            tool_calls
+        ):
+            raise self._invalid_tool_state("signed tool calls have duplicate IDs")
         if (
             usage.output_tokens > 0
             and not text.strip()
@@ -507,9 +540,14 @@ class OpenAICompatibleModelProvider:
                             if reasoning_details is not None
                             else {}
                         ),
+                        **(
+                            {"tool_call_thought_signatures": signatures_by_id}
+                            if signatures_by_id
+                            else {}
+                        ),
                     },
                 )
-                if reasoning or reasoning_details is not None
+                if reasoning or reasoning_details is not None or signatures_by_id
                 else {},
             ),
         )
@@ -900,12 +938,28 @@ class OpenAICompatibleModelProvider:
         value: dict[str, Any] = {
             "role": "system" if message.role == "developer" else message.role
         }
+        signatures: dict[str, str] = {}
         if message.role == "assistant":
             state = read_provider_state(message.provider_state, "openai_compatible")
             if state is not None:
                 for key in ("reasoning_content", "reasoning_details"):
                     if key in state:
                         value[key] = state[key]
+                if "tool_call_thought_signatures" in state:
+                    raw = state["tool_call_thought_signatures"]
+                    call_ids = [call.tool_call_id for call in message.tool_calls]
+                    if (
+                        not isinstance(raw, Mapping)
+                        or not set(raw).issubset(call_ids)
+                        or len(set(call_ids)) != len(call_ids)
+                    ):
+                        raise self._invalid_tool_state(
+                            "tool signature state does not match calls"
+                        )
+                    signatures = {
+                        key: self._tool_signature(signature)
+                        for key, signature in raw.items()
+                    }
         if message.role == "assistant" and self._requires_empty_reasoning_content:
             if value.get("reasoning_content") is None:
                 value["reasoning_content"] = ""
@@ -924,6 +978,17 @@ class OpenAICompatibleModelProvider:
                             ensure_ascii=False,
                         ),
                     },
+                    **(
+                        {
+                            "extra_content": {
+                                "google": {
+                                    "thought_signature": signatures[call.tool_call_id]
+                                }
+                            }
+                        }
+                        if call.tool_call_id in signatures
+                        else {}
+                    ),
                 }
                 for call in message.tool_calls
             ]
@@ -932,6 +997,27 @@ class OpenAICompatibleModelProvider:
             value["content"] = parts[0]["text"]
         else:
             value["content"] = parts
+        return value
+
+    @staticmethod
+    def _invalid_tool_state(message: str) -> SageV2Error:
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code="model.provider_state_invalid",
+                category=ErrorCategory.VALIDATION,
+                message=message,
+                safe_to_resume=True,
+            )
+        )
+
+    @classmethod
+    def _tool_signature(cls, value: object) -> str:
+        if not isinstance(value, str) or not value:
+            raise cls._invalid_tool_state("thought_signature must be a nonempty string")
+        if len(value.encode("utf-8")) > MAX_PROVIDER_STATE_BYTES:
+            raise cls._invalid_tool_state(
+                "thought_signature exceeds provider state limit"
+            )
         return value
 
     def _content_block(self, block) -> dict[str, Any]:
