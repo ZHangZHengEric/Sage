@@ -550,6 +550,9 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
                         )
                     await self._sync_locations(cursor, session_id, location_rows)
                     await self._sync_start_idempotency(cursor, session_id, start_rows)
+                    from .workspace_probe import write_projection
+                    await write_projection(cursor, self._table, session_id, new_revision,
+                                           {rid: self._runs[rid].state.value for rid in run_ids})
                 written_at = time.perf_counter()
                 await connection.commit()
                 committed_at = time.perf_counter()

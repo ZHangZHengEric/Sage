@@ -2,6 +2,8 @@
 
 import asyncio
 
+from .workspace_probe import NAMESPACE, write_projection
+
 from .state import (
     _MysqlSessionState, _datetime, _json, _decode_json, _LOCATION_KINDS,
     _principal_lookup_key,
@@ -93,6 +95,10 @@ class MysqlSessionArchive(_MysqlSessionState):
                     if row is None:
                         raise ValueError("Session archive base is missing")
                     current = int(row[0])
+                    await cursor.execute(f"SELECT value FROM {self._table('derived_state')} WHERE session_id = %s AND namespace = %s AND `key` = 'runs'", (sid, NAMESPACE))
+                    cached = await cursor.fetchone()
+                    projection = _decode_json(cached[0]) if cached else None
+                    states = dict(projection['states']) if (isinstance(projection, dict) and projection.get('revision') == current and isinstance(projection.get('states'), dict)) else None
                     for revision, head, delta, encoded, events, removed in prepared:
                         if revision <= current:
                             continue
@@ -116,6 +122,16 @@ class MysqlSessionArchive(_MysqlSessionState):
                             await cursor.execute(f"DELETE FROM {self._table('start_idempotency')} WHERE tenant_id = %s AND principal_id = %s AND idempotency_key = %s AND session_id = %s", (tenant or "", _principal_lookup_key(principal_type or "", principal_id), key, sid))
                         await cursor.execute(f"UPDATE {self._table('sessions')} SET parent_session_id = %s, revision = %s, last_sequence = %s, updated_at = %s WHERE session_id = %s", (head.get("parent_session_id"), revision, head["last_sequence"], _datetime(head["updated_at"]), sid))
                         current = revision
+                        if states is not None:
+                            for run in delta.get('upserts', {}).get('runs', ()):
+                                states[run['run_id']] = run['state']
+                            for run in delta.get('patches', {}).get('runs', ()):
+                                if run.get('state') is not None:
+                                    states[run['run_id']] = run['state']
+                            for identity in delta.get('deletes', {}).get('runs', ()):
+                                states.pop(identity[0], None)
+                    if states is not None:
+                        await write_projection(cursor, self._table, sid, current, states)
                 await connection.commit()
                 return current
             except BaseException:
@@ -196,6 +212,8 @@ class MysqlSessionArchive(_MysqlSessionState):
                             f"INSERT INTO {self._table('start_idempotency')} "
                             "(tenant_id, principal_id, idempotency_key, session_id, run_id, request_digest) "
                             "VALUES (%s, %s, %s, %s, %s, %s)", starts)
+                    await write_projection(cursor, self._table, sid, revision,
+                                           {run['run_id']: run['state'] for run in payload.get('runs', ())})
                     for artifact_id, content in attachments.items():
                         await cursor.execute(
                             f"INSERT IGNORE INTO {self._table('attachments')} (session_id, artifact_id, payload) "

@@ -41,7 +41,9 @@ async def test_target_tree_probe_includes_children_but_not_unrelated_runs(tmp_pa
 async def test_mysql_probe_reads_only_latest_state_projection(busy):
     state = _MysqlSessionState("mysql://unused/test")
     cursor, connection = AsyncMock(), AsyncMock()
-    cursor.fetchone.return_value = (1,) if busy else None
+    cursor.fetchall.return_value = [('root', 'run', 10, {
+        'revision': 10, 'states': {'run': 'running' if busy else 'completed'},
+    })]
     connection.cursor = MagicMock()
     connection.cursor.return_value.__aenter__.return_value = cursor
     @asynccontextmanager
@@ -51,9 +53,9 @@ async def test_mysql_probe_reads_only_latest_state_projection(busy):
     state._fetch_session = AsyncMock(side_effect=AssertionError("workspace probe installed full history"))
     assert await state.has_nonterminal_session_trees(["root"]) is busy
     statement = cursor.execute.await_args.args[0]
-    assert "RECURSIVE" in statement and "JSON_TABLE" in statement
+    assert "RECURSIVE" in statement and "derived_state" in statement
+    assert "JSON_TABLE" not in statement and "session_mutations" not in statement
     assert "run_events" not in statement
-    assert "LIMIT 1" in statement
     assert not state._sessions
 
 
@@ -192,10 +194,18 @@ async def test_live_mysql_workspace_probe_uses_current_journal_and_child_index()
         state._fetch_session = AsyncMock(side_effect=AssertionError("live probe fetched historical events"))
         assert not await state.has_nonterminal_session_trees([root.handle.session_id])
         assert await state.has_nonterminal_session_trees([stranger.handle.session_id])
+        # Existing archives have no projection until the first safe read repair.
+        # The repair must be durable and retain all states at the exact revision.
+        from sagents.v2.runtime.session.plugins.mysql.workspace_probe import NAMESPACE
+        await state.delete_derived_state(root.handle.session_id, NAMESPACE, 'runs')
+        assert not await state.has_nonterminal_session_trees([root.handle.session_id])
+        repaired = await state.get_derived_state(root.handle.session_id, NAMESPACE, 'runs')
+        assert repaired['states'][root.handle.run_id] == 'completed'
         # Capture the adapter's actual recursive statement for a real optimizer
         # check, rather than forcing an index in an unrelated single-table SQL.
         reader = state._reader_connection
         recorded_cursor, recorded_connection = AsyncMock(), MagicMock()
+        recorded_connection.begin = AsyncMock()
         recorded_cursor.fetchone.return_value = None
         recorded_connection.cursor.return_value.__aenter__.return_value = recorded_cursor
         @asynccontextmanager
@@ -204,7 +214,8 @@ async def test_live_mysql_workspace_probe_uses_current_journal_and_child_index()
         state._reader_connection = record_reader
         try:
             await state.has_nonterminal_session_trees([root.handle.session_id])
-            statement, parameters = recorded_cursor.execute.await_args.args
+            statement, parameters = next(call.args for call in recorded_cursor.execute.await_args_list
+                                         if 'WITH RECURSIVE' in call.args[0])
         finally:
             state._reader_connection = reader
         async with state._reader_connection() as connection:
