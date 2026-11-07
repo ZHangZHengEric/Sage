@@ -119,3 +119,49 @@ async def current_run_workspace(service, *, tenant_id: str, agent_id: str,
     except ValueError as exc:
         raise _error("workspace_missing", ErrorCategory.VALIDATION,
                      "Run has no bound workspace directory") from exc
+
+
+async def run_metrics(service, *, tenant_id: str, agent_id: str,
+                      thread_id: str, run_id: str) -> dict:
+    """Safe, exact-run operating metrics; never return provider payloads."""
+    payload, native_id, _, _, context, access, _ = await selected_run(
+        service, tenant_id=tenant_id, agent_id=agent_id,
+        thread_id=thread_id, run_id=run_id,
+    )
+    run = await access.get_run(native_id, context)
+    metrics = {"threadId": thread_id, "runId": run_id,
+               "state": run.state.value, "acceptedAt": run.created_at.isoformat(),
+               "completedAt": None, "activeMilliseconds": None, "usage": None}
+    if run.state not in TERMINAL_RUN_STATES:
+        return metrics
+    result = await access.get_run_result(native_id, context)
+    metrics["completedAt"] = result.completed_at.isoformat()
+    metrics["usage"] = result.usage.model_dump(include={
+        "reported", "input_tokens", "output_tokens", "cached_input_tokens",
+    })
+    # Lifecycle segments exclude queueing and suspended user-input waits.
+    # Missing/oversized histories remain unknown rather than fabricated zeroes.
+    cursor, active, elapsed, saw_start, saw_end, invalid = 0, None, 0.0, False, False, False
+    for _ in range(200):
+        events = await access.read_events(native_id, context, after_sequence=cursor, limit=500)
+        if not events:
+            if saw_start and saw_end and active is None and not invalid:
+                metrics["activeMilliseconds"] = round(elapsed * 1000)
+            break
+        for event in events:
+            cursor = event.run_sequence
+            if event.type in {"run.started", "run.resumed"}:
+                if active is None:
+                    active = event.occurred_at
+                saw_start = True
+            elif event.type in {"run.suspended", "run.completed", "run.failed", "run.cancelled"}:
+                if active is not None:
+                    seconds = (event.occurred_at - active).total_seconds()
+                    invalid = invalid or seconds < 0
+                    elapsed += max(0.0, seconds)
+                    active = None
+                elif event.type == "run.suspended":
+                    invalid = True
+                if event.type != "run.suspended":
+                    saw_end = True
+    return metrics

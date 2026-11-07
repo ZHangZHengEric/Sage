@@ -383,3 +383,8 @@ python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill
 ## 飞书 IM 接入
 
 飞书通过官方 Python SDK 长连接接入，仅填写 App ID / App Secret，不配置企业租户 ID、公网事件回调或飞书环境变量，支持本人配对、文本私聊、`/new`、`/stop`、现有 Sage 审批链接和持久收发恢复。平台适配器由现有 ExtensionHost 加载，执行复用 RunAdmission、RunService 与 SessionStore。用户通过一级菜单「IM管理」（`/im`）或 `/api/im/connections` 自助配置本人连接，只绑定自己的 Agent；凭据使用服务端自动生成并持久化的独立主密钥加密保存。内置 `im_notify` 支持模型准备最终通知正文，Run 完成后投递；网页可选择本人已配对连接，外部定时调度可通过 Run API 指定 `notification_connection_id`。部署与联调见 [IM 接入说明](im/README.md)。
+
+
+### External Run operating metrics
+
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` uses the existing Agent API key and tenant scope. It returns `acceptedAt`, `completedAt`, `activeMilliseconds` and the canonical `usage` counters (`reported`, `input_tokens`, `output_tokens`, `cached_input_tokens`). It never returns provider payloads or message content. Cached input is a subset of input. Terminal Run timings sum started/resumed-to-suspended/terminal segments, excluding queue and suspended waits; missing or oversized event histories remain null. Nonterminal usage and timings remain null. Queries are exact-run scoped and safe to replay for downstream idempotent snapshots.

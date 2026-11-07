@@ -70,6 +70,17 @@ def _exercise_run_routes(client, base, agent_id):
     assert "request_id" not in result.json()["data"]
     assert "run_id" not in result.json()["data"]
     assert result.json()["data"]["items"]
+    metrics_path = base + "/runs/thread-a/run-a/metrics"
+    metrics = client.get(metrics_path, headers=_headers())
+    assert metrics.status_code == 200, metrics.text
+    measured = metrics.json()["data"]
+    assert measured["runId"] == "run-a"
+    assert measured["completedAt"]
+    assert measured["activeMilliseconds"] >= 0
+    assert set(measured["usage"]) == {"reported", "input_tokens", "output_tokens", "cached_input_tokens"}
+    assert client.get(metrics_path, headers=_headers("tenant-b")).status_code == 404
+    assert client.get(base + "/runs/thread-a/missing/metrics", headers=_headers()).status_code == 404
+
     assert client.get(base + "/runs/thread-a/run-a", headers=_headers("tenant-b")).status_code == 404
     assert client.get(base + "/runs/thread-a/wrong-run", headers=_headers()).status_code == 404
     downloaded = client.get(base + "/runs/thread-a/run-a/files", headers=_headers())
