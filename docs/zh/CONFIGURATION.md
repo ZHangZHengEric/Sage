@@ -59,6 +59,8 @@ Gemini 模型使用 `openai-chat-completions` 时，Sage 会将文档定义的
 不保存其他扩展字段。格式不合法的签名状态会被拒绝，并沿用现有 provider-state
 的 8 MiB 上限。此处理针对工具调用签名；原生 `gemini-generate-content` 路由
 使用自身的续接状态处理。
+历史记忆清理会保留带有 provider 续接状态的完整工具调用组及其结果，避免删除调用后
+留下失配的签名。不带 provider 状态的普通记忆调用仍按原逻辑清理。
 
 ## 选择运行组件
 

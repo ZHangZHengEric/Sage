@@ -7,6 +7,7 @@ import httpx
 import pytest
 from openai import AsyncOpenAI
 
+from sagents.v2.context import DefaultContextAssembler
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
@@ -30,6 +31,57 @@ from tests.sagents.v2.test_session_history_context_matrix import (
 
 if TYPE_CHECKING:
     from sagents.v2.runtime.session.contracts import SessionStore
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parallel", [False, True])
+@pytest.mark.parametrize("with_text", [False, True])
+async def test_historical_memory_pruning_preserves_signed_tool_group(parallel, with_text):
+    calls = (ModelToolCall(tool_call_id="memory", name="search_memory", arguments={}),)
+    if parallel:
+        calls += (ModelToolCall(tool_call_id="lookup", name="lookup", arguments={}),)
+    assistant = ModelMessage(
+        role="assistant",
+        content=(TextBlock(text="Checking memory"),) if with_text else (),
+        tool_calls=calls,
+        provider_state=make_provider_state(
+            "openai_compatible",
+            {"tool_call_thought_signatures": {"memory": "opaque-signature"}},
+        ),
+    )
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="first question"),)),
+        assistant,
+        *(
+            ModelMessage(
+                role="tool",
+                tool_call_id=call.tool_call_id,
+                content=(TextBlock(text="result"),),
+            )
+            for call in calls
+        ),
+        ModelMessage(role="user", content=(TextBlock(text="follow up"),)),
+    )
+    positions: list[int] = []
+    assert DefaultContextAssembler._strip_historical_search_memory(
+        ledger, source_positions=positions
+    ) == ledger
+    assert positions == list(range(len(ledger)))
+    prepared = await DefaultContextAssembler().prepare_messages(
+        command("follow up", "signed-memory"), ledger
+    )
+    provider = OpenAICompatibleModelProvider(config(), client=object())
+    wire = provider.diagnostic_request(request(messages=prepared))["messages"]
+    replay = next(message for message in wire if message.get("tool_calls"))
+    assert [call["id"] for call in replay["tool_calls"]] == [
+        call.tool_call_id for call in calls
+    ]
+    assert replay["tool_calls"][0]["extra_content"] == {
+        "google": {"thought_signature": "opaque-signature"}
+    }
+    assert [message["tool_call_id"] for message in wire if message["role"] == "tool"] == [
+        call.tool_call_id for call in calls
+    ]
 
 
 def tool(index, call_id=None, arguments=None, signature=None):

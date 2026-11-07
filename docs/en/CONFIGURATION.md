@@ -63,6 +63,9 @@ configuration is needed. Signatures remain opaque strings; unrelated extension
 fields are not retained. Malformed signature state is rejected, and the existing
 8 MiB provider-state limit applies. This handling concerns tool-call signatures;
 the native `gemini-generate-content` route has its own continuation handling.
+Historical memory pruning preserves complete tool-call groups carrying provider
+continuation state, including their results, so it cannot detach a signature from
+its call. Ordinary memory calls without provider state are still pruned.
 
 ## Selecting runtime implementations
 

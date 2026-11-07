@@ -632,7 +632,7 @@ class DefaultContextAssembler:
         *,
         source_positions: list[int] | None = None,
     ) -> tuple[ModelMessage, ...]:
-        """Keep only the current turn's automatic Memory Tool pair, as v1 does."""
+        """Prune historical Memory pairs only when they have no opaque state."""
 
         latest_user = next(
             (
@@ -650,6 +650,9 @@ class DefaultContextAssembler:
             call.tool_call_id
             for message in messages[:latest_user]
             if message.role == "assistant"
+            # Protocol-owned state may sign the whole assistant/tool-call group.
+            # Context cannot safely rewrite it or remove an individual call.
+            if not message.provider_state
             for call in message.tool_calls
             if call.name == "search_memory"
         }
