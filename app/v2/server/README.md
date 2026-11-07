@@ -322,6 +322,22 @@ CREATE INDEX sessions_parent_id ON sessions (parent_session_id);
 
 删除与 Run 创建、文件导入在当前 server 进程内互斥；请求取消时会等待文件线程退出后释放互斥。运行冲突保护适用于现有单进程 server v2，不提供多 worker、多实例或外部进程直接写 workspace 时的分布式文件租约。
 
+## 技能版本管理
+
+技能详情的「版本」页展示修订历史、历史 `SKILL.md`、与当前版本的完整文件包差异，并可将历史文件包恢复为新修订。旧版本和原文件保留；回滚必须携带当前 `expected_version_id`，并发更新返回 409。大文本差异会截断，二进制文件只标记变更。
+
+- `GET /api/skills/{skill_id}/versions?limit=50&before_revision=3`：按修订号倒序分页，最多 100 条，继续分页时传入上一页最后的修订号。
+- `GET /api/skills/{skill_id}/versions/{version_id}`：读取该技能某一历史版本的元信息和正文。
+- `GET /api/skills/{skill_id}/diff?from_version=...&to_version=...`：比较两个版本的新增、删除、文本和二进制文件。
+- `POST /api/skills/{skill_id}/rollback`：提交 `{ "version_id": "历史版本", "expected_version_id": "当前版本" }`，发布新的当前修订。
+- `PUT /api/agents/{agent_id}/skills/{skill_id}/version`：已绑定的技能提交 `{ "version_id": "指定版本" }` 固定版本，或 `{ "version_id": null }` 跟随最新版。普通保存 Agent 不会清除已有固定策略；解绑再绑定默认跟随最新版。
+
+版本历史、比较和恢复沿用技能所有权权限；管理员可查看跨用户历史，管理员代看页面保持只读。普通用户无法读取或绑定其他用户的版本。固定版本的 Agent 不接受 ZIP 同步覆盖，需先改为跟随最新版，或使用「Agent 技能同步」同步选定的固定版本。
+
+新任务受理时记录技能版本和绑定策略。跟随最新版保留默认 auto-sync 行为：显式加载时可更新到当前版本；固定版本始终读取选中的制品，同名包内技能不会覆盖显式固定的目录版本。变更绑定策略仅影响新任务，已有任务保留原策略。发布和回滚不会立即重写工作区；下次加载或「Agent 技能同步」才同步对应版本。共享工作区仍遵守活跃读者保护，不允许并行任务互相覆盖不同版本。
+
+Server 启动时增量添加 `skill_versions.description` 和 `agent_skill_selections.source_version_id` 两个可空字段，保留已有数据；旧绑定默认跟随最新版，旧历史描述从原制品恢复。回退应用代码时可保留新增字段，无需删表或删除历史。SDK SQLite Skill 仓库继续使用独立实现。
+
 ## 在线技能导入
 
 技能页的“导入技能”支持本地 ZIP、在线 ZIP 和 `npx skills add` 命令。远程导入先解析并展示技能列表，用户选择后导入；同名且内容不同的技能需要明确选择“更新已有技能”。导入不自动修改智能体绑定。

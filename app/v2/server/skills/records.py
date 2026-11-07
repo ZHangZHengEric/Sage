@@ -148,6 +148,8 @@ class SkillRecord:
     file_count: int
     total_bytes: int
     status: str = "active"
+    created_at: str = ""
+    pinned: bool = False
 
     def public_dict(self) -> dict[str, object]:
         return {
@@ -162,6 +164,8 @@ class SkillRecord:
             "file_count": self.file_count,
             "total_bytes": self.total_bytes,
             "status": self.status,
+            "created_at": self.created_at,
+            "version_policy": "pinned" if self.pinned else "latest",
         }
 
     def absolute_path(self, data_root: Path) -> Path:
@@ -186,6 +190,7 @@ class AgentSkillBinding:
     skill_name: str
     source_skill_id: str | None
     position: int
+    source_version_id: str | None = None
 
 
 def new_skill_id() -> str:

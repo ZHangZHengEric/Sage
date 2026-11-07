@@ -41,6 +41,9 @@ class SkillVersionRow(Base):
     file_count: Mapped[int] = mapped_column(Integer)
     total_bytes: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(
+        Text().with_variant(LONGTEXT(), "mysql", "mariadb"), nullable=True
+    )
 
 
 class AgentSkillSelectionRow(Base):
@@ -51,3 +54,4 @@ class AgentSkillSelectionRow(Base):
     skill_name: Mapped[str] = mapped_column(String(191), primary_key=True)
     source_skill_id: Mapped[str] = mapped_column(String(64), default="")
     position: Mapped[int] = mapped_column(Integer)
+    source_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

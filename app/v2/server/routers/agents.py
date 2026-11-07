@@ -11,7 +11,7 @@ from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS,
 from app.v2.server.routers.schemas.catalog import (
     AgentBody, AgentPublic, AgentSummary, ToolPublic, AgentToolOption, AgentEditorResources,
 )
-from app.v2.server.routers.schemas.skills import SkillBindBody, SkillPublic
+from app.v2.server.routers.schemas.skills import SkillBindBody, SkillPublic, SkillVersionBindingBody
 from app.v2.server.skills.agent_guidance import sync_agent_guidance, sync_bound_agent_skills
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
@@ -260,6 +260,15 @@ async def bind_agent_skills(
 ):
     skills = await service.bind_agent_skills(user.user_id, agent_id, body.names)
     return success([item.public_dict() for item in skills])
+
+
+@skill_binding_router.put(
+    "/api/agents/{agent_id}/skills/{skill_id}/version", response_model=ApiResponse[SkillPublic]
+)
+async def bind_agent_skill_version(agent_id: str, skill_id: str, body: SkillVersionBindingBody,
+                                   user: CurrentUser, service: CatalogDep):
+    record = await service.bind_agent_skill_version(user.user_id, agent_id, skill_id, body.version_id)
+    return success(record.public_dict())
 
 
 router = APIRouter()

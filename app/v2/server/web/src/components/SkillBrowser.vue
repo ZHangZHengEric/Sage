@@ -6,9 +6,11 @@ import { formatBytes, markdownBody, resourceHelp } from '../resource-presentatio
 import FieldHelp from './FieldHelp.vue'
 import AppIcon from './AppIcon.vue'
 import FormDrawer from './FormDrawer.vue'
+import SkillVersions from './SkillVersions.vue'
 
 const props = defineProps({ item: { type: Object, required: true } })
-const emit = defineEmits(['removed'])
+const emit = defineEmits(['removed', 'changed'])
+const versionBusy = ref(false)
 const open = ref(false), tab = ref('overview'), deleting = ref(false), confirmDelete = ref(false), deleteError = ref('')
 const busy = ref(false)
 const error = ref('')
@@ -22,6 +24,7 @@ const hexLimit = ref(4096)
 const binary = ref(null)
 const collapsed = ref(new Set())
 let requestIndex = 0
+let filesStale = false
 
 const selectedFile = computed(() => files.value.find(file => file.path === selected.value))
 const tree = computed(() => {
@@ -150,8 +153,17 @@ function safeMarkdown(source) {
 const markdownHtml = computed(() => kind.value === 'markdown' && previewMode.value === 'preview' ? safeMarkdown(selected.value === 'SKILL.md' ? markdownBody(content.value) : content.value) : '')
 async function setTab(value) {
   tab.value = value
+  if (value !== 'versions' && filesStale) {
+    try {
+      files.value = await api.skillFiles(props.item.skill_id, props.item._owner)
+      filesStale = false
+      await selectFile(files.value.find(file => file.path === 'SKILL.md')?.path || files.value[0]?.path)
+    } catch (exc) { error.value = exc.message }
+    return
+  }
   if (value === 'overview' && selected.value !== 'SKILL.md' && files.value.some(file => file.path === 'SKILL.md')) await selectFile('SKILL.md')
 }
+function versionChanged() { filesStale = true; emit('changed') }
 async function remove() {
   if (isForeign(props.item) || deleting.value) return
   deleting.value = true; deleteError.value = ''
@@ -165,12 +177,13 @@ onBeforeUnmount(clearPreview)
 
 <template>
   <button class="btn ghost" type="button" :aria-label="`查看 ${item.name} 详情`" @click="inspect">查看<AppIcon name="chevron" /></button>
-  <FormDrawer :model-value="open" title="技能详情" centered panel-class="resource-dialog skill-dialog" :busy="deleting" @update:model-value="close">
+  <FormDrawer :model-value="open" title="技能详情" centered panel-class="resource-dialog skill-dialog" :busy="deleting || versionBusy" @update:model-value="close">
     <template v-if="open">
       <div class="rs-identity"><span class="rs-icon"><AppIcon name="skill" /></span><div><h2>{{ item.name }}</h2><div class="rs-technical">{{ item._owner?.username || '我的技能' }}</div></div><span v-if="isForeign(item)" class="rs-badge readonly">只读</span><span v-else class="rs-badge">可用</span></div>
-      <nav class="rs-detail-tabs" aria-label="技能详情分区"><button type="button" :aria-pressed="tab === 'overview'" @click="setTab('overview')">说明</button><button type="button" :aria-pressed="tab === 'files'" @click="setTab('files')">文件</button></nav>
+      <nav class="rs-detail-tabs" aria-label="技能详情分区"><button type="button" :disabled="versionBusy" :aria-pressed="tab === 'overview'" @click="setTab('overview')">说明</button><button type="button" :disabled="versionBusy" :aria-pressed="tab === 'files'" @click="setTab('files')">文件</button><button type="button" :disabled="versionBusy" :aria-pressed="tab === 'versions'" @click="setTab('versions')">版本</button></nav>
+      <SkillVersions v-if="tab === 'versions'" :item="item" @changed="versionChanged" @busy="versionBusy = $event" />
       <section v-if="tab === 'overview'" class="rs-section"><dl class="rs-metadata"><div><dt>所有者</dt><dd>{{ item._owner?.username || '我' }}</dd></div><div><dt>修订</dt><dd class="rs-label">{{ item.revision ?? '—' }}<FieldHelp label="修订编号" :text="resourceHelp.revision" /></dd></div><div><dt>文件</dt><dd>{{ item.file_count ?? files.length }} 个 · {{ formatBytes(item.total_bytes ?? files.reduce((sum, file) => sum + file.size, 0)) }}</dd></div></dl></section>
-      <div class="skill-browser" :class="{ overview: tab === 'overview' }">
+      <div v-if="tab !== 'versions'" class="skill-browser" :class="{ overview: tab === 'overview' }">
         <aside v-if="tab === 'files'" class="skill-files" aria-label="技能文件">
           <div class="file-heading"><span class="rs-label">文件<FieldHelp label="技能文件" :text="resourceHelp.files" /></span><span>{{ files.length }}</span></div>
           <div v-for="entry in tree" :key="entry.path" class="tree-entry"><button type="button" class="tree-button" :class="{ active: !entry.folder && selected === entry.path }" :style="{ paddingLeft: `${entry.depth * 16 + 12}px` }" :aria-label="entry.path" :aria-current="!entry.folder && selected === entry.path ? 'true' : undefined" :aria-expanded="entry.folder ? !collapsed.has(entry.path) : undefined" @click="entry.folder ? toggleFolder(entry.path) : selectFile(entry.path)"><AppIcon :name="entry.folder ? 'folder' : 'file'" /><span>{{ entry.path.split('/').at(-1) }}</span></button></div>
@@ -194,7 +207,7 @@ onBeforeUnmount(clearPreview)
     </template>
     <template #footer><p v-if="deleteError" class="error rs-footer-error" role="alert">{{ deleteError }}</p><div class="rs-dialog-footer">
       <template v-if="confirmDelete"><span class="rs-small">确认删除 {{ item.name }}？</span><div class="row"><button class="btn ghost" type="button" :disabled="deleting" @click="confirmDelete = false">取消</button><button class="btn rs-destructive" type="button" :disabled="deleting" @click="remove">{{ deleting ? '正在删除…' : '确认删除' }}</button></div></template>
-      <template v-else><button v-if="!isForeign(item)" class="btn ghost rs-danger" type="button" :disabled="busy" @click="confirmDelete = true"><AppIcon name="trash" />删除技能</button><span v-else class="rs-small muted rs-label">只读<FieldHelp label="只读权限" :text="resourceHelp.readonly" /></span><div class="rs-label"><FieldHelp label="技能授权" :text="resourceHelp.bind" /><router-link class="btn cta" to="/agents" @click="close">前往智能体配置<AppIcon name="chevron" /></router-link></div></template>
+      <template v-else><button v-if="!isForeign(item)" class="btn ghost rs-danger" type="button" :disabled="busy || versionBusy" @click="confirmDelete = true"><AppIcon name="trash" />删除技能</button><span v-else class="rs-small muted rs-label">只读<FieldHelp label="只读权限" :text="resourceHelp.readonly" /></span><div v-if="!versionBusy" class="rs-label"><FieldHelp label="技能授权" :text="resourceHelp.bind" /><router-link class="btn cta" to="/agents" @click="close">前往智能体配置<AppIcon name="chevron" /></router-link></div></template>
     </div></template>
   </FormDrawer>
 </template>

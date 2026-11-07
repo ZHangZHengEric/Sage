@@ -28,7 +28,8 @@ class CatalogSkillProvider:
         self._records = {item.name: item for item in records}
         self.data_root = Path(data_root)
         self.latest_record = latest_record
-        self._bundles = package_skill_bundles(package_files or {})
+        self._bundles = {name: bundle for name, bundle in package_skill_bundles(package_files or {}).items()
+                         if name not in self._records or not self._records[name].pinned}
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
         descriptors = {name: _descriptor(item) for name, item in self._records.items()}
@@ -68,6 +69,8 @@ class CatalogSkillProvider:
         ):
             raise SageV2Error(RuntimeErrorInfo(code="skill.not_found", category=ErrorCategory.POLICY_DENIED,
                 message="Current Skill no longer matches this Run's admitted identity", safe_to_resume=True))
+        if admitted.pinned:
+            record = admitted
         return await self._fetch_record(record, _descriptor(record))
 
     async def _fetch_record(self, record, descriptor):

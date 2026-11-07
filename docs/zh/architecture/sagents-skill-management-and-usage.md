@@ -55,6 +55,8 @@ Agent 工具开放。多租户使用独立仓库路径或带授权的管理插�
 需要接受时就固定版本的宿主继续使用接受快照，例如 Server frozen composition。
 filesystem 不承诺历史版本恢复。管理器的历史保留策略与 Agent workspace 分开。
 
+Server 的 MySQL 技能库另有版本历史、文件差异和回滚 API。Agent 可按技能选择跟随最新版或固定 `version_id`；绑定策略在 Run 受理时冻结。固定版本不会被 `fetch_latest` 或同名包内技能替换，跟随最新版继续遵守下述 auto-sync 规则。页面入口、API 与数据库增量升级见 [Server 技能版本管理](../../../app/v2/server/README.md#技能版本管理)。
+
 ## 三种工作区策略
 
 三种策略的实际路径都是 `skills/<名称>/`。例如 reference 的地址始终是

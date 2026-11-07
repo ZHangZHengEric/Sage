@@ -10,6 +10,7 @@ from app.v2.server.database import Database
 from app.v2.server.database.base import Base
 from app.v2.server.identity import orm as _identity_orm  # noqa: F401
 from app.v2.server.identity.migrations import upgrade_identity_schema
+from app.v2.server.skills.migrations import upgrade_skill_schema
 from app.v2.server.observability.logging import get_logger
 from app.v2.server.catalog import orm as _catalog_orm  # noqa: F401
 from app.v2.server.conversations import orm as _conversations_orm  # noqa: F401
@@ -53,6 +54,7 @@ def _create_missing_host_tables(connection) -> None:
     if missing:
         Base.metadata.create_all(connection, tables=missing, checkfirst=False)
     upgrade_identity_schema(connection)
+    upgrade_skill_schema(connection)
     if "im_deliveries" in existing:
         columns = {column["name"] for column in inspect(connection).get_columns("im_deliveries")}
         if "run_context" not in columns:

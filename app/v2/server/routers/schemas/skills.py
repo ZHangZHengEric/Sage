@@ -13,6 +13,32 @@ class SkillPublishBody(BaseModel):
 
 class SkillUpdateBody(BaseModel):
     content: str
+    expected_version_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class SkillRollbackBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str = Field(min_length=1, max_length=64)
+    expected_version_id: str = Field(min_length=1, max_length=64)
+
+
+class SkillVersionBindingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str | None = Field(max_length=64, min_length=1)
+
+
+class SkillFileDiff(BaseModel):
+    path: str
+    status: Literal["added", "removed", "modified"]
+    binary: bool
+    truncated: bool
+    diff: str
+
+
+class SkillDiffPublic(BaseModel):
+    from_version_id: str
+    to_version_id: str
+    files: list[SkillFileDiff]
 
 
 class SkillBindBody(BaseModel):
@@ -37,6 +63,8 @@ class SkillPublic(BaseModel):
     status: str
     content: str | None = None
     workspace_status: str | None = None
+    created_at: str = ""
+    version_policy: Literal["latest", "pinned"] = "latest"
 
 
 class SkillFilePublic(BaseModel):

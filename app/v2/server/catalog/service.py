@@ -271,3 +271,14 @@ class CatalogService:
             if current.skills != bound:
                 await self.store.update_agent(user_id, current.with_configuration(skills=bound))
             return skills
+
+    async def bind_agent_skill_version(self, user_id: str, agent_id: str, skill_id: str, version_id: str | None):
+        from app.v2.server.skills.versions import SkillVersionService
+        from app.v2.server.skills.agent_guidance import _lock as guidance_lock
+        # Guidance takes the Agent sync lock before the catalog write lock.
+        # Keep that order so a policy change cannot race a workspace sync.
+        async with guidance_lock(self.skills.guidance_locks, (user_id, agent_id)):
+            async with self._lock(user_id, "agents"):
+                require_agent(await self.store.get(user_id), agent_id)
+                return await SkillVersionService(self.skills).bind_version(
+                    agent_id, skill_id, version_id, user_id=user_id)

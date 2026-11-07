@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from pathlib import PurePosixPath
 from weakref import WeakValueDictionary
@@ -160,7 +161,8 @@ class SkillCatalogService:
         )
 
     async def update_content(
-        self, skill_id: str, content: str, *, user_id: str, role: str
+        self, skill_id: str, content: str, *, user_id: str, role: str,
+        expected_version_id: str | None = None,
     ) -> SkillRecord:
         current = await self.get(skill_id, user_id=user_id, role=role)
         if current.owner_user_id != user_id and role != "admin":
@@ -194,6 +196,7 @@ class SkillCatalogService:
             owner_user_id=current.owner_user_id,
             skill_id=current.skill_id,
             revision=current.revision + 1,
+            expected_version_id=expected_version_id,
         )
 
     async def disable(self, skill_id: str, *, user_id: str, role: str) -> None:
@@ -218,7 +221,8 @@ class SkillCatalogService:
     ) -> list[SkillRecord]:
         ordered = normalize_skill_names(names)
         visible = await self.store.list_visible(user_id=owner_user_id, role="user")
-        resolved: list[SkillRecord] = []
+        previous = {item.skill_name: item for item in await self.store.list_bindings(
+            owner_user_id=owner_user_id, agent_id=agent_id)}
         bindings: list[AgentSkillBinding] = []
         for position, name in enumerate(ordered):
             match = pick_visible_skill(visible, name=name, user_id=owner_user_id)
@@ -230,7 +234,6 @@ class SkillCatalogService:
                         message=f"unknown skill: {name}",
                     )
                 )
-            resolved.append(match)
             bindings.append(
                 AgentSkillBinding(
                     owner_user_id=owner_user_id,
@@ -238,6 +241,8 @@ class SkillCatalogService:
                     skill_name=name,
                     source_skill_id=match.skill_id,
                     position=position,
+                    source_version_id=(previous[name].source_version_id
+                        if name in previous and previous[name].source_skill_id == match.skill_id else None),
                 )
             )
         await self.store.replace_bindings(
@@ -245,7 +250,7 @@ class SkillCatalogService:
         )
         if catalog is not None:
             _sync_agent_skills(catalog, agent_id, ordered)
-        return resolved
+        return await self.bound_skills(owner_user_id=owner_user_id, agent_id=agent_id)
 
     async def bound_skills(
         self, *, owner_user_id: str, agent_id: str
@@ -254,7 +259,22 @@ class SkillCatalogService:
             self.store.list_visible(user_id=owner_user_id, role="user"),
             self.store.list_bindings(owner_user_id=owner_user_id, agent_id=agent_id),
         )
-        return resolve_bound_skills(visible, bindings)
+        resolved = resolve_bound_skills(visible, bindings)
+        pins = {binding.source_skill_id: binding.source_version_id for binding in bindings
+                if binding.source_version_id and binding.source_skill_id}
+        historical = {item.version_id: item for item in await self.store.get_versions(list(pins.values()))}
+        result = []
+        for item in resolved:
+            version_id = pins.get(item.skill_id)
+            if version_id is None:
+                result.append(item)
+            else:
+                version = historical.get(version_id)
+                if version is None or version.skill_id != item.skill_id or version.owner_user_id != owner_user_id:
+                    raise SageV2Error(RuntimeErrorInfo(code="skill.version_not_found",
+                        category=ErrorCategory.VALIDATION, message="pinned skill version not found"))
+                result.append(replace(version, pinned=True))
+        return result
 
     async def bound_names(self, owner_user_id: str, agent_id: str) -> tuple[str, ...]:
         return tuple(
@@ -335,7 +355,7 @@ class SkillCatalogService:
             inspect_skill_markdown(name=skill_name, content=content)
             current = await skill_io(self.workspace_storage.skill_files, user_id, agent_id, skill_name)
             if current is None:
-                source = await self._catalog_source(user_id, skill_name)
+                source = await self._catalog_source(user_id, skill_name, agent_id)
                 if source is None:
                     raise ValueError("Skill is not bound")
                 package = await skill_io(inspect_skill_directory, source)
@@ -345,7 +365,7 @@ class SkillCatalogService:
         target = await skill_io(workspace_skill_path, self.data_root, user_id, agent_id, skill_name)
         source = None
         if not await skill_io(target.is_dir):
-            source = await self._catalog_source(user_id, skill_name)
+            source = await self._catalog_source(user_id, skill_name, agent_id)
 
         def write():
             if not target.is_dir():
@@ -372,7 +392,7 @@ class SkillCatalogService:
             current = await skill_io(self.workspace_storage.skill_files, user_id, agent_id, name)
             if current is None:
                 return "missing"
-            source = await self._catalog_source(user_id, name)
+            source = await self._catalog_source(user_id, name, agent_id)
             if source is None:
                 return "local"
             package = await skill_io(inspect_skill_directory, source)
@@ -380,7 +400,7 @@ class SkillCatalogService:
         target = await skill_io(workspace_skill_path, self.data_root, user_id, agent_id, name)
         if not await skill_io(target.is_dir):
             return "missing"
-        source = await self._catalog_source(user_id, name)
+        source = await self._catalog_source(user_id, name, agent_id)
         if source is None:
             return "local"
         def status():
@@ -393,8 +413,13 @@ class SkillCatalogService:
 
         return await skill_io(status)
 
-    async def _catalog_source(self, user_id: str, name: str) -> Path | None:
+    async def _catalog_source(self, user_id: str, name: str, agent_id: str | None = None) -> Path | None:
         visible = await self.store.list_visible(user_id=user_id, role="user")
+        if agent_id is not None:
+            bound = await self.bound_skills(owner_user_id=user_id, agent_id=agent_id)
+            pinned = next((item for item in bound if item.name == name and item.pinned), None)
+            if pinned is not None:
+                visible = [pinned]
         match = pick_visible_skill(visible, name=name, user_id=user_id)
         if match is None:
             return None
@@ -412,6 +437,7 @@ class SkillCatalogService:
         skill_id: str | None = None,
         revision: int = 1,
         expected_version_id: str | None = None,
+        force_new_version: bool = False,
     ) -> SkillRecord:
         """Publish a validated bundle, optionally comparing the catalog version."""
         visible = await self.store.list_visible(
@@ -426,8 +452,12 @@ class SkillCatalogService:
             ),
             None,
         )
+        if expected_version_id is not None and (existing.version_id if existing else "") != expected_version_id:
+            from app.v2.server.skills.downloads import import_error
+            raise import_error("技能已被其他操作更新，请重新预览", conflict=True)
         if (
-            existing is not None
+            not force_new_version
+            and existing is not None
             and existing.package_sha256 == package.package_sha256
             and existing.description == package.description
         ):

@@ -113,6 +113,9 @@ async def _sync_one_skill(host, *, owner_id: str, agent_id: str,
     # same Skill, keep the shared-binding check and publish/bind indivisible.
     async with _lock(host.skill_catalog.guidance_skill_locks, (owner_id, name)):
         agent = await host.catalog.get_agent(owner_id, agent_id)
+        bindings = await host.skill_catalog.store.list_bindings(owner_user_id=owner_id, agent_id=agent_id)
+        if any(item.skill_name == name and item.source_version_id for item in bindings):
+            raise ValueError("技能已固定版本，请先切换为跟随最新版，或同步已绑定的固定版本")
         catalog = await host.catalog.get(owner_id)
         if any(other.id != agent_id and name in other.skills for other in catalog.agents):
             raise ValueError("Skill is shared with another Agent")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from typing import Protocol, cast
 
 from sqlalchemy import CursorResult, select, update
@@ -23,6 +24,8 @@ def _now() -> str:
 
 class SkillStore(Protocol):
     async def get(self, skill_id: str) -> SkillRecord | None: ...
+    async def get_versions(self, version_ids: list[str]) -> list[SkillRecord]: ...
+    async def list_versions(self, skill_id: str, *, limit: int = 50, before_revision: int | None = None) -> list[SkillRecord]: ...
     async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]: ...
     async def publish(self, record: SkillRecord, *, expected_version_id: str | None = None) -> SkillRecord: ...
     async def disable(self, skill_id: str) -> None: ...
@@ -51,6 +54,27 @@ class DatabaseSkillStore:
         if version is None:
             return None
         return _record(row, version)
+
+    async def get_versions(self, version_ids: list[str]) -> list[SkillRecord]:
+        if not version_ids:
+            return []
+        async with self.database.session() as session:
+            rows = (await session.execute(select(SkillRow, SkillVersionRow).join(
+                SkillVersionRow, SkillVersionRow.skill_id == SkillRow.skill_id
+            ).where(SkillVersionRow.version_id.in_(version_ids)))).all()
+        return [_record(row, version) for row, version in rows]
+
+    async def list_versions(self, skill_id: str, *, limit: int = 50, before_revision: int | None = None) -> list[SkillRecord]:
+        statement = select(SkillRow, SkillVersionRow).join(
+            SkillVersionRow, SkillVersionRow.skill_id == SkillRow.skill_id
+        ).where(SkillRow.skill_id == skill_id)
+        if before_revision is not None:
+            statement = statement.where(SkillVersionRow.revision < before_revision)
+        async with self.database.session() as session:
+            rows = (await session.execute(statement.order_by(
+                SkillVersionRow.revision.desc(), SkillVersionRow.created_at.desc()
+            ).limit(limit))).all()
+        return [_record(row, version) for row, version in rows]
 
     async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]:
         # Visibility is a WHERE clause, not a full scan: this runs on every chat
@@ -81,6 +105,7 @@ class DatabaseSkillStore:
         reject_absolute_artifact_path(record.artifact_path)
         now = _now()
         skill_id = record.skill_id
+        revision = record.revision
         async with self.database.transaction() as session:
             existing = (
                 (
@@ -88,13 +113,17 @@ class DatabaseSkillStore:
                         select(SkillRow).where(
                             SkillRow.owner_user_id == record.owner_user_id,
                             SkillRow.name == record.name,
-                        )
+                        ).with_for_update()
                     )
                 )
                 .scalars()
                 .first()
             )
             current_version = existing.current_version_id if existing and existing.status == "active" else ""
+            if existing is not None:
+                previous = await session.get(SkillVersionRow, existing.current_version_id)
+                if previous is not None:
+                    revision = previous.revision + 1
             if expected_version_id is not None and current_version != expected_version_id:
                 raise import_error("技能已被其他操作更新，请重新预览", conflict=True)
             if existing is None:
@@ -133,7 +162,8 @@ class DatabaseSkillStore:
                 SkillVersionRow(
                     version_id=record.version_id,
                     skill_id=skill_id,
-                    revision=record.revision,
+                    revision=revision,
+                    description=record.description,
                     artifact_path=record.artifact_path,
                     skill_md_sha256=record.skill_md_sha256,
                     package_sha256=record.package_sha256,
@@ -142,9 +172,7 @@ class DatabaseSkillStore:
                     created_at=now,
                 )
             )
-        saved = await self.get(skill_id)
-        assert saved is not None
-        return saved
+        return replace(record, skill_id=skill_id, revision=revision, created_at=now)
 
     async def disable(self, skill_id: str) -> None:
         async with self.database.transaction() as session:
@@ -184,6 +212,7 @@ class DatabaseSkillStore:
                         skill_name=normalize_skill_name(binding.skill_name),
                         source_skill_id=binding.source_skill_id or "",
                         position=binding.position,
+                        source_version_id=binding.source_version_id,
                     )
                 )
             # Binding index and canonical package must commit or roll back together.
@@ -232,6 +261,7 @@ class DatabaseSkillStore:
                 skill_name=row.skill_name,
                 source_skill_id=row.source_skill_id or None,
                 position=row.position,
+                source_version_id=row.source_version_id,
             )
             for row in sorted(rows, key=lambda item: item.position)
         ]
@@ -244,23 +274,35 @@ def _record(row: SkillRow, version: SkillVersionRow) -> SkillRecord:
         revision=version.revision,
         owner_user_id=row.owner_user_id,
         name=row.name,
-        description=row.description,
+        description=version.description if version.description is not None else (
+            row.description if version.version_id == row.current_version_id else ""),
         artifact_path=version.artifact_path,
         skill_md_sha256=version.skill_md_sha256,
         package_sha256=version.package_sha256,
         file_count=version.file_count,
         total_bytes=version.total_bytes,
         status=row.status,
+        created_at=version.created_at,
     )
 
 
 class MemorySkillStore:
     def __init__(self) -> None:
         self._skills: dict[str, SkillRecord] = {}
+        self._versions: dict[str, SkillRecord] = {}
         self._bindings: dict[tuple[str, str], list[AgentSkillBinding]] = {}
 
     async def get(self, skill_id: str) -> SkillRecord | None:
         return self._skills.get(skill_id)
+
+    async def get_versions(self, version_ids: list[str]) -> list[SkillRecord]:
+        return [replace(self._versions[version], status=self._skills[self._versions[version].skill_id].status)
+                for version in version_ids if version in self._versions]
+
+    async def list_versions(self, skill_id: str, *, limit: int = 50, before_revision: int | None = None) -> list[SkillRecord]:
+        return sorted((item for item in self._versions.values() if item.skill_id == skill_id
+            and (before_revision is None or item.revision < before_revision)),
+            key=lambda item: item.revision, reverse=True)[:limit]
 
     async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]:
         return [
@@ -301,7 +343,10 @@ class MemorySkillStore:
                 status="active",
             )
             self._skills.pop(current.skill_id, None)
+        stored = replace(stored, created_at=stored.created_at or _now(),
+            revision=current.revision + 1 if current and current.version_id != stored.version_id else stored.revision)
         self._skills[stored.skill_id] = stored
+        self._versions[stored.version_id] = stored
         return stored
 
     async def disable(self, skill_id: str) -> None:
@@ -337,6 +382,7 @@ class MemorySkillStore:
                 skill_name=normalize_skill_name(item.skill_name),
                 source_skill_id=item.source_skill_id,
                 position=item.position,
+                source_version_id=item.source_version_id,
             )
             for item in bindings
         ]

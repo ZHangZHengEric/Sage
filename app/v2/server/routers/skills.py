@@ -17,9 +17,12 @@ from app.v2.server.routers.schemas.skills import (
     SkillUpdateBody,
     SkillUploadResult,
     WorkspaceSkillBody,
+    SkillRollbackBody,
+    SkillDiffPublic,
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from app.v2.server.skills.imports import SkillImportService
+from app.v2.server.skills.versions import SkillVersionService
 from app.v2.server.skills.files import MAX_SKILL_ZIP_BYTES
 
 router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
@@ -101,6 +104,36 @@ async def get_skill(skill_id: str, user: ReadUser, service: SkillDep):
     return success(payload)
 
 
+@router.get("/api/skills/{skill_id}/versions", response_model=ApiResponse[list[SkillPublic]])
+async def list_skill_versions(skill_id: str, user: ReadUser, service: SkillDep,
+                              limit: int = Query(50, ge=1, le=100),
+                              before_revision: int | None = Query(None, ge=1)):
+    records = await SkillVersionService(service).list(skill_id, user_id=user.user_id,
+        role=user.role, limit=limit, before_revision=before_revision)
+    return success([item.public_dict() for item in records])
+
+
+@router.get("/api/skills/{skill_id}/versions/{version_id}", response_model=ApiResponse[SkillPublic])
+async def get_skill_version(skill_id: str, version_id: str, user: ReadUser, service: SkillDep):
+    return success(await SkillVersionService(service).content(skill_id, version_id,
+        user_id=user.user_id, role=user.role))
+
+
+@router.get("/api/skills/{skill_id}/diff", response_model=ApiResponse[SkillDiffPublic])
+async def diff_skill_versions(skill_id: str, user: ReadUser, service: SkillDep,
+                              from_version: str = Query(min_length=1, max_length=64),
+                              to_version: str = Query(min_length=1, max_length=64)):
+    return success(await SkillVersionService(service).diff(skill_id, from_version, to_version,
+        user_id=user.user_id, role=user.role))
+
+
+@router.post("/api/skills/{skill_id}/rollback", response_model=ApiResponse[SkillPublic])
+async def rollback_skill(skill_id: str, body: SkillRollbackBody, user: CurrentUser, service: SkillDep):
+    record = await SkillVersionService(service).rollback(skill_id, body.version_id,
+        expected_version_id=body.expected_version_id, user_id=user.user_id, role=user.role)
+    return success(record.public_dict())
+
+
 @router.get("/api/skills/{skill_id}/files", response_model=ApiResponse[list[SkillFilePublic]])
 async def list_skill_files(skill_id: str, user: ReadUser, service: SkillDep):
     return success(await service.list_files(
@@ -125,7 +158,8 @@ async def update_skill(
     skill_id: str, body: SkillUpdateBody, user: CurrentUser, service: SkillDep
 ):
     record = await service.update_content(
-        skill_id, body.content, user_id=user.user_id, role=user.role
+        skill_id, body.content, user_id=user.user_id, role=user.role,
+        expected_version_id=body.expected_version_id,
     )
     return success(record.public_dict())
 

@@ -185,6 +185,11 @@ export const api = {
     return request('/api/skills/upload', { method: 'POST', body })
   },
   getSkill: (id, owner) => read(`/api/skills/${id}`, owner),
+  skillVersions: (id, owner, before) => read(`/api/skills/${encodeURIComponent(id)}/versions?limit=50${before ? `&before_revision=${before}` : ''}`, owner),
+  skillVersion: (id, version, owner) => read(`/api/skills/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`, owner),
+  skillDiff: (id, from, to, owner) => read(`/api/skills/${encodeURIComponent(id)}/diff?${new URLSearchParams({ from_version: from, to_version: to })}`, owner),
+  rollbackSkill: (id, body) => request(`/api/skills/${encodeURIComponent(id)}/rollback`, { method: 'POST', body: JSON.stringify(body) }),
+  bindSkillVersion: (agent, id, version) => request(`/api/agents/${encodeURIComponent(agent)}/skills/${encodeURIComponent(id)}/version`, { method: 'PUT', body: JSON.stringify({ version_id: version || null }) }),
   skillFiles: (id, owner) => read(`/api/skills/${encodeURIComponent(id)}/files`, owner),
   skillFile: (id, path, owner) => request(
     `/api/skills/${encodeURIComponent(id)}/files/${path.split('/').map(encodeURIComponent).join('/')}`,
