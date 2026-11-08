@@ -645,3 +645,35 @@ async def test_pool_http_partial_initialize_bounds_session_termination(monkeypat
         await asyncio.wait_for(terminating.wait(), 1)
     assert stopped.is_set()
     assert "cleanup_timeout" in pool.cleanup_errors
+
+
+@pytest.mark.asyncio
+async def test_pool_records_cleanup_deadline_when_transport_rethrows_cancellation():
+    from sagents.v2.tool import McpSessionPool
+
+    stopped = asyncio.Event()
+
+    @asynccontextmanager
+    async def factory(config):
+        try:
+            await asyncio.Event().wait()
+            yield object()
+        except asyncio.CancelledError as startup_error:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                pass
+            finally:
+                stopped.set()
+            # Transport teardown can preserve the original startup cancellation
+            # after its own cancellation handler has finished.
+            raise startup_error
+
+    config = McpServerConfig(name="cancelled-cleanup", protocol="streamable_http",
+                             url="http://mcp.test/mcp", timeout_seconds=0.02)
+    async with McpSessionPool(session_factory=factory, cleanup_timeout_seconds=0.02) as pool:
+        with pytest.raises(TimeoutError):
+            async with pool(config):
+                pytest.fail("uninitialized session exposed")
+    assert stopped.is_set()
+    assert pool.cleanup_errors == ("cleanup_timeout",)

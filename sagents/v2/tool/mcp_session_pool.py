@@ -228,10 +228,6 @@ class McpSessionPool:
                         entry.retired = True
                         if not self._preserve_stdio_cleanup(entry):
                             scope.deadline = anyio.current_time() + self._cleanup_timeout
-            if scope.cancel_called:
-                self._errors.append("cleanup_timeout")
-                if not entered:
-                    entry.failure = "startup_timeout"
         except asyncio.CancelledError:
             entry.failure = entry.failure or "session_closed"
         except Exception:
@@ -240,6 +236,13 @@ class McpSessionPool:
             else:
                 entry.failure = "initialization_failed"
         finally:
+            # Teardown may re-raise the original startup cancellation instead
+            # of the cleanup scope's exception. Record the expired deadline
+            # regardless of how the transport exits the scope.
+            if scope.cancel_called:
+                self._errors.append("cleanup_timeout")
+                if not entered:
+                    entry.failure = "startup_timeout"
             startup_timer.cancel()
             entry.retired = True
             entry.ready.set()
