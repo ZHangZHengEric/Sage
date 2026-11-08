@@ -77,3 +77,52 @@ MCP 调用默认时限为 7200 秒（2 小时），可通过每个服务的 `cal
 [可运行的 SAgents 示例](../../examples/v2/PARALLEL_SEARCH.md)通过 Streamable HTTP
 使用 Parallel Search MCP，在不提供 Parallel API Key 的情况下，经 v2 桥接发现并调用
 网页搜索和页面抓取工具。示例由宿主显式调用；接入 Agent 时，请按上面的授权步骤配置。
+
+### 嵌入式宿主可选的会话复用
+
+宿主可以显式将 `McpSessionPool` 注入桥接层的 `session_factory`。
+默认桥接仍为每次发现或调用建立会话，Desktop 和 Server 配置不会自动启用连接池。
+宿主负责连接池的生命周期，必须在 MCP 工作期间保持连接池打开。
+下例中的 `servers` 是 `McpServerConfig` 元组，`run_agent` 将传入的插件用作工具目录和执行器：
+
+```python
+from sagents.v2.tool import McpSessionPool, McpToolPlugin
+
+async def run_with_mcp(servers, run_agent):
+    async with McpSessionPool(
+        idle_timeout_seconds=300,
+        shutdown_timeout_seconds=10,
+        cleanup_timeout_seconds=5,
+    ) as pool:
+        plugin = McpToolPlugin(servers, session_factory=pool)
+        await run_agent(plugin)
+    # Inspect pool.cleanup_errors in the host shutdown diagnostics.
+```
+
+每个池属于一个事件循环和一个由宿主确定的安全作用域。不同租户或凭据作用域应使用独立的池。
+相同有效配置共享一个已初始化会话，支持并发借用；释放或取消一个借用者不会关闭其他借用者的会话。
+凭据、URL、命令、参数、环境变量和超时设置都参与会话标识；配置或凭据变化会创建独立条目。
+如果继承的进程环境发生变化，宿主必须更换连接池。
+
+`timeout_seconds` 独立限制每次获取和初始化，工具执行仍受 `call_timeout_seconds` 限制。
+池的各项超时和获取超时必须为有限正数。空闲回收从最后一个借用归还后开始计时，
+未被使用的初始化完成后也会开始计时。操作异常会使连接停止接受新借用，
+后续获取可在已有借用归还后建立替代连接。池不会重试工具调用、执行退避或保活，
+也不会根据通知刷新工具列表。
+
+`aclose()` 拒绝新获取并唤醒等待者，最多等待 `shutdown_timeout_seconds` 让活跃借用归还，
+然后关闭剩余会话。SDK 上下文始终由进入它的任务退出。各会话并行清理，
+宿主等待受独立的 `cleanup_timeout_seconds` 限制。HTTP 或自定义初始化中断只发送一次取消，
+让异步清理能够继续。默认 SDK 的 stdio 初始化使用其自身的 `timeout_seconds` 时限；
+即使宿主等待超时，也会保留其初始化和进程树清理任务；
+打断其优雅退出过程可能遗留子进程。宽限期到期可能中断活跃调用，
+但不能据此认定服务端已经停止或可以安全重放。
+取消等待 `aclose()` 的调用者不会放弃共享清理任务，可再次等待 `aclose()` 观察清理完成。
+已关闭的池不能重新进入。
+
+有容量上限的 `cleanup_errors` 元组只包含脱敏的生命周期错误码，
+包括 `session_cleanup_failed`、`cleanup_timeout` 和 `cleanup_incomplete`，宿主应将其纳入关闭诊断。
+SDK 的 stdio 清理或抑制取消的自定义会话工厂可能超过宿主等待时限；
+`cleanup_incomplete` 会报告此情况，池继续跟踪任务且不会复用该条目。
+应保持事件循环运行，等待保留的清理完成；立即关闭事件循环可能中断清理。
+已经收到的成功响应不会因后续传输清理失败而失效。会话复用不提供持久操作账本或恰好一次执行保证。

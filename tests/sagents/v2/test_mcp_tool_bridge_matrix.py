@@ -1143,3 +1143,200 @@ async def test_mcp_failure_stage_preserves_response_and_leaf_diagnostics(
         with pytest.raises(SageV2Error) as repeated:
             await bridge.execute(call, CONTEXT)
         assert repeated.value.info == info
+
+
+@pytest.mark.asyncio
+async def test_pool_reuses_discovery_session_for_distinct_calls_and_isolates_config():
+    from sagents.v2.tool import McpSessionPool
+
+    opened = []
+    closed = []
+
+    @asynccontextmanager
+    async def factory(config):
+        session = FakeSession()
+        owner = asyncio.current_task()
+        opened.append(session)
+        try:
+            yield session
+        finally:
+            assert asyncio.current_task() is owner
+            closed.append(session)
+
+    config = McpServerConfig(name="drive", protocol="stdio", command="fake")
+    async with McpSessionPool(session_factory=factory) as pool:
+        bridge = McpToolPlugin((config,), session_factory=pool)
+        tool = (await bridge.list_tools(run_id="run_1"))[0]
+        for index in range(2):
+            result = await bridge.execute(ToolCall(
+                tool_call_id=f"call_{index}", tool_name=tool.name,
+                arguments={"query": "report"}, operation_id=f"op_{index}",
+                idempotency_key=f"key_{index}", owner_run_id="run_1",
+            ), CONTEXT)
+            assert result.content[0].text == "found"
+        assert len(opened) == 1
+        assert len(opened[0].calls) == 2
+        assert closed == []
+        async with pool(config.model_copy(update={"env": {"TOKEN": "rotated"}})):
+            assert len(opened) == 2
+        async with McpSessionPool(session_factory=factory) as other:
+            async with other(config):
+                assert len(opened) == 3
+    assert len(closed) == 3
+
+
+@pytest.mark.asyncio
+async def test_pool_failed_call_is_never_replayed_and_next_lease_reconnects():
+    from sagents.v2.tool import McpSessionPool
+
+    dispatches = []
+    opens = []
+
+    class FailedSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            dispatches.append(name)
+            raise ConnectionError("response lost")
+
+    @asynccontextmanager
+    async def factory(config):
+        opens.append(config.name)
+        yield FailedSession()
+
+    config = McpServerConfig(name="drive", protocol="stdio", command="fake")
+    async with McpSessionPool(session_factory=factory) as pool:
+        bridge = McpToolPlugin((config,), session_factory=pool)
+        tool = (await bridge.list_tools(run_id="run_1"))[0]
+        call = ToolCall(tool_call_id="call", tool_name=tool.name,
+                        arguments={"query": "report"}, operation_id="op",
+                        idempotency_key="key", owner_run_id="run_1")
+        for _ in range(2):
+            with pytest.raises(SageV2Error) as error:
+                await bridge.execute(call, CONTEXT)
+            assert error.value.info.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+        assert len(dispatches) == 1
+        async with pool(config):
+            assert len(opens) == 2
+
+
+@pytest.mark.asyncio
+async def test_pool_success_survives_cleanup_failure_without_exposing_secrets():
+    from sagents.v2.tool import McpSessionPool
+
+    @asynccontextmanager
+    async def factory(config):
+        yield FakeSession()
+        raise ConnectionError("secret-token-in-transport-error")
+
+    config = McpServerConfig(name="drive", protocol="stdio", command="fake")
+    async with McpSessionPool(session_factory=factory) as pool:
+        bridge = McpToolPlugin((config,), session_factory=pool)
+        tool = (await bridge.list_tools(run_id="run_1"))[0]
+        call = ToolCall(tool_call_id="call", tool_name=tool.name,
+                        arguments={"query": "report"}, operation_id="op",
+                        idempotency_key="key", owner_run_id="run_1")
+        result = await bridge.execute(call, CONTEXT)
+    assert result.content[0].text == "found"
+    assert pool.cleanup_errors == ("session_cleanup_failed",)
+    assert await bridge.execute(call, CONTEXT) == result
+
+
+@pytest.mark.asyncio
+async def test_pool_credential_rotation_and_mutated_config_do_not_reuse_session():
+    from pydantic import SecretStr
+    from sagents.v2.tool import McpSessionPool
+
+    observed = []
+    @asynccontextmanager
+    async def factory(config):
+        observed.append(config)
+        yield FakeSession()
+
+    config = McpServerConfig(name="drive", protocol="streamable_http", url="https://mcp.test",
+                             api_key=SecretStr("first"))
+    async with McpSessionPool(session_factory=factory) as pool:
+        async with pool(config):
+            pass
+        config = config.model_copy(update={"api_key": SecretStr("second")})
+        async with pool(config):
+            pass
+        config.env["SCOPE"] = "changed"
+        async with pool(config):
+            pass
+    assert len(observed) == 3
+    assert observed[0].api_key.get_secret_value() == "first"
+    assert observed[1].api_key.get_secret_value() == "second"
+    assert observed[1].env == {}
+    assert observed[2].env == {"SCOPE": "changed"}
+
+
+@pytest.mark.asyncio
+async def test_pool_concurrent_borrower_cancellation_preserves_other_call():
+    from sagents.v2.tool import McpSessionPool
+
+    started = {name: asyncio.Event() for name in ("cancel", "finish")}
+    release, closed = asyncio.Event(), asyncio.Event()
+    calls = []
+    class Session:
+        async def call_tool(self, name, args):
+            calls.append(name)
+            started[name].set()
+            await release.wait()
+            assert not closed.is_set()
+            return name
+    @asynccontextmanager
+    async def factory(config):
+        try:
+            yield Session()
+        finally:
+            closed.set()
+    config = McpServerConfig(name="shared", protocol="stdio", command="fake")
+    async with McpSessionPool(session_factory=factory) as pool:
+        async def call(name):
+            async with pool(config) as session:
+                return await session.call_tool(name, {})
+        cancelled, completed = (asyncio.create_task(call(name)) for name in started)
+        await asyncio.gather(*(event.wait() for event in started.values()))
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        assert not closed.is_set()
+        release.set()
+        assert await completed == "finish"
+    assert calls == ["cancel", "finish"]
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_pool_failed_acquisition_has_zero_dispatches_and_can_be_retried():
+    from sagents.v2.tool import McpSessionPool
+
+    opens = []
+    session = FakeSession()
+    @asynccontextmanager
+    async def factory(config):
+        opens.append(config.name)
+        if len(opens) == 1:
+            raise ConnectionError("secret-credential")
+        yield session
+    config = McpServerConfig(name="drive", protocol="stdio", command="fake")
+    # Discover via an independent factory so acquisition is the failure boundary.
+    @asynccontextmanager
+    async def discovery(config):
+        yield session
+    bridge = McpToolPlugin((config,), session_factory=discovery)
+    tool = (await bridge.list_tools(run_id="run_1"))[0]
+    async with McpSessionPool(session_factory=factory) as pool:
+        bridge.session_factory = pool
+        call = ToolCall(tool_call_id="call", tool_name=tool.name,
+                        arguments={"query": "report"}, operation_id="op",
+                        idempotency_key="key", owner_run_id="run_1")
+        with pytest.raises(SageV2Error) as failure:
+            await bridge.execute(call, CONTEXT)
+        assert failure.value.info.code == "mcp.connection_failed"
+        assert failure.value.info.metadata["side_effect_state"] == "not_applied"
+        assert "secret-credential" not in str(failure.value.info)
+        assert session.calls == []
+        retry = call.model_copy(update={"tool_call_id": "retry", "operation_id": "retry", "idempotency_key": "retry"})
+        assert (await bridge.execute(retry, CONTEXT)).content[0].text == "found"
+        assert len(session.calls) == 1
+        assert len(opens) == 2
