@@ -350,7 +350,7 @@ async def test_pool_cleanup_timeout_does_not_cross_anyio_scopes():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["reuse", "initialize_cancel", "delete_timeout"])
+@pytest.mark.parametrize("mode", ["reuse", "initialize_cancel", "delete_timeout", "concurrent_cancel"])
 async def test_pool_real_http_sdk_lifecycle(monkeypatch, mode):
     import json
     import httpx
@@ -360,6 +360,9 @@ async def test_pool_real_http_sdk_lifecycle(monkeypatch, mode):
     original = mcp.client.streamable_http.streamablehttp_client
     methods = []
     started, stopped = asyncio.Event(), asyncio.Event()
+    dispatched = [asyncio.Event(), asyncio.Event()]
+    release_calls = asyncio.Event()
+    calls, session_ids = [], []
 
     async def handle(request):
         if request.method == "GET":
@@ -371,6 +374,7 @@ async def test_pool_real_http_sdk_lifecycle(monkeypatch, mode):
                     await asyncio.Event().wait()
                 finally:
                     stopped.set()
+            stopped.set()
             return httpx.Response(200)
         message = json.loads(request.content)
         methods.append(message["method"])
@@ -389,6 +393,12 @@ async def test_pool_real_http_sdk_lifecycle(monkeypatch, mode):
         elif message["method"] == "tools/list":
             result = {"tools": []}
         else:
+            if mode == "concurrent_cancel":
+                index = message["params"]["arguments"]["index"]
+                calls.append(index)
+                session_ids.append(request.headers.get("mcp-session-id"))
+                dispatched[index].set()
+                await release_calls.wait()
             result = {"content": [{"type": "text", "text": "done"}]}
         return httpx.Response(200, headers={"mcp-session-id": "test-session"},
                               json={"jsonrpc": "2.0", "id": message["id"], "result": result})
@@ -412,6 +422,37 @@ async def test_pool_real_http_sdk_lifecycle(monkeypatch, mode):
         with pytest.raises(RuntimeError, match="closing"):
             await task
         assert stopped.is_set()
+    elif mode == "concurrent_cancel":
+        async def call(index):
+            async with pool(config) as session:
+                return await session.call_tool("echo", {"index": index})
+
+        borrowers = [asyncio.create_task(call(index)) for index in range(2)]
+        try:
+            await asyncio.wait_for(asyncio.gather(*(event.wait() for event in dispatched)), 1)
+            assert methods.count("initialize") == 1
+            assert sorted(calls) == [0, 1]
+            assert session_ids == ["test-session", "test-session"]
+            borrowers[0].cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(borrowers[0], 1)
+            assert not borrowers[1].done()
+            assert "DELETE" not in methods
+            release_calls.set()
+            result = await asyncio.wait_for(borrowers[1], 1)
+            assert result.content[0].text == "done"
+        finally:
+            release_calls.set()
+            for task in borrowers:
+                task.cancel()
+            await asyncio.gather(*borrowers, return_exceptions=True)
+            await asyncio.wait_for(pool.wait_closed(), 1)
+        assert methods.count("initialize") == 1
+        assert methods.count("tools/call") == 2
+        assert sorted(calls) == [0, 1]
+        assert methods.count("DELETE") == 1
+        assert stopped.is_set()
+        assert pool.cleanup_errors == ()
     else:
         await borrow()
         for _ in range(2):
@@ -596,9 +637,8 @@ else:
             child = psutil.Process(int(pid_file.read_text()))
         # Host returns promptly, while SDK process-tree teardown is retained.
         assert "cleanup_incomplete" in pool.cleanup_errors
-        async with asyncio.timeout(6):
-            while child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
-                await asyncio.sleep(0.02)
+        await asyncio.wait_for(pool.wait_closed(), 6)
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
     finally:
         if child is not None and child.is_running():
             try:
@@ -677,3 +717,53 @@ async def test_pool_records_cleanup_deadline_when_transport_rethrows_cancellatio
                 pytest.fail("uninitialized session exposed")
     assert stopped.is_set()
     assert pool.cleanup_errors == ("cleanup_timeout",)
+
+
+@pytest.mark.asyncio
+async def test_pool_wait_closed_observes_retained_cleanup_and_survives_waiter_cancellation():
+    import anyio
+    from sagents.v2.tool import McpSessionPool
+
+    cleaning, release, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    @asynccontextmanager
+    async def factory(config):
+        try:
+            yield object()
+        finally:
+            with anyio.CancelScope(shield=True):
+                cleaning.set()
+                try:
+                    await release.wait()
+                finally:
+                    stopped.set()
+
+    pool = await McpSessionPool(session_factory=factory, shutdown_timeout_seconds=0.01,
+                                cleanup_timeout_seconds=0.01).__aenter__()
+    waiter = None
+    try:
+        async with pool(McpServerConfig(name="retained", protocol="stdio", command="fake")):
+            pass
+        await asyncio.wait_for(pool.aclose(), 1)
+        assert cleaning.is_set()
+        assert not stopped.is_set()
+        assert "cleanup_incomplete" in pool.cleanup_errors
+        waiter = asyncio.create_task(pool.wait_closed())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(waiter), 0.02)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not stopped.is_set()
+        waiter = asyncio.create_task(pool.wait_closed())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(waiter), 0.02)
+        release.set()
+        await asyncio.wait_for(waiter, 1)
+        assert stopped.is_set()
+        await asyncio.wait_for(pool.wait_closed(), 1)
+    finally:
+        release.set()
+        if waiter is not None:
+            await asyncio.gather(waiter, return_exceptions=True)
+        await pool.aclose()

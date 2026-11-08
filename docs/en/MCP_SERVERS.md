@@ -99,14 +99,18 @@ as its tool catalog/executor:
 from sagents.v2.tool import McpSessionPool, McpToolPlugin
 
 async def run_with_mcp(servers, run_agent):
-    async with McpSessionPool(
+    pool = McpSessionPool(
         idle_timeout_seconds=300,
         shutdown_timeout_seconds=10,
         cleanup_timeout_seconds=5,
-    ) as pool:
-        plugin = McpToolPlugin(servers, session_factory=pool)
-        await run_agent(plugin)
-    # Inspect pool.cleanup_errors in the host shutdown diagnostics.
+    )
+    try:
+        async with pool:
+            plugin = McpToolPlugin(servers, session_factory=pool)
+            await run_agent(plugin)
+    finally:
+        await pool.wait_closed()  # No deadline: keep the loop alive for teardown.
+        # Inspect pool.cleanup_errors in the host shutdown diagnostics.
 ```
 
 Each pool belongs to one event loop and one host-selected security scope. Create
@@ -133,14 +137,21 @@ to run. Default SDK stdio initialization uses its own `timeout_seconds` deadline
 its initialization/teardown owner is retained even if the host wait expires;
 interrupting its graceful shutdown could orphan descendants. Grace expiry can interrupt an
 active call; it does not prove the server stopped or that replay is safe.
-Cancelling the caller awaiting `aclose()` leaves shared cleanup running; await
-`aclose()` again to observe completion. A closed pool cannot be re-entered.
+Cancelling the caller awaiting `aclose()` leaves shared cleanup running; another
+`aclose()` waits for the same bounded shutdown phase. A closed pool cannot be re-entered.
+
+`wait_closed()` starts shutdown if needed and waits until all retained owner tasks
+finish. It has no deadline and can be called repeatedly or by concurrent waiters.
+Cancelling or timing out a waiter does not cancel SDK teardown; a later
+`wait_closed()` can still observe completion. An uncooperative custom factory can
+keep this wait pending indefinitely.
 
 The bounded `cleanup_errors` tuple contains sanitized lifecycle codes, including
 `session_cleanup_failed`, `cleanup_timeout` and `cleanup_incomplete`; include these
 in host shutdown diagnostics. SDK stdio teardown or a custom factory that suppresses cancellation can
 outlive the host wait; `cleanup_incomplete` reports this, its task remains tracked,
-and the entry is not reused. Keep the event loop alive for retained cleanup to
-finish; closing the loop immediately can interrupt that cleanup.
+and the entry is not reused. Keep the event loop alive until `wait_closed()`
+finishes; closing the loop immediately can interrupt retained cleanup. These codes
+are historical diagnostics, not a completion flag, and remain after cleanup finishes.
 Successful responses remain authoritative even if later transport cleanup fails.
 Pooling does not add a durable operation ledger or exactly-once execution.

@@ -255,13 +255,26 @@ class McpSessionPool:
         """Drain leases, then close concurrently within a separate cleanup bound.
 
         Cancellation of this caller leaves the shared close task running.
-        Hosts can await aclose again to observe completion.
+        Await aclose again for the bounded shutdown, or wait_closed for all
+        retained owner tasks to finish.
         """
         self._check_loop()
         if self._close_task is None:
             self._closing = True
             self._close_task = asyncio.create_task(self._close())
         await asyncio.shield(self._close_task)
+
+    async def wait_closed(self) -> None:
+        """Start shutdown and wait for every retained owner to finish.
+
+        Unlike aclose, this wait has no deadline. Cancelling the waiter leaves
+        cleanup running; another waiter can still observe its completion.
+        """
+        await self.aclose()
+        # Closing rejects new acquisitions, so no owners can be added after
+        # the bounded close completes. Shield the join, never cancel teardown.
+        if self._owners:
+            await asyncio.shield(asyncio.gather(*tuple(self._owners)))
 
     async def _close(self) -> None:
         entries = tuple(self._entries.values())

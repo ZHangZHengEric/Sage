@@ -89,14 +89,18 @@ MCP 调用默认时限为 7200 秒（2 小时），可通过每个服务的 `cal
 from sagents.v2.tool import McpSessionPool, McpToolPlugin
 
 async def run_with_mcp(servers, run_agent):
-    async with McpSessionPool(
+    pool = McpSessionPool(
         idle_timeout_seconds=300,
         shutdown_timeout_seconds=10,
         cleanup_timeout_seconds=5,
-    ) as pool:
-        plugin = McpToolPlugin(servers, session_factory=pool)
-        await run_agent(plugin)
-    # Inspect pool.cleanup_errors in the host shutdown diagnostics.
+    )
+    try:
+        async with pool:
+            plugin = McpToolPlugin(servers, session_factory=pool)
+            await run_agent(plugin)
+    finally:
+        await pool.wait_closed()  # No deadline: keep the loop alive for teardown.
+        # Inspect pool.cleanup_errors in the host shutdown diagnostics.
 ```
 
 每个池属于一个事件循环和一个由宿主确定的安全作用域。不同租户或凭据作用域应使用独立的池。
@@ -117,12 +121,17 @@ async def run_with_mcp(servers, run_agent):
 即使宿主等待超时，也会保留其初始化和进程树清理任务；
 打断其优雅退出过程可能遗留子进程。宽限期到期可能中断活跃调用，
 但不能据此认定服务端已经停止或可以安全重放。
-取消等待 `aclose()` 的调用者不会放弃共享清理任务，可再次等待 `aclose()` 观察清理完成。
+取消等待 `aclose()` 的调用者不会放弃共享清理任务，再次调用 `aclose()` 会等待同一个有时限的关闭阶段。
 已关闭的池不能重新进入。
+
+`wait_closed()` 会在需要时发起关闭，并等待所有保留的生命周期任务结束。
+它没有时限，支持重复调用和多个调用者同时等待。取消等待者或让等待超时不会取消 SDK 清理；
+之后仍可通过 `wait_closed()` 观察完成。如果自定义工厂始终不退出，该等待也可能一直挂起。
 
 有容量上限的 `cleanup_errors` 元组只包含脱敏的生命周期错误码，
 包括 `session_cleanup_failed`、`cleanup_timeout` 和 `cleanup_incomplete`，宿主应将其纳入关闭诊断。
 SDK 的 stdio 清理或抑制取消的自定义会话工厂可能超过宿主等待时限；
 `cleanup_incomplete` 会报告此情况，池继续跟踪任务且不会复用该条目。
-应保持事件循环运行，等待保留的清理完成；立即关闭事件循环可能中断清理。
+应保持事件循环运行直到 `wait_closed()` 完成；立即关闭事件循环可能中断保留的清理。
+这些错误码是历史诊断记录，不是完成标志，清理结束后仍会保留。
 已经收到的成功响应不会因后续传输清理失败而失效。会话复用不提供持久操作账本或恰好一次执行保证。
