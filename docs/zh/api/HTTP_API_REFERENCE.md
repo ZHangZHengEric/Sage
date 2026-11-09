@@ -48,6 +48,8 @@ parent: API
 
 外部接口使用绑定目标的 `Authorization: Bearer <API Key>`，并要求 `SAGE-TENANT-ID` 请求头。读取要求 `a2a:read`，写入与执行要求 `a2a:invoke`，交互回复要求 `a2a:approve`。服务端核对密钥绑定、目标归属与权限；租户、会话或运行 ID 本身不是凭据。
 
+外部运行复用旧哈希会话时，AG-UI 生命周期事件和指定运行的结果会在 `threadId` 中返回请求使用的 ID。`session_id` 字段保留持久化的会话 ID。
+
 `PUT /api/agents/{agent_id}/workspace/files` 导入 `{directory, files}`，文件内容使用 base64；只创建缺失文件，相同内容可重复导入，冲突返回 409。上限为 256 个文件、单文件 4 MiB、总计 16 MiB。删除通过同一路径的 DELETE 操作，受工作区空闲状态与路径检查约束。
 
 `PUT /api/agents/{agent_id}/workspace/file?path=projects/site/uploads/clip.mp4` 导入单个非空原始二进制请求体，最大 64 MiB。相同内容可幂等重试；已有内容不同时返回 409，路径无效或请求体为空时返回 422，超限返回 413。路径相对于租户和 Agent 的工作区，不跟随符号链接。

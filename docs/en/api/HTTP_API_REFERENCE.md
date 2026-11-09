@@ -48,6 +48,8 @@ The agent list uses `GET /api/agents/summary` for the current user. Admins use `
 
 External routes require a target-bound `Authorization: Bearer <API Key>` and a `SAGE-TENANT-ID` header. Reads require `a2a:read`, writes/execution require `a2a:invoke`, and interaction replies require `a2a:approve`. The server verifies the key binding, ownership, and grants; tenant, Session, and Run IDs are not credentials.
 
+For external runs backed by a legacy hashed Session, AG-UI lifecycle frames and the exact-run result echo the requested ID in `threadId`. The `session_id` field carries the persisted Session ID.
+
 `PUT /api/agents/{agent_id}/workspace/files` imports `{directory, files}` with base64 file contents. It creates missing files only, accepts identical content again, and returns 409 on conflicts. Limits are 256 files, 4 MiB per file, and 16 MiB total. DELETE on the same route checks paths and workspace idleness.
 
 `PUT /api/agents/{agent_id}/workspace/file?path=projects/site/uploads/clip.mp4` imports one nonempty raw binary request body, up to 64 MiB. Identical retries succeed; different existing content returns 409, invalid paths or empty bodies return 422, and oversized bodies return 413. Paths are relative to the tenant and Agent workspace; symbolic links are not followed.

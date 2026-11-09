@@ -173,7 +173,22 @@ def test_legacy_hash_lookup_reuses_history_workspace_and_todo(tmp_path, monkeypa
         assert send(client, session="old-id").status_code == 200
         store = host.application.entrypoint().runtime.session_store
         assert len(cast('BlockingPortal', client.portal).call(store.list_session_runs, legacy)) == 1
-        assert send(client, session="old-id", request="edit-2").status_code == 200
+        base = f"/api/agents/{agent}/runs"
+        edited = client.post(base, headers=headers(),
+                             json={**body(threadId="old-id"), "runId": "edit-2"})
+        assert edited.status_code == 200, edited.text
+        lifecycle = [frame for frame in _parse_sse(edited.text)
+                     if frame["type"] in {"RUN_STARTED", "RUN_FINISHED"}]
+        assert [frame["type"] for frame in lifecycle] == ["RUN_STARTED", "RUN_FINISHED"]
+        assert all(frame["threadId"] == "old-id" and frame["session_id"] == legacy
+                   and frame["runId"] == "edit-2" for frame in lifecycle)
+        detail = client.get(base + "/old-id/edit-2", headers=headers())
+        assert detail.status_code == 200, detail.text
+        data = detail.json()["data"]
+        assert data["threadId"] == "old-id"
+        assert data["session_id"] == legacy
+        assert data["runId"] == "edit-2"
+        assert data["state"] == "completed"
         assert result(client, session="old-id").json()["data"]["session_id"] == legacy
         assert (todos / f"{legacy}.json").is_file()
         assert cast('BlockingPortal', client.portal).call(host.threads.find, "old-id") is None

@@ -445,6 +445,7 @@ class ConversationService:
                     events,
                     thread_id=thread_id,
                     run_id=stream_run_id or run_id,
+                    client_thread_id=stream_thread_id,
                     last_event_id=last_event_id,
                     logger=StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=correlation_id),
                     started_at=started_at,

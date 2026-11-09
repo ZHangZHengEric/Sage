@@ -37,11 +37,12 @@ def frame_to_agui_event(
     *,
     thread_id: str,
     run_id: str,
+    client_thread_id: str | None = None,
 ) -> dict[str, Any]:
     payload = dict(frame.payload)
     if frame.name in _RUN_ID_EVENTS:
         payload["session_id"] = thread_id
-        payload["threadId"] = thread_id
+        payload["threadId"] = client_thread_id or thread_id
         payload["runId"] = run_id
     return {"type": frame.name, **payload}
 
@@ -125,6 +126,7 @@ async def canonical_agui_sse(
     thread_id: str,
     run_id: str,
     last_event_id: str | None,
+    client_thread_id: str | None = None,
     restarted_after: int = 0,
     heartbeat_seconds: float = 20.0,
     logger=None,
@@ -161,6 +163,7 @@ async def canonical_agui_sse(
                 frame,
                 thread_id=thread_id,
                 run_id=run_id,
+                client_thread_id=client_thread_id,
             )
             # Initial inbound user text belongs to the client. Steering input
             # becomes a new canonical Message only when the driver applies it.

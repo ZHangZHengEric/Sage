@@ -43,7 +43,7 @@ async def run_details(service, *, tenant_id: str, agent_id: str,
         service, tenant_id=tenant_id, agent_id=agent_id,
         thread_id=thread_id, run_id=run_id,
     )
-    details = {**payload, "items": [], "interaction": None}
+    details = {**payload, "threadId": thread_id, "items": [], "interaction": None}
     run = await access.get_run(native_run_id, context)
     if run.state in TERMINAL_RUN_STATES:
         result = await access.get_run_result(run.run_id, context)
