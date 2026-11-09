@@ -60,6 +60,8 @@ External routes require a target-bound `Authorization: Bearer <API Key>` and a `
 
 File downloads snapshot the Run-bound working directory, limited to 32 MiB and 512 entries. A directory superseded by a newer Run in the same Session returns 409; changes during packaging may return 503. Callers validate artifacts and Run identity. Sage does not interpret downstream business manifests or build customer projects.
 
+`GET /api/agents/{agent_id}/sessions/{session_id}/missing-history-images` returns the unique missing media IDs for legacy WishSeen user images in an authorized Session. It scans up to the initial Session sequence head. Only numeric tenants and `wishseen_w_<32 lowercase hex digits>` sessions are recognized. For matching `workspace_path=projects/w_<id>` Runs, existing feedback files under `user-uploads/feedback` replace matching signed image URLs in the final model request; missing files become a text placeholder. It never downloads signed URLs, follows symlinks, or rewrites canonical history or summary checkpoints.
+
 ## Guidance and Skills sync
 
 The ZIP-upload mode of `PUT /api/agents/{agent_id}/guidance` uses multipart `prompt` and `files`, accepts 1–32 complete Skill ZIPs, and validates/reports each item. This upload branch does not require a user identity and must be exposed only to trusted callers; do not confuse it with Bearer Key-protected external Run routes.
@@ -74,6 +76,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 
 | Method | Path | Router |
 | --- | --- | --- |
+| `GET` | `/.well-known/agent-card.json` | `a2a` |
 | `GET` | `/.well-known/agent-card.json` | `a2a` |
 | `POST` | `/a2a/v1` | `a2a` |
 | `GET` | `/a2a/v1/card` | `a2a` |
@@ -125,6 +128,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |

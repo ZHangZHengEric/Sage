@@ -485,6 +485,68 @@ async def delete_agent_session(session_id: str, caller: CallerDep,
     return success({"session_id": internal_id})
 
 
+def _wishseen_feedback_root(host, caller, session_id):
+    import re
+
+    if not re.fullmatch(r"wishseen_w_[0-9a-f]{32}", session_id):
+        return None
+    project = session_id.removeprefix("wishseen_")
+    return str(host.paths.workspace_path(caller.tenant_id, caller.agent_id)
+               / "projects" / project / "user-uploads" / "feedback")
+
+
+@external_router.get("/sessions/{session_id}/missing-history-images")
+async def missing_history_images(session_id: str, caller: CallerDep, host: HostDep,
+                                 service: ConversationDep):
+    from sagents.v2.contracts.events import ItemEventData
+    from sagents.v2.contracts.items import ImageBlock, MessageItemData
+    from sagents.v2.runtime.artifact.images import read_wishseen_feedback, wishseen_history_image_id
+
+    owner, internal_id = await service._scope(caller.tenant_id, caller.agent_id, session_id)
+    root = _wishseen_feedback_root(host, caller, session_id)
+    if root is None:
+        return success([])
+    context = service.context_for(owner)
+    seen = set()
+    cursor = 0
+    head = None
+    while True:
+        page = await service.session_access.read_session_event_page(
+            internal_id, context, after_sequence=cursor, limit=100
+        )
+        if not page.events:
+            break
+        if head is None:
+            head = page.total
+        for event in page.events:
+            if (event.session_sequence or 0) > head:
+                continue
+            data = event.data
+            if (not isinstance(data, ItemEventData) or data.item is None
+                    or data.operation not in {"completed", "snapshot"}):
+                continue
+            message = data.item.data
+            if not isinstance(message, MessageItemData) or message.role != "user":
+                continue
+            for block in message.content:
+                if isinstance(block, ImageBlock):
+                    media_id = wishseen_history_image_id(block.uri, caller.tenant_id)
+                    if media_id:
+                        seen.add(media_id)
+        next_cursor = max(event.session_sequence or 0 for event in page.events)
+        if next_cursor <= cursor:
+            raise RuntimeError("session event page did not advance")
+        cursor = next_cursor
+        if cursor >= head:
+            break
+
+    def missing():
+        return [media_id for media_id in sorted(seen)
+                if not read_wishseen_feedback(root, media_id, read_data=False)]
+
+    return success(await asyncio.to_thread(missing))
+
+
 @external_router.post("/runs", response_class=StreamingResponse)
 async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
                     host: HostDep, service: ConversationDep,
@@ -500,6 +562,11 @@ async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
                                  agent_id=caller.agent_id, api_key=caller.api_key,
                                  workspace_directory=workspace_path,
                                  runtime_context=body.runtimeContext,
+                                 wishseen_feedback_root=(
+                                     _wishseen_feedback_root(host, caller, body.threadId)
+                                     if workspace_path == "projects/" + body.threadId.removeprefix("wishseen_")
+                                     else None
+                                 ),
                                  notification_connection_id=body.notification_connection_id,
                                  last_event_id=last_event_id)
     return StreamingResponse(stream, media_type="text/event-stream", headers={

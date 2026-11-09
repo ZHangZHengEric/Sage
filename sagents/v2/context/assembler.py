@@ -31,7 +31,7 @@ from sagents.v2.context.plugins.summary_ephemeral import (
 )
 from sagents.v2.model import ModelMessage
 from sagents.v2.runtime.artifact.contracts import ArtifactStore
-from sagents.v2.runtime.artifact.images import hydrate_image_blocks
+from sagents.v2.runtime.artifact.images import hydrate_image_blocks, hydrate_wishseen_history
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -339,6 +339,9 @@ class DefaultContextAssembler:
             from sagents.v2.runtime.artifact import SessionArtifactStore
 
             artifact_store = SessionArtifactStore(self.history.reader, run_id)
+        # Expand compatibility images only in the final inference view. Summary
+        # coverage/digests must depend on immutable ledger content, not files.
+        view = await hydrate_wishseen_history(view, command.config.metadata)
         view = await hydrate_image_blocks(view, artifact_store)
         if view != projection.messages:
             projection = projection.model_copy(

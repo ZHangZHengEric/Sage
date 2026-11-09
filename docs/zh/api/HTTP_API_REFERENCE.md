@@ -60,6 +60,8 @@ parent: API
 
 文件下载读取运行绑定的工作目录快照，上限 32 MiB、512 项；旧运行目录已被同会话的新运行替代时返回 409，打包期间文件变化可能返回 503。调用方应核对产物与运行身份；Sage 不解释下游业务清单或执行客户项目构建。
 
+`GET /api/agents/{agent_id}/sessions/{session_id}/missing-history-images` 返回已授权 Session 中旧版 WishSeen 用户图片缺失的媒体 ID，结果去重，扫描截止首次读取的会话序号上限。仅识别数字租户及 `wishseen_w_<32 位小写十六进制>` 会话。Run 的 `workspace_path=projects/w_<id>` 匹配时，从 `user-uploads/feedback` 中读取已有文件，仅在最终模型请求里替换对应签名图片 URL；缺失文件替换为文本提示。不下载签名 URL、不跟随符号链接，也不改写规范历史或摘要检查点。
+
 ## 指导与 Skills 同步
 
 `PUT /api/agents/{agent_id}/guidance` 的 ZIP 上传模式使用 multipart `prompt` 与 `files`，接受 1–32 个完整 Skill ZIP，逐项校验并返回结果。该上传分支不要求用户身份，因此只能暴露给受信任的调用方；不要将它与受 Bearer Key 保护的外部 Run 接口混淆。
@@ -74,6 +76,7 @@ parent: API
 
 | Method | Path | Router |
 | --- | --- | --- |
+| `GET` | `/.well-known/agent-card.json` | `a2a` |
 | `GET` | `/.well-known/agent-card.json` | `a2a` |
 | `POST` | `/a2a/v1` | `a2a` |
 | `GET` | `/a2a/v1/card` | `a2a` |
@@ -125,6 +128,7 @@ parent: API
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |

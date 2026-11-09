@@ -297,7 +297,8 @@ class ConversationService:
     async def start(self, request, *, user_id: str, last_event_id: str | None = None,
                     agent_id: str | None = None, workspace_directory: str | None = None,
                     runtime_context: dict | None = None, package=None, api_key=None,
-                    notification_connection_id: str | None = None):
+                    notification_connection_id: str | None = None,
+                    wishseen_feedback_root: str | None = None):
         started_at = perf_counter()
         performance_started_at = utc_now()
         logger = StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=get_request_id())
@@ -342,6 +343,9 @@ class ConversationService:
             )
         enabled = admitted.enabled_skills
         metadata = {**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id}
+        if wishseen_feedback_root is not None:
+            from sagents.v2.runtime.artifact.images import WISHSEEN_FEEDBACK_ROOT
+            metadata[WISHSEEN_FEEDBACK_ROOT] = wishseen_feedback_root
         if runtime_context:
             if agent_id is None or len(runtime_context) > 32:
                 raise _error("invalid_runtime_context", "invalid external runtime context")

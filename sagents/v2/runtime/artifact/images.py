@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import os
+import stat
+from pathlib import Path
 import hashlib
 import re
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import ImageBlock
+from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.runtime.artifact.contracts import ArtifactStore
 
@@ -122,3 +126,111 @@ async def hydrate_image_blocks(
             else message
         )
     return tuple(hydrated)
+
+
+# Compatibility for WishSeen messages admitted before inline image inputs.
+# Signed URLs are identified, never downloaded or renewed.
+WISHSEEN_FEEDBACK_ROOT = "server_v2.wishseen_feedback_root"
+_WISHSEEN_IMAGES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+_MAX_FEEDBACK_BYTES = 10 << 20
+
+
+def wishseen_history_image_id(uri: str, tenant: str) -> str | None:
+    if not re.fullmatch(r"[0-9]+", tenant) or not uri.startswith("https://"):
+        return None
+    try:
+        parsed = urlparse(uri)
+    except ValueError:
+        return None
+    if (parsed.netloc != "storage.withling.top"
+            or not parse_qs(parsed.query).get("X-Amz-Signature")):
+        return None
+    match = re.fullmatch(r"/wishseen/media/" + tenant + r"/(m_[A-Za-z0-9_-]{1,38})", parsed.path)
+    return match.group(1) if match else None
+
+
+def read_wishseen_feedback(root: str, media_id: str, *, read_data: bool = True):
+    if not re.fullmatch(r"m_[A-Za-z0-9_-]{1,38}", media_id):
+        return None
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent = None
+    try:
+        # Open each component, including the project and uploads directories,
+        # without following workspace-controlled symlinks.
+        path = Path(root)
+        if not path.is_absolute() or ".." in path.parts:
+            return None
+        parent = os.open(path.anchor, directory_flags)
+        for part in path.parts[1:]:
+            child = os.open(part, directory_flags, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        name = hashlib.sha256(media_id.encode()).hexdigest()[:24]
+        for extension, mime in _WISHSEEN_IMAGES.items():
+            try:
+                fd = os.open(name + extension, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            except OSError:
+                continue
+            with os.fdopen(fd, "rb") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= _MAX_FEEDBACK_BYTES:
+                    continue
+                if not read_data:
+                    return True
+                data = source.read(info.st_size + 1)
+                after = os.fstat(source.fileno())
+                if (len(data) == info.st_size == after.st_size
+                        and info.st_mtime_ns == after.st_mtime_ns
+                        and info.st_ctime_ns == after.st_ctime_ns):
+                    return mime, data
+    except OSError:
+        return None
+    finally:
+        if parent is not None:
+            os.close(parent)
+    return None
+
+
+async def hydrate_wishseen_history(messages, metadata):
+    root = metadata.get(WISHSEEN_FEEDBACK_ROOT)
+    tenant = metadata.get("server_v2.workspace_user_id")
+    if not isinstance(root, str) or not isinstance(tenant, str):
+        return messages
+
+    def hydrate():
+        cache = {}
+        result = []
+        for message in messages:
+            if message.role != "user":
+                result.append(message)
+                continue
+            blocks = []
+            for block in message.content:
+                media_id = wishseen_history_image_id(block.uri, tenant) if isinstance(block, ImageBlock) else None
+                if media_id is None:
+                    blocks.append(block)
+                    continue
+                if media_id not in cache:
+                    found = read_wishseen_feedback(root, media_id)
+                    if found is None:
+                        cache[media_id] = TextBlock(text="[Earlier feedback image is unavailable.]")
+                    else:
+                        mime, data = found
+                        uri = "data:" + mime + ";base64," + base64.b64encode(data).decode("ascii")
+                        cache[media_id] = (mime, uri)
+                replacement = cache[media_id]
+                if isinstance(replacement, TextBlock):
+                    blocks.append(replacement)
+                else:
+                    mime, uri = replacement
+                    blocks.append(block.model_copy(update={"mime_type": mime, "uri": uri}))
+            content = tuple(blocks)
+            result.append(message if content == message.content else message.model_copy(update={"content": content}))
+        return tuple(result)
+
+    return await asyncio.to_thread(hydrate)
