@@ -57,6 +57,7 @@ class _PostgresSessionState(
         dsn,
         *,
         table_prefix=None,
+        provision_schema: bool = True,
         max_connections=16,
         max_pending_connections=64,
         connection_acquire_timeout_seconds=10,
@@ -64,6 +65,7 @@ class _PostgresSessionState(
     ):
         self.dsn = parse_postgres_dsn(dsn)
         self.table_prefix = "sagent" if table_prefix is None else table_prefix.strip()
+        self._provision_schema = provision_schema
         if self.table_prefix and not _PREFIX.fullmatch(self.table_prefix):
             raise ValueError("postgres SessionStore table_prefix is invalid")
         self._connection_budget = PostgresConnectionBudget(
@@ -157,12 +159,14 @@ class _PostgresSessionState(
             )
             try:
                 await pool.open()
+                created = ()
                 async with pool.connection() as connection:
-                    # Bootstrap must see DDL committed while its advisory lock
-                    # was waiting. Ordinary reads retain repeatable snapshots.
-                    await connection.set_isolation_level(IsolationLevel.READ_COMMITTED)
-                    created = await bootstrap(self, connection)
-                    await connection.set_isolation_level(IsolationLevel.REPEATABLE_READ)
+                    if self._provision_schema:
+                        # Bootstrap must see DDL committed while its advisory lock
+                        # was waiting. Ordinary reads retain repeatable snapshots.
+                        await connection.set_isolation_level(IsolationLevel.READ_COMMITTED)
+                        created = await bootstrap(self, connection)
+                        await connection.set_isolation_level(IsolationLevel.REPEATABLE_READ)
                 if self._closed:
                     raise RuntimeError("PostgreSQL SessionStore closed during startup")
             except BaseException:

@@ -81,6 +81,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
                         "table_prefix": {"type": "string"},
+                        "provision_schema": {"type": "boolean", "default": True},
                         "max_cached_sessions": {"type": "integer", "minimum": 1},
                         "max_cached_bytes": {"type": "integer", "minimum": 1},
                         "cache_idle_seconds": {"type": "number", "minimum": 0},
@@ -119,6 +120,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                 **{
                     key: context.config[key]
                     for key in (
+                        "provision_schema",
                         "max_cached_sessions",
                         "max_cached_bytes",
                         "cache_idle_seconds",
@@ -149,6 +151,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
                         "table_prefix": {"type": "string"},
+                        "provision_schema": {"type": "boolean", "default": True},
                         "max_cached_sessions": {"type": "integer", "minimum": 1},
                         "max_cached_bytes": {"type": "integer", "minimum": 1},
                         "cache_idle_seconds": {"type": "number", "minimum": 0},
@@ -187,6 +190,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                 **{
                     key: context.config[key]
                     for key in (
+                        "provision_schema",
                         "max_cached_sessions",
                         "max_cached_bytes",
                         "cache_idle_seconds",
@@ -227,6 +231,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                             "exclusiveMinimum": 0,
                         },
                         "table_prefix": {"type": "string"},
+                        "provision_schema": {"type": "boolean", "default": True},
                         "key_prefix": {"type": "string", "minLength": 1},
                         "archive_interval_seconds": {
                             "type": "number",
@@ -302,6 +307,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                             "exclusiveMinimum": 0,
                         },
                         "table_prefix": {"type": "string"},
+                        "provision_schema": {"type": "boolean", "default": True},
                         "key_prefix": {"type": "string", "minLength": 1},
                         "archive_interval_seconds": {
                             "type": "number",

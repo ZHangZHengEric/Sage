@@ -65,6 +65,7 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         self._archive = self._archive_type(
             dsn,
             table_prefix=table_prefix,
+            provision_schema=self._provision_schema,
             max_connections=self._connection_budget.max_connections,
             max_pending_connections=self._connection_budget.max_pending_connections,
             connection_acquire_timeout_seconds=self._connection_budget.connection_acquire_timeout_seconds,

@@ -108,6 +108,7 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
         dsn: str,
         *,
         table_prefix: str | None = None,
+        provision_schema: bool = True,
         max_cached_sessions: int = 256,
         max_cached_bytes: int = 256 * 1024**2,
         cache_idle_seconds: float = 300,
@@ -129,6 +130,7 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
             raise ValueError("mysql SessionStore table_prefix is invalid")
         self.dsn = resolved
         self.table_prefix = prefix
+        self._provision_schema = provision_schema
         self._connect_kwargs = parse_mysql_dsn(resolved)
         self._pool = None
         self._connection_budget = MysqlConnectionBudget(
@@ -191,7 +193,9 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
             )
             try:
                 async with pool.acquire() as connection:
-                    created = await self._bootstrap(connection)
+                    created = (
+                        await self._bootstrap(connection) if self._provision_schema else ()
+                    )
                 LOGGER.info(
                     "session.mysql.ready",
                     "mysql session store ready",

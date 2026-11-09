@@ -194,6 +194,13 @@ for an interaction must receive its normal reply before continuation. Uncertain
 external effects require their reconciliation contract; recovery is not a promise
 to repeat a side effect safely.
 
+## SQL SessionStore provisioning
+
+The MySQL and PostgreSQL SessionStore plugins and their Redis-backed variants
+initialize the SQL schema by default. Hosts that provision the schema separately
+can set `provision_schema: false` in the `session.store` plugin config. Prepare
+the tables and indexes for the configured `table_prefix` before startup.
+
 ## Local media execution
 
 Select `sage.execution.binding.local-workspace`; Sage accepts policy and creates
