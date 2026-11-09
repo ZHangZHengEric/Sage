@@ -234,8 +234,10 @@ async def test_package_reads_do_not_wait_for_same_store_write_lock(package_store
     # The read must finish while this same store's writer is still occupied.
     async with store.transaction():
         task = asyncio.create_task(read())
-        await asyncio.wait_for(entered.wait(), timeout=1)
-        assert await asyncio.wait_for(task, timeout=0.5) == expected
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        # This is a lock-order test, not a database latency benchmark. The
+        # reader must complete while the writer lock is held, even on busy CI.
+        assert await asyncio.wait_for(task, timeout=10) == expected
 
 
 @pytest.mark.parametrize("operation", [
@@ -276,10 +278,12 @@ async def test_package_optional_writes_still_wait_for_same_store_write_lock(
     try:
         async with store.transaction():
             task = asyncio.create_task(write())
-            await asyncio.wait_for(entered.wait(), timeout=1)
+            await asyncio.wait_for(entered.wait(), timeout=10)
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(task), timeout=0.05)
-        result = await asyncio.wait_for(task, timeout=1)
+        # The exclusion check above is the contract. Allow the SQLite worker
+        # thread time to flush/commit after release on a contended CI runner.
+        result = await asyncio.wait_for(task, timeout=10)
         assert result == await reads[operation]()
     finally:
         if task is not None and not task.done():
