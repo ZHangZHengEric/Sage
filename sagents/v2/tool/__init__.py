@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from sagents.v2.tool.plugins.a2a import A2AToolPlugin as A2AToolPlugin
     from sagents.v2.tool.plugins.mcp import McpServerConfig as McpServerConfig
     from sagents.v2.tool.plugins.mcp import McpToolPlugin as McpToolPlugin
+    from sagents.v2.tool.mcp_session_pool import McpSessionPool as McpSessionPool
     from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy as RecentToolSelectionPolicy
 
 
@@ -86,6 +87,7 @@ _LAZY_EXPORTS = {
     "A2AToolPlugin": ("sagents.v2.tool.plugins.a2a", "A2AToolPlugin"),
     "McpServerConfig": ("sagents.v2.tool.plugins.mcp", "McpServerConfig"),
     "McpToolPlugin": ("sagents.v2.tool.plugins.mcp", "McpToolPlugin"),
+    "McpSessionPool": ("sagents.v2.tool.mcp_session_pool", "McpSessionPool"),
     "RecentToolSelectionPolicy": (
         "sagents.v2.tool.plugins.selection_recent",
         "RecentToolSelectionPolicy",

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from sagents.v2.model.provider import ModelProvider
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 
 import pytest
 
@@ -114,28 +114,36 @@ async def assert_no_interactions(runtime, run_id):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["reset", "timeout", "none"])
 @pytest.mark.parametrize("applied", [True, False])
-async def test_main_agent_checks_status_then_reuses_output_or_retries(failure, applied):
+@pytest.mark.parametrize("pooled", [False, True])
+async def test_main_agent_checks_status_then_reuses_output_or_retries(failure, applied, pooled):
     server = MediaServer(failure, applied=applied)
     bridge = server.bridge()
-    runtime = ephemeral_runtime()
-    handle = await start(runtime)
-    steps = [step(tool="create"), step(tool="status", key="status", assertion=assert_unknown)]
-    if not applied:
-        steps.append(step(tool="create", key="retry"))
-    steps.append(step())
-    model = ScriptedModelProvider(tuple(steps))
-    loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, model), tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
+    async with AsyncExitStack() as stack:
+        if pooled:
+            from sagents.v2.tool import McpSessionPool
+            bridge.session_factory = await stack.enter_async_context(McpSessionPool(session_factory=server.session))
+        runtime = ephemeral_runtime()
+        handle = await start(runtime)
+        steps = [step(tool="create"), step(tool="status", key="status", assertion=assert_unknown)]
+        if not applied:
+            steps.append(step(tool="create", key="retry"))
+        steps.append(step())
+        model = ScriptedModelProvider(tuple(steps))
+        loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, model), tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
 
-    result = await loop.execute(handle.run_id, CONTEXT)
+        result = await loop.execute(handle.run_id, CONTEXT)
 
-    assert result.state == RunState.COMPLETED
-    assert server.calls == (["create", "status"] if applied else ["create", "status", "create"])
-    assert server.created == 1
-    assert server.sessions >= len(server.calls)  # Each recovery call opens a fresh connection.
-    events = await assert_no_interactions(runtime, handle.run_id)
-    failures = [e for e in events if e.type == "tool.call.failed"]
-    assert len(failures) == 1
-    assert failures[0].data.error.metadata["execution_outcome"] == "unknown"
+        assert result.state == RunState.COMPLETED
+        assert server.calls == (["create", "status"] if applied else ["create", "status", "create"])
+        assert server.created == 1
+        if pooled:
+            assert server.sessions == 2  # Failed lease retires; status/retry share the replacement.
+        else:
+            assert server.sessions >= len(server.calls)
+        events = await assert_no_interactions(runtime, handle.run_id)
+        failures = [e for e in events if e.type == "tool.call.failed"]
+        assert len(failures) == 1
+        assert failures[0].data.error.metadata["execution_outcome"] == "unknown"
 
 
 @pytest.mark.asyncio

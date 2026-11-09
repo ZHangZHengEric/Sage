@@ -85,3 +85,73 @@ The [runnable SAgents example](../../examples/v2/PARALLEL_SEARCH.md) uses
 Parallel Search MCP over Streamable HTTP to discover and execute web search and
 page fetch through the v2 bridge without a Parallel API key. It demonstrates
 explicit host-side calls; see the authorization steps above when wiring an Agent.
+
+### Optional session reuse for embedded hosts
+
+Hosts can explicitly inject `McpSessionPool` as the bridge's `session_factory`.
+The default bridge still opens a session per discovery/call; Desktop and Server
+configuration do not automatically enable pooling. The host owns the pool and
+must keep it open for the lifetime of its MCP work. In this example, `servers`
+is a tuple of `McpServerConfig` values and `run_agent` uses the supplied plugin
+as its tool catalog/executor:
+
+```python
+from sagents.v2.tool import McpSessionPool, McpToolPlugin
+
+async def run_with_mcp(servers, run_agent):
+    pool = McpSessionPool(
+        idle_timeout_seconds=300,
+        shutdown_timeout_seconds=10,
+        cleanup_timeout_seconds=5,
+    )
+    try:
+        async with pool:
+            plugin = McpToolPlugin(servers, session_factory=pool)
+            await run_agent(plugin)
+    finally:
+        await pool.wait_closed()  # No deadline: keep the loop alive for teardown.
+        # Inspect pool.cleanup_errors in the host shutdown diagnostics.
+```
+
+Each pool belongs to one event loop and one host-selected security scope. Create
+separate pools for different tenants or credential scopes. Matching effective
+configurations share one initialized session, including concurrent borrowers;
+releasing or cancelling one borrower does not close another borrower's session.
+Credentials, URL, command, args, environment and timeout settings participate in
+identity. Configuration or credential changes create a separate entry. The host
+must replace its pool if the inherited process environment changes.
+
+`timeout_seconds` bounds each acquisition/initialization independently of
+`call_timeout_seconds`. Pool timeouts and acquisition timeouts must be finite
+and positive. Idle eviction starts after the final lease returns (or after an
+unused initialization). An exceptional operation retires the connection; a
+later acquisition can replace it after active leases drain. The pool does not
+retry tool calls, implement backoff/keepalive, or refresh tool lists on notifications.
+
+`aclose()` rejects new acquisitions and wakes pending borrowers, waits up to
+`shutdown_timeout_seconds` for active leases, then closes remaining sessions.
+SDK contexts always exit in the task that entered them. Cleanup runs concurrently
+with a separate `cleanup_timeout_seconds` bound on the host wait. Interrupted
+HTTP/custom initialization receives one cancellation, allowing asynchronous teardown
+to run. Default SDK stdio initialization uses its own `timeout_seconds` deadline;
+its initialization/teardown owner is retained even if the host wait expires;
+interrupting its graceful shutdown could orphan descendants. Grace expiry can interrupt an
+active call; it does not prove the server stopped or that replay is safe.
+Cancelling the caller awaiting `aclose()` leaves shared cleanup running; another
+`aclose()` waits for the same bounded shutdown phase. A closed pool cannot be re-entered.
+
+`wait_closed()` starts shutdown if needed and waits until all retained owner tasks
+finish. It has no deadline and can be called repeatedly or by concurrent waiters.
+Cancelling or timing out a waiter does not cancel SDK teardown; a later
+`wait_closed()` can still observe completion. An uncooperative custom factory can
+keep this wait pending indefinitely.
+
+The bounded `cleanup_errors` tuple contains sanitized lifecycle codes, including
+`session_cleanup_failed`, `cleanup_timeout` and `cleanup_incomplete`; include these
+in host shutdown diagnostics. SDK stdio teardown or a custom factory that suppresses cancellation can
+outlive the host wait; `cleanup_incomplete` reports this, its task remains tracked,
+and the entry is not reused. Keep the event loop alive until `wait_closed()`
+finishes; closing the loop immediately can interrupt retained cleanup. These codes
+are historical diagnostics, not a completion flag, and remain after cleanup finishes.
+Successful responses remain authoritative even if later transport cleanup fails.
+Pooling does not add a durable operation ledger or exactly-once execution.
