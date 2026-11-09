@@ -77,7 +77,6 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | Method | Path | Router |
 | --- | --- | --- |
 | `GET` | `/.well-known/agent-card.json` | `a2a` |
-| `GET` | `/.well-known/agent-card.json` | `a2a` |
 | `POST` | `/a2a/v1` | `a2a` |
 | `GET` | `/a2a/v1/card` | `a2a` |
 | `GET` | `/api/a2a-agents` | `a2a_agents` |
@@ -104,6 +103,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `PUT` | `/api/agents/{agent_id}/guidance` | `agents` |
 | `GET` | `/api/agents/{agent_id}/skills` | `agents` |
 | `PUT` | `/api/agents/{agent_id}/skills` | `agents` |
+| `PUT` | `/api/agents/{agent_id}/skills/{skill_id}/version` | `agents` |
 | `GET` | `/api/plugins` | `agents` |
 | `GET` | `/api/plugins/server` | `agents` |
 | `PUT` | `/api/plugins/server` | `agents` |
@@ -212,8 +212,12 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `DELETE` | `/api/skills/{skill_id}` | `skills` |
 | `GET` | `/api/skills/{skill_id}` | `skills` |
 | `PUT` | `/api/skills/{skill_id}` | `skills` |
+| `GET` | `/api/skills/{skill_id}/diff` | `skills` |
 | `GET` | `/api/skills/{skill_id}/files` | `skills` |
 | `GET` | `/api/skills/{skill_id}/files/{path:path}` | `skills` |
+| `POST` | `/api/skills/{skill_id}/rollback` | `skills` |
+| `GET` | `/api/skills/{skill_id}/versions` | `skills` |
+| `GET` | `/api/skills/{skill_id}/versions/{version_id}` | `skills` |
 | `PUT` | `/api/workspace/skills/{name}` | `skills` |
 
 Host infrastructure also exposes `GET /livez`, `GET /readyz`, and `GET /metrics` outside OpenAPI. Readiness probes the host database and application state.

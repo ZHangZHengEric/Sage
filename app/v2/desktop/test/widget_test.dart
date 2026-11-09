@@ -11058,7 +11058,6 @@ void main() {
             'rsi-start',
             'rsi-open-folder',
             'rsi-resume',
-            'rsi-back-agent',
           ]) {
             final button = find.byKey(ValueKey(key));
             expect(button, findsOneWidget);
@@ -11071,6 +11070,16 @@ void main() {
               lessThanOrEqualTo(tester.getBottomRight(title).dx + 1),
             );
           }
+          final back = find.byKey(const ValueKey('rsi-back-agent'));
+          expect(back, findsOneWidget);
+          expect(
+            tester.getBottomRight(back).dx,
+            lessThanOrEqualTo(tester.getTopLeft(title).dx),
+          );
+          expect(
+            tester.getCenter(back).dy,
+            closeTo(tester.getCenter(title).dy, 1),
+          );
           expect(tester.takeException(), isNull);
         },
       );

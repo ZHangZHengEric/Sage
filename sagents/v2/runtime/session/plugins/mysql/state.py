@@ -89,6 +89,20 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
     format_version = "sage.session.mysql/v2"
     snapshot_interval = 256
 
+    async def _sync_start_idempotency(self, cursor, session_id, current):
+        try:
+            await super()._sync_start_idempotency(cursor, session_id, current)
+        except _require_aiomysql().IntegrityError as exc:
+            if exc.args and exc.args[0] == 1062:
+                # Keep the insert strict: restoring an old backup must never
+                # take ownership of a key now belonging to another Session.
+                # The shared commit path rolls back before exposing this error.
+                raise self._conflict(
+                    "session.revision_conflict",
+                    "MySQL Session start key already exists; retry the operation",
+                ) from exc
+            raise
+
     def __init__(
         self,
         dsn: str,

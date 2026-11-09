@@ -105,8 +105,9 @@ class _FilePanelState extends State<_FilePanel> {
     final workspace =
         group.project?.path ?? controller.settings.agentWorkspacePath;
     try {
-      if (workspace.isEmpty)
+      if (workspace.isEmpty) {
         throw const FileSystemException('Workspace unavailable');
+      }
       final root = await Directory(workspace).resolveSymbolicLinks();
       final rootUri = Uri.directory(root);
       final file = File.fromUri(rootUri.resolveUri(Uri(path: node.path)));

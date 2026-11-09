@@ -921,6 +921,14 @@ const _translations = <String, Map<String, String>>{
         'The task state changed and this approval request has expired',
   },
   'pt': {
+    'workspace.expandPanel': 'Expandir espaço de trabalho',
+    'workspace.restorePanel': 'Restaurar visualização dividida',
+    'workspace.moveToTrash': 'Mover para a Lixeira',
+    'workspace.moveToTrashFailed':
+        'Não foi possível mover este arquivo para a Lixeira',
+    'workspace.openBrowser': 'Abrir no navegador',
+    'workspace.openBrowserFailed':
+        'Não foi possível abrir este arquivo no navegador',
     'agent.memory.recall': 'Consultar memórias',
     'agent.memory.auto_write': 'Guardar memórias automaticamente',
     'agent.memory.scope': 'Âmbito da memória',
@@ -1351,6 +1359,14 @@ const _translations = <String, Map<String, String>>{
         'O estado da tarefa mudou e esta solicitação de aprovação expirou',
   },
   'es': {
+    'workspace.expandPanel': 'Ampliar espacio de trabajo',
+    'workspace.restorePanel': 'Restaurar vista dividida',
+    'workspace.moveToTrash': 'Mover a la papelera',
+    'workspace.moveToTrashFailed':
+        'No se pudo mover este archivo a la papelera',
+    'workspace.openBrowser': 'Abrir en el navegador',
+    'workspace.openBrowserFailed':
+        'No se pudo abrir este archivo en el navegador',
     'agent.memory.recall': 'Consultar memoria',
     'agent.memory.auto_write': 'Guardar memoria automáticamente',
     'agent.memory.scope': 'Ámbito de memoria',
@@ -1786,6 +1802,14 @@ const _translations = <String, Map<String, String>>{
         'El estado de la tarea cambió y esta solicitud de aprobación caducó',
   },
   'fr': {
+    'workspace.expandPanel': 'Agrandir l’espace de travail',
+    'workspace.restorePanel': 'Rétablir la vue divisée',
+    'workspace.moveToTrash': 'Déplacer vers la corbeille',
+    'workspace.moveToTrashFailed':
+        'Impossible de déplacer ce fichier vers la corbeille',
+    'workspace.openBrowser': 'Ouvrir dans le navigateur',
+    'workspace.openBrowserFailed':
+        'Impossible d’ouvrir ce fichier dans le navigateur',
     'agent.memory.recall': 'Consulter la mémoire',
     'agent.memory.auto_write': 'Enregistrer automatiquement la mémoire',
     'agent.memory.scope': 'Portée de la mémoire',
@@ -2219,6 +2243,14 @@ const _translations = <String, Map<String, String>>{
         'L’état de la tâche a changé et cette demande d’approbation a expiré',
   },
   'de': {
+    'workspace.expandPanel': 'Arbeitsbereich vergrößern',
+    'workspace.restorePanel': 'Geteilte Ansicht wiederherstellen',
+    'workspace.moveToTrash': 'In den Papierkorb verschieben',
+    'workspace.moveToTrashFailed':
+        'Diese Datei konnte nicht in den Papierkorb verschoben werden',
+    'workspace.openBrowser': 'Im Browser öffnen',
+    'workspace.openBrowserFailed':
+        'Diese Datei konnte nicht im Browser geöffnet werden',
     'agent.memory.recall': 'Erinnerungen abrufen',
     'agent.memory.auto_write': 'Erinnerungen automatisch speichern',
     'agent.memory.scope': 'Speicherbereich',
@@ -2651,6 +2683,12 @@ const _translations = <String, Map<String, String>>{
         'Der Aufgabenstatus hat sich geändert; diese Genehmigungsanfrage ist abgelaufen',
   },
   'ja': {
+    'workspace.expandPanel': 'ワークスペースを拡大',
+    'workspace.restorePanel': '分割表示に戻す',
+    'workspace.moveToTrash': 'ゴミ箱に移動',
+    'workspace.moveToTrashFailed': 'このファイルをゴミ箱に移動できませんでした',
+    'workspace.openBrowser': 'ブラウザーで開く',
+    'workspace.openBrowserFailed': 'このファイルをブラウザーで開けませんでした',
     'agent.memory.recall': '記憶を検索',
     'agent.memory.auto_write': '記憶を自動保存',
     'agent.memory.scope': '記憶の範囲',
@@ -3040,6 +3078,12 @@ const _translations = <String, Map<String, String>>{
     'error.approvalExpired': 'タスクの状態が変わったため、この承認リクエストは期限切れです',
   },
   'ko': {
+    'workspace.expandPanel': '작업 공간 확대',
+    'workspace.restorePanel': '분할 보기 복원',
+    'workspace.moveToTrash': '휴지통으로 이동',
+    'workspace.moveToTrashFailed': '이 파일을 휴지통으로 이동할 수 없습니다',
+    'workspace.openBrowser': '브라우저에서 열기',
+    'workspace.openBrowserFailed': '이 파일을 브라우저에서 열 수 없습니다',
     'agent.memory.recall': '기억 검색',
     'agent.memory.auto_write': '기억 자동 저장',
     'agent.memory.scope': '기억 범위',
@@ -3431,6 +3475,12 @@ const _translations = <String, Map<String, String>>{
     'error.approvalExpired': '작업 상태가 변경되어 이 승인 요청이 만료되었습니다',
   },
   'ru': {
+    'workspace.expandPanel': 'Развернуть рабочую область',
+    'workspace.restorePanel': 'Восстановить разделённый вид',
+    'workspace.moveToTrash': 'Переместить в корзину',
+    'workspace.moveToTrashFailed': 'Не удалось переместить этот файл в корзину',
+    'workspace.openBrowser': 'Открыть в браузере',
+    'workspace.openBrowserFailed': 'Не удалось открыть этот файл в браузере',
     'agent.memory.recall': 'Поиск в памяти',
     'agent.memory.auto_write': 'Автосохранение памяти',
     'agent.memory.scope': 'Область памяти',

@@ -163,7 +163,8 @@ async def test_native_evaluator_reads_files_writes_json_and_repairs_invalid_evid
                 response = authored_evaluation_response(request, payload, answer)
                 if response.tool_calls and response.tool_calls[0].name == 'file_write':
                     self.evaluator_calls += 1
-                    self.bad_written = True
+                    if title == 'OptimizationDiagnosis':
+                        self.bad_written = True
                 yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
                 return
             async for event in super()._stream(request):
@@ -187,8 +188,12 @@ async def test_native_evaluator_reads_files_writes_json_and_repairs_invalid_evid
         assert all(c['grade']['score'] == .75 for c in run['result']['report']['baseline']['cases'])
         root = service.runtime_root / 'rsi' / started['id'] / 'evaluations'
         validations = [json.loads(p.read_text()) for p in root.rglob('validation.json')]
-        assert any(not item['valid'] for item in validations)
-        assert any(item['valid'] for item in validations)
+        # A repaired call reuses its immutable input digest, so the latest
+        # validation receipt is valid. The journal retains the rejection.
+        audit = [json.loads(line) for line in (root.parent / 'audit.jsonl').read_text().splitlines()]
+        assert any(e['event'] == 'evaluation_response_rejected'
+            and 'outside the supplied execution' in e['data']['reason'] for e in audit)
+        assert validations and all(item['valid'] for item in validations)
         assert list(root.rglob('assessment.json')) and list(root.rglob('context.json'))
         assert (root.parent / 'README.md').is_file()
         assert all('evaluation_context' in json.loads(p.read_text()) for p in root.rglob('context.json'))

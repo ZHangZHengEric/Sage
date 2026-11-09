@@ -2746,8 +2746,9 @@ class _RsiScreenState extends State<RsiScreen> {
                       'cases/$part',
                     ),
                   );
-                  if (_caseDetails.length > 24)
+                  if (_caseDetails.length > 24) {
                     _caseDetails.remove(_caseDetails.keys.first);
+                  }
                   return FutureBuilder<Map<String, Object?>>(
                     future: future,
                     builder: (_, snapshot) {
@@ -2758,8 +2759,9 @@ class _RsiScreenState extends State<RsiScreen> {
                           child: Text(t('重试', 'Retry')),
                         );
                       }
-                      if (!snapshot.hasData)
+                      if (!snapshot.hasData) {
                         return const CupertinoActivityIndicator();
+                      }
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: evaluationCase(snapshot.data!),

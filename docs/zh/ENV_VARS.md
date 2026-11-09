@@ -27,6 +27,7 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_SCHEDULER_PLUGIN` | 默认 `sage.scheduler.ephemeral`；显式设为 `sage.scheduler.redis-distributed` 时启用共享 Run 调度及 `sage.job.redis-distributed`，须同时配置 MySQL、Redis 地址。工作区文件仍为节点本地目录。 |
 | `SAGE_SERVER_SESSION_STORE_KEY_PREFIX` | 可显式指定 Redis 会话命名空间；共享会话的实例须使用相同前缀。 |
 | `SAGE_SERVER_MYSQL_URL` | 必须配置的 MySQL 连接地址 |
+| `SAGE_SERVER_POSTGRES_URL` | 使用 PostgreSQL 会话后端时的连接 URL |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |
 | `SAGE_SERVER_DATA` | `data/server_v2` |

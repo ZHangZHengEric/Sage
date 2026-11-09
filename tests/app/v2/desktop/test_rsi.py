@@ -292,6 +292,9 @@ async def setup_service(tmp_path, monkeypatch, model):
 
 def start_request(request_id="request-1"):
     return RsiStart(
+        # Recovery fixtures count individual calls; repeated trials have dedicated tests.
+        evaluation_repeats=1,
+        human_test_repeats=1,
         goal="Improve arithmetic reliability",
         rounds=3,
         request_id=request_id,

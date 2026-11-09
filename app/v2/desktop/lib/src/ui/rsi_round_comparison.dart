@@ -209,9 +209,7 @@ class RsiRoundComparisons extends StatelessWidget {
         key: ValueKey('rsi-test-checkpoint-$checkpoint'),
         message: test == null
             ? _t('R$checkpoint · 暂无测试', 'R$checkpoint · No test')
-            : _t('R$checkpoint 检查点', 'R$checkpoint checkpoint') +
-                  ' · ${test.version == null ? _t('受测版本未知', 'Unknown version') : _version(test.version)} vs ${_version(0)}\n'
-                      '${outcome(test.results, expected: test.expected)}',
+            : '${_t('R$checkpoint 检查点', 'R$checkpoint checkpoint')} · ${test.version == null ? _t('受测版本未知', 'Unknown version') : _version(test.version)} vs ${_version(0)}\n${outcome(test.results, expected: test.expected)}',
         child: SizedBox(
           width: width,
           child: Column(
@@ -283,11 +281,7 @@ class RsiRoundComparisons extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          _t(
-                'R${test.checkpoint} 检查点 · ',
-                'R${test.checkpoint} checkpoint · ',
-              ) +
-              '${test.version == null ? _t('受测版本未知', 'Unknown version') : _version(test.version)} vs ${_version(0)}',
+          '${_t('R${test.checkpoint} 检查点 · ', 'R${test.checkpoint} checkpoint · ')}${test.version == null ? _t('受测版本未知', 'Unknown version') : _version(test.version)} vs ${_version(0)}',
           style: theme.textTheme.labelMedium,
         ),
         const SizedBox(height: 5),

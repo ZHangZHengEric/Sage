@@ -322,8 +322,9 @@ void main() {
           final overview = await tester.runAsync(
             () => api.rsiRun(agent, run['id'] as String),
           );
-          if (overview == null || overview['overview_pending'] == true)
+          if (overview == null || overview['overview_pending'] == true) {
             continue;
+          }
           finished = overview;
           break;
         }

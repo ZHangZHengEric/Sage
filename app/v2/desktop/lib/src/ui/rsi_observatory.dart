@@ -118,8 +118,9 @@ class _RsiObservatoryState extends State<RsiObservatory>
     ];
     final versions = <String, int>{};
     void recordVersion(int round, Object? hash) {
-      if (hash is String && hash.isNotEmpty)
+      if (hash is String && hash.isNotEmpty) {
         versions.putIfAbsent(hash, () => round);
+      }
     }
 
     recordVersion(0, _map(report['baseline'])['package_hash']);
@@ -373,8 +374,9 @@ class _RsiObservatoryState extends State<RsiObservatory>
               'responding',
               'queued',
               'submitted',
-            ].contains(view.state))
+            ].contains(view.state)) {
               continue;
+            }
             final matches = live
                 .where(
                   (c) =>
@@ -1666,8 +1668,9 @@ class _RsiObservatoryState extends State<RsiObservatory>
           ],
         });
       }
-      if (summary.execution != null)
+      if (summary.execution != null) {
         return item.executionView(summary.execution!);
+      }
       if (item.trialViews.length == 1) {
         item.turns.addAll(item.trialViews.values.single.turns);
       }
@@ -1677,8 +1680,9 @@ class _RsiObservatoryState extends State<RsiObservatory>
         projection._fillExecution(item.executionView(index + 1), trial);
       }
       if (summary.execution != null) {
-        if (item.trialViews.isNotEmpty)
+        if (item.trialViews.isNotEmpty) {
           return item.executionView(summary.execution!);
+        }
         item.execution = summary.execution;
       }
     }

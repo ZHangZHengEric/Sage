@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from threading import Lock
 
 import pytest
 
@@ -57,7 +58,12 @@ async def test_external_host_events_and_human_scores_are_visible_without_resetti
     records = [{'round': 0, 'scores': {'training': .5, 'validation': .6, 'test': .7},
                 'cases': [{'input': 'HUMAN-ONLY-TEST'}]}]
     mirror.tests(records)
-    service = SimpleNamespace(runtime_root=tmp_path, rsi_store=store, _rsi_cursors={}, _rsi_usage_readers={})
+    class Service(DesktopRsiMixin, SimpleNamespace):
+        pass
+
+    service = Service(runtime_root=tmp_path, rsi_store=store, _rsi_cursors={}, _rsi_usage_readers={})
+    service._rsi_cursor_lock = Lock()
+    service._rsi_usage_lock = Lock()
     async def agent(agent_id, user_id):
         assert (agent_id, user_id) == ('agent', 'owner')
         return owner

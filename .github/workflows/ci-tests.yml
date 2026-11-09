@@ -101,6 +101,10 @@ jobs:
           fi
           python -m pip check
 
+      - name: Install Sage lint runtime
+        if: matrix.environment != 'v1'
+        run: npm ci --prefix sagents/v2/tool/official/lint --ignore-scripts --no-audit --no-fund
+
       - name: Run Pytest Suite
         # The Linux sandbox binds the workspace at its own workspace_root, and
         # /tmp is where the sandbox mounts its scratch. A default pytest tmp_path

@@ -53,6 +53,8 @@ Use separate roots per tenant or a tenant-authorized provider. Repositories pin 
 Run's visible catalog on first lookup; SQLite pins survive restart. Hosts that
 need acceptance-time selection retain their accepted composition snapshots.
 
+The Server MySQL skill library also provides version history, file diffs, and rollback APIs. Agents can follow the latest version or pin a `version_id`; this binding is frozen when a Run is accepted. Pinned versions are not replaced by `fetch_latest` or same-named packaged skills. See [Server skill version management](../../../app/v2/server/README.md#技能版本管理) for the UI, API, and database upgrade.
+
 ## Workspace policies
 
 All three policies expose a Skill at `skills/<name>/`. A reference is read at

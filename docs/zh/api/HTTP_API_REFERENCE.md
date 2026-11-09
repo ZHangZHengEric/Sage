@@ -77,7 +77,6 @@ parent: API
 | Method | Path | Router |
 | --- | --- | --- |
 | `GET` | `/.well-known/agent-card.json` | `a2a` |
-| `GET` | `/.well-known/agent-card.json` | `a2a` |
 | `POST` | `/a2a/v1` | `a2a` |
 | `GET` | `/a2a/v1/card` | `a2a` |
 | `GET` | `/api/a2a-agents` | `a2a_agents` |
@@ -104,6 +103,7 @@ parent: API
 | `PUT` | `/api/agents/{agent_id}/guidance` | `agents` |
 | `GET` | `/api/agents/{agent_id}/skills` | `agents` |
 | `PUT` | `/api/agents/{agent_id}/skills` | `agents` |
+| `PUT` | `/api/agents/{agent_id}/skills/{skill_id}/version` | `agents` |
 | `GET` | `/api/plugins` | `agents` |
 | `GET` | `/api/plugins/server` | `agents` |
 | `PUT` | `/api/plugins/server` | `agents` |
@@ -212,8 +212,12 @@ parent: API
 | `DELETE` | `/api/skills/{skill_id}` | `skills` |
 | `GET` | `/api/skills/{skill_id}` | `skills` |
 | `PUT` | `/api/skills/{skill_id}` | `skills` |
+| `GET` | `/api/skills/{skill_id}/diff` | `skills` |
 | `GET` | `/api/skills/{skill_id}/files` | `skills` |
 | `GET` | `/api/skills/{skill_id}/files/{path:path}` | `skills` |
+| `POST` | `/api/skills/{skill_id}/rollback` | `skills` |
+| `GET` | `/api/skills/{skill_id}/versions` | `skills` |
+| `GET` | `/api/skills/{skill_id}/versions/{version_id}` | `skills` |
 | `PUT` | `/api/workspace/skills/{name}` | `skills` |
 
 宿主基础设施还提供 `GET /livez`、`GET /readyz` 和 `GET /metrics`，这些不展示在 OpenAPI 中。就绪检查会探测宿主数据库和应用状态。

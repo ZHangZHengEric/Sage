@@ -218,7 +218,7 @@ class _ConversationReplayState extends State<_ConversationReplay> {
                     height: 30,
                     segments: [
                       for (final speed in _speeds)
-                        GlassSegment(label: '${speed}×'),
+                        GlassSegment(label: '$speed×'),
                     ],
                     selectedIndex: _speedIndex,
                     onSegmentSelected: _setSpeed,

@@ -1147,7 +1147,7 @@ void main() {
                 frameBuilder: (title, titleBar, actions, body) => Column(
                   children: [
                     titleBar,
-                    if (actions != null) actions,
+                    ?actions,
                     Expanded(child: body),
                   ],
                 ),

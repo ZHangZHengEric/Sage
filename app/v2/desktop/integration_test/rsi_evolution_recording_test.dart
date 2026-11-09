@@ -781,10 +781,13 @@ void main() {
           await File(
             '$output/frame-times.json',
           ).writeAsString(jsonEncode(frameTimes));
-          if (encoder != null) {
+          final activeEncoder = encoder;
+          if (activeEncoder != null) {
             debugPrint('RSI_RECORD encoder closing');
-            await encoder.stdin.close().timeout(const Duration(seconds: 15));
-            final code = await encoder.exitCode.timeout(
+            await activeEncoder.stdin.close().timeout(
+              const Duration(seconds: 15),
+            );
+            final code = await activeEncoder.exitCode.timeout(
               const Duration(seconds: 30),
             );
             debugPrint('RSI_RECORD encoder closed: $code');
