@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from copy import deepcopy
 import hashlib
 import json
+import time
 import uuid
 
 from sagents.v2.contracts.common import new_id
@@ -25,6 +26,8 @@ from sagents.v2.runtime.distributed.redis_coordination import (
     coordination_error,
     watch_fence,
 )
+from sagents.v2.runtime.observability.logs import get_logger
+
 from .aggregate import _json
 from .loading import DurableSessionLoading
 
@@ -364,18 +367,39 @@ class RedisSessionCoordination:
             await self._retry_transaction(write)
 
     async def _archive_session(self, sid):
-        # Share the Session guard with mutations, deletion and compaction.
-        # Read only after claiming it; another writer may have just committed.
+        started = time.monotonic()
+        # Claim SQL serialization under the mutation guard, preserving the lock
+        # order used by restoration. Only capture the immutable Redis snapshot
+        # under that guard: SQL I/O must not block live Run commits.
+        async with AsyncExitStack() as archive_stack:
+            async with self._guard("session:" + sid):
+                if not await self._redis.sismember(self._key("pending"), sid):
+                    return
+                await archive_stack.enter_async_context(self._archive.session_guard(sid))
+                fields = await self._read_hot(self._session_key(sid))
+                if not fields:
+                    raise self._storage_error(f"Pending Redis Session data is missing: {sid}")
+            get_logger(__name__).info(
+                "session.archive.snapshot_captured", "会话归档快照已获取，释放创作状态锁后写入 SQL",
+                session_id=sid, revision=fields.get("revision"),
+            )
+            await self._write_archive_snapshot(sid, fields)
+        # Release SQL before taking Redis again, so a concurrent restore which
+        # owns Redis and waits for SQL cannot deadlock with acknowledgement.
         async with self._guard("session:" + sid):
-            if not await self._redis.sismember(self._key("pending"), sid):
-                return
-            async with self._archive.session_guard(sid):
-                async with self._redis.pipeline() as pipe:
-                    await self._owned(pipe)
-                await super()._archive_session(sid)
-                if await self._redis.hget(self._session_key(sid), "deleted") == "1":
-                    # Never reload a deleted identity from an older archive.
-                    await self._redis.persist(self._session_key(sid))
+            await self._ack_archive_snapshot(sid, fields)
+            if await self._redis.hget(self._session_key(sid), "deleted") == "1":
+                await self._redis.persist(self._session_key(sid))
+        if (fields.get("deleted") != "1" and
+            sum(name.startswith("d:") for name in fields) >= self.snapshot_interval):
+            # Decode and stage outside the mutation guard. Publication checks the
+            # base generation and retains deltas committed after this snapshot.
+            await self._compact_hot(sid, fields)
+        get_logger(__name__).info(
+            "session.archive.finished", "会话后台归档完成", session_id=sid,
+            revision=fields.get("revision"),
+            duration_ms=round((time.monotonic() - started) * 1000, 3),
+        )
 
     def _preview_epoch_for_run(self, run_id):
         return self._publication_epoch.get() or self._preview_epoch

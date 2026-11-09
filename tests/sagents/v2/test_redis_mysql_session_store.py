@@ -836,3 +836,81 @@ async def test_cold_read_racing_with_completed_deletion_preserves_tombstone(bulk
     finally:
         setattr(archive, method, original)
         await value.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('phase', ['sql', 'snapshot'])
+async def test_slow_archive_does_not_block_live_commit_or_lose_new_revision(phase):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = store(redis, archive)
+    value.coordination_wait_seconds = .1
+    created = await value.create_run(command(), CONTEXT)
+    await transition(value, created, RunState.RUNNING, 'running')
+    sid = created.handle.session_id
+    await redis.sadd(value._key('pending'), sid)
+    entered, release = asyncio.Event(), asyncio.Event()
+    target, method = (archive, 'archive_session') if phase == 'sql' else (value, '_stage_snapshot')
+    original = getattr(target, method)
+    if phase == 'snapshot':
+        value.snapshot_interval = 1
+
+    async def paused(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await original(*args, **kwargs)
+
+    setattr(target, method, paused)
+    archiving = asyncio.create_task(value.archive_pending())
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        await asyncio.wait_for(transition(value, created, RunState.CANCELLED, 'cancel'), 1)
+        release.set()
+        await asyncio.wait_for(archiving, 2)
+        assert await redis.sismember(value._key('pending'), sid)
+        await value.archive_pending()
+        assert archive.states[sid]['runs'][0]['state'] == 'cancelled'
+        hot = await value._fetch_session(sid)
+        assert hot['runs'][0]['state'] == 'cancelled'
+        token = await redis.hget(value._session_key(sid), 'base_snapshot')
+        if token:
+            assert await redis.ttl(value._key(f'snapshot:{token}')) > 0
+    finally:
+        release.set()
+        await archiving
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_during_slow_archive_keeps_tombstone_and_pending_delete():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = store(redis, archive)
+    value.coordination_wait_seconds = .1
+    created = await value.create_run(command(), CONTEXT)
+    await transition(value, created, RunState.CANCELLED, 'cancel')
+    sid = created.handle.session_id
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = archive.archive_session
+
+    async def paused(*args):
+        entered.set()
+        await release.wait()
+        await original(*args)
+
+    archive.archive_session = paused
+    archiving = asyncio.create_task(value.archive_pending())
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        await asyncio.wait_for(value.delete_session(sid), 1)
+        release.set()
+        await archiving
+        assert await redis.hget(value._session_key(sid), 'deleted') == '1'
+        assert await redis.sismember(value._key('pending'), sid)
+        await value.archive_pending()
+        assert sid not in archive.states
+        assert await redis.hget(value._session_key(sid), 'deleted') == '1'
+    finally:
+        release.set()
+        await archiving
+        await value.close()

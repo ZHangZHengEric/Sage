@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -83,8 +82,12 @@ class RedisArchiveProtocol:
                     return
                 if not await pipe.exists(key) or await pipe.hget(key, "deleted") == "1":
                     return
+                ttl = await pipe.pttl(key)
                 pipe.multi()
-                pipe.persist(snapshot_key)
+                if ttl > 0:
+                    pipe.pexpire(snapshot_key, ttl)
+                else:
+                    pipe.persist(snapshot_key)
                 pipe.hset(
                     key,
                     mapping={
@@ -99,19 +102,14 @@ class RedisArchiveProtocol:
                 await pipe.execute()
                 published = True
 
-        await self._retry_transaction(publish)
+        async with self._guard("session:" + sid):
+            await self._retry_transaction(publish)
         if published and fields.get("base_snapshot"):
             await self._redis.delete(self._key(f"snapshot:{fields['base_snapshot']}"))
         return payload
 
-    async def _archive_session(self, sid):
-        from redis.exceptions import WatchError
-
-        started = time.perf_counter()
-        key = self._session_key(sid)
-        fields = await self._read_hot(key)
-        if not fields:
-            raise self._storage_error(f"Pending Redis Session data is missing: {sid}")
+    async def _write_archive_snapshot(self, sid, fields):
+        """Write an immutable snapshot while SQL serialization remains held."""
         deleted = fields.get("deleted") == "1"
         if deleted:
             await self._archive.delete_archived_sessions((sid,))
@@ -148,21 +146,22 @@ class RedisArchiveProtocol:
                 size += encoded_size
             if batch:
                 await self._archive.archive_batch(sid, batch)
-            if (
-                len([name for name in fields if name.startswith("d:")])
-                >= self.snapshot_interval
-            ):
-                await self._compact_hot(sid, fields)
+
+    async def _ack_archive_snapshot(self, sid, fields):
+        from redis.exceptions import WatchError
+
+        key = self._session_key(sid)
+        deleted = fields.get("deleted") == "1"
         try:
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
                 await pipe.watch(key)
-                revision, current_deleted, quiescent = await pipe.hmget(
-                    key, ("revision", "deleted", "quiescent")
+                revision, current_deleted, quiescent, base_snapshot = await pipe.hmget(
+                    key, ("revision", "deleted", "quiescent", "base_snapshot")
                 )
                 if revision != fields.get("revision") or current_deleted != fields.get(
                     "deleted"
-                ):
+                ) or base_snapshot != fields.get("base_snapshot"):
                     return
                 token = await pipe.hget(key, "base_snapshot")
                 pipe.multi()
@@ -196,10 +195,3 @@ class RedisArchiveProtocol:
                 await pipe.execute()
         except WatchError:
             return
-        LOGGER.debug(
-            f"session.{self.archive_backend}.archived",
-            "SQL Session archive completed",
-            session_id=sid,
-            revision=fields.get("revision"),
-            duration_ms=round((time.perf_counter() - started) * 1000, 3),
-        )
