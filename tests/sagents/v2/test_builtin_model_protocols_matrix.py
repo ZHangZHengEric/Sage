@@ -677,14 +677,12 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
     assert completed.response_id == "message_1"
     assert completed.text == "answer"
     assert completed.reasoning == "think"
-    assert completed.provider_state == make_provider_state(
-        "anthropic_messages",
-        {
-            "thinking_blocks": [
-                {"type": "thinking", "thinking": "think", "signature": "signed"}
-            ]
-        },
-    )
+    state = completed.provider_state["anthropic_messages"]["payload"]
+    assert state["thinking_blocks"] == [
+        {"type": "thinking", "thinking": "think", "signature": "signed"}
+    ]
+    assert [block["type"] for block in state["content_blocks"]] == ["thinking", "text", "tool_use"]
+    assert len(state["prefix_digest"]) == 64
     assert completed.finish_reason == "tool_use"
     assert completed.tool_calls[0].arguments == {"q": "new"}
     assert completed.usage.input_tokens == 26
@@ -720,26 +718,13 @@ async def test_anthropic_messages_preserves_system_tool_blocks_and_sse_usage():
     ]
     assert outgoing["tools"][0]["input_schema"] == {"type": "object"}
     replay = provider.diagnostic_request(
-        request(
-            messages=(
-                ModelMessage(role="user", content=(TextBlock(text="go"),)),
-                ModelMessage(
-                    role="assistant",
-                    tool_calls=completed.tool_calls,
-                    provider_state=completed.provider_state,
-                ),
-                ModelMessage(
-                    role="tool",
-                    tool_call_id="call_1",
-                    content=(TextBlock(text="result"),),
-                ),
-            )
-        )
+        request(messages=(*request().messages, ModelMessage(
+            role="assistant", content=(TextBlock(text=completed.text),),
+            tool_calls=completed.tool_calls, provider_state=completed.provider_state,
+        ), ModelMessage(role="tool", tool_call_id="call_1", content=(TextBlock(text="result"),))))
     )
-    assert replay["messages"][1]["content"][0] == {
-        "type": "thinking",
-        "thinking": "think",
-        "signature": "signed",
+    assert replay["messages"][3]["content"][0] == {
+        "type": "thinking", "thinking": "think", "signature": "signed",
     }
 
 

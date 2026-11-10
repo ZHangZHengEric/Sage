@@ -150,3 +150,38 @@ python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagent
 基准只计合成长事件列表的协调器序列化，不计 SQL、网络、模型或任务完成率；不能换算为生产 QPS。真实端点的长时间负载需要单独验证。
 
 实现入口：[model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/runtime/model_pool.py)。
+
+## Anthropic preserved thinking 与前缀变化
+
+`AnthropicMessagesConfig` 提供可选的
+`thinking_prefix_mismatch_behavior="drop_block"`（或诊断用的 `"error"`）。
+启用后会将 `thinking-binding-controls-2026-08-01` 合并到 `anthropic-beta`
+请求头，并将 `block_binding.prefix_mismatch_behavior` 合并到 thinking 配置。
+已有 beta 值、thinking 字段和配置对象均保留。也可以通过标准的
+`extra_body["thinking"]["block_binding"]` 配置；适配层会自动补充 beta 头。
+只有部分 thinking 字段时，会与生成的 adaptive 配置合并，而不是整体覆盖。
+供应商代理是否支持此 beta 仍需真实链路验证；模型本身仍须支持所选 thinking 类型。
+
+响应的转换记录可从
+`ModelResponse.provider_metadata["input_transformations"]` 读取（上游未提供时不生成该字段）。
+压缩后仍保留旧签名历史时，需要在后续请求持续启用 `drop_block`。
+
+未配置官方 binding 控制时，适配层会使用新响应 `provider_state` 中的
+`prefix_digest` 校验实际序列化的 system、tools 和此前 messages。
+前缀变化后，从首次不匹配处开始去除 `thinking` 和 `redacted_thinking`，
+保留文本、工具调用和工具结果，不修改存储中的历史。
+指纹随响应持久化；更换 Run、provider 实例或子 Agent 不会共享可变的校验基准。
+旧版 provider state 没有指纹，适配层不会猜测其来源：应使用官方 `drop_block`
+处理这些历史。显式配置官方 binding 控制时，由上游执行校验，避免掩盖其诊断结果。
+
+新响应还保存按原顺序排列的原始内容块，以避免将交错的文本、thinking 和工具调用
+重新分组。已存在的仅含 `thinking_blocks` 的历史仍兼容读取。
+
+这些措施是前缀变化时的协议保护，不意味着上下文组装已实现 append-only。
+当前组装器仍会重建 system 并将运行上下文注入最新 user 消息；旧 user 消息中的
+上下文也可能被剥离。会话级 system、Run 动态信息和持久化的已发送消息视图的分离，
+以及通过追加消息更新动态信息，仍需在上下文管理层继续实现。
+不得将没有可见前缀变化的签名失败归因为压缩或动态 system；应结合 wire diagnostics
+检查响应块回放及供应商实际接收到的请求。
+
+参考：[Anthropic preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)。
