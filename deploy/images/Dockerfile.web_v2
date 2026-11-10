@@ -9,4 +9,4 @@ FROM docker.m.daocloud.io/library/nginx:1.27-alpine
 COPY deploy/standalone/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 CMD wget -qO- -T 4 http://127.0.0.1/ >/dev/null && wget -qO- -T 4 http://127.0.0.1/readyz >/dev/null || exit 1
