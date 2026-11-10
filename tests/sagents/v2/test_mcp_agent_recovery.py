@@ -98,10 +98,11 @@ class MediaServer:
         ),), session_factory=self.session)
 
 
-async def start(runtime, agent_id="root"):
+async def start(runtime, agent_id="root", *, autonomous=True):
     return await runtime.start_run(StartRun(
         agent_id=agent_id, input=(InputItem(role="user", content=(TextBlock(text="make video"),)),),
-        config=RunConfig(max_steps=10), resolved_spec_hash="sha256:mcp-recovery", idempotency_key="start",
+        # Legacy agent-directed reconciliation remains an explicit host opt-in.
+        config=RunConfig(max_steps=10, autonomous_error_recovery=autonomous), resolved_spec_hash="sha256:mcp-recovery", idempotency_key="start",
     ), CONTEXT)
 
 
@@ -123,7 +124,7 @@ async def test_main_agent_checks_status_then_reuses_output_or_retries(failure, a
             from sagents.v2.tool import McpSessionPool
             bridge.session_factory = await stack.enter_async_context(McpSessionPool(session_factory=server.session))
         runtime = ephemeral_runtime()
-        handle = await start(runtime)
+        handle = await start(runtime, autonomous=False)
         steps = [step(tool="create"), step(tool="status", key="status", assertion=assert_unknown)]
         if not applied:
             steps.append(step(tool="create", key="retry"))
@@ -150,7 +151,7 @@ async def test_main_agent_checks_status_then_reuses_output_or_retries(failure, a
 @pytest.mark.parametrize("failure", ["reset", "timeout", "none"])
 async def test_parent_and_delegated_child_both_recover_without_approval(failure):
     runtime = ephemeral_runtime()
-    handle = await start(runtime)
+    handle = await start(runtime, autonomous=False)
     servers = {name: MediaServer(failure) for name in ("root", "child")}
     bridges = {name: server.bridge() for name, server in servers.items()}
     definitions = await bridges["root"].list_tools(run_id=handle.run_id)
@@ -211,7 +212,7 @@ async def test_parent_and_delegated_child_both_recover_without_approval(failure)
 async def test_interrupted_dispatch_recovers_with_new_bridge_without_replaying_write():
     server = MediaServer("interrupted")
     runtime = ephemeral_runtime()
-    handle = await start(runtime)
+    handle = await start(runtime, autonomous=False)
     bridge = server.bridge()
     loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, ScriptedModelProvider((step(tool="create"),))),
                            tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
@@ -264,3 +265,22 @@ async def test_connection_reset_before_dispatch_returns_known_failure_for_safe_r
     assert result.state == RunState.COMPLETED
     assert server.calls == ["status"]
     await assert_no_interactions(runtime, handle.run_id)
+
+
+@pytest.mark.asyncio
+async def test_default_unknown_mcp_write_stops_without_guessing_or_manual_recovery():
+    server = MediaServer("reset")
+    bridge = server.bridge()
+    runtime = ephemeral_runtime()
+    handle = await start(runtime)
+    model = ScriptedModelProvider((step(tool="create"), step(tool="create", key="poll"), step()))
+    loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, model),
+        tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.FAILED
+    assert server.calls == ["create"]
+    assert server.created == 1
+    events = await assert_no_interactions(runtime, handle.run_id)
+    terminal = [e for e in events if e.type == "run.failed"][-1]
+    assert terminal.data.error.code == "tool.outcome_unverified"
+    assert not terminal.data.error.metadata["recovery_questionnaire"]["questions"]

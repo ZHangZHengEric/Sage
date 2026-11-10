@@ -65,6 +65,8 @@ class RunConfig(StrictModel):
                 update={"transient_retries": self.transient_retry_limit}))
         return self
 
+    # Legacy hosts can explicitly retain manual recovery interactions.
+    autonomous_error_recovery: bool = True
     automatic_stage_continuation: bool = True
     max_stages: int | None = Field(default=None, gt=0)
     flow_boundary: Literal["complete_node", "continue_node"] | None = None

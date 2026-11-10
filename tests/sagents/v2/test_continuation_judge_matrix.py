@@ -550,7 +550,7 @@ async def test_explicit_status_only_requests_guidance_at_step_limit():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("finish_reason", ["length", "max_tokens", "max_output_tokens"])
+@pytest.mark.parametrize("finish_reason", ["length", "max_tokens", "max_output_tokens", "MAX_TOKENS"])
 @pytest.mark.parametrize(
     "policy_name", ["deterministic", "explicit", "hybrid", "judge"]
 )

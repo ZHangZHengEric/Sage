@@ -477,7 +477,7 @@ async def test_driver_factory_failure_after_acceptance_is_streamed_and_replayabl
     assert final.state == RunState.FAILED
     assert events[-1].type == "run.failed"
     error = cast(RunEventData, events[-1].data).error
-    assert cast('RuntimeErrorInfo', error).metadata["recovery_questionnaire"]["questions"]
+    assert not cast('RuntimeErrorInfo', error).metadata["recovery_questionnaire"]["questions"]
     assert cast('RuntimeErrorInfo', error).metadata["recovery_questionnaire"]["resumable"] is False
     replay = await runtime.session_store.read_events(final.run_id)
     assert replay[-1] == events[-1]
@@ -505,7 +505,7 @@ async def test_schedule_accepted_run_submission_failure_is_durable():
     events = await runtime.session_store.read_events(handle.run_id)
     assert final.state == RunState.FAILED
     assert events[-1].type == "run.failed"
-    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).metadata["recovery_questionnaire"]["questions"]
+    assert not cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).metadata["recovery_questionnaire"]["questions"]
 
 
 @pytest.mark.asyncio
@@ -598,6 +598,6 @@ async def test_factory_failure_survives_filesystem_store_reopen(tmp_path):
         assert restored.state == RunState.FAILED
         assert replay[-1].event_id == events[-1].event_id
         assert replay[-1].data.error.code == "model.provider_permanent"
-        assert replay[-1].data.error.metadata["recovery_questionnaire"]["questions"]
+        assert not replay[-1].data.error.metadata["recovery_questionnaire"]["questions"]
     finally:
         await reopened.close()

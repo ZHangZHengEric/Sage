@@ -152,6 +152,7 @@ class LoopChildRunExecutor:
             deadline_seconds=parent_command.config.deadline_seconds,
             max_stages=parent_command.config.max_stages,
             automatic_stage_continuation=parent_command.config.automatic_stage_continuation,
+            autonomous_error_recovery=parent_command.config.autonomous_error_recovery,
             transient_retry_limit=parent_command.config.transient_retry_limit,
             model_recovery=parent_command.config.model_recovery,
             priority=parent_command.config.priority,

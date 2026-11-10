@@ -228,6 +228,7 @@ async def setup_loop(
     deadline_seconds=None,
     transient_retry_limit=3,
     automatic_stage_continuation=False,
+    autonomous_error_recovery=False,
     max_stages=None,
     clock=None,
     actor_context=CONTEXT,
@@ -258,6 +259,7 @@ async def setup_loop(
                 deadline_seconds=deadline_seconds,
                 transient_retry_limit=transient_retry_limit,
                 automatic_stage_continuation=automatic_stage_continuation,
+                autonomous_error_recovery=autonomous_error_recovery,
                 max_stages=max_stages,
                 flow_boundary=flow_boundary,
                 metadata=(
