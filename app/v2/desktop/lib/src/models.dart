@@ -1131,6 +1131,7 @@ class Conversation {
   int previewSequence;
   String? previewEpoch;
   RunStatus status;
+  String? modelRecoveryNotice;
 
   /// Transient UI state driven by reasoning lifecycle events.
   /// Reasoning content is intentionally never retained or rendered.

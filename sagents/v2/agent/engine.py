@@ -11,10 +11,10 @@ import asyncio
 import hashlib
 import inspect
 import json
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from dataclasses import dataclass
 from collections.abc import Callable, AsyncGenerator, Awaitable
-from typing import Any, cast
+from typing import cast
 
 from sagents.v2.runtime.execution.ownership import (
     can_defer_run,
@@ -35,6 +35,10 @@ from sagents.v2.model.contracts import (
     ModelMessage,
     ModelResponse,
     ModelToolCall,
+)
+from sagents.v2.contracts.model_recovery import ModelRecoveryAction, ModelRecoveryState, ModelFailure, ModelFailureKind
+from sagents.v2.model.recovery_policy import (
+    ModelRecoveryPolicy, checked_response, reserve_recovery, failure_from_error,
 )
 from sagents.v2.agent.step_request import (
     AgentStepRequestBuilder,
@@ -174,8 +178,6 @@ class AgentLoopEngine:
     # Items are cancelled and never enter canonical model history.
     _PROVIDER_RETRY_BASE_SECONDS = 1.0
     _PROVIDER_RETRY_MAX_SECONDS = 60.0
-    _MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES = 2
-    _MAX_MODEL_ARGUMENT_RECOVERIES = 2
 
     """Composable model/tool loop with durable, resumable side-effect barriers."""
 
@@ -353,51 +355,54 @@ class AgentLoopEngine:
             )
         except Exception as exc:
             return await self._fail_skill_initialization(run, state, command, exc, context)
-        tool_selection_task = asyncio.create_task(
-            self._prepare_tool_selection(
-                command=command,
-                run_id=run_id,
-                messages=messages,
-                language=context.language,
+        from sagents.v2.model.recovery_scope import recovery_scope
+        scope = await self._create_recovery_scope(run, state, command, context)
+        with recovery_scope(scope):
+            tool_selection_task = asyncio.create_task(
+                self._prepare_tool_selection(
+                    command=command,
+                    run_id=run_id,
+                    messages=messages,
+                    language=context.language,
+                )
             )
-        )
-        try:
-            if self.automatic_memory_recall:
-                run, state = await self._run_automatic_memory_recall(
-                    run, state, command, context
-                )
-            await tool_selection_task
-        except BaseException as exc:
-            if not tool_selection_task.done():
-                tool_selection_task.cancel()
-            await asyncio.gather(tool_selection_task, return_exceptions=True)
-            if isinstance(exc, Exception):
-                error = (
-                    exc.info
-                    if isinstance(exc, SageV2Error)
-                    else RuntimeErrorInfo(
-                        code="loop.preparation_failed",
-                        category=ErrorCategory.PROVIDER_PERMANENT,
-                        message=exception_diagnostic_message(exc),
-                        safe_to_resume=True,
+            try:
+                if self.automatic_memory_recall:
+                    run, state = await self._run_automatic_memory_recall(
+                        run, state, command, context
                     )
-                )
-                if self._provider_retry_allowed(error, command, state) and (
-                    not self.automatic_memory_recall
-                    or (not tool_selection_task.cancelled() and tool_selection_task.exception() is exc)
-                ):
-                    run, state = await self._schedule_provider_retry(
-                        await self.runtime.get_run(run.run_id), state,
-                        new_id("step_preparation"), error, command, context,
+                await tool_selection_task
+            except BaseException as exc:
+                if not tool_selection_task.done():
+                    tool_selection_task.cancel()
+                await asyncio.gather(tool_selection_task, return_exceptions=True)
+                if isinstance(exc, Exception):
+                    error = (
+                        exc.info
+                        if isinstance(exc, SageV2Error)
+                        else RuntimeErrorInfo(
+                            code="loop.preparation_failed",
+                            category=ErrorCategory.PROVIDER_PERMANENT,
+                            message=exception_diagnostic_message(exc),
+                            safe_to_resume=True,
+                        )
                     )
-                    if can_defer_run(run.run_id):
-                        return run
-                    return await self._drive(run, state, context)
-                return await self._fail(
-                    run, state, new_id("step_preparation"), error, context
-                )
-            raise
-        return await self._drive(run, state, context)
+                    if self._provider_retry_allowed(error, command, state) and (
+                        not self.automatic_memory_recall
+                        or (not tool_selection_task.cancelled() and tool_selection_task.exception() is exc)
+                    ):
+                        run, state = await self._schedule_provider_retry(
+                            await self.runtime.get_run(run.run_id), state,
+                            new_id("step_preparation"), error, command, context,
+                        )
+                        if can_defer_run(run.run_id):
+                            return run
+                        return await self._drive(run, state, context)
+                    return await self._fail(
+                        run, state, new_id("step_preparation"), error, context
+                    )
+                raise
+            return await self._drive(run, state, context)
 
     async def _restore_skill_state(self, run_id, *, checkpoint_state=None, legacy=False) -> None:
         if not self.preload_skills or self.skill_loader is None:
@@ -1108,6 +1113,7 @@ class AgentLoopEngine:
             "agent-loop/1",
             "agent-loop/2",
             "agent-loop/3",
+            "agent-loop/4",
         }:
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -1453,6 +1459,67 @@ class AgentLoopEngine:
                     )
         return await self._drive(run, state, context)
 
+    async def _create_recovery_scope(self, run, state, command, context):
+        from sagents.v2.model.recovery_scope import RecoveryScope
+        scope = RecoveryScope(config=command.config.model_recovery, clock=self.clock,
+            run_requests=state.model_recovery.run_requests)
+        # Auxiliary reservations are durable events, never stale whole-loop
+        # checkpoints: a Judge may run after tools have already committed.
+        for event in await self.runtime.session_store.read_events(run.run_id):
+            error = getattr(event.data, "error", None)
+            detail = error.metadata.get("recovery", {}) if error else {}
+            scope.run_requests = max(scope.run_requests, detail.get("run_attempts", 0))
+            if detail.get("episode_key"):
+                scope.episode_counts[detail["episode_key"]] = max(
+                    scope.episode_counts.get(detail["episode_key"], 0), detail.get("attempt", 0))
+                if detail.get("deadline"):
+                    scope.episode_deadlines[detail["episode_key"]] = datetime.fromisoformat(detail["deadline"])
+            if detail.get("auxiliary_key") and detail.get("state"):
+                scope.states[detail["auxiliary_key"]] = ModelRecoveryState.model_validate(detail["state"])
+
+        async def persist_auxiliary(key, reservation, error, decision):
+            current = await self.runtime.get_run(run.run_id)
+            if current.state != RunState.RUNNING:
+                raise SageV2Error(RuntimeErrorInfo(code="model.recovery_cancelled",
+                    category=ErrorCategory.CANCELLED, message="Model recovery was cancelled"))
+            error = error.model_copy(update={"metadata": {**error.metadata,
+                "recovery": {"version": "model-recovery/1", **decision.model_dump(mode="json"),
+                    "auxiliary_key": key, "state": reservation.model_dump(mode="json"),
+                    "attempt": reservation.episode_requests, "run_attempts": reservation.run_requests,
+                    "episode_key": scope.step_key, "deadline": reservation.deadline.isoformat() if reservation.deadline else None}}})
+            phase = error.metadata.get("recovery_phase", "retry_scheduled")
+            await self._commit_running(current, context, (
+                EventDraft(type=f"step.{phase}", turn_id=state.turn_id,
+                    data=StepEventData(state=phase, attempt=max(1, reservation.episode_requests),
+                        retry_at=self.clock() + timedelta(seconds=decision.delay_seconds), error=error)),
+            ))
+        scope.persist = persist_auxiliary
+        scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
+        # Older checkpoints have counters but no versioned recovery events.
+        scope.episode_counts[scope.step_key] = max(scope.episode_counts.get(scope.step_key, 0), state.model_recovery.episode_requests)
+        if state.model_recovery.deadline is not None:
+            existing_deadline = scope.episode_deadlines.get(scope.step_key)
+            scope.episode_deadlines[scope.step_key] = min(existing_deadline, state.model_recovery.deadline) if existing_deadline else state.model_recovery.deadline
+        async def record_failed_usage(usage):
+            async with scope.reservation_lock:
+                current = await self.runtime.get_run(run.run_id)
+                if current.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                    await self._commit_running(current, context, (
+                        EventDraft(type="usage.recorded", turn_id=state.turn_id, data=UsageEventData(usage=usage)),
+                    ), expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED})
+        scope.record_failed_usage = record_failed_usage
+        async def check_call():
+            from sagents.v2.runtime.execution.budgets import evaluate_run_budget
+            current = await self.runtime.get_run(run.run_id)
+            if current.state != RunState.RUNNING:
+                raise SageV2Error(RuntimeErrorInfo(code="model.recovery_cancelled",
+                    category=ErrorCategory.CANCELLED, message="Model call was cancelled"))
+            budget = await evaluate_run_budget(self.runtime.session_store, current, self.clock(), usage_cache=self._budget_usage_cache)
+            if budget.error is not None:
+                raise SageV2Error(budget.error)
+        scope.check = check_call
+        return scope
+
     async def _drive(
         self,
         run: RunSnapshot,
@@ -1474,14 +1541,20 @@ class AgentLoopEngine:
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
         context_overflow_retries = 0
-        while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
-            iteration = await self._drive_step(run, state, context, command, max_steps,
-                empty_response_retries, context_overflow_retries)
-            run, state = iteration.run, iteration.state
-            empty_response_retries = iteration.empty_response_retries
-            context_overflow_retries = iteration.context_overflow_retries
-            if iteration.stop:
-                return run
+        from sagents.v2.model.recovery_scope import recovery_scope
+        scope = await self._create_recovery_scope(run, state, command, context)
+        with recovery_scope(scope):
+            while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
+                state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(
+                    update={"run_requests": max(scope.run_requests, state.model_recovery.run_requests)})})
+                iteration = await self._drive_step(run, state, context, command, max_steps,
+                    empty_response_retries, context_overflow_retries)
+                run, state = iteration.run, iteration.state
+                empty_response_retries = iteration.empty_response_retries
+                context_overflow_retries = iteration.context_overflow_retries
+                if iteration.stop:
+                    return run
         return run
 
     async def _drive_step(
@@ -1531,6 +1604,19 @@ class AgentLoopEngine:
             return _DriveIteration(await self._suspend_at_safe_point(await self.runtime.get_run(run.run_id), state, context), state, empty_response_retries, context_overflow_retries, stop=True)
         except Exception as exc:
             return _DriveIteration(await self._fail_skill_initialization(run, state, command, exc, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        if state.model_recovery.pending_action is not None and state.model_recovery.dispatch_started:
+            # The previous worker could have sent this reserved request. Its
+            # allowance stays consumed; never replay it as an uncharged request.
+            error = RuntimeErrorInfo(code="model.recovery_interrupted", category=ErrorCategory.VALIDATION,
+                message="A model recovery request was interrupted by worker restart.", safe_to_resume=True,
+                metadata={"model_failure": ModelFailure(kind=state.model_recovery.pending_kind or ModelFailureKind.UNKNOWN).model_dump(mode="json")})
+            run, state, recovered = await self._recover_model_failure(run, state, None, error, command, context)
+            return _DriveIteration(run, state, empty_response_retries, context_overflow_retries,
+                stop=not recovered or can_defer_run(run.run_id))
+        if state.model_recovery.pending_action == ModelRecoveryAction.REPAIR_REQUEST and state.rejected_input_characters is not None:
+            request_compression = getattr(self.context_assembler, "request_compression", None)
+            if callable(request_compression):
+                request_compression(run.run_id)
         await self._prepare_self_configuration(run.run_id, context)
         if self.self_configuration is not None:
             state = state.model_copy(
@@ -1625,6 +1711,7 @@ class AgentLoopEngine:
                     language=context.language,
                 )
             except SageV2Error as exc:
+                run = await self.runtime.get_run(run.run_id)
                 if self._provider_retry_allowed(exc.info, command, state):
                     run, state = await self._schedule_provider_retry(
                         run, state, step_id, exc.info, command, context
@@ -1644,12 +1731,21 @@ class AgentLoopEngine:
                     request.max_output_tokens or budget.remaining_tokens,
                     budget.remaining_tokens,
                 )})
+            run = await self.runtime.get_run(run.run_id)
             tools = prepared_step.tools
             system_requirements = self._system_requirements(request.messages)
             available_tools = tuple(tool.name for tool in tools)
             try:
                 # Phase 3: deltas are emitted as replay-buffered events, followed
                 # by completed Items that are authoritative for final content.
+                request_size = len(json.dumps([m.model_dump(mode="json") for m in request.messages]))
+                if (state.rejected_input_characters is not None
+                    and request_size >= state.rejected_input_characters):
+                    raise SageV2Error(RuntimeErrorInfo(code="model.context_irreducible",
+                        category=ErrorCategory.VALIDATION, message="Context recovery did not reduce the rejected input."))
+                if state.model_recovery.pending_action is not None:
+                    state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(update={"dispatch_started": True})})
+                    run = await self._commit_running(run, context, (), recovery_state=state)
                 run, response, partial_suspension = await self._stream_model(
                     run, request, context, state, step_id
                 )
@@ -1661,115 +1757,12 @@ class AgentLoopEngine:
                     return _DriveIteration(await self._suspend_at_safe_point(run, state.model_copy(update={'retry_model_step': True}), context), state, empty_response_retries, context_overflow_retries, stop=True)
                 if run.state in TERMINAL_RUN_STATES:
                     return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
-                if self._provider_retry_allowed(exc.info, command, state):
-                    run, state = await self._schedule_provider_retry(
-                        run, state, step_id, exc.info, command, context
-                    )
-                    if can_defer_run(run.run_id):
-                        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
-                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
-                if (
-                    can_repair_model_arguments(exc.info)
-                    and state.pending_tool_call is None
-                    and state.pending_response_step_id is None
-                ):
-                    run, state = await self._recover_model_arguments(
-                        run,
-                        state,
-                        step_id,
-                        exc.info,
-                        command,
-                        context,
-                    )
-                    if run.state != RunState.RUNNING:
-                        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
-                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
-                if (
-                    exc.info.code == "model.context_window_exceeded"
-                    and context_overflow_retries < 6
-                    and callable(
-                        getattr(self.context_assembler, "request_compression", None)
-                    )
-                ):
-                    context_overflow_retries += 1
-                    cast(Callable[[str], Any], getattr(self.context_assembler, "request_compression"))(run.run_id)
-                    retry_error = exc.info.model_copy(
-                        update={
-                            "metadata": {
-                                **exc.info.metadata,
-                                "transparent_retry_attempt": context_overflow_retries,
-                                "transparent_retry_limit": 6,
-                            }
-                        }
-                    )
-                    run = await self._commit_running(
-                        run,
-                        context,
-                        (
-                            EventDraft(
-                                type="step.retry_scheduled",
-                                turn_id=state.turn_id,
-                                step_id=step_id,
-                                data=StepEventData(
-                                    state="retry_scheduled",
-                                    attempt=context_overflow_retries,
-                                    retry_at=self.clock(),
-                                    error=retry_error,
-                                ),
-                            ),
-                        ),
-                    )
-                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
-                if (
-                    exc.info.code == "model.empty_semantic_response"
-                    and empty_response_retries
-                    < self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
-                ):
-                    empty_response_retries += 1
-                    retry_error = exc.info.model_copy(
-                        update={
-                            "retryable": True,
-                            "metadata": {
-                                **exc.info.metadata,
-                                "transparent_retry_attempt": empty_response_retries,
-                                "transparent_retry_limit": (
-                                    self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
-                                ),
-                            },
-                        }
-                    )
-                    run = await self._commit_running(
-                        run,
-                        context,
-                        (
-                            EventDraft(
-                                type="step.retry_scheduled",
-                                turn_id=state.turn_id,
-                                step_id=step_id,
-                                data=StepEventData(
-                                    state="retry_scheduled",
-                                    attempt=empty_response_retries,
-                                    retry_at=self.clock(),
-                                    error=retry_error,
-                                ),
-                            ),
-                        ),
-                    )
-                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
-                error = exc.info
-                if error.code == "model.empty_semantic_response":
-                    error = error.model_copy(
-                        update={
-                            "retryable": True,
-                            "metadata": {
-                                **error.metadata,
-                                "transparent_retries_exhausted": (
-                                    empty_response_retries
-                                ),
-                            },
-                        }
-                    )
-                return _DriveIteration(await self._fail(run, state, step_id, error, context), state, empty_response_retries, context_overflow_retries, stop=True)
+                run, state, recovered = await self._recover_model_failure(
+                    run, state, step_id, exc.info.model_copy(update={"metadata": {
+                        **exc.info.metadata, "request_characters": request_size}}), command, context
+                )
+                return _DriveIteration(run, state, empty_response_retries, context_overflow_retries,
+                    stop=not recovered or can_defer_run(run.run_id))
             except Exception as exc:
                 return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='model.provider_error', category=ErrorCategory.PROVIDER_PERMANENT, message=str(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
             if partial_suspension is not None:
@@ -1782,6 +1775,10 @@ class AgentLoopEngine:
                 observe_response(request, response)
             empty_response_retries = 0
             context_overflow_retries = 0
+            state = state.model_copy(update={
+                "model_recovery": state.model_recovery.next_call(),
+                "provider_retry_attempts": 0, "rejected_input_characters": None,
+            })
             state = self._state_after_model_response(
                 state, response, step_id, system_requirements, available_tools
             )
@@ -2060,7 +2057,12 @@ class AgentLoopEngine:
                 or command.config.metadata.get("max_total_tokens")
             ),
         )
-        if questionnaire_completed:
+        invalid_tool_results = [result for result in completed_tool_results if result.error is not None
+            and result.error.code in {"tool.not_found", "tool.arguments_invalid", "tool.input_schema_invalid"}]
+        if invalid_tool_results:
+            decision = ContinuationDecision(action=ContinuationAction.CONTINUE_STEP,
+                reason_code="tool.validation_retry", reason="Correct the failed calls using the available tool schemas and recorded validation feedback. Reuse successful sibling results; do not repeat completed operations.")
+        elif questionnaire_completed:
             # Match the established questionnaire_async contract: a
             # successfully validated result is a terminal boundary for this
             # Run, while the answer arrives as the next user turn. The
@@ -2075,7 +2077,37 @@ class AgentLoopEngine:
                 },
             )
         else:
-            decision = await self.continuation_policy.decide(continuation_context)
+            try:
+                decision = await self.continuation_policy.decide(continuation_context)
+            except Exception as exc:
+                run = await self.runtime.get_run(run.run_id)
+                error = exc.info if isinstance(exc, SageV2Error) else RuntimeErrorInfo(
+                    code="model.internal_error", category=ErrorCategory.PROVIDER_PERMANENT,
+                    message="The continuation evaluator failed unexpectedly.", safe_to_resume=True)
+                return _DriveIteration(await self._fail(run, state, step_id, error, context),
+                    state, empty_response_retries, context_overflow_retries, stop=True)
+            run = await self.runtime.get_run(run.run_id)
+        if (decision.action == ContinuationAction.CONTINUE_STEP and decision.reason_code in {
+            "response.output_limit", "openui.validation_retry", "output.self_check_retry", "tool.validation_retry",
+            "loop.inspection_correction", "loop.pattern_correction",
+        }):
+            from sagents.v2.model.recovery_scope import reserve_additional_request, current_recovery_scope
+            try:
+                await reserve_additional_request(
+                    "arguments" if "validation" in decision.reason_code or "self_check" in decision.reason_code else "continuation",
+                    purpose="output_repair")
+                run = await self.runtime.get_run(run.run_id)
+                scope = current_recovery_scope()
+                if scope:
+                    state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(update={
+                        "logical_call_id": scope.step_key, "run_requests": scope.run_requests,
+                        "episode_requests": scope.episode_counts.get(scope.step_key, 0),
+                        "deadline": scope.episode_deadlines.get(scope.step_key),
+                    })})
+            except SageV2Error as exc:
+                run = await self.runtime.get_run(run.run_id)
+                return _DriveIteration(await self._fail(run, state, step_id, exc.info, context),
+                    state, empty_response_retries, context_overflow_retries, stop=True)
         if decision.usage.input_tokens or decision.usage.output_tokens:
             state = state.model_copy(
                 update={
@@ -2378,191 +2410,102 @@ class AgentLoopEngine:
             and payload.get("should_end") is True
         )
 
-    async def _recover_model_arguments(
-        self, run, state, step_id, error, command, context
-    ) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
-        """Checkpoint a bounded inference repair; never retry a Tool execution."""
-        run = await self.runtime.get_run(run.run_id)
-        if run.state in TERMINAL_RUN_STATES:
-            return run, state
-        usage = UsageSummary.model_validate(error.metadata.get("usage") or {})
-        state = state.model_copy(
-            update={
-                "total_input_tokens": state.total_input_tokens + usage.input_tokens,
-                "total_output_tokens": state.total_output_tokens + usage.output_tokens,
-            }
-        )
-        usage_draft = EventDraft(
-            type="usage.recorded",
-            turn_id=state.turn_id,
-            step_id=step_id,
-            data=UsageEventData(usage=usage),
-        )
-        max_tokens = command.config.max_total_tokens or command.config.metadata.get(
-            "max_total_tokens"
-        )
-        budget_error = None
-        if (
-            max_tokens
-            and state.total_input_tokens + state.total_output_tokens >= max_tokens
-        ):
-            budget_error = "budget.max_tokens"
-        elif (
-            command.config.deadline_seconds is not None
-            and (self.clock() - run.created_at).total_seconds()
-            >= command.config.deadline_seconds
-        ):
-            budget_error = "budget.deadline"
-        exhausted = (
-            state.model_argument_recovery_attempts
-            >= self._MAX_MODEL_ARGUMENT_RECOVERIES
-        )
-        if (
-            budget_error
-            or exhausted
-            or state.step_number >= (command.config.max_steps or 24)
-        ):
-            run = await self._commit_running(
-                run, context, (usage_draft,), expected_states={run.state}
-            )
-            if budget_error:
-                error = RuntimeErrorInfo(
-                    code=budget_error,
-                    category=ErrorCategory.VALIDATION,
-                    message=tr("error." + budget_error, context.language),
-                    safe_to_resume=True,
-                    metadata={"model_error_code": error.code},
-                )
-            else:
-                error = error.model_copy(
-                    update={
-                        "message_key": "error.model.argument_recovery_exhausted"
-                        if exhausted
-                        else "recovery.max_steps",
-                        "metadata": {
-                            **error.metadata,
-                            "transparent_retries_exhausted": True,
-                            "transparent_retry_limit": self._MAX_MODEL_ARGUMENT_RECOVERIES,
-                        },
-                    }
-                )
-            return await self._fail(run, state, step_id, error, context), state
-        attempt = state.model_argument_recovery_attempts + 1
-        state = state.model_copy(
-            update={
-                "model_argument_recovery_attempts": attempt,
-                "pending_continuation_reason": argument_recovery_guidance(error),
-                "retry_model_step": True,
-                "step_number": state.step_number + 1,
-            }
-        )
-        if run.state == RunState.SUSPEND_REQUESTED:
-            run = await self._commit_running(
-                run,
-                context,
-                (usage_draft,),
-                expected_states={RunState.SUSPEND_REQUESTED},
-            )
-            return await self._suspend_at_safe_point(run, state, context), state
-        retry_error = error.model_copy(
-            update={
-                "metadata": {
-                    **{
-                        key: value
-                        for key, value in error.metadata.items()
-                        if key != "raw_arguments"
-                    },
-                    "transparent_retry_attempt": attempt,
-                    "transparent_retry_limit": self._MAX_MODEL_ARGUMENT_RECOVERIES,
-                }
-            }
-        )
-        checkpoint, _ = await self._checkpoint_records(
-            run, state, reason=SuspensionReason.MANUAL_PAUSE
-        )
-        checkpoint = checkpoint.model_copy(
-            update={
-                "state": {**checkpoint.state, "execution_checkpoint": True},
-            }
-        )
-        committed = await self.runtime.session_store.commit_run(
-            run_id=run.run_id,
-            expected_revision=run.revision,
-            expected_states={RunState.RUNNING},
-            new_state=RunState.RUNNING,
-            drafts=(
-                usage_draft,
-                EventDraft(
-                    type="step.retry_scheduled",
-                    turn_id=state.turn_id,
-                    step_id=step_id,
-                    data=StepEventData(
-                        state="retry_scheduled",
-                        attempt=attempt,
-                        retry_at=self.clock(),
-                        error=retry_error,
-                    ),
-                ),
-            ),
-            checkpoint=checkpoint,
-            context=context,
-            idempotency_key=f"model-argument-repair:{run.run_id}:{step_id}",
-        )
-        return committed.run, state
-
     async def _stream_model(self, run, request, context, state, step_id) -> tuple[RunSnapshot, ModelResponse | None, RunSnapshot | None]:
         return await self.stream_model_step(run, request, context, state, step_id)
 
+    async def _recover_model_failure(self, run, state, step_id, error, command, context):
+        import random
+        config = command.config.model_recovery
+        now = self.clock()
+        recovery = state.model_recovery
+        from sagents.v2.model.recovery_scope import current_recovery_scope
+        scope = current_recovery_scope()
+        if scope is not None:
+            recovery = recovery.model_copy(update={
+                "run_requests": max(recovery.run_requests, scope.run_requests),
+                "episode_requests": max(recovery.episode_requests, scope.episode_counts.get(scope.step_key, 0)),
+                "deadline": recovery.deadline or scope.episode_deadlines.get(scope.step_key),
+            })
+        usage = UsageSummary.model_validate(error.metadata.get("usage") or {})
+        state = state.model_copy(update={
+            "total_input_tokens": state.total_input_tokens + usage.input_tokens,
+            "total_output_tokens": state.total_output_tokens + usage.output_tokens,
+        })
+        run = await self._commit_running(run, context, (
+            EventDraft(type="usage.recorded", turn_id=state.turn_id, step_id=step_id,
+                data=UsageEventData(usage=usage)),
+        ))
+        max_tokens = command.config.max_total_tokens or command.config.metadata.get("max_total_tokens")
+        if max_tokens and state.total_input_tokens + state.total_output_tokens >= max_tokens:
+            error = RuntimeErrorInfo(code="budget.max_tokens", category=ErrorCategory.VALIDATION,
+                message="The run token budget has been exhausted.")
+        if can_repair_model_arguments(error) and state.step_number >= (command.config.max_steps or 24):
+            error = error.model_copy(update={"retryable": False,
+                "metadata": {**error.metadata, "model_failure": {
+                    "kind": "budget", "phase": "response"}}})
+        if command.config.deadline_seconds is not None:
+            deadline = run.created_at + timedelta(seconds=command.config.deadline_seconds)
+            if recovery.deadline is None or deadline < recovery.deadline:
+                recovery = recovery.model_copy(update={"deadline": deadline})
+        decision = ModelRecoveryPolicy().decide(error, recovery, config, now=now,
+            blocked=state.pending_tool_call is not None or state.pending_response_step_id is not None,
+            can_compress=callable(getattr(self.context_assembler, "request_compression", None)),
+            jitter=random.uniform(0, 0.25))
+        if decision.action == ModelRecoveryAction.STOP_WITH_EXPLANATION:
+            if decision.reason == "retry_after_exceeds_deadline" and command.config.deadline_seconds is not None:
+                error = error.model_copy(update={"code": "budget.deadline", "message": "Insufficient run time remains for model recovery."})
+            error = error.model_copy(update={"metadata": {**error.metadata,
+                "recovery": {"version": "model-recovery/1", **decision.model_dump(mode="json"),
+                    "attempt": recovery.episode_requests, "run_attempts": recovery.run_requests},
+                "transparent_retries_exhausted": recovery.episode_requests}})
+            return await self._fail(run, state, step_id, error, context), state, False
+        recovery = reserve_recovery(recovery, decision, config, now=now,
+            logical_call_id=scope.step_key if scope else step_id, error=error)
+        if scope is not None:
+            recovery = scope.account(recovery)
+        delay = max(decision.delay_seconds * self._PROVIDER_RETRY_BASE_SECONDS,
+                    failure_from_error(error).retry_after_seconds or 0)
+        retry_at = now + timedelta(seconds=delay)
+        state = state.model_copy(update={
+            "model_recovery": recovery,
+            "rejected_input_characters": error.metadata.get("request_characters")
+                if decision.counter == "context" else state.rejected_input_characters,
+            "pending_continuation_reason": (
+                argument_recovery_guidance(error) if can_repair_model_arguments(error)
+                else decision.guidance or state.pending_continuation_reason),
+            "step_number": state.step_number + (1 if can_repair_model_arguments(error) else 0),
+            "model_argument_recovery_attempts": state.model_argument_recovery_attempts + (1 if can_repair_model_arguments(error) else 0),
+            "retry_model_step": True, "provider_retry_at": retry_at,
+            "automatic_resume_at": retry_at, "automatic_resume_reason": "model.recovery",
+            "provider_retry_attempts": recovery.counts.get("transient", 0),
+        })
+        error = error.model_copy(update={"metadata": {**error.metadata,
+            "transparent_retry_attempt": recovery.counts[decision.counter],
+            "transparent_retry_limit": decision.limit, "retry_delay_seconds": delay,
+            "automatic_recovery": True,
+            "recovery": {"version": "model-recovery/1", **decision.model_dump(mode="json"),
+                "attempt": recovery.episode_requests, "run_attempts": recovery.run_requests,
+                "episode_key": scope.step_key if scope else recovery.logical_call_id,
+                "deadline": recovery.deadline.isoformat() if recovery.deadline else None},
+        }})
+        run = await self._commit_running(run, context, (
+            EventDraft(type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
+                data=StepEventData(state="retry_scheduled", attempt=recovery.episode_requests,
+                    retry_at=retry_at, error=error)),
+        ), recovery_state=state)
+        if decision.action == ModelRecoveryAction.REPAIR_REQUEST:
+            self.context_assembler.request_compression(run.run_id)
+        return run, state, True
+
     @staticmethod
     def _provider_retry_allowed(error, command, state) -> bool:
-        limit = command.config.transient_retry_limit
-        return (
-            error.retryable
-            and error.category in {ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED}
-            and error.code != "model.empty_semantic_response"
-            and state.pending_tool_call is None
-            and state.pending_response_step_id is None
-            and (limit is None or state.provider_retry_attempts < limit)
-        )
+        return ModelRecoveryPolicy().decide(error, state.model_recovery,
+            command.config.model_recovery, now=datetime.now(timezone.utc),
+            blocked=state.pending_tool_call is not None or state.pending_response_step_id is not None,
+        ).action == ModelRecoveryAction.RETRY_SAME_REQUEST
 
-    async def _schedule_provider_retry(self, run, state, step_id, error, command, context) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
-        # Only uncommitted inference/preparation is retried. Never redispatch
-        # completed tools or replay a tool whose remote outcome is unknown.
-        attempt = state.provider_retry_attempts + 1
-        delay = min(
-            self._PROVIDER_RETRY_MAX_SECONDS,
-            self._PROVIDER_RETRY_BASE_SECONDS * 2 ** min(attempt - 1, 16),
-        )
-        retry_at = self.clock() + timedelta(seconds=delay)
-        if command.config.deadline_seconds is not None:
-            retry_at = min(retry_at, run.created_at + timedelta(seconds=command.config.deadline_seconds))
-        state = state.model_copy(update={
-            "provider_retry_attempts": attempt,
-            "provider_retry_at": retry_at,
-            "retry_model_step": True,
-            "automatic_resume_at": retry_at,
-            "automatic_resume_reason": "provider.retry",
-        })
-        error = localize_error(error, context.language)
-        error = error.model_copy(update={
-            "metadata": {
-                **error.metadata,
-                "transparent_retry_attempt": attempt,
-                "transparent_retry_limit": command.config.transient_retry_limit,
-                "retry_delay_seconds": delay,
-                "automatic_recovery": True,
-            },
-        })
-        run = await self._commit_running(
-            run, context,
-            (EventDraft(
-                type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
-                data=StepEventData(
-                    state="retry_scheduled", attempt=attempt, retry_at=retry_at, error=error,
-                ),
-            ),),
-            recovery_state=state,
-        )
+    async def _schedule_provider_retry(self, run, state, step_id, error, command, context):
+        run, state, _ = await self._recover_model_failure(run, state, step_id, error, command, context)
         return run, state
 
     async def _wait_for_model_retry(self, run_id, delay) -> None:
@@ -2572,7 +2515,7 @@ class AgentLoopEngine:
             if (await self.runtime.get_run(run_id)).state != RunState.RUNNING:
                 return
 
-    async def _control_aware_model_events(self, stream, run, command) -> AsyncGenerator[tuple[ModelStreamEvent | None, RunSnapshot | None], None]:
+    async def _control_aware_model_events(self, stream, run, command, recovery_deadline=None) -> AsyncGenerator[tuple[ModelStreamEvent | None, RunSnapshot | None], None]:
         """Poll durable control/deadline state without cancelling socket reads."""
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
@@ -2594,6 +2537,12 @@ class AgentLoopEngine:
                         timeout = 0
                     else:
                         timeout = min(timeout, remaining)
+                if recovery_deadline is not None:
+                    remaining = (recovery_deadline - self.clock()).total_seconds()
+                    if remaining <= 0:
+                        raise SageV2Error(RuntimeErrorInfo(code="model.recovery_exhausted",
+                            category=ErrorCategory.VALIDATION, message="Model recovery deadline reached"))
+                    timeout = min(timeout, remaining)
                 done, _ = await asyncio.wait({pending}, timeout=timeout)
                 if done:
                     try:
@@ -2635,7 +2584,7 @@ class AgentLoopEngine:
         stream = self.model.stream(request)
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
-        controlled_events = self._control_aware_model_events(stream, run, command)
+        controlled_events = self._control_aware_model_events(stream, run, command, state.model_recovery.deadline)
 
         async def commit_delta_batch(batch_run, drafts):
             return await self.runtime.session_store.commit_model_stream_batch(
@@ -2763,9 +2712,23 @@ class AgentLoopEngine:
                         },
                     )
                 )
+            if response is not None:
+                if text and not response.text:
+                    response = ModelResponse.model_validate({
+                        **response.model_dump(), "text": text, "termination": None,
+                    })
+                checked_response(response, request)
         except SageV2Error as exc:
+            # Some protocols send content only in the terminal envelope. Keep
+            # that evidence as interrupted output even when validation rejects it.
+            if response is not None:
+                text = text or response.text
+                reasoning = reasoning or response.reasoning
+                text_started = text_started or bool(text)
+                reasoning_started = reasoning_started or bool(reasoning)
             if (
                 can_repair_model_arguments(exc.info)
+                or "model_failure" in exc.info.metadata
                 or (
                     exc.info.category
                     in {ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED}
@@ -2802,7 +2765,10 @@ class AgentLoopEngine:
                 raise SageV2Error(
                     exc.info.model_copy(
                         update={
-                            "metadata": {**exc.info.metadata, "response_started": True},
+                            "metadata": {**exc.info.metadata, "response_started": True,
+                                "model_failure": failure_from_error(exc.info).model_copy(update={
+                                    "response_started": True, "has_text": bool(text), "has_reasoning": bool(reasoning),
+                                }).model_dump(mode="json")},
                         }
                     )
                 ) from exc
@@ -4663,12 +4629,22 @@ class AgentLoopEngine:
         if current.state in TERMINAL_RUN_STATES:
             await self._release_run_resources(run.run_id)
             return current
+        if current.state == RunState.SUSPEND_REQUESTED and error.category == ErrorCategory.CANCELLED:
+            return await self._suspend_at_safe_point(current, state.model_copy(update={
+                "retry_model_step": state.pending_response_step_id is None}), context)
         # Retryability describes execution safety, not a reason to lock the
         # conversation behind a pending interaction. Explicit approvals, manual
         # pauses and uncertain side effects have dedicated suspension paths.
         if error.metadata.get("budget_scope") == "run_tree":
             from sagents.v2.runtime.execution.budgets import stop_budget_descendants
             await stop_budget_descendants(self.runtime, current, context)
+        if error.code.startswith("model.") or "model_failure" in error.metadata:
+            from sagents.v2.model.recovery_presentation import failure_presentation
+            summary = failure_presentation(error, language=context.language,
+                tool_call_ids=tuple(m.tool_call_id for m in state.messages if m.role == "tool" and m.tool_call_id),
+                correlation_id=run.run_id)
+            error = error.model_copy(update={"message": summary["message"],
+                "metadata": {**error.metadata, "failure_summary": summary}})
         recovery = error_recovery_payload(error, context.language, resumable=False)
         error = error.model_copy(
             update={

@@ -88,3 +88,24 @@ test('IM notification destination is explicit per Run and never carried into the
   assert.equal(requests[0].forwardedProps.notification_connection_id, undefined)
   assert.equal(requests[1].notification_connection_id, undefined)
 })
+
+test('model recovery updates one status and clears it on terminal success', async t => {
+  const statuses = []
+  t.mock.method(globalThis, 'fetch', async () => new Response([
+    { type: 'RUN_STARTED', threadId: 'recovery', runId: 'r1' },
+    { type: 'CUSTOM', name: 'sage.step.retry_scheduled', value: { error: { metadata: { recovery: {
+      version: 'model-recovery/1', action: 'retry_same_request', attempt: 1,
+    } } } } },
+    { type: 'CUSTOM', name: 'sage.step.retry_scheduled', value: { error: { metadata: { recovery: {
+      version: 'model-recovery/1', action: 'regenerate_with_guidance', attempt: 2,
+    } } } } },
+    { type: 'RUN_FINISHED', threadId: 'recovery', runId: 'r1' },
+  ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    headers: { 'Content-Type': 'text/event-stream' },
+  }))
+  const agent = createAguiAgent({ onRecovery: value => statuses.push(value) })
+  agent.threadId = 'recovery'
+  await agent.runAgent({ runId: 'r1', tools: [], context: [] })
+  assert.deepEqual(statuses.map(s => s?.action || null), [null, 'retry_same_request', 'regenerate_with_guidance', null])
+  assert.equal(agent.messages.length, 0)
+})

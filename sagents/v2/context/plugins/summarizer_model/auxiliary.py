@@ -1,6 +1,7 @@
 """API-driven recovery for auxiliary inference views; canonical history is immutable."""
 
 from __future__ import annotations
+from sagents.v2.model.recovery_scope import recovery_scope
 from sagents.v2.model.recovery import (
     collect_response,
     is_context_overflow,
@@ -22,9 +23,12 @@ async def stream_auxiliary_model(model, request):
     from sagents.v2.model.contracts import ModelStreamEvent
 
     original = request
-    with model_call_budget():
+    with model_call_budget(), recovery_scope():
         for attempt in range(7):
             try:
+                if attempt:
+                    from sagents.v2.model.recovery_scope import reserve_additional_request
+                    await reserve_additional_request("context", purpose="auxiliary_context_retry")
                 response = await collect_response(model, request)
                 capabilities_method = getattr(model, "capabilities", None)
                 if capabilities_method is not None:
@@ -38,6 +42,8 @@ async def stream_auxiliary_model(model, request):
             except SageV2Error as exc:
                 if not is_context_overflow(exc) or attempt == 6:
                     raise
+                from sagents.v2.model.recovery_scope import reserve_additional_request
+                await reserve_additional_request("context", purpose="auxiliary_context", error=exc.info)
                 payload = tuple(
                     m for m in request.messages if m.role not in {"system", "developer"}
                 )

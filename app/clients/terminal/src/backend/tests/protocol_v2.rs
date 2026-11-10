@@ -519,3 +519,14 @@ fn real_always_ask_run_replays_approval_requests_and_denials() {
     assert!(request_at < resolved_at && resolved_at < finished_at);
     assert!(matches!(events.last(), Some(BackendEvent::Finished)));
 }
+
+#[test]
+fn model_recovery_updates_status_without_chat_messages() {
+    let mut state = BackendProtocolState::default();
+    for action in ["retry_same_request", "regenerate_with_guidance"] {
+        let events = state.parse_line(&native("step.retry_scheduled", None,
+            serde_json::json!({"error":{"metadata":{"recovery":{"action":action,"attempt":1}}}})));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], BackendEvent::Status(text) if !text.is_empty()));
+    }
+}

@@ -306,6 +306,7 @@ class CompositionResolver:
             "max_stages": parent_config.max_stages,
             "automatic_stage_continuation": parent_config.automatic_stage_continuation,
             "transient_retry_limit": parent_config.transient_retry_limit,
+            "model_recovery": parent_config.model_recovery,
             "priority": parent_config.priority,
         })
 

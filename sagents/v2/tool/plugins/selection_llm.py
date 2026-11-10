@@ -112,7 +112,11 @@ class LLMToolSelectionPolicy(ToolSelectionState):
             max_output_tokens=None,
             response_format="json_object",
             tool_choice="none",
-            metadata={"purpose": "tool_selection"},
+            metadata={"purpose": "tool_selection", "output_validation_schema": {
+                "type": "object", "required": ["tools"],
+                "properties": {"tools": {"type": "array", "items": {
+                    "type": "string", "enum": [tool.name for tool in context.tools]}}},
+            }},
         )
         response = None
         stream = stream_auxiliary_model(context.model, request)

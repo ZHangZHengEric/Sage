@@ -2899,6 +2899,18 @@ class WorkspaceController extends ChangeNotifier {
     final eventData = data is Map
         ? data.cast<String, Object?>()
         : const <String, Object?>{};
+    if (type == 'step.retry_scheduled') {
+      final recoveryError = eventData['error'];
+      final metadata = recoveryError is Map ? recoveryError['metadata'] : null;
+      final recovery = metadata is Map ? metadata['recovery'] : null;
+      if (recovery is Map) {
+        conversation.modelRecoveryNotice = recovery['action'] == 'retry_same_request'
+            ? '模型服务暂时不可用，正在重试'
+            : '正在修正模型输出';
+      }
+    } else if ({'message.delta', 'step.completed', 'step.recovery_completed', 'run.completed', 'run.failed', 'run.cancelled'}.contains(type)) {
+      conversation.modelRecoveryNotice = null;
+    }
     if (type == 'reasoning.started' || type == 'reasoning.delta') {
       conversation.thinking = true;
     } else if (type == 'reasoning.completed' ||

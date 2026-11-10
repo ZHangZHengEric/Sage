@@ -127,38 +127,150 @@ def reported_context_limit_error(response, capabilities):
     return None
 
 
-async def collect_response(model, request, *, transient_retries=3):
-    for attempt in range(transient_retries + 1):
-        consume_model_call()
-        stream = model.stream(request)
-        response = None
-        try:
-            async for event in stream:
-                if event.kind == ModelEventKind.COMPLETED:
-                    response = event.response
-                    if response is not None:
-                        break
-            if response is None:
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="model.stream_incomplete",
+async def _next_controlled_event(iterator, scope):
+    if scope.check is None:
+        return await anext(iterator)
+    pending = asyncio.create_task(anext(iterator))
+    try:
+        while not pending.done():
+            await asyncio.wait({pending}, timeout=.25)
+            await scope.check()
+        return pending.result()
+    finally:
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+
+
+async def collect_response(model, request, *, transient_retries=None, purpose=None, idle_timeout_seconds=None, on_event=None, manage_transport=True):
+    from sagents.v2.contracts.common import new_id
+    from sagents.v2.contracts.items import TextBlock
+    from sagents.v2.model.contracts import ModelMessage
+    from sagents.v2.contracts.model_recovery import ModelRecoveryAction, ModelRecoveryState
+    from sagents.v2.model.recovery_policy import ModelRecoveryPolicy, checked_response, reserve_recovery
+    from sagents.v2.model.recovery_scope import recovery_scope
+    import random
+
+    with recovery_scope() as scope:
+        config = scope.config
+        if transient_retries is not None:
+            config = config.model_copy(update={"transient_retries": min(transient_retries, config.transient_retries)})
+        purpose = purpose or request.metadata.get("purpose", "auxiliary")
+        key = f"{scope.step_key}:{purpose}"
+        state = scope.states.get(key, ModelRecoveryState())
+        if purpose == "capability_probe":
+            request = request.model_copy(update={"metadata": {**request.metadata, "capability_probe": True}})
+        original = request
+        if state.pending_action is not None:
+            from sagents.v2.contracts.model_recovery import ModelFailure, ModelFailureKind
+            from sagents.v2.model.recovery_policy import EMPTY_GUIDANCE, ARGUMENT_GUIDANCE
+            if state.dispatch_started:
+                from sagents.v2.model.recovery_scope import schedule_failure_recovery
+                error = RuntimeErrorInfo(code="model.recovery_interrupted", category=ErrorCategory.VALIDATION,
+                    message="A previous model recovery request may have been sent.", safe_to_resume=True,
+                    metadata={"model_failure": ModelFailure(kind=state.pending_kind or ModelFailureKind.UNKNOWN).model_dump(mode="json")})
+                decision = await schedule_failure_recovery(error, purpose=purpose)
+                state = scope.states[key]
+                await scope.wait(decision.delay_seconds)
+            elif state.retry_not_before is not None:
+                await scope.wait(max(0, (state.retry_not_before - scope.clock()).total_seconds()))
+            guidance_kind = state.guidance_kind or (state.pending_kind if state.pending_action == ModelRecoveryAction.REGENERATE_WITH_GUIDANCE else None)
+            if guidance_kind is not None:
+                guidance = EMPTY_GUIDANCE if guidance_kind in {ModelFailureKind.EMPTY, ModelFailureKind.REASONING_ONLY} else (
+                    "Return one complete valid JSON object matching the requested schema; preserve the original task and committed results."
+                    if guidance_kind == ModelFailureKind.STRUCTURED_OUTPUT else ARGUMENT_GUIDANCE)
+                request = original.model_copy(update={"messages": (*original.messages,
+                    ModelMessage(role="user", content=(TextBlock(text=guidance),),
+                        metadata={"inference_view_only": True, "runtime_continuation_guidance": True}))})
+        while True:
+            if scope.check is not None:
+                await scope.check()
+            state = state.model_copy(update={
+                "deadline": state.deadline or scope.episode_deadlines.get(scope.step_key),
+                "episode_requests": max(state.episode_requests, scope.episode_counts.get(scope.step_key, 0)),
+                "run_requests": scope.run_requests,
+            })
+            consume_model_call()
+            if state.deadline is not None and scope.clock() >= state.deadline:
+                raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached")
+            state = await scope.record_dispatch(key, state)
+            stream = model.stream(request)
+            response = None
+            try:
+                async with asyncio.timeout_at(
+                    asyncio.get_running_loop().time() + max(0, (state.deadline - scope.clock()).total_seconds())
+                    if state.deadline else None
+                ):
+                    iterator = aiter(stream)
+                    while True:
+                        try:
+                            async with asyncio.timeout(idle_timeout_seconds):
+                                event = await _next_controlled_event(iterator, scope)
+                        except StopAsyncIteration:
+                            break
+                        except TimeoutError as exc:
+                            raise SageV2Error(RuntimeErrorInfo(code="context.summarizer.model_timeout",
+                                category=ErrorCategory.PROVIDER_TRANSIENT,
+                                message="Model response progress stalled", retryable=True, safe_to_resume=True,
+                                metadata={"timeout_kind": "idle"})) from exc
+                        if on_event is not None:
+                            on_event(event)
+                        if event.kind == ModelEventKind.COMPLETED:
+                            response = event.response
+                            if response is not None:
+                                break
+                if response is None:
+                    raise SageV2Error(RuntimeErrorInfo(code="model.stream_incomplete",
                         category=ErrorCategory.PROVIDER_TRANSIENT,
-                        message="Auxiliary stream ended without a completed response",
-                        retryable=True,
-                        safe_to_resume=True,
-                    )
-                )
-            return response
-        except SageV2Error as exc:
-            if not (
-                exc.info.retryable
-                and exc.info.category
-                in {ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED}
-                and attempt < transient_retries
-            ):
-                raise
-        finally:
-            closer = getattr(stream, "aclose", None)
-            if closer is not None:
-                await closer()
-        await asyncio.sleep(2**attempt)
+                        message="Auxiliary model stream ended before completion", retryable=True, safe_to_resume=True))
+                if purpose != "capability_probe" and not (
+                    purpose == "continuation_judge" and response.reasoning.strip() and not response.text.strip()
+                    and response.termination.value == "empty"
+                ):
+                    # A Judge validates its private structured reasoning fallback;
+                    # it is never a user-facing answer or an automatic completion.
+                    checked_response(response, request)
+                await scope.record_dispatch(key, state, completed=True)
+                scope.states.pop(key, None)
+                return response
+            except TimeoutError as exc:
+                raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached") from exc
+            except SageV2Error as exc:
+                if scope.record_failed_usage is not None:
+                    from sagents.v2.contracts.items import UsageSummary
+                    from sagents.v2.model.recovery_policy import failure_from_error
+                    usage = UsageSummary.model_validate(exc.info.metadata.get("usage") or failure_from_error(exc.info).usage or {})
+                    await scope.record_failed_usage(usage)
+                if not manage_transport and exc.info.retryable and exc.info.category in {
+                    ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED
+                }:
+                    raise
+                state = state.model_copy(update={"run_requests": scope.run_requests})
+                decision = ModelRecoveryPolicy().decide(exc.info, state, config,
+                    now=scope.clock(), purpose=purpose, jitter=random.uniform(0, .25))
+                if decision.action == ModelRecoveryAction.STOP_WITH_EXPLANATION:
+                    raise SageV2Error(exc.info.model_copy(update={"metadata": {**exc.info.metadata,
+                        "recovery": {"version": "model-recovery/1", **decision.model_dump(mode="json"),
+                                     "attempt": state.episode_requests}}})) from exc
+                state = reserve_recovery(state, decision, config, now=scope.clock(),
+                    logical_call_id=original.request_id, error=exc.info)
+                state = await scope.reserve(key, state, exc.info, decision)
+            finally:
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    await closer()
+            if decision.delay_seconds:
+                await scope.wait(decision.delay_seconds)
+            if decision.action == ModelRecoveryAction.RETRY_SAME_REQUEST:
+                request = request.model_copy(update={"request_id": new_id("model_recovery"),
+                    "metadata": {**request.metadata, "logical_request_id": state.logical_call_id,
+                                 "recovery_attempt": state.episode_requests}})
+                continue
+            suffix = ()
+            if decision.guidance:
+                suffix = (ModelMessage(role="user", content=(TextBlock(text=decision.guidance),),
+                    metadata={"inference_view_only": True, "runtime_continuation_guidance": True}),)
+            request = original.model_copy(update={"request_id": new_id("model_recovery"),
+                "messages": (*original.messages, *suffix),
+                "metadata": {**original.metadata, "logical_request_id": state.logical_call_id,
+                             "recovery_attempt": state.episode_requests}})

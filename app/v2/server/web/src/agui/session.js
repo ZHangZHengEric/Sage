@@ -25,10 +25,10 @@ class SageHttpAgent extends HttpAgent {
 }
 
 export function messageForAguiError(event, fallback) {
-  return event?.message || fallback?.message || fallback || 'run failed'
+  return event?.details?.failure_summary?.message || event?.message || fallback?.message || fallback || 'run failed'
 }
 
-export function createAguiAgent({ onMessages, onError, onInteraction, onStarted, onSteerApplied, agentId = '' } = {}) {
+export function createAguiAgent({ onMessages, onError, onInteraction, onStarted, onSteerApplied, onRecovery, agentId = '' } = {}) {
   let interaction = null
   function updateInteraction(event) {
     const next = interactionAfterEvent(interaction, event)
@@ -43,6 +43,7 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
   agent.subscribe({
     onRunStartedEvent() {
       updateInteraction({ type: 'RUN_STARTED' })
+      onRecovery?.(null)
       onStarted?.()
     },
     onMessagesChanged({ messages }) {
@@ -67,16 +68,21 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
     },
     onCustomEvent({ event, messages }) {
       updateInteraction(event)
+      if (event?.name === 'sage.step.retry_scheduled') onRecovery?.(event.value?.error?.metadata?.recovery || null)
+      if (['sage.step.completed', 'sage.step.recovery_completed', 'sage.run.cancelled'].includes(event?.name)) onRecovery?.(null)
       if (event?.name === 'sage.steer.applied') {
         onSteerApplied?.(event.value?.steer_id)
       }
       return { messages: updateToolStates(messages, event) }
     },
+    onRunFinishedEvent() { onRecovery?.(null) },
     onRunErrorEvent({ event }) {
+      onRecovery?.(null)
       updateInteraction(event)
       onError?.(messageForAguiError(event))
     },
     onRunFailed({ error }) {
+      onRecovery?.(null)
       onError?.(messageForAguiError(error, error))
     },
   })

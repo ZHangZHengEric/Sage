@@ -1,6 +1,7 @@
 """SAgents V2 module for model/plugins/openai_compatible.py."""
 
 from __future__ import annotations
+from sagents.v2.model.recovery_policy import normalize_provider_failure
 
 import json
 from sagents.v2.model.wire_diagnostics import record_wire_event
@@ -122,12 +123,16 @@ class OpenAICompatibleModelProvider:
         self._owns_client = client is None
         if client is not None:
             self._client = client
+            if isinstance(getattr(client, "max_retries", None), int) and client.max_retries:
+                import warnings
+                warnings.warn("Injected model clients must disable SDK retries (max_retries=0)", RuntimeWarning, stacklevel=2)
         else:
             assert credential is not None
             self._client = AsyncOpenAI(
                 api_key=credential.secret.get_secret_value(),
                 base_url=config.base_url,
                 timeout=config.timeout_seconds,
+                max_retries=0,
             )
         # Capability declarations describe the model, but OpenAI-compatible
         # gateways may still reject otherwise valid reasoning controls. Learn
@@ -299,6 +304,7 @@ class OpenAICompatibleModelProvider:
 
         upstream = None
         text = ""
+        refused = False
         reasoning = ""
         reasoning_details: Any = None
         response_id = new_id("model_response")
@@ -317,7 +323,7 @@ class OpenAICompatibleModelProvider:
             (
                 upstream,
                 compatibility_fallback,
-            ) = await self._create_with_compatibility_negotiation(kwargs)
+            ) = await self._create_with_compatibility_negotiation(kwargs, allow_negotiation=not request.metadata.get("capability_probe", False))
             async for chunk in upstream:
                 record_wire_event(chunk)
                 failure = wire_value(chunk, "error")
@@ -391,6 +397,7 @@ class OpenAICompatibleModelProvider:
                         )
                     if not content and not text:
                         content = self._first_wire_text(delta, "refusal")
+                        refused = refused or bool(content)
                     if content:
                         response_started = True
                         text += content
@@ -440,10 +447,10 @@ class OpenAICompatibleModelProvider:
                                 accumulator["arguments"], _ = self._merge_stream_text(
                                     accumulator["arguments"], str(arguments)
                                 )
-        except SageV2Error:
-            raise
+        except SageV2Error as exc:
+            raise SageV2Error(normalize_provider_failure(exc.info, self.config.provider_id)) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=response_started) from exc
+            raise provider_error(exc, response_started=response_started, provider=self.config.provider_id) from exc
         finally:
             if upstream is not None:
                 closer = getattr(upstream, "close", None) or getattr(
@@ -483,36 +490,6 @@ class OpenAICompatibleModelProvider:
             tool_calls
         ):
             raise self._invalid_tool_state("signed tool calls have duplicate IDs")
-        if (
-            usage.output_tokens > 0
-            and not text.strip()
-            and not reasoning.strip()
-            and not tool_calls
-        ):
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="model.empty_semantic_response",
-                    category=ErrorCategory.PROVIDER_TRANSIENT,
-                    message=(
-                        "provider reported output tokens but returned no supported "
-                        "text, reasoning, or Tool call fields"
-                    ),
-                    retryable=True,
-                    safe_to_resume=True,
-                    metadata={
-                        "output_tokens": usage.output_tokens,
-                        "finish_reason": finish_reason,
-                        "observed_choice_fields": sorted(observed_choice_fields),
-                        "observed_delta_fields": sorted(observed_delta_fields),
-                        "observed_delta_field_types": {
-                            key: sorted(values)
-                            for key, values in sorted(
-                                observed_delta_field_types.items()
-                            )
-                        },
-                    },
-                )
-            )
         yield ModelStreamEvent(
             kind=ModelEventKind.COMPLETED,
             response=ModelResponse(
@@ -520,7 +497,7 @@ class OpenAICompatibleModelProvider:
                 text=text,
                 reasoning=reasoning,
                 tool_calls=tuple(tool_calls),
-                finish_reason=finish_reason,
+                finish_reason="refusal" if refused else finish_reason,
                 usage=usage,
                 provider_metadata={
                     "provider_id": self.config.provider_id,
@@ -555,6 +532,7 @@ class OpenAICompatibleModelProvider:
     async def _create_with_compatibility_negotiation(
         self,
         kwargs: dict[str, Any],
+        *, allow_negotiation: bool = True,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Create one stream with bounded pre-stream dialect negotiation."""
 
@@ -564,6 +542,9 @@ class OpenAICompatibleModelProvider:
         token_fallback_used = False
         history_fallback_used = False
         while True:
+            if fallbacks:
+                from sagents.v2.model.recovery_scope import reserve_additional_request
+                await reserve_additional_request("compatibility", purpose=f"compatibility:{fallbacks[-1]['kind']}")
             try:
                 record_wire_event(
                     {"diagnostic_event": "request_attempt", "payload": current}
@@ -587,6 +568,8 @@ class OpenAICompatibleModelProvider:
                         "error": {"type": type(exc).__name__, "message": str(exc)},
                     }
                 )
+                if not allow_negotiation:
+                    raise
                 if not history_fallback_used:
                     fallback = self._reasoning_history_fallback_request(current, exc)
                     if fallback is not None:

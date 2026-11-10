@@ -249,7 +249,7 @@ def test_request_uses_native_thinking_tools_json_and_media(model, effort, contro
     [
         ([event([{"text": "partial"}])], "model.stream_incomplete"),
         ([{"promptFeedback": {"blockReason": "SAFETY"}}], "model.response_blocked"),
-        ([event([], finish="SAFETY")], "model.response_rejected"),
+        ([event([], finish="SAFETY")], "model.response_refused"),
         (
             [event([{"functionCall": {"name": "lookup", "args": []}}], finish="STOP")],
             "model.tool_arguments_not_object",
@@ -268,7 +268,9 @@ async def test_stream_failures_are_not_successful_completions(events, code):
     provider, client, _ = provider_for(events)
     try:
         with pytest.raises(SageV2Error) as error:
-            [value async for value in provider.stream(request())]
+            values = [value async for value in provider.stream(request())]
+            from sagents.v2.model.recovery_policy import checked_response
+            checked_response(values[-1].response)
         assert error.value.info.code == code
         if code == "model.provider_transient":
             assert error.value.info.retryable is True
@@ -516,7 +518,9 @@ async def test_http_errors_preserve_context_recovery_and_retry_classification(
     )
     try:
         with pytest.raises(SageV2Error) as error:
-            [value async for value in provider.stream(request())]
+            values = [value async for value in provider.stream(request())]
+            from sagents.v2.model.recovery_policy import checked_response
+            checked_response(values[-1].response)
         assert error.value.info.code == code
         assert error.value.info.retryable is retryable
     finally:

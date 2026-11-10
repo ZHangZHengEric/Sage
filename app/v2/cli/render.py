@@ -131,6 +131,14 @@ class PlainRenderer:
                     f"[approval] auto-approved ({data.remembered_scope}): {data.reason}"
                 )
                 return
+        if event.type == "step.retry_scheduled":
+            error = getattr(data, "error", None)
+            recovery = error.metadata.get("recovery") if error else None
+            if recovery:
+                label = "Model temporarily unavailable; retrying" if recovery.get("action") == "retry_same_request" else "Recovering model output"
+                self.out.write(f"\r{label} (attempt {recovery.get('attempt', 1)})\033[K")
+                self.out.flush()
+            return
         if event.type == "run.failed":
             data = cast(RunEventData, data)
             if data.error is not None:

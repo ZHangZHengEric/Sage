@@ -633,27 +633,15 @@ async def test_output_tokens_without_semantic_fields_are_a_provider_error():
         config(), client=FakeClient(FakeCompletions(stream=stream))
     )
 
+    events = [event async for event in provider.stream(request())]
+    response = events[-1].response
+    assert response.termination.value == "empty"
+    assert response.usage.output_tokens == 43
+    from sagents.v2.model.recovery_policy import checked_response
     with pytest.raises(SageV2Error) as caught:
-        _ = [event async for event in provider.stream(request())]
-
+        checked_response(response)
     assert caught.value.info.code == "model.empty_semantic_response"
-    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
-    assert caught.value.info.retryable is True
-    assert caught.value.info.metadata == {
-        "output_tokens": 43,
-        "finish_reason": "stop",
-        "observed_choice_fields": ["delta", "finish_reason"],
-        "observed_delta_fields": [
-            "content",
-            "reasoning_content",
-            "tool_calls",
-        ],
-        "observed_delta_field_types": {
-            "content": ["null"],
-            "reasoning_content": ["null"],
-            "tool_calls": ["array"],
-        },
-    }
+    assert caught.value.info.category == ErrorCategory.VALIDATION
     assert stream.closed is True
 
 

@@ -169,6 +169,7 @@ class AgUiProtocolAdapter:
                             if data.error
                             else "run failed",
                             "code": data.error.code if data.error else None,
+                            "details": data.error.metadata if data.error else {},
                         },
                     ),
                 )
@@ -402,7 +403,7 @@ class AgUiProtocolAdapter:
                     self._frame(
                         event,
                         "RUN_ERROR",
-                        {"message": item.error.message, "code": item.error.code},
+                        {"message": item.error.message, "code": item.error.code, "details": item.error.metadata},
                     ),
                 )
             )

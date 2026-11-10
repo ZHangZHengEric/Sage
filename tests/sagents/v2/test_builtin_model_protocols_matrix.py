@@ -776,7 +776,7 @@ async def test_anthropic_messages_surfaces_sse_error_event():
         _ = [event async for event in provider.stream(request())]
 
     assert caught.value.info.code == "model.provider_permanent"
-    assert "overloaded" in caught.value.info.message
+    assert caught.value.info.metadata["model_failure"]["kind"] == "unknown"
 
 
 def test_anthropic_thinking_uses_native_adaptive_effort_parameters():

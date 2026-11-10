@@ -17,6 +17,11 @@ class OptimizationRecoveryRequired(RuntimeError):
     """An interrupted execution has an unknown outcome that needs host resolution."""
 
 
+class OptimizationModelRecoveryExhausted(RuntimeError):
+    """The model recovery owner stopped; never replay the enclosing evaluation."""
+    rsi_local_retries_exhausted = True
+
+
 class OptimizationTransientFailure(RuntimeError):
     """Transport interrupted an unscored execution; its outcome is not a grade."""
 
@@ -27,6 +32,9 @@ def model_transport_interrupted(observation):
     for event in observation.evidence.get('runtime_events', ()):
         if event.get('type') == 'interaction.requested':
             errors.append((event.get('data', {}).get('payload') or {}).get('error'))
+    if any(isinstance(error, dict) and error.get("metadata", {}).get("recovery", {}).get("action") == "stop_with_explanation"
+        for error in errors):
+        raise OptimizationModelRecoveryExhausted("Model recovery stopped; preserve completed evaluation work")
     return any(isinstance(error, dict)
         and str(error.get('code', '')).startswith('model.')
         and error.get('retryable') is True

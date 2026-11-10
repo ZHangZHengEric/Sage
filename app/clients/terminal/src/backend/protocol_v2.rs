@@ -414,6 +414,14 @@ fn parse_native_event(
             )],
             None => Vec::new(),
         },
+        "step.retry_scheduled" => {
+            let action = data.get("error").and_then(|e| e.pointer("/metadata/recovery/action")).and_then(Value::as_str);
+            match action {
+                Some("retry_same_request") => vec![BackendEvent::Status("Model temporarily unavailable; retrying".into())],
+                Some(_) => vec![BackendEvent::Status("Recovering model output".into())],
+                None => Vec::new(),
+            }
+        }
         "run.failed" => {
             let Some(error) = data.get("error").and_then(Value::as_object) else {
                 return Vec::new();

@@ -22,6 +22,14 @@ async def retry_delay(attempt):
 
 def retry_allowed(error):
     original = error.original if isinstance(error, TargetCallFailure) else error
+    cause = original
+    for _ in range(8):
+        if cause is None:
+            break
+        info = getattr(cause, "info", None)
+        if info is not None and getattr(info, "metadata", {}).get("recovery", {}).get("action") == "stop_with_explanation":
+            return False
+        cause = cause.__cause__
     metadata = getattr(original, "rsi_failure_metadata", {})
     if (
         metadata.get("phase") == "execution"

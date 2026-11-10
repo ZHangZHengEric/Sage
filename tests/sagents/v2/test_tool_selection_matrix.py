@@ -161,7 +161,7 @@ async def test_llm_policy_prepares_once_and_uses_exact_valid_names():
 @pytest.mark.asyncio
 async def test_llm_policy_reports_invalid_model_output():
     model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(completed_json("not json"),)),)
+        (ScriptedModelStep(events=(completed_json("not json"),)),) * 3
     )
     policy = LLMToolSelectionPolicy({"max_visible_tools": 2})
     messages = user_message("send an email")
@@ -172,8 +172,10 @@ async def test_llm_policy_reports_invalid_model_output():
             )
         )
 
-    assert caught.value.info.code == "tool_selection.model_output_invalid"
-    assert caught.value.info.category == ErrorCategory.PROVIDER_PERMANENT
+    assert caught.value.info.code == "model.structured_output_invalid"
+    assert caught.value.info.category == ErrorCategory.VALIDATION
+
+    assert len(model.requests) == 3
 
 
 @pytest.mark.asyncio
@@ -215,7 +217,7 @@ async def test_llm_policy_skips_model_when_the_catalog_fits_the_visible_limit():
 @pytest.mark.asyncio
 async def test_llm_policy_rejects_a_nonempty_list_of_unknown_tools():
     model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(completed_json('{"tools":["missing"]}'),)),)
+        (ScriptedModelStep(events=(completed_json('{"tools":["missing"]}'),)),) * 3
     )
     policy = LLMToolSelectionPolicy({"max_visible_tools": 2})
 
@@ -224,7 +226,7 @@ async def test_llm_policy_rejects_a_nonempty_list_of_unknown_tools():
             ToolSelectionPrepareContext(run_id="run_1", tools=TOOLS, model=cast('ModelProvider | None', model))
         )
 
-    assert caught.value.info.code == "tool_selection.model_output_invalid"
+    assert caught.value.info.code == "model.structured_output_invalid"
 
 
 @pytest.mark.asyncio
