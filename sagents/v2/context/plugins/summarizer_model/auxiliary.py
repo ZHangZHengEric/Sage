@@ -1,7 +1,7 @@
 """API-driven recovery for auxiliary inference views; canonical history is immutable."""
 
 from __future__ import annotations
-from sagents.v2.model.recovery_scope import recovery_scope
+from sagents.v2.model.recovery_scope import recovery_operation
 from sagents.v2.model.recovery import (
     collect_response,
     is_context_overflow,
@@ -15,7 +15,7 @@ from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 
 
-async def stream_auxiliary_model(model, request):
+async def stream_auxiliary_model(model, request, *, timeout_seconds=None, timeout_error=None):
     """Shared recovery used by selection, completion judging and memory queries."""
     from sagents.v2.context.contracts import ContextReductionScope
     from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
@@ -23,71 +23,72 @@ async def stream_auxiliary_model(model, request):
     from sagents.v2.model.contracts import ModelStreamEvent
 
     original = request
-    with model_call_budget(), recovery_scope():
-        for attempt in range(7):
-            try:
-                if attempt:
+    with model_call_budget():
+        async with recovery_operation():
+            for attempt in range(7):
+                try:
+                    if attempt:
+                        from sagents.v2.model.recovery_scope import reserve_additional_request
+                        await reserve_additional_request("context", purpose="auxiliary_context_retry")
+                    response = await collect_response(model, request, request_timeout_seconds=timeout_seconds, timeout_error=timeout_error)
+                    capabilities_method = getattr(model, "capabilities", None)
+                    if capabilities_method is not None:
+                        ceiling_error = reported_context_limit_error(
+                            response, await capabilities_method(request.model_binding)
+                        )
+                        if ceiling_error is not None:
+                            raise ceiling_error
+                    yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
+                    return
+                except SageV2Error as exc:
+                    if not is_context_overflow(exc) or attempt == 6:
+                        raise
                     from sagents.v2.model.recovery_scope import reserve_additional_request
-                    await reserve_additional_request("context", purpose="auxiliary_context_retry")
-                response = await collect_response(model, request)
-                capabilities_method = getattr(model, "capabilities", None)
-                if capabilities_method is not None:
-                    ceiling_error = reported_context_limit_error(
-                        response, await capabilities_method(request.model_binding)
+                    await reserve_additional_request("context", purpose="auxiliary_context", error=exc.info)
+                    payload = tuple(
+                        m for m in request.messages if m.role not in {"system", "developer"}
                     )
-                    if ceiling_error is not None:
-                        raise ceiling_error
-                yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
-                return
-            except SageV2Error as exc:
-                if not is_context_overflow(exc) or attempt == 6:
-                    raise
-                from sagents.v2.model.recovery_scope import reserve_additional_request
-                await reserve_additional_request("context", purpose="auxiliary_context", error=exc.info)
-                payload = tuple(
-                    m for m in request.messages if m.role not in {"system", "developer"}
-                )
-                if not payload:
-                    raise recovery_error(
-                        "model.context_irreducible",
-                        "The API rejected mandatory auxiliary instructions",
-                    ) from exc
-                summarizer = ModelConversationSummarizer(model)
-                summary = await summarizer.summarize(
-                    SummarizationRequest(
-                        scope=ContextReductionScope(
-                            context_key=original.run_id,
-                            session_id=original.run_id,
-                            run_id=original.run_id,
-                        ),
-                        messages=payload,
-                        target_tokens=1024,
+                    if not payload:
+                        raise recovery_error(
+                            "model.context_irreducible",
+                            "The API rejected mandatory auxiliary instructions",
+                        ) from exc
+                    summarizer = ModelConversationSummarizer(model)
+                    summary = await summarizer.summarize(
+                        SummarizationRequest(
+                            scope=ContextReductionScope(
+                                context_key=original.run_id,
+                                session_id=original.run_id,
+                                run_id=original.run_id,
+                            ),
+                            messages=payload,
+                            target_tokens=1024,
+                        )
                     )
-                )
-                source = "\n".join(
-                    summary_safe_block_text(b) for m in payload for b in m.content
-                )
-                if not summary.strip() or len(summary) >= len(source):
-                    raise recovery_error(
-                        "context.summary_no_progress",
-                        "Auxiliary context recovery did not reduce its source",
-                    ) from exc
-                request = request.model_copy(
-                    update={
-                        "request_id": new_id("auxiliary_context_retry"),
-                        "messages": (
-                            *(
-                                m
-                                for m in original.messages
-                                if m.role in {"system", "developer"}
+                    source = "\n".join(
+                        summary_safe_block_text(b) for m in payload for b in m.content
+                    )
+                    if not summary.strip() or len(summary) >= len(source):
+                        raise recovery_error(
+                            "context.summary_no_progress",
+                            "Auxiliary context recovery did not reduce its source",
+                        ) from exc
+                    request = request.model_copy(
+                        update={
+                            "request_id": new_id("auxiliary_context_retry"),
+                            "messages": (
+                                *(
+                                    m
+                                    for m in original.messages
+                                    if m.role in {"system", "developer"}
+                                ),
+                                ModelMessage(
+                                    role="user", content=(TextBlock(text=summary),)
+                                ),
                             ),
-                            ModelMessage(
-                                role="user", content=(TextBlock(text=summary),)
-                            ),
-                        ),
-                        "metadata": {
-                            **original.metadata,
-                            "context_recovery_attempt": attempt + 1,
-                        },
-                    }
-                )
+                            "metadata": {
+                                **original.metadata,
+                                "context_recovery_attempt": attempt + 1,
+                            },
+                        }
+                    )

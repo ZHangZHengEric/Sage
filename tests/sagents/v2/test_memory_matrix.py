@@ -394,14 +394,15 @@ async def test_llm_recall_query_rejects_malformed_output(text):
                     ),
                 ),
             ),
-        )
+        ) * 3
     )
     generator = LLMMemoryRecallQueryGenerator(cast(ModelProvider, model))
 
     with pytest.raises(SageV2Error) as caught:
         await generator.generate("没有", run_id="run_1")
 
-    assert caught.value.info.code == "memory.recall_query.output_invalid"
+    assert caught.value.info.code == "model.structured_output_invalid"
+    assert len(model.requests) == 3
 
 
 @pytest.mark.asyncio

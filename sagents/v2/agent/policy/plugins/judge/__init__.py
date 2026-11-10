@@ -6,7 +6,6 @@ from sagents.v2.contracts.errors import SageV2Error, RuntimeErrorInfo, ErrorCate
 
 from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxiliary_model
 
-import asyncio
 import json
 import re
 from html import unescape
@@ -115,16 +114,15 @@ class LLMContinuationJudge:
         limit = scope.config.argument_repairs if scope else 2
         for attempt in range(limit + 1):
             completed = None
-            try:
-                async with asyncio.timeout(self.timeout_seconds):
-                    async for event in stream_auxiliary_model(self.model, request):
-                        if event.kind == ModelEventKind.COMPLETED:
-                            completed = event.response
-            except TimeoutError as exc:
-                raise auxiliary_model_timeout_error(
+            async for event in stream_auxiliary_model(
+                self.model, request, timeout_seconds=self.timeout_seconds,
+                timeout_error=auxiliary_model_timeout_error(
                     code="agent.continuation.judge_timeout", operation="LLM continuation Judge",
                     timeout_seconds=self.timeout_seconds, plugin_id="sage.agent.continuation.llm-judge",
-                ) from exc
+                ).info,
+            ):
+                if event.kind == ModelEventKind.COMPLETED:
+                    completed = event.response
             reason = "Judge returned an invalid structured verdict"
             if completed is not None:
                 usage = usage.model_copy(update={

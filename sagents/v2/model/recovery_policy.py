@@ -149,6 +149,17 @@ def checked_response(response, request=None):
             )
         )
     termination = response.termination
+    if (termination == ModelTermination.TRUNCATED and not response.tool_calls
+        and request is not None
+        and (request.response_schema is not None or request.response_format == "json_object"
+             or request.metadata.get("output_validation_schema") is not None)
+        and request.metadata.get("purpose") != "conversation_summary"):
+        raise SageV2Error(annotate_error(RuntimeErrorInfo(
+            code="model.structured_output_invalid", category=ErrorCategory.VALIDATION,
+            message="Structured output was truncated; regenerate a shorter complete object.",
+            safe_to_resume=True, metadata={"usage": response.usage.model_dump(mode="json")},
+        ), ModelFailure(kind=Kind.STRUCTURED_OUTPUT, terminal_received=True,
+            native_finish_reason=response.finish_reason)))
     if termination == ModelTermination.TRUNCATED and response.tool_calls:
         raise SageV2Error(
             annotate_error(
@@ -193,6 +204,7 @@ def checked_response(response, request=None):
             and (
                 request.response_schema is not None
                 or request.response_format == "json_object"
+                or request.metadata.get("output_validation_schema") is not None
             )
             and request.metadata.get("purpose")
             not in {"continuation_judge", "conversation_summary"}
@@ -201,7 +213,12 @@ def checked_response(response, request=None):
             from jsonschema import validate, ValidationError
 
             try:
-                value = json.loads(response.text)
+                text = response.text.strip()
+                if request.metadata.get("json_fence_compatible") and text.startswith("```"):
+                    lines = text.splitlines()
+                    if len(lines) > 2 and lines[-1].strip() == "```":
+                        text = "\n".join(lines[1:-1])
+                value = json.loads(text)
                 schema = request.response_schema or request.metadata.get(
                     "output_validation_schema"
                 )
@@ -323,7 +340,7 @@ class ModelRecoveryPolicy:
                     "arguments",
                     config.argument_repairs,
                     (
-                        "The previous answer did not match the required JSON contract. Return one complete valid JSON object matching the requested schema; preserve the original task and committed results."
+                        "The previous answer did not match the required JSON contract or was truncated. Regenerate one shorter, complete valid JSON object matching the requested schema. Do not append to partial JSON; preserve the original task and committed results."
                         if kind == Kind.STRUCTURED_OUTPUT
                         else ARGUMENT_GUIDANCE
                     ),

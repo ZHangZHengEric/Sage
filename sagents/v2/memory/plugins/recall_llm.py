@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from sagents.v2.model.recovery_scope import scoped_recovery
+
 from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxiliary_model
 
-import asyncio
 import json
 
 from sagents.v2.prompt_i18n import prompt_language, prompt_text
@@ -42,6 +43,7 @@ class LLMMemoryRecallQueryGenerator:
         self.language = language
         self.timeout_seconds = float(timeout_seconds)
 
+    @scoped_recovery
     async def generate(
         self, user_input: str, *, run_id: str, language: str | None = None
     ) -> str:
@@ -61,27 +63,23 @@ class LLMMemoryRecallQueryGenerator:
             ),
             tools=(),
             tool_choice="none",
-            metadata={"purpose": "memory_recall_query", "response_language": language},
+            metadata={"purpose": "memory_recall_query", "response_language": language, "json_fence_compatible": True,
+                "output_validation_schema": {"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}}},
         )
         response = None
+        stream = stream_auxiliary_model(
+            self.model, request, timeout_seconds=self.timeout_seconds,
+            timeout_error=auxiliary_model_timeout_error(
+                code="memory.recall_query.model_timeout", operation="LLM Memory recall query generation",
+                timeout_seconds=self.timeout_seconds, plugin_id=self.plugin_id,
+            ).info,
+        )
         try:
-            async with asyncio.timeout(self.timeout_seconds):
-                stream = stream_auxiliary_model(self.model, request)
-                try:
-                    async for event in stream:
-                        if event.response is not None:
-                            response = event.response
-                finally:
-                    closer = getattr(stream, "aclose", None)
-                    if closer is not None:
-                        await closer()
-        except TimeoutError as exc:
-            raise auxiliary_model_timeout_error(
-                code="memory.recall_query.model_timeout",
-                operation="LLM Memory recall query generation",
-                timeout_seconds=self.timeout_seconds,
-                plugin_id=self.plugin_id,
-            ) from exc
+            async for event in stream:
+                if event.response is not None:
+                    response = event.response
+        finally:
+            await stream.aclose()
         if response is None:
             raise SageV2Error(
                 RuntimeErrorInfo(

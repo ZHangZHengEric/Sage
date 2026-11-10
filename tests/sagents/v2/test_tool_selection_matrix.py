@@ -246,10 +246,10 @@ async def test_llm_policy_reports_timeout_without_changing_selection_strategy():
     assert caught.value.info.code == "tool_selection.model_timeout"
     assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
     assert caught.value.info.retryable is True
-    assert caught.value.info.metadata == {
-        "plugin_id": "sage.tool-selection.llm",
-        "timeout_seconds": 0.01,
-    }
+    assert caught.value.info.metadata["plugin_id"] == "sage.tool-selection.llm"
+    assert caught.value.info.metadata["timeout_seconds"] == 0.01
+    assert caught.value.info.metadata["recovery"]["attempt"] == 2
+    assert caught.value.info.metadata["recovery"]["action"] == "stop_with_explanation"
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,10 @@ Configure finite budgets through `RunConfig.model_recovery`. Explicit integers i
 
 Auxiliary calls use a task-local scope and cannot share counters across independent operations. Invalid Judge output receives at most two corrections; failure cannot fall back to treating any text as completion. Tool selection validates JSON structure and available names; failure cannot enable all tools. Built-in simulators and optimization callers recognize recovery stop markers instead of restarting an entire evaluation. Capability probes allow only transport recovery and disable negotiations that change the parameter being tested.
 
+Judge, tool-selection, and memory-query timeouts apply to each model request and enter the same bounded retry policy. Exhausted Run or recovery-episode deadlines still stop immediately. Memory queries validate their JSON contract at runtime, retaining fenced-JSON compatibility without requiring native provider schema support. Truncated structured output must regenerate a complete object instead of passing partial JSON to a business parser.
+
+Only successful completion of the outer semantic operation releases episode counters and deadlines. Nested summaries, JSON corrections, and unresolved main calls retain the same recovery budget. Completion is persisted before release; restart does not resurrect a closed deadline from an older checkpoint. Run-wide recovery counts are always retained.
+
 ## Persistence and User Experience
 
 The Agent checkpoint codec is `agent-loop/4` and reads older versions. Legacy retry counts import as consumed budget. Main calls persist a checkpoint before recovery; auxiliary calls persist recovery events. Dispatch markers are persisted before sending. Restart restores reservations without refunding possibly sent requests; an unconfirmed dispatched request cannot reuse the same reservation. Auxiliary calls record dispatch/completion through `step.recovery_dispatched` and `step.recovery_completed`, without emitting duplicate retry notices.

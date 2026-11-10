@@ -1469,7 +1469,11 @@ class AgentLoopEngine:
             error = getattr(event.data, "error", None)
             detail = error.metadata.get("recovery", {}) if error else {}
             scope.run_requests = max(scope.run_requests, detail.get("run_attempts", 0))
+            if error and error.metadata.get("episode_closed") and detail.get("episode_key"):
+                scope.clear_episode(detail["episode_key"])
+                continue
             if detail.get("episode_key"):
+                scope.closed_episodes.discard(detail["episode_key"])
                 scope.episode_counts[detail["episode_key"]] = max(
                     scope.episode_counts.get(detail["episode_key"], 0), detail.get("attempt", 0))
                 if detail.get("deadline"):
@@ -1496,8 +1500,9 @@ class AgentLoopEngine:
         scope.persist = persist_auxiliary
         scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
         # Older checkpoints have counters but no versioned recovery events.
-        scope.episode_counts[scope.step_key] = max(scope.episode_counts.get(scope.step_key, 0), state.model_recovery.episode_requests)
-        if state.model_recovery.deadline is not None:
+        if scope.step_key not in scope.closed_episodes:
+            scope.episode_counts[scope.step_key] = max(scope.episode_counts.get(scope.step_key, 0), state.model_recovery.episode_requests)
+        if state.model_recovery.deadline is not None and scope.step_key not in scope.closed_episodes:
             existing_deadline = scope.episode_deadlines.get(scope.step_key)
             scope.episode_deadlines[scope.step_key] = min(existing_deadline, state.model_recovery.deadline) if existing_deadline else state.model_recovery.deadline
         async def record_failed_usage(usage):
@@ -1546,6 +1551,7 @@ class AgentLoopEngine:
         with recovery_scope(scope):
             while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
                 scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
+                scope.primary_recovery = bool(state.model_recovery.logical_call_id)
                 state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(
                     update={"run_requests": max(scope.run_requests, state.model_recovery.run_requests)})})
                 iteration = await self._drive_step(run, state, context, command, max_steps,
@@ -2059,6 +2065,13 @@ class AgentLoopEngine:
         )
         invalid_tool_results = [result for result in completed_tool_results if result.error is not None
             and result.error.code in {"tool.not_found", "tool.arguments_invalid", "tool.input_schema_invalid"}]
+        from sagents.v2.model.recovery_scope import current_recovery_scope
+        scope = current_recovery_scope()
+        if (scope is not None and not invalid_tool_results and response.termination.value != "truncated"
+            and f"{scope.step_key}:output_repair" not in scope.states):
+            await scope.finish_episode()
+            scope.primary_recovery = False
+            run = await self.runtime.get_run(run.run_id)
         if invalid_tool_results:
             decision = ContinuationDecision(action=ContinuationAction.CONTINUE_STEP,
                 reason_code="tool.validation_retry", reason="Correct the failed calls using the available tool schemas and recorded validation feedback. Reuse successful sibling results; do not repeat completed operations.")

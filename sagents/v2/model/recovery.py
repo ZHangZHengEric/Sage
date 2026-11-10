@@ -6,6 +6,8 @@ retry projection is replaced. Model calls never execute returned Tool calls.
 
 from __future__ import annotations
 
+from sagents.v2.model.recovery_scope import scoped_recovery
+
 import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -142,7 +144,8 @@ async def _next_controlled_event(iterator, scope):
         await asyncio.gather(pending, return_exceptions=True)
 
 
-async def collect_response(model, request, *, transient_retries=None, purpose=None, idle_timeout_seconds=None, on_event=None, manage_transport=True):
+@scoped_recovery
+async def collect_response(model, request, *, transient_retries=None, purpose=None, idle_timeout_seconds=None, on_event=None, manage_transport=True, request_timeout_seconds=None, timeout_error=None):
     from sagents.v2.contracts.common import new_id
     from sagents.v2.contracts.items import TextBlock
     from sagents.v2.model.contracts import ModelMessage
@@ -201,24 +204,31 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                     asyncio.get_running_loop().time() + max(0, (state.deadline - scope.clock()).total_seconds())
                     if state.deadline else None
                 ):
-                    iterator = aiter(stream)
-                    while True:
-                        try:
-                            async with asyncio.timeout(idle_timeout_seconds):
-                                event = await _next_controlled_event(iterator, scope)
-                        except StopAsyncIteration:
-                            break
-                        except TimeoutError as exc:
-                            raise SageV2Error(RuntimeErrorInfo(code="context.summarizer.model_timeout",
-                                category=ErrorCategory.PROVIDER_TRANSIENT,
-                                message="Model response progress stalled", retryable=True, safe_to_resume=True,
-                                metadata={"timeout_kind": "idle"})) from exc
-                        if on_event is not None:
-                            on_event(event)
-                        if event.kind == ModelEventKind.COMPLETED:
-                            response = event.response
-                            if response is not None:
-                                break
+                    try:
+                        async with asyncio.timeout(request_timeout_seconds):
+                            iterator = aiter(stream)
+                            while True:
+                                try:
+                                    async with asyncio.timeout(idle_timeout_seconds):
+                                        event = await _next_controlled_event(iterator, scope)
+                                except StopAsyncIteration:
+                                    break
+                                except TimeoutError as exc:
+                                    raise SageV2Error(RuntimeErrorInfo(code="context.summarizer.model_timeout",
+                                        category=ErrorCategory.PROVIDER_TRANSIENT,
+                                        message="Model response progress stalled", retryable=True, safe_to_resume=True,
+                                        metadata={"timeout_kind": "idle"})) from exc
+                                if on_event is not None:
+                                    on_event(event)
+                                if event.kind == ModelEventKind.COMPLETED:
+                                    response = event.response
+                                    if response is not None:
+                                        break
+                    except TimeoutError as exc:
+                        raise SageV2Error(timeout_error or RuntimeErrorInfo(
+                            code="model.request_timeout", category=ErrorCategory.PROVIDER_TRANSIENT,
+                            message="Model request timed out", retryable=True, safe_to_resume=True,
+                        )) from exc
                 if response is None:
                     raise SageV2Error(RuntimeErrorInfo(code="model.stream_incomplete",
                         category=ErrorCategory.PROVIDER_TRANSIENT,

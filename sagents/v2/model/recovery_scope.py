@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +23,34 @@ class RecoveryScope:
     step_key: str = "operation"
     episode_counts: dict[str, int] = field(default_factory=dict)
     episode_deadlines: dict[str, Any] = field(default_factory=dict)
+    active_operations: int = 0
+    primary_recovery: bool = False
+    closed_episodes: set[str] = field(default_factory=set)
+
+    def clear_episode(self, key):
+        self.episode_counts.pop(key, None)
+        self.episode_deadlines.pop(key, None)
+        for state_key in tuple(self.states):
+            if state_key.startswith(f"{key}:"):
+                self.states.pop(state_key)
+        self.closed_episodes.add(key)
+
+    async def finish_episode(self):
+        """Persist semantic success before releasing local limits, never Run totals."""
+        from sagents.v2.contracts.errors import RuntimeErrorInfo, ErrorCategory
+        from sagents.v2.contracts.model_recovery import ModelRecoveryDecision, ModelRecoveryAction, ModelFailureKind
+        async with self.reservation_lock:
+            key = self.step_key
+            if not self.episode_counts.get(key):
+                return
+            if self.persist is not None:
+                await self.persist(f"{key}:episode", ModelRecoveryState(run_requests=self.run_requests),
+                    RuntimeErrorInfo(code="model.recovery_completed", category=ErrorCategory.VALIDATION,
+                        message="Model recovery episode completed", metadata={
+                            "recovery_phase": "recovery_completed", "episode_closed": True}),
+                    ModelRecoveryDecision(action=ModelRecoveryAction.REPAIR_REQUEST,
+                        kind=ModelFailureKind.UNKNOWN, reason="episode_completed"))
+            self.clear_episode(key)
 
     async def reserve(self, key, state, error, decision):
         async with self.reservation_lock:
@@ -129,6 +157,7 @@ class RecoveryScope:
                 )
             )
         self.run_requests += 1
+        self.closed_episodes.discard(self.step_key)
         self.episode_counts[self.step_key] = count + 1
         self.episode_deadlines[self.step_key] = deadline
         return state.model_copy(
@@ -143,6 +172,7 @@ class RecoveryScope:
 _active: ContextVar[RecoveryScope | None] = ContextVar(
     "model_recovery_scope", default=None
 )
+_operation: ContextVar[RecoveryScope | None] = ContextVar("model_recovery_operation", default=None)
 
 
 def current_recovery_scope():
@@ -223,10 +253,31 @@ def scoped_recovery(function):
 
     @wraps(function)
     async def wrapped(*args, **kwargs):
-        with recovery_scope():
+        async with recovery_operation():
             return await function(*args, **kwargs)
 
     return wrapped
+
+
+@asynccontextmanager
+async def recovery_operation():
+    """Only the outer semantic operation can close nested recovery budgets."""
+    with recovery_scope() as scope:
+        outer = _operation.get() is not scope
+        token = _operation.set(scope)
+        if outer:
+            scope.active_operations += 1
+        succeeded = False
+        try:
+            yield scope
+            succeeded = True
+        finally:
+            _operation.reset(token)
+            if outer:
+                scope.active_operations -= 1
+                if (succeeded and not scope.active_operations and not scope.primary_recovery
+                    and f"{scope.step_key}:output_repair" not in scope.states):
+                    await scope.finish_episode()
 
 
 async def schedule_failure_recovery(error, *, purpose):
