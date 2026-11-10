@@ -1000,8 +1000,13 @@ class AgentLoopEngine:
                 state.turn_id,
                 started.step_id,
             )
+        if command.config.autonomous_error_recovery and (
+            definition is None or proposal_missing
+        ):
+            return await self._fail(run, state, started.step_id, uncertainty, context)
         if definition is not None and (
-            definition.supports_reconciliation
+            command.config.autonomous_error_recovery
+            or definition.supports_reconciliation
             or definition.resume_strategy == ResumeStrategy.AGENT_RECOVERY
         ):
             run, result = await self._reconcile_or_suspend_tool(
@@ -2670,7 +2675,8 @@ class AgentLoopEngine:
         text_started = False
         reasoning_started = False
         response = None
-        stream = self.model.stream(request)
+        from sagents.v2.model.stream_errors import normalized_model_stream
+        stream = normalized_model_stream(self.model, request)
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
         controlled_events = self._control_aware_model_events(stream, run, command, state.model_recovery.deadline)
@@ -3510,9 +3516,22 @@ class AgentLoopEngine:
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         try:
             run, result = await self._execute_tool_with_control(run, call, context)
-            if result is None:
-                # The owner releases run resources after all siblings drain.
+            if result is None and run.state in TERMINAL_RUN_STATES:
+                # A confirmed cancellation owns the terminal state.
                 return run, None
+            if (
+                not isinstance(result, ToolExecutionResult)
+                or result.tool_call_id != call.tool_call_id
+                or result.operation_id != call.operation_id
+            ):
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="tool.invalid_result",
+                        category=ErrorCategory.PROVIDER_PERMANENT,
+                        message="The tool returned no valid result for the dispatched operation. Inspect its status or outputs before considering another execution.",
+                        safe_to_resume=True,
+                    )
+                )
         except asyncio.CancelledError:
             # The durable started barrier is sufficient for crash recovery.
             # The batch owner drains every sibling before releasing resources.

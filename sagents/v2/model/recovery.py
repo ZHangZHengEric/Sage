@@ -185,7 +185,8 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
             if state.deadline is not None and scope.clock() >= state.deadline:
                 raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached")
             state = await scope.record_dispatch(key, state)
-            stream = model.stream(request)
+            from sagents.v2.model.stream_errors import normalized_model_stream
+            stream = normalized_model_stream(model, request)
             response = None
             try:
                 async with scope.enforce_deadline():

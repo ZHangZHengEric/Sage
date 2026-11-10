@@ -90,3 +90,7 @@ Approvals, genuinely missing task information, and account/resource configuratio
 MCP tools are conservatively treated as potential writes; remote `readOnlyHint` annotations do not remove this barrier. Without a trusted reconciliation adapter, ordinary query text cannot certify a write whose receipt was lost, and the Run stops explicitly. Tool-specific reconciliation remains an integration requirement, not a reason to add retries.
 
 Unverified child-agent effects propagate to the parent instead of being hidden by a successful delegation response. Reconciliation reuses the original call, operation ID and child Runs, preserving successful sibling results.
+
+Raw connection, timeout, and HTTP exceptions from third-party providers use the same classification and bounded recovery for main and auxiliary calls. Explicit authentication status takes precedence over words such as timeout in an error message. Programming errors are not retried as temporary network failures.
+
+Tool receipts must be valid `ToolExecutionResult` objects matching the dispatched call and operation IDs. Missing or mismatched receipts become feedback for the original call: the Agent can repair read-only operations, while possible writes require reconciliation of the original execution instead of redispatch. Legacy records without checkpoints also use autonomous recovery; missing essential call records cause an explicit stop rather than asking the user to guess the execution outcome.
