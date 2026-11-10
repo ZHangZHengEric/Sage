@@ -24,6 +24,7 @@ class RecoveryScope:
     episode_counts: dict[str, int] = field(default_factory=dict)
     episode_deadlines: dict[str, Any] = field(default_factory=dict)
     active_operations: int = 0
+    operation_failed: bool = False
     primary_recovery: bool = False
     closed_episodes: set[str] = field(default_factory=set)
 
@@ -266,6 +267,8 @@ async def recovery_operation():
         outer = _operation.get() is not scope
         token = _operation.set(scope)
         if outer:
+            if not scope.active_operations:
+                scope.operation_failed = False
             scope.active_operations += 1
         succeeded = False
         try:
@@ -274,8 +277,9 @@ async def recovery_operation():
         finally:
             _operation.reset(token)
             if outer:
+                scope.operation_failed = scope.operation_failed or not succeeded
                 scope.active_operations -= 1
-                if (succeeded and not scope.active_operations and not scope.primary_recovery
+                if (not scope.operation_failed and not scope.active_operations and not scope.primary_recovery
                     and f"{scope.step_key}:output_repair" not in scope.states):
                     await scope.finish_episode()
 

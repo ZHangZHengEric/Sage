@@ -13,6 +13,12 @@ ref: v2-model-recovery
 
 Providers identify protocol facts, `ModelRecoveryPolicy` selects an action, and the Agent Loop and auxiliary callers execute it. Generation ending and the user's task being complete are separate decisions. Recovery does not switch providers or models automatically.
 
+## Module boundaries
+
+`model/failures.py` normalizes failure facts; `model/response_validation.py` validates responses and structured output; `model/recovery_policy.py` chooses actions and owns guidance templates; `model/recovery_scope.py` manages shared budgets and persistence callbacks; `model/recovery.py` and the Agent Loop execute recovery. Providers depend directly on failure facts, not recovery policy. Existing helper imports from the policy module remain compatible.
+
+Concurrent operations sharing a recovery episode must all succeed before its budget is released. A successful sibling cannot clear a failed operation's state. Fresh requests and resumed recovery use the same guidance templates. Server waits exceeding the remaining budget stop directly, including extremely large finite values, without overflowing datetime arithmetic.
+
 ## Contracts
 
 `ModelResponse.termination` is an optional, automatically normalized termination state: `complete`, `tool_calls`, `truncated`, `paused`, `refused`, `empty`, or `unknown`. The original `finish_reason` is retained. Empty output is checked even with missing usage or output_tokens=0. Reasoning alone cannot replace a deliverable answer.

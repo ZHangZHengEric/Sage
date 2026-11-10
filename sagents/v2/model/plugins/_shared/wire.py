@@ -217,7 +217,7 @@ def provider_error(exc: Exception, *, response_started: bool = False, provider: 
     from email.utils import parsedate_to_datetime
     import math
     from sagents.v2.contracts.model_recovery import ModelFailure, ModelFailureKind as K
-    from sagents.v2.model.recovery_policy import annotate_error
+    from sagents.v2.model.failures import annotate_error
 
     if isinstance(exc, SageV2Error):
         return exc

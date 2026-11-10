@@ -6,7 +6,7 @@ and persisted Session history, including signature-only streaming Parts.
 """
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import annotate_stream_failure
+from sagents.v2.model.failures import annotate_stream_failure
 
 import base64
 import copy

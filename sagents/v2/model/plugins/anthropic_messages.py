@@ -1,7 +1,7 @@
 """Anthropic Messages API adapter implemented against the public HTTP protocol."""
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import annotate_stream_failure
+from sagents.v2.model.failures import annotate_stream_failure
 
 import base64
 import json

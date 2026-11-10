@@ -13,6 +13,12 @@ ref: v2-model-recovery
 
 Provider 负责识别协议事实，`ModelRecoveryPolicy` 负责确定恢复动作，Agent Loop 和辅助调用负责执行。正常生成结束与用户任务完成是两个独立判断。不会自动切换 Provider 或模型。
 
+## 模块边界
+
+`model/failures.py` 只归一化错误事实；`model/response_validation.py` 校验响应与结构化输出；`model/recovery_policy.py` 决定动作并提供统一指导模板；`model/recovery_scope.py` 管理共享预算与持久化回调；`model/recovery.py` 和 Agent Loop 执行恢复。Provider 直接依赖错误事实层，不依赖恢复策略。旧策略模块的辅助函数导入路径保留兼容。
+
+共享恢复过程中的并发操作必须全部成功才能释放过程预算；成功的兄弟操作不能清除失败操作的状态。新请求与重启续接使用同一指导模板。超出剩余预算的服务端等待值直接停止，包括极大的有限数值，不进入日期运算溢出路径。
+
 ## 契约
 
 `ModelResponse.termination` 是可选、自动归一化的结束状态：`complete`、`tool_calls`、`truncated`、`paused`、`refused`、`empty`、`unknown`。原始 `finish_reason` 保留。无 usage 或 output_tokens=0 的空输出同样检查。只有推理不能替代可交付答案。

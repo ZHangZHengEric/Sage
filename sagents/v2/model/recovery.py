@@ -166,7 +166,7 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
         original = request
         if state.pending_action is not None:
             from sagents.v2.contracts.model_recovery import ModelFailure, ModelFailureKind
-            from sagents.v2.model.recovery_policy import EMPTY_GUIDANCE, ARGUMENT_GUIDANCE
+            from sagents.v2.model.recovery_policy import guidance_for_failure
             if state.dispatch_started:
                 from sagents.v2.model.recovery_scope import schedule_failure_recovery
                 error = RuntimeErrorInfo(code="model.recovery_interrupted", category=ErrorCategory.VALIDATION,
@@ -179,9 +179,7 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                 await scope.wait(max(0, (state.retry_not_before - scope.clock()).total_seconds()))
             guidance_kind = state.guidance_kind or (state.pending_kind if state.pending_action == ModelRecoveryAction.REGENERATE_WITH_GUIDANCE else None)
             if guidance_kind is not None:
-                guidance = EMPTY_GUIDANCE if guidance_kind in {ModelFailureKind.EMPTY, ModelFailureKind.REASONING_ONLY} else (
-                    "Return one complete valid JSON object matching the requested schema; preserve the original task and committed results."
-                    if guidance_kind == ModelFailureKind.STRUCTURED_OUTPUT else ARGUMENT_GUIDANCE)
+                guidance = guidance_for_failure(guidance_kind)
                 request = original.model_copy(update={"messages": (*original.messages,
                     ModelMessage(role="user", content=(TextBlock(text=guidance),),
                         metadata={"inference_view_only": True, "runtime_continuation_guidance": True}))})

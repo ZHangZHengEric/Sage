@@ -1,7 +1,7 @@
 """OpenAI Responses API adapter for the v2 model capability port."""
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import annotate_stream_failure
+from sagents.v2.model.failures import annotate_stream_failure
 
 from sagents.v2.model.wire_diagnostics import record_wire_event
 
