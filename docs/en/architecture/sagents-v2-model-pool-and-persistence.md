@@ -173,3 +173,48 @@ Pool tests cover concurrent initialization, user and credential isolation, capac
 The benchmark measures coordinator serialization of synthetic long event lists, excluding SQL, network, model calls, and task completion rates. It cannot be converted into production QPS. Long-running load against real endpoints requires separate validation.
 
 Implementation: [model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/runtime/model_pool.py).
+
+## Anthropic preserved thinking and prefix changes
+
+`AnthropicMessagesConfig` offers the optional
+`thinking_prefix_mismatch_behavior="drop_block"` (or `"error"` for diagnostics).
+When enabled, the adapter merges `thinking-binding-controls-2026-08-01` into the
+`anthropic-beta` header and `block_binding.prefix_mismatch_behavior` into the
+thinking configuration. Existing beta values, thinking fields, and configuration
+objects are preserved. The standard `extra_body["thinking"]["block_binding"]`
+configuration is also supported; the adapter adds the beta header automatically.
+Partial thinking configuration is merged with generated adaptive defaults rather
+than replacing them. Supplier proxy support for this beta still requires live
+validation, and the model must support the selected thinking type.
+
+Response transformations are available through
+`ModelResponse.provider_metadata["input_transformations"]` (the field is absent
+when the upstream response does not provide it). Keep `drop_block` enabled on
+subsequent requests while old signed history remains after compaction.
+
+Without explicit binding controls, the adapter uses `prefix_digest` in each new
+response's `provider_state` to validate the serialized system, tools, and preceding
+messages. After a prefix change, it removes `thinking` and `redacted_thinking`
+from the first mismatch onward, preserving text, tool calls, and tool results
+without mutating stored history. Fingerprints persist with responses; different
+Runs, provider instances, and child agents do not share a mutable baseline.
+Legacy provider state has no fingerprint, so the adapter does not guess its
+origin: use the official `drop_block` control for those histories. With explicit
+binding controls, upstream validation takes precedence so its diagnostics remain
+visible.
+
+New responses also preserve original content-block order to avoid regrouping
+interleaved text, thinking, and tool calls. Existing histories containing only
+`thinking_blocks` remain readable.
+
+These measures provide protocol protection after prefix changes; they do not
+make context assembly append-only. The assembler still rebuilds system content
+and injects runtime context into the latest user message; context in older user
+messages may also be stripped. Separating session-level system instructions,
+Run-level dynamic information, and durable views of messages actually sent, as
+well as updating dynamic information through appended messages, still requires
+context-management changes. Do not attribute signature failures without visible
+prefix changes to compaction or dynamic system content; use wire diagnostics to
+inspect response-block replay and the requests actually received by the supplier.
+
+Reference: [Anthropic preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking).
