@@ -1165,6 +1165,13 @@ async def test_five_transient_gateway_failures_recover_automatically_without_rep
                 self.target_calls += 1
             async for event in super()._stream(request):
                 yield event
+    # This test verifies retry ownership and case reuse, not elapsed backoff.
+    from sagents.v2.optimization import call_isolation
+    retry_attempts = []
+    async def record_retry(attempt):
+        retry_attempts.append(attempt)
+        await asyncio.sleep(0)
+    monkeypatch.setattr(call_isolation, 'retry_delay', record_retry)
     model = GatewayModel()
     service, agent_id = await setup_service(tmp_path, monkeypatch, model)
     from sagents.v2 import IsolatedOptimizationRunner
@@ -1194,6 +1201,7 @@ async def test_five_transient_gateway_failures_recover_automatically_without_rep
         assert final.get('automatic_recoveries', 0) == 0
         assert len([e for e in final['events'] if e['event'] == 'call_retry_scheduled']) == 5
         assert delays == []
+        assert retry_attempts == [1, 2, 3, 4, 5]
         assert model.target_calls == 8  # baseline pair + three candidate pairs, no repeated executions
         assert len(final['result']['report']['rounds']) == 3
     finally:

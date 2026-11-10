@@ -1,0 +1,4 @@
+pydantic>=2.5,<3
+pytest>=8.0
+pytest-asyncio>=0.24.0
+pytest-timeout>=2.3.0
