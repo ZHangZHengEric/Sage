@@ -401,7 +401,7 @@ async def test_hard_kill_after_checkpoint_before_lease_release_recovers(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_explicit_stage_limit_still_requests_a_decision():
+async def test_explicit_stage_limit_stops_without_requesting_manual_recovery():
     runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
@@ -413,7 +413,8 @@ async def test_explicit_stage_limit_still_requests_a_decision():
     agent = facade(runtime, {handle.run_id: model}, writes)
     try:
         future = await dispatcher.submit(agent, handle, CONTEXT)
-        assert (await asyncio.wait_for(future, 2)).state == RunState.SUSPENDED
+        assert (await asyncio.wait_for(future, 2)).state == RunState.FAILED
+        assert not [e for e in await runtime.session_store.read_events(handle.run_id) if e.type == "interaction.requested"]
         assert len(writes) == 1
         assert len(model.requests) == 1
     finally:

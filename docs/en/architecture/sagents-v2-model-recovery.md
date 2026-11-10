@@ -78,3 +78,15 @@ Event categories, actions, counts, and stop reasons support aggregation of recov
 Run `tests/sagents/v2/test_model_recovery_policy.py` together with the four provider, Agent Loop, auxiliary-call, and protocol-conversion tests. Synthetic empty-response session tests verify that successful tools execute once and that one guided recovery either completes or stops explicitly.
 
 Migration changes include finite default retries, disabled SDK retries, and a new checkpoint codec. Old binaries are not guaranteed to restore new checkpoints. Real API smoke tests and production deployment require the relevant service environment; offline protocol tests do not establish live-service acceptance.
+
+## Autonomous tool-error recovery
+
+New Runs default to `autonomous_error_recovery=true`, inherited by child Agents. Ordinary tool failures return complete diagnostics and existing content to the model so the Agent can correct inputs, inspect outputs, or choose safe alternatives without creating a manual recovery question. Extra model calls triggered by tool failures consume durable recovery budgets across execution stages. No-progress loops and exhausted budgets fail explicitly while preserving results rather than asking the user to reset limits.
+
+Result post-processing failures preserve the original tool result and never repeat a successful operation. Unknown writes first use provider reconciliation. Until settled, the Agent may investigate using read-only tools or reconcile the original operation ID; the framework blocks new writes. Only authoritative reconciliation success or failure releases the barrier, not model text. Unverified side effects prevent successful Run completion.
+
+Approvals, genuinely missing task information, and account/resource configuration retain their appropriate human paths. Legacy hosts can explicitly set `autonomous_error_recovery=false` to retain the earlier manual recovery protocol without changing approval policy.
+
+MCP tools are conservatively treated as potential writes; remote `readOnlyHint` annotations do not remove this barrier. Without a trusted reconciliation adapter, ordinary query text cannot certify a write whose receipt was lost, and the Run stops explicitly. Tool-specific reconciliation remains an integration requirement, not a reason to add retries.
+
+Unverified child-agent effects propagate to the parent instead of being hidden by a successful delegation response. Reconciliation reuses the original call, operation ID and child Runs, preserving successful sibling results.

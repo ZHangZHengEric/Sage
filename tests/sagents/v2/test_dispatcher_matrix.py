@@ -25,7 +25,7 @@ from sagents.v2.contracts.principals import (
     RequestContext,
 )
 from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.commands import RunConfig, InputItem, StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime import HarnessRuntime
@@ -595,6 +595,7 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
             input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
             resolved_spec_hash="sha256:test",
             idempotency_key="live-cancel-run",
+            config=RunConfig(autonomous_error_recovery=False),
         ),
         CONTEXT,
     )

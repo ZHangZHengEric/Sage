@@ -29,7 +29,7 @@ from sagents.v2.agent.multi_agent import (
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
 from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
 from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
-from sagents.v2.contracts.commands import InputItem, ReplyInteraction, StartRun
+from sagents.v2.contracts.commands import RunConfig, InputItem, ReplyInteraction, StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -331,6 +331,7 @@ async def worker(root, scenario):
     handle = await runtime.start_run(
         StartRun(
             agent_id="root",
+            config=RunConfig(autonomous_error_recovery=False),
             idempotency_key="start",
             input=(
                 InputItem(role="user", content=(TextBlock(text="original request"),)),

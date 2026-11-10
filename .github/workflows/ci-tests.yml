@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +25,28 @@ jobs:
           python-version: "3.12"
       - run: python scripts/shared/checks/check_architecture.py
 
+  python-smoke:
+    name: Python recovery smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/shared/checks/requirements-ci-smoke.txt
+      - run: python -m pip install -r scripts/shared/checks/requirements-ci-smoke.txt
+      - name: Contracts and provider state
+        run: python -m pytest -q tests/sagents/v2/test_contracts_matrix.py tests/sagents/v2/test_provider_state_contract_matrix.py --durations=5
+      - name: Model error classification and bounded recovery
+        run: >-
+          python -m pytest -q tests/sagents/v2/test_model_recovery_policy.py
+          -k 'failure_mapping or provider_independent_termination or empty_has_exactly_one_guided_attempt or execution_barrier_prevents_recovery or retry_after_is_minimum_and_deadline_wins or legacy_config_defaults_are_finite_and_conflicts_rejected or truncated_response_never_executes_even_parseable_tool_arguments or gemini_daily_quota_is_not_transient_rate_limit'
+          --durations=5
+
   python-tests:
+    if: github.event_name == 'workflow_dispatch'
     needs: architecture
     name: Pytest (${{ matrix.suite }})
     runs-on: ubuntu-latest
@@ -38,9 +60,22 @@ jobs:
           - suite: sagents-v1
             path: tests/sagents/v1
             environment: v1
-          - suite: app-v2
+          - suite: app-v2-1
             path: tests/app/v2
             environment: v2
+            shard_args: -p scripts.shared.checks.pytest_shard --ci-shard=1/4
+          - suite: app-v2-2
+            path: tests/app/v2
+            environment: v2
+            shard_args: -p scripts.shared.checks.pytest_shard --ci-shard=2/4
+          - suite: app-v2-3
+            path: tests/app/v2
+            environment: v2
+            shard_args: -p scripts.shared.checks.pytest_shard --ci-shard=3/4
+          - suite: app-v2-4
+            path: tests/app/v2
+            environment: v2
+            shard_args: -p scripts.shared.checks.pytest_shard --ci-shard=4/4
           - suite: sagents-v2
             path: tests/sagents/v2
             environment: v2
@@ -109,7 +144,16 @@ jobs:
         # The Linux sandbox binds the workspace at its own workspace_root, and
         # /tmp is where the sandbox mounts its scratch. A default pytest tmp_path
         # therefore cannot be a host-path workspace; put temporaries elsewhere.
-        run: python -m pytest ${{ matrix.path }} -m 'not live' -v --basetemp="${{ runner.temp }}/pytest"
+        run: python -m pytest ${{ matrix.path }} ${{ matrix.shard_args }} -m "not live" -v --durations=20 --durations-min=1 --basetemp="${{ runner.temp }}/pytest"
+
+  app-v2-checks:
+    # Retain the existing required-check name after splitting the matrix entry.
+    name: Pytest (app-v2)
+    needs: python-tests
+    if: always() && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.python-tests.result }}" = success
 
   web-tests:
     name: Web Vitest
@@ -181,6 +225,7 @@ jobs:
       - run: npm run build
 
   desktop-v2:
+    if: github.event_name == 'workflow_dispatch'
     name: Desktop v2 Flutter checks
     runs-on: ubuntu-24.04
     defaults:
@@ -198,6 +243,7 @@ jobs:
       - run: flutter test
 
   postgres-tests:
+    if: github.event_name == 'workflow_dispatch'
     name: MySQL and PostgreSQL storage parity
     runs-on: ubuntu-latest
     services:

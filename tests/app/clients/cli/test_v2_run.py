@@ -2869,13 +2869,16 @@ async def test_partial_write_of_a_reconcilable_tool_is_verified_from_the_workspa
     assert "[tool] file_update reconciling" in err.getvalue()
 
 
-async def test_partial_write_without_reconciliation_asks_the_user_and_continues(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("autonomous", [True, False])
+async def test_partial_write_without_reconciliation_obeys_recovery_mode(
+    tmp_path, monkeypatch, autonomous
 ):
-    """file_write 写完后结果丢失：无法自动核对，交给用户；答 mark_failed 后 Run 继续并完成。"""
+    """默认保留写入并停止；显式兼容模式仍支持人工核对协议。"""
 
     lose_result_after_write(monkeypatch)
     workspace, _, agent, command = await make_agent(tmp_path, update_notes_model("file_write"))
+    command = command.model_copy(update={"config": command.config.model_copy(
+        update={"autonomous_error_recovery": autonomous})})
     err = io.StringIO()
 
     outcome = await run_task(
@@ -2886,6 +2889,14 @@ async def test_partial_write_without_reconciliation_asks_the_user_and_continues(
         decider=PromptInteractionDecider(line_source("a", "x", "f"), err=err),
     )
     await agent.close()
+
+    if autonomous:
+        assert outcome.state == RunState.FAILED
+        assert (workspace / "notes.txt").read_text() == "alpha\ngamma\n"
+        assert outcome.event_types.count("tool.call.started") == 1
+        assert outcome.event_types.count("interaction.requested") == 1  # approval only
+        assert "did the tool call take effect?" not in err.getvalue()
+        return
 
     assert outcome.state == RunState.COMPLETED
     assert (workspace / "notes.txt").read_text() == "alpha\ngamma\n"

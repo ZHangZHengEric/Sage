@@ -2063,12 +2063,20 @@ class AgentLoopEngine:
                 or command.config.metadata.get("max_total_tokens")
             ),
         )
+        failed_tool_results = [
+            result for result in completed_tool_results if result.error is not None
+        ]
         invalid_tool_results = [result for result in completed_tool_results if result.error is not None
             and result.error.code in {"tool.not_found", "tool.arguments_invalid", "tool.input_schema_invalid"}]
         from sagents.v2.model.recovery_scope import current_recovery_scope
         scope = current_recovery_scope()
-        if (scope is not None and not invalid_tool_results and response.termination.value != "truncated"
-            and f"{scope.step_key}:output_repair" not in scope.states):
+        if (
+            scope is not None
+            and not invalid_tool_results
+            and not (command.config.autonomous_error_recovery and failed_tool_results)
+            and response.termination.value != "truncated"
+            and f"{scope.step_key}:output_repair" not in scope.states
+        ):
             await scope.finish_episode()
             scope.primary_recovery = False
             run = await self.runtime.get_run(run.run_id)
@@ -2100,10 +2108,37 @@ class AgentLoopEngine:
                 return _DriveIteration(await self._fail(run, state, step_id, error, context),
                     state, empty_response_retries, context_overflow_retries, stop=True)
             run = await self.runtime.get_run(run.run_id)
-        if (decision.action == ContinuationAction.CONTINUE_STEP and decision.reason_code in {
-            "response.output_limit", "openui.validation_retry", "output.self_check_retry", "tool.validation_retry",
-            "loop.inspection_correction", "loop.pattern_correction",
-        }):
+        if command.config.autonomous_error_recovery and decision.reason_code not in {
+            "budget.max_steps",
+            "status.missing_at_limit",
+        }:
+            from sagents.v2.agent.autonomous_recovery import autonomous_continuation
+
+            decision = autonomous_continuation(decision)
+        if (
+            decision.action == ContinuationAction.CONTINUE_STEP
+            and decision.reason_code
+            in {
+                "response.output_limit",
+                "openui.validation_retry",
+                "output.self_check_retry",
+                "tool.validation_retry",
+                "loop.inspection_correction",
+                "loop.pattern_correction",
+                "agent.autonomous_repair",
+            }
+        ) or (
+            command.config.autonomous_error_recovery
+            and failed_tool_results
+            and (
+                decision.action == ContinuationAction.CONTINUE_STEP
+                or (
+                    decision.reason_code
+                    in {"budget.max_steps", "status.missing_at_limit"}
+                    and command.config.automatic_stage_continuation
+                )
+            )
+        ):
             from sagents.v2.model.recovery_scope import reserve_additional_request, current_recovery_scope
             try:
                 await reserve_additional_request(
@@ -2130,6 +2165,19 @@ class AgentLoopEngine:
                     + decision.usage.output_tokens,
                 }
             )
+        if (
+            command.config.autonomous_error_recovery
+            and decision.reason_code in {"budget.max_steps", "status.missing_at_limit"}
+            and (repeated >= 6 or state.no_progress_steps >= 12)
+        ):
+            decision = decision.model_copy(
+                update={
+                    "action": ContinuationAction.FAIL,
+                    "reason_code": "loop.no_progress",
+                    "interaction": None,
+                    "reason": "Repeated operations made no progress. Automatic recovery stopped; existing results are preserved.",
+                }
+            )
         advance_stage = (
             decision.action == ContinuationAction.REQUEST_INTERACTION
             and decision.reason_code in {"budget.max_steps", "status.missing_at_limit"}
@@ -2146,6 +2194,27 @@ class AgentLoopEngine:
                 "reason": "continue the task in the next checkpointed execution stage",
                 "interaction": None,
             })
+        if command.config.autonomous_error_recovery:
+            from sagents.v2.agent.autonomous_recovery import autonomous_continuation
+
+            decision = autonomous_continuation(decision)
+            if decision.action in {
+                ContinuationAction.COMPLETE_RUN,
+                ContinuationAction.COMPLETE_TURN,
+                ContinuationAction.HANDOFF,
+            }:
+                from sagents.v2.agent.autonomous_recovery import unresolved_effects
+
+                if unresolved_effects(
+                    await self.runtime.session_store.read_events(run.run_id)
+                ):
+                    decision = decision.model_copy(
+                        update={
+                            "action": ContinuationAction.FAIL,
+                            "reason_code": "tool.outcome_unverified",
+                            "reason": "A tool operation may have applied but its outcome could not be verified. Recorded results are preserved; the operation was not repeated.",
+                        }
+                    )
         run = await self._record_continuation(
             run, decision, context, state.turn_id, step_id
         )
@@ -2201,6 +2270,7 @@ class AgentLoopEngine:
             and decision.reason_code
             in {
                 "response.output_limit",
+                "agent.autonomous_repair",
                 "plan.explanation_required",
                 "plan.required",
                 "goal.explanation_required",
@@ -3205,6 +3275,14 @@ class AgentLoopEngine:
         Recovery consumes receipts or reconciles started operations, never
         repeats a side effect merely because a sibling needed user input.
         """
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        if command.config.autonomous_error_recovery:
+            from sagents.v2.agent.autonomous_recovery import unresolved_effects
+
+            if unresolved_effects(
+                await self.runtime.session_store.read_events(run.run_id)
+            ):
+                return run, state, {}
         turn_id = state.turn_id
         results = {}
         fresh = [call for call in calls if call.tool_call_id not in crossed]
@@ -3331,6 +3409,82 @@ class AgentLoopEngine:
         )
         return run
 
+    async def _guard_unresolved_effect(
+        self,
+        run: RunSnapshot,
+        call: ToolCall,
+        context: RequestContext,
+        turn_id: str,
+        step_id: str | None,
+        state: AgentLoopCheckpointState | None,
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None] | None:
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        if not command.config.autonomous_error_recovery:
+            return None
+        from sagents.v2.agent.autonomous_recovery import unresolved_effects
+
+        pending = unresolved_effects(
+            await self.runtime.session_store.read_events(run.run_id)
+        )
+        if not pending:
+            return None
+        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
+        if definition.side_effect_level in {SideEffectLevel.NONE, SideEffectLevel.READ}:
+            return None
+        for proposal, unknown in pending:
+            if (
+                proposal
+                and proposal.tool_name == call.tool_name
+                and proposal.arguments == call.arguments
+                and definition.supports_reconciliation
+            ):
+                original = call.model_copy(
+                    update={
+                        "operation_id": unknown.operation_id,
+                        "idempotency_key": unknown.idempotency_key
+                        or call.idempotency_key,
+                    }
+                )
+                return await self._reconcile_or_suspend_tool(
+                    run,
+                    original,
+                    context,
+                    turn_id,
+                    step_id,
+                    state,
+                    unknown.error
+                    or RuntimeErrorInfo(
+                        code="tool.outcome_unknown",
+                        category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                        message="Tool outcome is unknown",
+                    ),
+                    reconcile_identity=original.model_copy(
+                        update={"tool_call_id": proposal.tool_call_id}
+                    ),
+                )
+        error = RuntimeErrorInfo(
+            code="tool.unresolved_effect_barrier",
+            category=ErrorCategory.POLICY_DENIED,
+            message="A prior write has an unverified outcome. Only read-only investigation or reconciliation is allowed; do not repeat or replace the write until it is settled.",
+            safe_to_resume=True,
+            metadata={
+                "side_effect_state": "not_applied",
+                "unresolved_operation_ids": [data.operation_id for _, data in pending],
+            },
+        )
+        return await self._commit_tool_result(
+            run,
+            call,
+            ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                error=error,
+            ),
+            context,
+            turn_id,
+            step_id=step_id,
+        )
+
     async def _record_cancelled_execution(self, run, call, context, turn_id, step_id) -> RunSnapshot:
         return await self._record_tool_unknown(
             run,
@@ -3434,6 +3588,11 @@ class AgentLoopEngine:
                 )
             result = receipt
         else:
+            guarded = await self._guard_unresolved_effect(
+                run, call, context, turn_id, step_id, state
+            )
+            if guarded is not None:
+                return guarded
             run = await self._start_tool_execution(run, call, context, turn_id, step_id)
             try:
                 run, result = await self._capture_tool_execution(
@@ -3592,6 +3751,15 @@ class AgentLoopEngine:
     async def _tool_failure_is_uncertain(self, run, call, error) -> bool:
         """Classify post-dispatch failures without assuming a write was rolled back."""
 
+        if self._unsafe_tool_runtime_error(error):
+            return False
+        # Explicit uncertainty outranks a mere receipt: receiving a report of
+        # an unknown outcome is not confirmation that a write did not apply.
+        if (
+            error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+            or error.metadata.get("side_effect_state") == "unknown"
+        ):
+            return True
         # A protocol-level tool error is an authoritative response, not a lost
         # response. The remote side confirmed that the operation failed, so a
         # write must not be escalated to an unknown-side-effect suspension.
@@ -3602,10 +3770,6 @@ class AgentLoopEngine:
         # suspending the entire Agent for an unknown execution outcome.
         if (error.category == ErrorCategory.RESOURCE_LOST
                 and error.metadata.get("process_settled") is True):
-            return False
-        if error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
-            return True
-        if self._unsafe_tool_runtime_error(error):
             return False
         if error.metadata.get("side_effect_state") == "not_applied":
             return False
@@ -3785,11 +3949,22 @@ class AgentLoopEngine:
         )
 
     async def _reconcile_or_suspend_tool(
-        self, run, call, context, turn_id, step_id, state, uncertainty
+        self,
+        run,
+        call,
+        context,
+        turn_id,
+        step_id,
+        state,
+        uncertainty,
+        *,
+        reconcile_identity: ToolCall | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Resolve an uncertain side effect without executing the call again."""
 
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        autonomous = command.config.autonomous_error_recovery
         if definition.supports_reconciliation:
             run = await self._commit_running(
                 run,
@@ -3812,10 +3987,23 @@ class AgentLoopEngine:
             try:
                 reconcile_call = getattr(self.tool_executor, "reconcile_call", None)
                 reconciled = (
-                    await cast(Callable[..., Awaitable[ReconcileResult]], reconcile_call)(call, context)
+                    await cast(
+                        Callable[..., Awaitable[ReconcileResult]], reconcile_call
+                    )(reconcile_identity or call, context)
                     if callable(reconcile_call)
                     else await self.tool_executor.reconcile(call.operation_id, context)
                 )
+                if (
+                    not isinstance(reconciled, ReconcileResult)
+                    or reconciled.operation_id != call.operation_id
+                    or (
+                        reconciled.result is not None
+                        and reconciled.result.operation_id != call.operation_id
+                    )
+                ):
+                    raise ValueError(
+                        "Reconciliation did not identify the original operation"
+                    )
             except Exception as exc:
                 if isinstance(exc, SageV2Error) and self._unsafe_tool_runtime_error(
                     exc.info
@@ -3895,7 +4083,12 @@ class AgentLoopEngine:
                 run, result = await self._commit_tool_result(
                     await self.runtime.get_run(run.run_id),
                     call,
-                    reconciled.result,
+                    reconciled.result.model_copy(
+                        update={
+                            "tool_call_id": call.tool_call_id,
+                            "operation_id": call.operation_id,
+                        }
+                    ),
                     context,
                     turn_id,
                     step_id=step_id,
@@ -3917,14 +4110,46 @@ class AgentLoopEngine:
                 run, result = await self._commit_tool_result(
                     run,
                     call,
-                    result,
+                    result.model_copy(
+                        update={
+                            "tool_call_id": call.tool_call_id,
+                            "operation_id": call.operation_id,
+                        }
+                    ),
                     context,
                     turn_id,
                     step_id=step_id,
                     event_type_override="tool.call.reconciled",
                 )
                 return run, result
-        if definition.resume_strategy == ResumeStrategy.AGENT_RECOVERY:
+        if autonomous and definition.side_effect_level in {
+            SideEffectLevel.NONE,
+            SideEffectLevel.READ,
+        }:
+            result = ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                error=uncertainty.model_copy(
+                    update={
+                        "category": ErrorCategory.PROVIDER_TRANSIENT,
+                        "safe_to_resume": True,
+                        "metadata": {
+                            **uncertainty.metadata,
+                            "side_effect_state": "not_applied",
+                        },
+                    }
+                ),
+            )
+            return await self._commit_tool_result(
+                run,
+                call,
+                result,
+                context,
+                turn_id,
+                step_id=step_id,
+                event_type_override="tool.call.reconciled",
+            )
+        if autonomous or definition.resume_strategy == ResumeStrategy.AGENT_RECOVERY:
             # A missing response is a failed invocation, not evidence that the
             # remote operation failed. Preserve that distinction in the durable
             # result and model-visible text; never replay the write here.
@@ -3939,6 +4164,18 @@ class AgentLoopEngine:
                 "repeat a write or claim success. A transport error alone does "
                 "not require user confirmation."
             )
+            if autonomous:
+                guidance = (
+                    "The write outcome remains unknown. Investigate with read-only tools. "
+                    + (
+                        "Re-proposing this exact operation invokes provider reconciliation, not a new write. "
+                        if definition.supports_reconciliation
+                        else "This provider has no reconciliation API; do not re-propose the write. "
+                    )
+                    + "Other mutations remain blocked until the original operation is settled. "
+                    "Do not ask the user to guess whether it succeeded. If it cannot be verified, "
+                    "report the known results and unresolved outcome without claiming completion."
+                )
             error = uncertainty.model_copy(update={
                 "safe_to_resume": True,
                 "retryable": False,
@@ -4119,9 +4356,51 @@ class AgentLoopEngine:
             )
 
         if self.tool_result_processor is not None:
-            result = await self.tool_result_processor.process(
-                result, call=call, context=context, runtime=self.tool_result_runtime,
-            )
+            try:
+                processed = await self.tool_result_processor.process(
+                    result,
+                    call=call,
+                    context=context,
+                    runtime=self.tool_result_runtime,
+                )
+                if (
+                    not isinstance(processed, ToolExecutionResult)
+                    or processed.tool_call_id != result.tool_call_id
+                    or processed.operation_id != result.operation_id
+                    or processed.error != result.error
+                ):
+                    raise ValueError(
+                        "Tool result processor changed the execution identity or result contract"
+                    )
+                result = processed
+            except Exception as exc:
+                if isinstance(exc, SageV2Error) and self._unsafe_tool_runtime_error(
+                    exc.info
+                ):
+                    raise
+                result = result.model_copy(
+                    update={
+                        "content": (
+                            *result.content,
+                            TextBlock(
+                                text=(
+                                    "The tool execution result is preserved, but result post-processing failed. "
+                                    "Use the original result or inspect its outputs; do not repeat the operation just to format its result."
+                                )
+                            ),
+                        ),
+                        "metadata": {
+                            **result.metadata,
+                            "result_processing_error": type(exc).__name__,
+                        },
+                    }
+                )
+
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        if result.error is not None and command.config.autonomous_error_recovery:
+            from sagents.v2.agent.autonomous_recovery import with_recovery_feedback
+
+            result = with_recovery_feedback(result)
 
         item_id = new_id("item")
         status = (
@@ -4664,7 +4943,13 @@ class AgentLoopEngine:
                 correlation_id=run.run_id)
             error = error.model_copy(update={"message": summary["message"],
                 "metadata": {**error.metadata, "failure_summary": summary}})
-        recovery = error_recovery_payload(error, context.language, resumable=False)
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        recovery = error_recovery_payload(
+            error,
+            context.language,
+            resumable=False,
+            interactive=not command.config.autonomous_error_recovery,
+        )
         error = error.model_copy(
             update={
                 "metadata": {

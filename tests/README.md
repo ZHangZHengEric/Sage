@@ -119,3 +119,11 @@ Flutter 原生集成脚本位于 `app/v2/desktop/integration_test/`，需要单�
   [标准宿主说明](../examples/v2/standard_host/README.md)。
 - 外部存储和其他服务集成的准备条件以对应测试与 fixture 为准。
   缺少依赖导致的收集错误、条件不满足导致的跳过，都不代表相关行为通过验证。
+
+## 自动 CI 与完整验证
+
+push/PR 自动 CI 以约一分钟为目标：源码架构、最小依赖的 Python 契约/LLM 恢复策略 smoke、Web 测试/构建、Desktop i18n。GitHub 排队、首次依赖下载和文档构建不保证一分钟；不会用超短超时把未完成检查伪装为通过。
+
+完整 Python（包含 RSI、重启与工具副作用集成）、Flutter、MySQL/PostgreSQL/Redis 验证保留在同一个 **CI Tests** 工作流，通过 Actions 的 **Run workflow** 手动触发。自动快速检查不等同于完整集成验收；运行时、存储或宿主集成大改应额外触发完整验证。没有删除用例。
+
+完整运行时，app-v2 在四个独立 runner 上按稳定的测试 node ID 哈希分片，每个用例只运行一次。直接本地运行不分片；可用 `python -m pytest tests/app/v2 -p scripts.shared.checks.pytest_shard --ci-shard=1/4` 复现一个分片。所有完整 Python 任务输出最慢 20 项。RSI 五次重试测试用记录尝试次数的异步让步代替 62 秒真实退避，不修改生产逻辑。

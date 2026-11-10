@@ -665,12 +665,16 @@ class HarnessRuntime:
 
         error = localize_error(error, context.language)
         if "recovery_questionnaire" not in error.metadata:
+            command = await self.session_store.get_start_command(run_id)
             error = error.model_copy(
                 update={
                     "metadata": {
                         **error.metadata,
                         "recovery_questionnaire": error_recovery_payload(
-                            error, context.language, resumable=False
+                            error,
+                            context.language,
+                            resumable=False,
+                            interactive=not command.config.autonomous_error_recovery,
                         ),
                     }
                 }

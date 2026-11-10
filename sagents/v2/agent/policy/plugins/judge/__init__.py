@@ -92,6 +92,12 @@ class LLMContinuationJudge:
         instructions = LEGACY_V1_TASK_COMPLETE_TEMPLATE[language].format(
             messages="<judge_input>The following user message contains the conversation and execution evidence to assess.</judge_input>"
         )
+        instructions += (
+            "\nOrdinary tool errors should be handled by the Agent through input correction, "
+            "status checks or safe alternatives. A tool error alone does not justify "
+            "need_user_input. Approval and genuinely unavailable task information, "
+            "credentials or resources may require the user. Never blindly repeat an unverified write."
+        )
         request = ModelRequest(
             request_id=new_id("continuation_judge"),
             run_id=context.run_id,
