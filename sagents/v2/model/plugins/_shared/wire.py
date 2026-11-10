@@ -274,6 +274,8 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
                 "internal_server_error",
                 "rate_limit_exceeded",
                 "overloaded_error",
+                "server_is_overloaded",
+                "no_capacity",
                 "api_error",
                 "response_failed",
             }
