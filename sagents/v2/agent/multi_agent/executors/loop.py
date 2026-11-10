@@ -153,6 +153,7 @@ class LoopChildRunExecutor:
             max_stages=parent_command.config.max_stages,
             automatic_stage_continuation=parent_command.config.automatic_stage_continuation,
             transient_retry_limit=parent_command.config.transient_retry_limit,
+            model_recovery=parent_command.config.model_recovery,
             priority=parent_command.config.priority,
         )
         if self.run_config_resolver is not None:

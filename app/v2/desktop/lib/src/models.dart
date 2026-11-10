@@ -848,6 +848,7 @@ class ChatMessage {
     required this.role,
     required this.text,
     this.streaming = false,
+    this.interrupted = false,
     this.processOnly = false,
     this.sequence = 0,
     this.content = const [],
@@ -866,6 +867,7 @@ class ChatMessage {
   String renderedText;
   final List<Map<String, Object?>> openUiSurfaces;
   bool streaming;
+  bool interrupted;
   bool processOnly;
   final int sequence;
   final List<ChatMessageContent> content;
@@ -884,6 +886,7 @@ class ChatMessage {
             ]
           : [],
       streaming: json['streaming'] == true,
+      interrupted: json['interrupted'] == true,
       processOnly: json['process_only'] == true,
       sequence: (json['sequence'] as num?)?.toInt() ?? 0,
       content: rawContent is List
@@ -905,6 +908,7 @@ class ChatMessage {
       'content': [for (final value in content) value.toJson()],
     if (openUiSurfaces.isNotEmpty) 'openui_surfaces': openUiSurfaces,
     'streaming': false,
+    'interrupted': interrupted,
     'process_only': processOnly,
     'sequence': sequence,
     'created_at': createdAt.toIso8601String(),
@@ -1131,6 +1135,7 @@ class Conversation {
   int previewSequence;
   String? previewEpoch;
   RunStatus status;
+  String? modelRecoveryNotice;
 
   /// Transient UI state driven by reasoning lifecycle events.
   /// Reasoning content is intentionally never retained or rendered.

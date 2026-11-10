@@ -76,9 +76,9 @@ EXPECTED_FAMILY_PROJECTIONS = {
     "ag-ui": {
         **dict.fromkeys((
             "run", "item", "usage", "interaction", "flow", "sandbox", "policy",
-            "steering", "job", "protocol", "session_commit", "checkpoint",
+            "steering", "job", "protocol", "session_commit", "checkpoint", "step",
         ), AG_UI_EXTENSION),
-        **dict.fromkeys(("continuation", "skill_state", "step", "turn"),
+        **dict.fromkeys(("continuation", "skill_state", "turn"),
                         ((), ("ag_ui.unsupported",))),
         "artifact": (("ACTIVITY_SNAPSHOT",), ()),
         "tool": (("CUSTOM",), ("ag_ui.tool_state_extension",)),
@@ -534,3 +534,14 @@ def test_agui_durable_start_restores_content_when_previews_are_unavailable(
     assert [frame.payload["delta"] for frame in frames if "delta" in frame.payload] == [
         "answer"
     ]
+
+
+@pytest.mark.parametrize('reasoning', [False, True])
+def test_ag_ui_interrupted_item_preserves_status_after_stream_end(reasoning):
+    data = ReasoningItemData(content=(TextBlock(text='partial'),)) if reasoning else MessageItemData(role='assistant', content=(TextBlock(text='partial'),))
+    item = item_snapshot('partial', data).model_copy(update={'status': ItemStatus.CANCELLED})
+    result = AgUiProtocolAdapter().translate(event('item.completed', item_id='partial', data=ItemEventData(operation='completed', item=item)))
+    frame = result.frames[-1]
+    assert frame.name == 'CUSTOM'
+    assert frame.payload['name'] == 'sage.message.interrupted'
+    assert frame.payload['value'] == {'message_id': 'partial', 'status': 'cancelled'}

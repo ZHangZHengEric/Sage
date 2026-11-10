@@ -793,7 +793,7 @@ async def _request(
         # Probes have fixed tiny protocol prompts: compression would invalidate
         # the measurement. Transient transport errors still retry finitely.
         with model_call_budget():
-            completed = await collect_response(provider, request)
+            completed = await collect_response(provider, request, purpose="capability_probe")
     except SageV2Error as exc:
         diagnostic = _compact_probe_error(exc.info.message, name=name)
         return None, ModelCapabilityProbeOutcome(

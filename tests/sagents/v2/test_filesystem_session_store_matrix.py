@@ -1030,7 +1030,7 @@ async def test_suspended_approval_resumes_after_store_process_reopen(
     suspension = await restored_repository.get_suspension(restored_run.suspension_id)
     interaction = await restored_repository.get_interaction(suspension.interaction_id)
     checkpoint = await restored_repository.get_checkpoint(suspension.checkpoint_id)
-    assert checkpoint.checkpoint_codec_version == "agent-loop/3"
+    assert checkpoint.checkpoint_codec_version == "agent-loop/4"
     assert "messages" not in checkpoint.state
     assert checkpoint.state["ledger_digest"].startswith("sha256:")
     receipt = await restored_runtime.reply_interaction(

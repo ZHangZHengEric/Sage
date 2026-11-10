@@ -17,6 +17,10 @@ export const toolStateLabels = {
 }
 
 export function updateToolStates(messages, event) {
+  if (event.type === 'CUSTOM' && event.name === 'sage.message.interrupted') {
+    return messages.map(message => message.id === event.value?.message_id
+      ? { ...message, interrupted: true, reasoningStreaming: false } : message)
+  }
   let id = event.toolCallId
   let state
   if (event.type === 'TOOL_CALL_END') state = 'queued'

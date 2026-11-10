@@ -281,7 +281,8 @@ async def test_responses_invalid_tool_arguments_preserve_terminal_diagnostics():
     metadata = caught.value.info.metadata
     assert metadata["finish_reason"] == "max_output_tokens"
     assert metadata["tool_name"] == "file_write"
-    assert metadata["raw_arguments"] == '{"content":"partial'
+    assert "raw_arguments" not in metadata
+    assert len(metadata["arguments_sha256"]) == 64
     assert metadata["usage"]["output_tokens"] == 8192
 
 

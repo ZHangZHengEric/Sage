@@ -190,6 +190,10 @@ async def canonical_agui_sse(
                 "message.completed", "reasoning.completed", "item.completed"
             }:
                 frame_index = _ITEM_COMPLETION_FRAME_INDEX.get(frame.name, frame_index)
+                if payload.get("name") == "sage.message.interrupted":
+                    # Completion may omit already-streamed start/content frames.
+                    # Keep this marker after every possible end-frame cursor.
+                    frame_index = 5
             position = CanonicalSseCursor(
                 event.run_sequence,
                 frame_index,

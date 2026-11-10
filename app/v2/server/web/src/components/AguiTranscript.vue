@@ -58,6 +58,7 @@ defineExpose({ focusInteraction })
           </details>
           <p v-else-if="message.role !== 'assistant'" class="plain">{{ textOf(message) }}</p>
           <span v-if="message.steeringPending" class="message-steering-status">待接收</span>
+          <span v-if="message.interrupted" class="message-steering-status">输出已中断，以上为未完成片段</span>
           <section v-if="message.toolCalls?.length" class="process-group" aria-label="工具调用">
             <ToolCallCard v-for="call in message.toolCalls" :key="call.id" :call="call" :result="results.get(call.id)" @open-workspace="$emit('open-workspace')">
               <div v-if="interaction && linkedCall === call.id" data-active-interaction tabindex="-1" class="interaction-location">

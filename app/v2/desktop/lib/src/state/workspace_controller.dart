@@ -2899,6 +2899,18 @@ class WorkspaceController extends ChangeNotifier {
     final eventData = data is Map
         ? data.cast<String, Object?>()
         : const <String, Object?>{};
+    if (type == 'step.retry_scheduled') {
+      final recoveryError = eventData['error'];
+      final metadata = recoveryError is Map ? recoveryError['metadata'] : null;
+      final recovery = metadata is Map ? metadata['recovery'] : null;
+      if (recovery is Map) {
+        conversation.modelRecoveryNotice = recovery['action'] == 'retry_same_request'
+            ? '模型服务暂时不可用，正在重试'
+            : '正在修正模型输出';
+      }
+    } else if ({'message.delta', 'step.completed', 'step.recovery_completed', 'run.completed', 'run.failed', 'run.cancelled'}.contains(type)) {
+      conversation.modelRecoveryNotice = null;
+    }
     if (type == 'reasoning.started' || type == 'reasoning.delta') {
       conversation.thinking = true;
     } else if (type == 'reasoning.completed' ||
@@ -2918,6 +2930,10 @@ class WorkspaceController extends ChangeNotifier {
     } else if (type == 'message.completed') {
       _completeMessage(conversation, eventData, sequence: sequence);
     } else if (type == 'item.completed') {
+      final item = eventData['item'];
+      if (item is Map && item['visibility'] == 'public' && {'cancelled', 'suspended', 'failed'}.contains(item['status'])) {
+        _completeMessage(conversation, eventData, sequence: sequence);
+      }
       _trackToolResult(conversation, eventData);
     } else if (type == 'turn.started') {
       conversation.status = RunStatus.running;
@@ -3110,6 +3126,7 @@ class WorkspaceController extends ChangeNotifier {
     if (role != 'assistant') return;
     final id = item['item_id']?.toString() ?? _id('assistant');
     final text = _textFromContent(rawMessage['content']);
+    final interrupted = {'cancelled', 'suspended', 'failed'}.contains(item['status']);
     final existing = conversation.messages
         .where((value) => value.id == id)
         .firstOrNull;
@@ -3120,6 +3137,7 @@ class WorkspaceController extends ChangeNotifier {
           id: id,
           role: role,
           text: text,
+          interrupted: interrupted,
           processOnly: true,
           sequence: sequence,
         ),
@@ -3137,6 +3155,7 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
       existing.streaming = false;
+      existing.interrupted = interrupted;
       existing.processOnly = existing.openUiSurfaces.isEmpty;
     }
   }

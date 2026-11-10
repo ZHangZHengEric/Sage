@@ -1,6 +1,7 @@
 """Anthropic Messages API adapter implemented against the public HTTP protocol."""
 
 from __future__ import annotations
+from sagents.v2.model.failures import annotate_stream_failure
 
 import base64
 import json
@@ -13,8 +14,8 @@ from typing import Any
 import httpx
 from pydantic import Field
 
+from sagents.v2.contracts.errors import SageV2Error, RuntimeErrorInfo, ErrorCategory
 from sagents.v2.contracts.common import StrictModel, new_id
-from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import (
     AudioBlock,
     FileBlock,
@@ -314,6 +315,21 @@ class AnthropicMessagesModelProvider:
         thinking_blocks: dict[int, dict[str, Any]] = {}
         response_started = False
         terminal_event_received = False
+        def stream_failure(error):
+            normalized = canonical_token_usage(provider_usage, input_mode="disjoint")
+            observed_usage = UsageSummary(
+                reported=usage_reported, input_tokens=normalized.input_tokens,
+                output_tokens=normalized.output_tokens,
+                cached_input_tokens=normalized.cached_input_tokens,
+                reasoning_tokens=normalized.reasoning_tokens,
+                models=(self.config.model,), provider_usage=provider_usage,
+            )
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal_event_received,
+                text=text, reasoning=reasoning, tools=tools,
+            ))
+
         try:
             record_wire_event(
                 {"diagnostic_event": "request_attempt", "payload": payload}
@@ -337,6 +353,15 @@ class AnthropicMessagesModelProvider:
                     elif event_type == "content_block_start":
                         index = int(event.get("index") or 0)
                         block = event.get("content_block") or {}
+                        if block.get("type") not in {"tool_use", "text", "thinking", "redacted_thinking"}:
+                            raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
+                                category=ErrorCategory.PROVIDER_PERMANENT,
+                                message="Unsupported Anthropic content block", safe_to_resume=True))
+                        if block.get("type") == "text" and block.get("text"):
+                            value = str(block["text"])
+                            text += value
+                            response_started = True
+                            yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=value)
                         if block.get("type") == "tool_use":
                             response_started = True
                             tools[index] = {
@@ -422,16 +447,16 @@ class AnthropicMessagesModelProvider:
                             message or "Anthropic Messages API failed",
                             code=error.get("type") if isinstance(error, dict) else None,
                         )
-        except SageV2Error:
-            raise
+        except SageV2Error as exc:
+            raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=response_started) from exc
+            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
 
         if not terminal_event_received:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
                 response_started=response_started,
-            )
+            ).info)
 
         usage = canonical_token_usage(provider_usage, input_mode="disjoint")
         usage_summary = UsageSummary(

@@ -459,8 +459,10 @@ async def test_prompt_decider_maps_keys_and_falls_back_on_eof():
     ) == InteractionAnswer("approve_and_remember", {"scope": "session"})
 
 
+@pytest.mark.parametrize("terminal", [False, True])
+@pytest.mark.parametrize("partial", [False, True])
 async def test_transient_provider_failure_retries_and_completes_headless(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, terminal, partial,
 ):
     from sagents.v2.agent import AgentLoopEngine
 
@@ -480,8 +482,17 @@ async def test_transient_provider_failure_retries_and_completes_headless(
             ScriptedModelStep(events=(_delta("Recovered."), _completed("Recovered."))),
         )
     )
+    if partial:
+        original_stream = failing_model.stream
+        async def interrupted_stream(request):
+            if not failing_model.requests:
+                yield _delta("Partial")
+            async for event in original_stream(request):
+                yield event
+        monkeypatch.setattr(failing_model, "stream", interrupted_stream)
     _, _, agent, command = await make_agent(tmp_path, failing_model)
     out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(err, "isatty", lambda: terminal)
     renderer = PlainRenderer(out, err)
 
     outcome = await run_task(
@@ -499,7 +510,16 @@ async def test_transient_provider_failure_retries_and_completes_headless(
     assert "step.retry_scheduled" in outcome.event_types
     assert "interaction.requested" not in outcome.event_types
     assert "non-interactive decision:" not in err.getvalue()
-    assert out.getvalue() == "Recovered.\n"
+    assert out.getvalue() == ("Partial\nRecovered.\n" if partial else "Recovered.\n")
+    if partial:
+        assert "preceding fragment is incomplete" in err.getvalue()
+    assert "Model temporarily unavailable; retrying" in err.getvalue()
+    if terminal:
+        assert "\r\033[K" in err.getvalue()
+        assert not renderer._recovery_status
+    else:
+        assert "\033" not in err.getvalue()
+        assert "\r" not in err.getvalue()
 
 
 def test_binding_provider_exposes_host_workspace_paths(tmp_path):

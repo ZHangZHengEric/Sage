@@ -7,6 +7,7 @@ host inject either an official SDK client or a protocol-compatible test client.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -144,7 +145,7 @@ def parse_tool_arguments(
         **dict(diagnostic_context or {}),
         "tool_call_id": tool_call_id,
         "tool_name": name,
-        "raw_arguments": raw,
+        "arguments_sha256": hashlib.sha256((raw or "").encode()).hexdigest(),
         "arguments_length": len(raw or ""),
         "side_effect_state": "not_applied",
         "tool_execution_started": False,
@@ -210,103 +211,124 @@ class ProviderStreamFailure(RuntimeError):
         self.status_code = status_code
 
 
-def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2Error:
-    """Classify common HTTP/SDK failures without exposing credential material."""
+def provider_error(exc: Exception, *, response_started: bool = False, provider: str | None = None) -> SageV2Error:
+    """Normalize HTTP and successful-HTTP error envelopes before choosing recovery."""
+    from datetime import datetime, timezone
+    from email.utils import parsedate_to_datetime
+    import math
+    from sagents.v2.contracts.model_recovery import ModelFailure, ModelFailureKind as K
+    from sagents.v2.model.failures import annotate_error
 
-    status = getattr(exc, "status_code", None)
-    if status is None:
-        response = getattr(exc, "response", None)
-        status = getattr(response, "status_code", None)
-    details = " ".join(
-        str(value)
-        for value in (
-            exc,
-            getattr(exc, "code", None),
-            getattr(exc, "body", None),
-        )
-        if value is not None
-    ).lower()
-    provider_code = getattr(exc, "code", None)
-    context_overflow = (
-        status in {400, 413, 422}
-        and (
-            any(marker in details for marker in _CONTEXT_WINDOW_MARKERS)
-            or ("input token count" in details and "exceeds" in details)
-        )
-    ) or (
-        status in {None, 200}
-        and (
-            provider_code
-            in {"context_length_exceeded", "context_window_exceeded", "prompt_too_long"}
-            or any(marker in details for marker in _CONTEXT_WINDOW_MARKERS[:-1])
-        )
-    )
-    interrupted_response = (
-        status in {None, 200}
-        and provider_code == "invalid_provider_response"
-        and (
-            response_started
-            or (
-                isinstance(exc, ProviderStreamFailure)
-                and str(exc).strip().rstrip(".").casefold()
-                == "response stream could not be completed"
-            )
-        )
-    )
-    retryable = (
-        interrupted_response
-        or
-        status in {408, 409, 425, 429}
-        or (isinstance(status, int) and status >= 500)
-        or isinstance(exc, (TimeoutError, ConnectionError))
-        or (
-            any(
-                cls.__name__
-                in {"APIConnectionError", "APITimeoutError", "TransportError"}
-                for cls in type(exc).__mro__
-            )
-        )
-        or (
-            status in {None, 200}
-            and provider_code
-            in {
-                "server_error",
-                "internal_server_error",
-                "rate_limit_exceeded",
-                "overloaded_error",
-                "server_is_overloaded",
-                "no_capacity",
-                "api_error",
-                "response_failed",
-            }
-        )
-    )
-    if context_overflow:
-        return SageV2Error(
-            RuntimeErrorInfo(
-                code="model.context_window_exceeded",
-                category=ErrorCategory.VALIDATION,
-                message="provider rejected the final request as exceeding its context window",
-                retryable=True,
-                safe_to_resume=True,
-                provider_code=str(status) if status is not None else provider_code,
-                metadata={"response_started": response_started},
-            )
-        )
-    return SageV2Error(
-        RuntimeErrorInfo(
-            code="model.provider_transient"
-            if retryable
-            else "model.provider_permanent",
-            category=(
-                ErrorCategory.PROVIDER_TRANSIENT
-                if retryable
-                else ErrorCategory.PROVIDER_PERMANENT
-            ),
-            message=str(exc),
-            retryable=retryable,
-            safe_to_resume=True,
-            provider_code=str(status) if status is not None else provider_code,
-            metadata={"response_started": response_started},
-        )
-    )
+    if isinstance(exc, SageV2Error):
+        return exc
+    response = getattr(exc, "response", None)
+    status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+    body = getattr(exc, "body", None)
+    if not isinstance(body, Mapping) and response is not None:
+        try:
+            body = response.json()
+        except (ValueError, RuntimeError, AttributeError):
+            body = None
+    payload = body.get("error", body) if isinstance(body, Mapping) else {}
+    if not isinstance(payload, Mapping):
+        payload = {}
+    native = getattr(exc, "code", None) or payload.get("code") or payload.get("type") or payload.get("status")
+    native = str(native) if native is not None else None
+    types = {str(v).lower() for v in (native, payload.get("type"), payload.get("status")) if v}
+    details = " ".join(str(v) for v in (exc, native, payload.get("message")) if v).lower()
+    names = {cls.__name__ for cls in type(exc).__mro__}
+    configuration_details = details
+    cause = exc.__cause__
+    for _ in range(8):
+        if cause is None:
+            break
+        names.update(cls.__name__ for cls in type(cause).__mro__)
+        configuration_details += " " + str(cause).lower()
+        cause = cause.__cause__
+    quota = {"insufficient_quota", "billing_hard_limit_reached", "billing_not_active",
+             "organization_usage_limit_exceeded", "usage_limit_reached", "credit_balance_too_low", "billing_error", "insufficient_balance", "out_of_credits"}
+    quota_details = payload.get("details", [])
+    hard_quota = any(
+        isinstance(detail, Mapping) and str(detail.get("@type", "")).endswith("QuotaFailure")
+        and any(isinstance(violation, Mapping) and any(marker in str(violation.get("quotaId", "")).lower()
+            for marker in ("perday", "per_day", "daily")) for violation in detail.get("violations", []))
+        for detail in quota_details if isinstance(quota_details, list)
+    ) if isinstance(quota_details, list) else False
+    kind = K.UNKNOWN
+    if status == 401 or types & {"authentication_error", "invalid_api_key", "unauthenticated"}:
+        kind = K.AUTHENTICATION
+    elif status == 403 or types & {"permission_error", "permission_denied", "access_denied"}:
+        kind = K.PERMISSION
+    elif types & quota or hard_quota or (status in {400, 429} and any(v in details for v in
+        ("insufficient credits", "credit balance is too low", "billing hard limit", "daily quota exceeded"))):
+        kind = K.QUOTA
+    elif status == 404 or types & {"model_not_found", "not_found_error"}:
+        kind = K.ROUTE
+    elif types & {"context_length_exceeded", "context_window_exceeded", "prompt_too_long"} or (
+        status in {None, 200, 400, 413, 422}
+        and ((not types or types <= {"invalid_request_error", "invalid_request", "invalid_argument", "bad_request"})
+            and (any(v in details for v in _CONTEXT_WINDOW_MARKERS)
+                 or ("input token count" in details and "exceeds" in details)))):
+        kind = K.CONTEXT
+    elif types & {"content_filter", "content_policy_violation", "safety", "content_blocked", "refusal"}:
+        kind = K.REFUSED
+    elif types & {"invalid_image", "image_parse_error", "image_url_invalid", "media_invalid", "unsupported_mime_type"}:
+        kind = K.MEDIA
+    elif types & {"not_implemented", "unsupported_operation", "unsupported_endpoint"}:
+        kind = K.UNSUPPORTED
+    elif types & {"rate_limit_exceeded", "rate_limit_error", "resource_exhausted"}:
+        kind = K.RATE_LIMIT
+    elif types & {"invalid_request_error", "invalid_argument"}:
+        kind = K.INVALID_REQUEST
+    elif types & {
+        "server_error", "internal_server_error", "overloaded_error", "server_is_overloaded", "no_capacity", "api_error", "response_failed"}:
+        kind = K.OVERLOADED
+    elif status == 413:
+        kind = K.PAYLOAD
+    elif status == 429:
+        kind = K.RATE_LIMIT
+    elif status in {400, 422}:
+        kind = K.INVALID_REQUEST
+    elif status in {501, 505}:
+        kind = K.UNSUPPORTED
+    elif status in {500, 502, 503, 504, 529}:
+        kind = K.OVERLOADED
+    elif status in {408, 409, 425}:
+        kind = K.TRANSPORT
+    elif native == "invalid_provider_response" and status in {None, 200} and (
+        response_started or (isinstance(exc, ProviderStreamFailure)
+        and str(exc).strip().rstrip(".").casefold() == "response stream could not be completed")):
+        kind = K.STREAM
+    elif names & {"InvalidURL", "UnsupportedProtocol", "ProxyError", "SSLCertVerificationError"} or any(
+        v in configuration_details for v in ("certificate verify failed", "invalid url", "unsupported protocol")):
+        kind = K.INVALID_REQUEST
+    elif isinstance(exc, (TimeoutError, ConnectionError)) or names & {
+        "APIConnectionError", "APITimeoutError", "TransportError", "ReadTimeout", "ConnectTimeout"}:
+        kind = K.TRANSPORT
+    retry_after = None
+    headers = getattr(response, "headers", {}) or {}
+    raw = headers.get("retry-after")
+    if raw:
+        try:
+            retry_after = float(raw)
+        except (ValueError, TypeError):
+            try:
+                retry_after = (parsedate_to_datetime(raw) - datetime.now(timezone.utc)).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                pass
+        if retry_after is not None and (not math.isfinite(retry_after) or retry_after < 0):
+            retry_after = None
+    retryable = kind in {K.TRANSPORT, K.STREAM, K.OVERLOADED, K.RATE_LIMIT}
+    category = (ErrorCategory.PROVIDER_TRANSIENT if retryable else ErrorCategory.PROVIDER_PERMANENT)
+    if kind == K.CONTEXT:
+        category = ErrorCategory.VALIDATION
+    code = "model.context_window_exceeded" if kind == K.CONTEXT else (
+        "model.provider_transient" if retryable else "model.provider_permanent")
+    failure = ModelFailure(kind=kind, phase="transport", provider=provider, http_status=status,
+        native_code=native, response_started=response_started, retry_after_seconds=retry_after,
+        request_id=headers.get("x-request-id") or headers.get("request-id"))
+    return SageV2Error(annotate_error(RuntimeErrorInfo(code=code, category=category,
+        message=f"Model request failed ({kind.value}).",
+        retryable=retryable or kind == K.CONTEXT, safe_to_resume=True,
+        provider_code=str(status) if status is not None else native,
+        metadata={"response_started": response_started}), failure))

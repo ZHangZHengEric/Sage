@@ -6,6 +6,7 @@ and persisted Session history, including signature-only streaming Parts.
 """
 
 from __future__ import annotations
+from sagents.v2.model.failures import annotate_stream_failure
 
 import base64
 import copy
@@ -324,6 +325,22 @@ class GeminiGenerateContentModelProvider:
         provider_usage: dict[str, Any] = {}
         terminal = started = False
         finish_reason = "completed"
+        def stream_failure(error):
+            thoughts = self._counter(provider_usage, "thoughtsTokenCount")
+            cached = self._counter(provider_usage, "cachedContentTokenCount")
+            observed_usage = UsageSummary(
+                reported=bool(provider_usage),
+                input_tokens=max(self._counter(provider_usage, "promptTokenCount"), cached),
+                output_tokens=self._counter(provider_usage, "candidatesTokenCount") + thoughts,
+                cached_input_tokens=cached, reasoning_tokens=thoughts,
+                models=(self.config.model,), provider_usage=provider_usage,
+            )
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal,
+                text=text, reasoning=reasoning, tools=calls,
+            ))
+
         try:
             record_wire_event(
                 {"diagnostic_event": "request_attempt", "payload": payload}
@@ -403,30 +420,40 @@ class GeminiGenerateContentModelProvider:
                                         compact_json(call.get("args", {})),
                                         tool_call_id=call.get("id"),
                                         name=call.get("name"),
+                                        diagnostic_context={
+                                            "provider": self.config.provider_id,
+                                            "finish_reason": "max_tokens" if candidate.get("finishReason") == "MAX_TOKENS" else candidate.get("finishReason"),
+                                        },
                                     )
                                 )
                         reason = candidate.get("finishReason")
                         if reason and reason != "FINISH_REASON_UNSPECIFIED":
                             if reason not in {"STOP", "MAX_TOKENS"}:
-                                raise self._error(
-                                    "model.response_rejected", str(reason)
-                                )
+                                if reason in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY"}:
+                                    finish_reason = "refusal"
+                                    terminal = True
+                                    continue
+                                if reason in {"MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL"}:
+                                    raise SageV2Error(RuntimeErrorInfo(
+                                        code="model.tool_arguments_invalid_json",
+                                        category=ErrorCategory.VALIDATION,
+                                        message="The model returned an invalid function call.",
+                                        retryable=True, safe_to_resume=True,
+                                        metadata={"side_effect_state": "not_applied", "tool_execution_started": False,
+                                                  "native_finish_reason": reason}))
+                                raise self._error("model.response_unknown", str(reason))
                             terminal = True
                             finish_reason = (
                                 "max_tokens" if reason == "MAX_TOKENS" else "completed"
                             )
-        except SageV2Error:
-            raise
+        except SageV2Error as exc:
+            raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=started) from exc
+            raise stream_failure(provider_error(exc, response_started=started, provider=self.config.provider_id).info) from exc
         if not terminal:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id, response_started=started
-            )
-        if not text and not calls and finish_reason != "max_tokens":
-            raise self._error(
-                "model.empty_response", "Gemini returned no answer or function call"
-            )
+            ).info)
         thoughts = self._counter(provider_usage, "thoughtsTokenCount")
         cached = self._counter(provider_usage, "cachedContentTokenCount")
         yield ModelStreamEvent(

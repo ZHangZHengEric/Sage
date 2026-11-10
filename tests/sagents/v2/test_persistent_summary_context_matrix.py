@@ -895,7 +895,7 @@ async def test_summary_timeout_retries_are_bounded_and_logged(
     async def summarize(request, progress):
         attempts.append(request)
         progress["text_delta_count"] = 1
-        if recover and len(attempts) == 4:
+        if recover and len(attempts) == 3:
             return '{"summary":"recovered"}'
         if kind == "total":
             raise TimeoutError()
@@ -917,17 +917,18 @@ async def test_summary_timeout_retries_are_bounded_and_logged(
             await summarizer.summarize(request)
         assert caught.value.info.code == "context.summarizer.model_timeout"
         assert caught.value.info.metadata["timeout_kind"] == kind
-        assert caught.value.info.metadata["timeout_attempt"] == 4
+        assert caught.value.info.metadata["timeout_attempt"] == 3
         assert caught.value.info.metadata["timeout_retries_exhausted"] is True
-    assert attempts == [request] * 4
-    assert delays == [2, 4, 8]
+    assert attempts == [request] * 3
+    assert len(delays) == 2
+    assert 1 <= delays[0] <= 1.25 and 2 <= delays[1] <= 2.25
     retries = [
         record
         for record in sink.records
         if record.event == "context.summary.timeout_retry"
     ]
-    assert len(retries) == 3
-    assert [record.attributes["timeout_attempt"] for record in retries] == [1, 2, 3]
+    assert len(retries) == 2
+    assert [record.attributes["timeout_attempt"] for record in retries] == [1, 2]
     assert all(record.attributes["timeout_kind"] == kind for record in retries)
     assert all(
         record.session_id == "session_1" and record.run_id == "run_1"
@@ -1066,7 +1067,7 @@ async def test_summary_transient_provider_errors_retry_without_losing_progress(
 
     async def summarize(request, progress):
         attempts.append(request)
-        if recover and len(attempts) == 4:
+        if recover and len(attempts) == 3:
             return "recovered summary"
         raise SageV2Error(
             RuntimeErrorInfo(
@@ -1087,5 +1088,6 @@ async def test_summary_transient_provider_errors_retry_without_losing_progress(
         with pytest.raises(SageV2Error) as caught:
             await summarizer.summarize(request)
         assert caught.value.info.code == "model.provider_transient"
-    assert attempts == [request] * 4
-    assert delays == [2, 4, 8]
+    assert attempts == [request] * 3
+    assert len(delays) == 2
+    assert 1 <= delays[0] <= 1.25 and 2 <= delays[1] <= 2.25

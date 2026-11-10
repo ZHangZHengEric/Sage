@@ -88,3 +88,41 @@ test('IM notification destination is explicit per Run and never carried into the
   assert.equal(requests[0].forwardedProps.notification_connection_id, undefined)
   assert.equal(requests[1].notification_connection_id, undefined)
 })
+
+test('model recovery updates one status and clears it on terminal success', async t => {
+  const statuses = []
+  t.mock.method(globalThis, 'fetch', async () => new Response([
+    { type: 'RUN_STARTED', threadId: 'recovery', runId: 'r1' },
+    { type: 'CUSTOM', name: 'sage.step.retry_scheduled', value: { error: { metadata: { recovery: {
+      version: 'model-recovery/1', action: 'retry_same_request', attempt: 1,
+    } } } } },
+    { type: 'CUSTOM', name: 'sage.step.retry_scheduled', value: { error: { metadata: { recovery: {
+      version: 'model-recovery/1', action: 'regenerate_with_guidance', attempt: 2,
+    } } } } },
+    { type: 'RUN_FINISHED', threadId: 'recovery', runId: 'r1' },
+  ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+    headers: { 'Content-Type': 'text/event-stream' },
+  }))
+  const agent = createAguiAgent({ onRecovery: value => statuses.push(value) })
+  agent.threadId = 'recovery'
+  await agent.runAgent({ runId: 'r1', tools: [], context: [] })
+  assert.deepEqual(statuses.map(s => s?.action || null), [null, 'retry_same_request', 'regenerate_with_guidance', null])
+  assert.equal(agent.messages.length, 0)
+})
+
+test('interrupted output retains its marker in live updates and replay', () => {
+  const interrupted = { type: 'CUSTOM', name: 'sage.message.interrupted', value: { message_id: 'partial', status: 'cancelled' } }
+  const messages = [{ id: 'partial', role: 'assistant', content: 'incomplete' }]
+  assert.equal(updateToolStates(messages, interrupted)[0].interrupted, true)
+  const replay = messagesFromEvents([
+    { type: 'TEXT_MESSAGE_START', messageId: 'partial', role: 'assistant' },
+    { type: 'TEXT_MESSAGE_CONTENT', messageId: 'partial', delta: 'incomplete' },
+    { type: 'TEXT_MESSAGE_END', messageId: 'partial' }, interrupted,
+    { type: 'TEXT_MESSAGE_START', messageId: 'recovered', role: 'assistant' },
+    { type: 'TEXT_MESSAGE_CONTENT', messageId: 'recovered', delta: 'complete' },
+  ])
+  assert.equal(replay[0].interrupted, true)
+  assert.equal(replay[0].content, 'incomplete')
+  assert.equal(replay[1].content, 'complete')
+  assert.equal(replay[1].interrupted, undefined)
+})

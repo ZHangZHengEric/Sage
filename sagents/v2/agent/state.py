@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from sagents.v2.model.contracts import ModelMessage
+from sagents.v2.contracts.model_recovery import ModelRecoveryState
 from sagents.v2.agent.policy.tool_policy import ToolPolicyDecision
 from sagents.v2.tool.contracts import ToolCall
 from sagents.v2.contracts.common import Identifier, StrictModel
@@ -51,6 +52,8 @@ class AgentLoopCheckpointState(StrictModel):
     pending_response_tool_names: tuple[str, ...] = ()
     pending_questionnaire_completed: bool = False
     retry_model_step: bool = False
+    model_recovery: ModelRecoveryState = Field(default_factory=ModelRecoveryState)
+    rejected_input_characters: int | None = None
     provider_retry_attempts: int = Field(default=0, ge=0)
     provider_retry_at: datetime | None = None
     automatic_resume_at: datetime | None = None
@@ -112,9 +115,9 @@ _PENDING_ADAPTER = TypeAdapter(PendingBarrierState)
 
 
 class AgentLoopCheckpointCodec:
-    """Encode v3 discriminated barriers and read legacy flat checkpoints."""
+    """Encode v4 recovery reservations/barriers and read legacy checkpoints."""
 
-    version = "agent-loop/3"
+    version = "agent-loop/4"
 
     @staticmethod
     def encode(state: AgentLoopCheckpointState, *, ledger_digest: str) -> dict:
@@ -132,7 +135,7 @@ class AgentLoopCheckpointCodec:
                 "retry_model_step",
             },
         )
-        payload["state_version"] = "3"
+        payload["state_version"] = "4"
         payload["ledger_digest"] = ledger_digest
         if state.pending_tool_call is not None:
             pending: PendingBarrierState = ToolBarrierState(
@@ -157,7 +160,15 @@ class AgentLoopCheckpointCodec:
 
     @staticmethod
     def decode(payload: dict) -> AgentLoopCheckpointState:
-        if str(payload.get("state_version") or "1") != "3":
+        payload = dict(payload)
+        if "model_recovery" not in payload:
+            transient = int(payload.get("provider_retry_attempts") or 0)
+            arguments = int(payload.get("model_argument_recovery_attempts") or 0)
+            payload["model_recovery"] = ModelRecoveryState(
+                counts={"transient": transient, "arguments": arguments},
+                episode_requests=transient + arguments, run_requests=transient + arguments,
+            ).model_dump(mode="json")
+        if str(payload.get("state_version") or "1") not in {"3", "4"}:
             return AgentLoopCheckpointState.model_validate(payload)
         pending = _PENDING_ADAPTER.validate_python(payload.get("pending", {"kind": "none"}))
         flattened = {key: value for key, value in payload.items() if key != "pending"}

@@ -1,0 +1,27 @@
+{
+  "release": "replace-with-unique-release-id",
+  "env_file": "/srv/Sage/deploy/standalone/.env",
+  "data_root": "/data/sage_v2",
+  "server_image": "sage-server:replace-with-release-tag",
+  "web_image": "sage-web:replace-with-release-tag",
+  "api_port": 32008,
+  "web_port": 32009,
+  "observe_seconds": 60,
+  "monitor_manifest": "/opt/sage-release/current.json",
+  "routes": [
+    {
+      "file": "/etc/caddy/Caddyfile.withyi",
+      "old_api_port": 32006,
+      "old_web_port": 32005,
+      "api_url": "https://api.sage-v2.withyi.life",
+      "web_url": "https://sage-v2.withyi.life"
+    },
+    {
+      "file": "/etc/caddy/Caddyfile.withling.me",
+      "old_api_port": 32006,
+      "old_web_port": 32005,
+      "api_url": "https://api.sage-v2.withling.me",
+      "web_url": "https://sage-v2.withling.me"
+    }
+  ]
+}

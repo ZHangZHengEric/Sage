@@ -1,10 +1,11 @@
 """V1-compatible model-backed completion policies for the V2 runtime."""
 
 from __future__ import annotations
+from sagents.v2.model.recovery_scope import scoped_recovery, reserve_additional_request
+from sagents.v2.contracts.errors import SageV2Error, RuntimeErrorInfo, ErrorCategory
 
 from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxiliary_model
 
-import asyncio
 import json
 import re
 from html import unescape
@@ -66,8 +67,8 @@ class JudgeVerdict(StrictModel):
 class LLMContinuationJudge:
     """Run the V1 completion Judge contract through V2 model ports.
 
-    The prompt, one-request behavior, four decisions, legacy boolean parsing,
-    Todo invariant, and invalid-output fallback intentionally match V1. V2 only
+    The prompt, four decisions, legacy boolean parsing,
+    and Todo invariant match V1. Invalid verdicts use bounded private repair. V2
     adapts the result into typed runtime actions and records model usage.
     """
 
@@ -84,6 +85,7 @@ class LLMContinuationJudge:
         self.model_binding = model_binding
         self.timeout_seconds = float(timeout_seconds)
 
+    @scoped_recovery
     async def decide(self, context: ContinuationContext) -> ContinuationDecision:
         judge_input, has_open_todo = self._judge_input(context)
         language = prompt_language(context.language)
@@ -105,43 +107,57 @@ class LLMContinuationJudge:
                 "response_language": prompt_language(context.language),
             },
         )
-        completed = None
-        try:
-            async with asyncio.timeout(self.timeout_seconds):
-                async for event in stream_auxiliary_model(self.model, request):
-                    if event.kind == ModelEventKind.COMPLETED:
-                        completed = event.response
-        except TimeoutError as exc:
-            raise auxiliary_model_timeout_error(
-                code="agent.continuation.judge_timeout",
-                operation="LLM continuation Judge",
-                timeout_seconds=self.timeout_seconds,
-                plugin_id="sage.agent.continuation.llm-judge",
-            ) from exc
-        if completed is None:
-            return self._invalid(
-                "Judge stream ended without a completed response", UsageSummary()
-            )
-        if completed.tool_calls:
-            return self._invalid(
-                "completion Judge attempted to call a Tool", completed.usage
-            )
-        judge_output = completed.text.strip() or completed.reasoning.strip()
-        if not judge_output:
-            return self._invalid(
-                "completion Judge returned an empty response", completed.usage
-            )
-        try:
-            result = self._parse_json(judge_output)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return self._invalid(
-                "completion Judge returned invalid JSON", completed.usage
-            )
-        if not isinstance(result, dict):
-            return self._invalid(
-                "completion Judge response is not a JSON object", completed.usage
-            )
-        return self._decision(context, result, has_open_todo, completed.usage)
+        original = request
+        usage = UsageSummary()
+        from sagents.v2.model.recovery_scope import current_recovery_scope
+        scope = current_recovery_scope()
+        limit = scope.config.argument_repairs if scope else 2
+        for attempt in range(limit + 1):
+            completed = None
+            async for event in stream_auxiliary_model(
+                self.model, request, timeout_seconds=self.timeout_seconds,
+                timeout_error=auxiliary_model_timeout_error(
+                    code="agent.continuation.judge_timeout", operation="LLM continuation Judge",
+                    timeout_seconds=self.timeout_seconds, plugin_id="sage.agent.continuation.llm-judge",
+                ).info,
+            ):
+                if event.kind == ModelEventKind.COMPLETED:
+                    completed = event.response
+            reason = "Judge returned an invalid structured verdict"
+            if completed is not None:
+                usage = usage.model_copy(update={
+                    "reported": usage.reported or completed.usage.reported,
+                    "input_tokens": usage.input_tokens + completed.usage.input_tokens,
+                    "output_tokens": usage.output_tokens + completed.usage.output_tokens,
+                    "cached_input_tokens": usage.cached_input_tokens + completed.usage.cached_input_tokens,
+                    "reasoning_tokens": usage.reasoning_tokens + completed.usage.reasoning_tokens,
+                })
+                try:
+                    result = self._parse_json(completed.text.strip() or completed.reasoning.strip())
+                except (TypeError, ValueError):
+                    result = None
+                if isinstance(result, dict) and not completed.tool_calls:
+                    decision = self._decision(context, result, has_open_todo, usage)
+                    if decision.reason_code != "judge.invalid_output":
+                        return decision
+                    reason = decision.reason
+            error = RuntimeErrorInfo(code="model.structured_output_invalid", category=ErrorCategory.VALIDATION,
+                message=reason, safe_to_resume=True, metadata={"usage": usage.model_dump(mode="json")})
+            if completed is not None and scope is not None and scope.record_failed_usage is not None:
+                await scope.record_failed_usage(completed.usage)
+                # These failed verdicts are already durable usage; a later
+                # successful decision must not count them a second time.
+                usage = UsageSummary()
+            if attempt == limit:
+                raise SageV2Error(error)
+            await reserve_additional_request("arguments", purpose="judge_schema", error=error)
+            request = original.model_copy(update={"request_id": new_id("judge_repair"),
+                "messages": (*original.messages, ModelMessage(role="user", content=(TextBlock(text=
+                    'Return one JSON object with decision (continue, completed, need_user_input, or blocked) and reason. '
+                    'Judge only the supplied evidence; do not execute the task or invent missing results.'),),
+                    metadata={"inference_view_only": True, "runtime_continuation_guidance": True})),
+            })
+        raise AssertionError("unreachable Judge recovery state")
 
     def _prompt(self, context: ContinuationContext) -> tuple[str, bool]:
         judge_input, has_open_todo = self._judge_input(context)
@@ -630,35 +646,11 @@ class HybridContinuationPolicy:
         deterministic = await self._fallback.evaluate(context)
         if deterministic.reason_code != "text.final":
             return deterministic
-        try:
-            judged = await self.judge.decide(context)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            return deterministic.model_copy(
-                update={
-                    "reason_code": "hybrid.fallback_text_final",
-                    "reason": "Judge unavailable; deterministic final-text rule applied",
-                    "usage": getattr(exc, "usage", UsageSummary()),
-                    "metadata": {
-                        "policy": "hybrid",
-                        "fallback": "judge_unavailable",
-                    },
-                }
-            )
+        judged = await self.judge.decide(context)
         if judged.metadata.get("invalid_output"):
-            return deterministic.model_copy(
-                update={
-                    "reason_code": "hybrid.fallback_text_final",
-                    "reason": "Invalid Judge output; deterministic final-text rule applied",
-                    "usage": judged.usage,
-                    "metadata": {
-                        **judged.metadata,
-                        "policy": "hybrid",
-                        "fallback": "judge_invalid_output",
-                    },
-                }
-            )
+            raise SageV2Error(RuntimeErrorInfo(code="model.structured_output_invalid",
+                category=ErrorCategory.VALIDATION, message="Judge returned an invalid verdict",
+                safe_to_resume=True, metadata={"usage": judged.usage.model_dump(mode="json")}))
         return judged.model_copy(
             update={"metadata": {**judged.metadata, "policy": "hybrid"}}
         )
