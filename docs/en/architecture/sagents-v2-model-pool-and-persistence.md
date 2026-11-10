@@ -194,9 +194,12 @@ subsequent requests while old signed history remains after compaction.
 
 Without explicit binding controls, the adapter uses `prefix_digest` in each new
 response's `provider_state` to validate the serialized system, tools, and preceding
-messages. After a prefix change, it removes `thinking` and `redacted_thinking`
-from the first mismatch onward, preserving text, tool calls, and tool results
-without mutating stored history. Fingerprints persist with responses; different
+messages. Validation proceeds response by response, removing `thinking` and
+`redacted_thinking` from mismatched segments while preserving text, tool calls,
+and tool results without mutating stored history. Later responses are validated
+against the already cleaned prefix, preserving valid thinking generated after
+cleanup. Blocks without fingerprints after a mismatch continue to be stripped
+until a response passes prefix validation. Fingerprints persist with responses; different
 Runs, provider instances, and child agents do not share a mutable baseline.
 Legacy provider state has no fingerprint, so the adapter does not guess its
 origin: use the official `drop_block` control for those histories. With explicit

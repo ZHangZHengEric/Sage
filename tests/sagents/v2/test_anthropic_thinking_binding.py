@@ -211,3 +211,40 @@ async def test_first_mismatch_removes_all_later_thinking():
         )
         == 3
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adjacent_assistants", [False, True])
+async def test_cleaned_prefix_preserves_new_thinking_across_multiple_turns(
+    adjacent_assistants,
+):
+    provider, _, old, reply, _, _ = await captured_turn()
+    history = (
+        ModelMessage(role="system", content=(TextBlock(text="changed system"),)),
+        *request().messages[1:],
+        old,
+        *((reply,) if not adjacent_assistants else ()),
+    )
+    original_state = copy.deepcopy(old.provider_state)
+    for turn in range(3):
+        events = [event async for event in provider.stream(request(messages=history))]
+        response = events[-1].response
+        sent = copy.deepcopy(provider.raw_client.calls[-1][2]["json"])
+        assert response.provider_state["anthropic_messages"]["payload"][
+            "prefix_digest"
+        ] == provider._prefix_digest(sent, sent["messages"])
+        new = ModelMessage(role="assistant", provider_state=response.provider_state)
+        history = (*history, new, *((reply,) if not adjacent_assistants else ()))
+        # Restarting the provider must not lose the cleaned-prefix baseline.
+        provider = AnthropicMessagesModelProvider(
+            provider.config, client=provider.raw_client
+        )
+        replay = provider.diagnostic_request(request(messages=history))
+        thinking = [
+            block
+            for message in replay["messages"]
+            for block in message["content"]
+            if block["type"] in {"thinking", "redacted_thinking"}
+        ]
+        assert len(thinking) == 2 * (turn + 1)
+        assert old.provider_state == original_state

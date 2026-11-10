@@ -168,8 +168,10 @@ python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagent
 
 未配置官方 binding 控制时，适配层会使用新响应 `provider_state` 中的
 `prefix_digest` 校验实际序列化的 system、tools 和此前 messages。
-前缀变化后，从首次不匹配处开始去除 `thinking` 和 `redacted_thinking`，
-保留文本、工具调用和工具结果，不修改存储中的历史。
+按响应逐段校验，前缀失配时去除该段的 `thinking` 和 `redacted_thinking`，
+保留文本、工具调用和工具结果，不修改存储中的历史。后续响应使用已经清理的实际
+前缀重新校验，因此基于新前缀生成的有效 thinking 可以继续保留。失配后的无指纹
+块继续清理，直到遇到前缀校验通过的响应。
 指纹随响应持久化；更换 Run、provider 实例或子 Agent 不会共享可变的校验基准。
 旧版 provider state 没有指纹，适配层不会猜测其来源：应使用官方 `drop_block`
 处理这些历史。显式配置官方 binding 控制时，由上游执行校验，避免掩盖其诊断结果。

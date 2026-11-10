@@ -325,32 +325,30 @@ class AnthropicMessagesModelProvider:
                 "prefix_mismatch_behavior": behavior,
             }
             payload["thinking"] = thinking
-        invalid_from = None
-        for message_index, offset, expected in bindings:
-            prefix = copy.deepcopy(messages[:message_index])
-            if offset:
-                prefix.append(
-                    {
-                        "role": messages[message_index]["role"],
-                        "content": messages[message_index]["content"][:offset],
-                    }
-                )
-            if self._prefix_digest(payload, prefix) != expected:
-                invalid_from = (message_index, offset)
-                break
-        # Provenance lives with each response, so separate agents and restarted
-        # Runs cannot accidentally share a mutable provider-instance baseline.
-        if invalid_from is not None and behavior is None and not configured_binding:
-            for index, message in enumerate(messages):
-                message["content"] = [
-                    block
-                    for offset, block in enumerate(message["content"])
-                    if (index, offset) < invalid_from
-                    or block.get("type") not in {"thinking", "redacted_thinking"}
-                ]
-            payload["messages"] = [
-                message for message in messages if message["content"]
-            ]
+        if behavior is None and not configured_binding:
+            expected_prefixes = {
+                (message_index, offset): expected
+                for message_index, offset, expected in bindings
+            }
+            cleaned: list[dict[str, Any]] = []
+            invalid = False
+            for message_index, message in enumerate(messages):
+                for offset, block in enumerate(message["content"]):
+                    expected = expected_prefixes.get((message_index, offset))
+                    if expected is not None:
+                        # Each response binds to the request actually sent.
+                        # Earlier invalid blocks have already been removed here,
+                        # so a later response generated after cleanup can match.
+                        invalid = self._prefix_digest(payload, cleaned) != expected
+                    # Without its own provenance, a legacy block following a
+                    # mismatch remains invalid until a verified boundary.
+                    if invalid and block.get("type") in {
+                        "thinking",
+                        "redacted_thinking",
+                    }:
+                        continue
+                    self._append_message(cleaned, message["role"], [block])
+            payload["messages"] = cleaned
         return payload
 
     @staticmethod
