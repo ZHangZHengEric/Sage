@@ -530,3 +530,12 @@ fn model_recovery_updates_status_without_chat_messages() {
         assert!(matches!(&events[0], BackendEvent::Status(text) if !text.is_empty()));
     }
 }
+
+#[test]
+fn interrupted_message_flushes_partial_text_before_recovery() {
+    let mut state = BackendProtocolState::default();
+    let events = state.parse_line(&native("item.completed", Some("partial"),
+        serde_json::json!({"item": {"item_id":"partial", "visibility":"public", "status":"cancelled",
+            "data":{"kind":"message", "role":"assistant", "content":[{"kind":"text", "text":"partial"}]}}})));
+    assert!(matches!(&events[..], [BackendEvent::Message(MessageKind::System, text)] if text.contains("incomplete")));
+}

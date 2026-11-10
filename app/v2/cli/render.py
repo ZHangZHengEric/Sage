@@ -72,6 +72,14 @@ class PlainRenderer:
             if item is None or item.visibility != "public":
                 return
             body = item.data
+            if isinstance(body, MessageItemData) and body.role == "assistant" and item.status.value in {"cancelled", "suspended", "failed"}:
+                if not self._streamed_chars.get(item.item_id, 0):
+                    self.out.write(_message_text(body))
+                if self._streamed_chars.get(item.item_id, 0) or _message_text(body):
+                    self.out.write("\n")
+                    self.out.flush()
+                self.notice("[model output interrupted; preceding fragment is incomplete]")
+                return
             if isinstance(body, ToolCallItemData):
                 self._tool_names[(event.run_id, body.tool_call_id)] = body.tool_name
             elif isinstance(body, ToolResultItemData):

@@ -2930,6 +2930,10 @@ class WorkspaceController extends ChangeNotifier {
     } else if (type == 'message.completed') {
       _completeMessage(conversation, eventData, sequence: sequence);
     } else if (type == 'item.completed') {
+      final item = eventData['item'];
+      if (item is Map && item['visibility'] == 'public' && {'cancelled', 'suspended', 'failed'}.contains(item['status'])) {
+        _completeMessage(conversation, eventData, sequence: sequence);
+      }
       _trackToolResult(conversation, eventData);
     } else if (type == 'turn.started') {
       conversation.status = RunStatus.running;
@@ -3122,6 +3126,7 @@ class WorkspaceController extends ChangeNotifier {
     if (role != 'assistant') return;
     final id = item['item_id']?.toString() ?? _id('assistant');
     final text = _textFromContent(rawMessage['content']);
+    final interrupted = {'cancelled', 'suspended', 'failed'}.contains(item['status']);
     final existing = conversation.messages
         .where((value) => value.id == id)
         .firstOrNull;
@@ -3132,6 +3137,7 @@ class WorkspaceController extends ChangeNotifier {
           id: id,
           role: role,
           text: text,
+          interrupted: interrupted,
           processOnly: true,
           sequence: sequence,
         ),
@@ -3149,6 +3155,7 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
       existing.streaming = false;
+      existing.interrupted = interrupted;
       existing.processOnly = existing.openUiSurfaces.isEmpty;
     }
   }

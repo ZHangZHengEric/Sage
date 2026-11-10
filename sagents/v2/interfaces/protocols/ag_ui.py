@@ -19,6 +19,7 @@ from sagents.v2.contracts.events import (
     SteeringEventData,
     ToolEventData,
     UsageEventData,
+    StepEventData,
 )
 from sagents.v2.contracts.items import (
     ActivityItemData,
@@ -128,6 +129,7 @@ class AgUiProtocolAdapter:
                     JobEventData,
                     ProtocolEventData,
                     SessionCommitEventData,
+                    StepEventData,
                 ),
             )
             or event.type == "checkpoint.committed"
@@ -310,6 +312,10 @@ class AgUiProtocolAdapter:
             )
             self._started_text.discard(item_id)
             self._streamed_text.discard(item_id)
+            if data.item.status.value in {"cancelled", "suspended", "failed"}:
+                frames.extend(self._extension(event, "sage.message.interrupted", {
+                    "message_id": item_id, "status": data.item.status.value,
+                }).frames)
             return AdapterResult(frames=tuple(frames))
         if isinstance(item, ReasoningItemData):
             text = self._text(item.content)
@@ -341,6 +347,10 @@ class AgUiProtocolAdapter:
             )
             self._started_reasoning.discard(item_id)
             self._streamed_reasoning.discard(item_id)
+            if data.item.status.value in {"cancelled", "suspended", "failed"}:
+                frames.extend(self._extension(event, "sage.message.interrupted", {
+                    "message_id": item_id, "status": data.item.status.value,
+                }).frames)
             return AdapterResult(frames=tuple(frames))
         if isinstance(item, ToolCallItemData):
             arguments = item.arguments_json or json.dumps(

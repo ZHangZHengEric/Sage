@@ -155,3 +155,41 @@ async def test_canonical_stream_keeps_idle_connection_alive():
 
     assert await anext(stream) == ": heartbeat\n\n"
     await getattr(stream, 'aclose')()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_marker_replays_after_message_end_cursor():
+    from app.v2.server.conversations.agui.sse import canonical_agui_sse
+    from tests.sagents.v2.test_protocol_adapters_matrix import event, item_snapshot
+    from sagents.v2.contracts.events import ItemEventData, RunEventData
+    from sagents.v2.contracts.items import ItemStatus, MessageItemData, TextBlock
+    import json
+
+    item = item_snapshot('partial', MessageItemData(role='assistant', content=(TextBlock(text='partial'),))).model_copy(update={'status': ItemStatus.CANCELLED})
+    events = [
+        event('run.started', sequence=1, data=RunEventData(state='running')),
+        event('message.delta', sequence=2, item_id='partial', data=ItemEventData(operation='delta', delta='partial')),
+        event('item.completed', sequence=3, item_id='partial', data=ItemEventData(operation='completed', item=item)),
+        event('run.completed', sequence=4, data=RunEventData(state='completed')),
+    ]
+    async def source():
+        for value in events:
+            yield value
+
+    async def frames(cursor):
+        output = []
+        async for chunk in canonical_agui_sse(source(), thread_id='session_1', run_id='run_1', last_event_id=cursor):
+            lines = chunk.splitlines()
+            data = next((line[6:] for line in lines if line.startswith('data: ')), None)
+            if data:
+                output.append((next(line[4:] for line in lines if line.startswith('id: ')), json.loads(data)))
+        return output
+
+    live = await frames(None)
+    end_cursor = next(cursor for cursor, frame in live if frame['type'] == 'TEXT_MESSAGE_END')
+    replay = await frames(end_cursor)
+    marker_cursor, marker = replay[0]
+    assert marker['name'] == 'sage.message.interrupted'
+    assert marker_cursor.endswith(':5')
+    assert not any(frame['type'] == 'TEXT_MESSAGE_CONTENT' for _, frame in replay)
+    assert not any(frame.get('name') == 'sage.message.interrupted' for _, frame in await frames(marker_cursor))
