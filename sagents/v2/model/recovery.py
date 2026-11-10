@@ -149,34 +149,22 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
     from sagents.v2.contracts.common import new_id
     from sagents.v2.contracts.items import TextBlock
     from sagents.v2.model.contracts import ModelMessage
-    from sagents.v2.contracts.model_recovery import ModelRecoveryAction, ModelRecoveryState
+    from sagents.v2.contracts.model_recovery import ModelRecoveryAction
     from sagents.v2.model.recovery_policy import ModelRecoveryPolicy, checked_response, reserve_recovery
-    from sagents.v2.model.recovery_scope import recovery_scope
+    from sagents.v2.model.recovery_scope import recovery_scope, recovery_call, resume_pending_recovery
     import random
 
-    with recovery_scope() as scope:
+    with recovery_scope() as scope, recovery_call(request, purpose) as key:
         config = scope.config
         if transient_retries is not None:
             config = config.model_copy(update={"transient_retries": min(transient_retries, config.transient_retries)})
         purpose = purpose or request.metadata.get("purpose", "auxiliary")
-        key = f"{scope.step_key}:{purpose}"
-        state = scope.states.get(key, ModelRecoveryState())
+        state = await resume_pending_recovery(scope, key, purpose)
         if purpose == "capability_probe":
             request = request.model_copy(update={"metadata": {**request.metadata, "capability_probe": True}})
         original = request
         if state.pending_action is not None:
-            from sagents.v2.contracts.model_recovery import ModelFailure, ModelFailureKind
             from sagents.v2.model.recovery_policy import guidance_for_failure
-            if state.dispatch_started:
-                from sagents.v2.model.recovery_scope import schedule_failure_recovery
-                error = RuntimeErrorInfo(code="model.recovery_interrupted", category=ErrorCategory.VALIDATION,
-                    message="A previous model recovery request may have been sent.", safe_to_resume=True,
-                    metadata={"model_failure": ModelFailure(kind=state.pending_kind or ModelFailureKind.UNKNOWN).model_dump(mode="json")})
-                decision = await schedule_failure_recovery(error, purpose=purpose)
-                state = scope.states[key]
-                await scope.wait(decision.delay_seconds)
-            elif state.retry_not_before is not None:
-                await scope.wait(max(0, (state.retry_not_before - scope.clock()).total_seconds()))
             guidance_kind = state.guidance_kind or (state.pending_kind if state.pending_action == ModelRecoveryAction.REGENERATE_WITH_GUIDANCE else None)
             if guidance_kind is not None:
                 guidance = guidance_for_failure(guidance_kind)
@@ -191,6 +179,8 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                 "episode_requests": max(state.episode_requests, scope.episode_counts.get(scope.step_key, 0)),
                 "run_requests": scope.run_requests,
             })
+            if state.deadline is not None:
+                scope.episode_deadlines.setdefault(scope.step_key, state.deadline)
             consume_model_call()
             if state.deadline is not None and scope.clock() >= state.deadline:
                 raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached")
@@ -198,10 +188,7 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
             stream = model.stream(request)
             response = None
             try:
-                async with asyncio.timeout_at(
-                    asyncio.get_running_loop().time() + max(0, (state.deadline - scope.clock()).total_seconds())
-                    if state.deadline else None
-                ):
+                async with scope.enforce_deadline():
                     try:
                         async with asyncio.timeout(request_timeout_seconds):
                             iterator = aiter(stream)
@@ -238,8 +225,7 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                     # A Judge validates its private structured reasoning fallback;
                     # it is never a user-facing answer or an automatic completion.
                     checked_response(response, request)
-                await scope.record_dispatch(key, state, completed=True)
-                scope.states.pop(key, None)
+                await scope.complete_call(key, state)
                 return response
             except TimeoutError as exc:
                 raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached") from exc
@@ -282,3 +268,31 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                 "messages": (*original.messages, *suffix),
                 "metadata": {**original.metadata, "logical_request_id": state.logical_call_id,
                              "recovery_attempt": state.episode_requests}})
+
+
+async def execute_recoverable_operation(operation, *, scope, key, purpose, transient_retries=None, on_retry=None):
+    """Shared transport recovery for an operation owning its output validation."""
+    from sagents.v2.contracts.model_recovery import ModelFailureKind
+    from sagents.v2.model.failures import failure_from_error
+    from sagents.v2.model.recovery_scope import resume_pending_recovery, schedule_failure_recovery
+    state = await resume_pending_recovery(scope, key, purpose)
+    while True:
+        if scope.check is not None:
+            await scope.check()
+        state = await scope.record_dispatch(key, state)
+        try:
+            async with scope.enforce_deadline():
+                result = await operation()
+        except SageV2Error as exc:
+            if failure_from_error(exc.info).kind not in {
+                ModelFailureKind.TRANSPORT, ModelFailureKind.STREAM, ModelFailureKind.RATE_LIMIT,
+                ModelFailureKind.OVERLOADED, ModelFailureKind.CAPACITY,
+            }:
+                raise
+            decision = await schedule_failure_recovery(exc.info, purpose=purpose, key=key, transient_retries=transient_retries)
+            if on_retry is not None:
+                on_retry(exc.info, decision)
+            state = await resume_pending_recovery(scope, key, purpose)
+        else:
+            await scope.complete_call(key, state)
+            return result

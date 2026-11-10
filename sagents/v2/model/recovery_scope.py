@@ -27,6 +27,35 @@ class RecoveryScope:
     operation_failed: bool = False
     primary_recovery: bool = False
     closed_episodes: set[str] = field(default_factory=set)
+    active_calls: set[str] = field(default_factory=set)
+    deadline_guards: dict = field(default_factory=dict, repr=False)
+
+    @asynccontextmanager
+    async def enforce_deadline(self):
+        """Reschedule running calls when nested negotiation starts recovery."""
+        from sagents.v2.contracts.errors import RuntimeErrorInfo, ErrorCategory, SageV2Error
+        guard = asyncio.timeout(None)
+        try:
+            async with guard:
+                self.deadline_guards[guard] = self.step_key
+                self.refresh_deadlines()
+                yield
+        except TimeoutError as exc:
+            if not guard.expired():
+                raise
+            raise SageV2Error(RuntimeErrorInfo(code="model.recovery_exhausted",
+                category=ErrorCategory.VALIDATION, message="Model recovery deadline reached",
+                safe_to_resume=True)) from exc
+        finally:
+            self.deadline_guards.pop(guard, None)
+
+    def refresh_deadlines(self):
+        for guard, key in tuple(self.deadline_guards.items()):
+            deadline = self.episode_deadlines.get(key)
+            if deadline is not None and not guard.expired():
+                when = asyncio.get_running_loop().time() + max(0, (deadline - self.clock()).total_seconds())
+                if guard.when() is None or when < guard.when():
+                    guard.reschedule(when)
 
     def clear_episode(self, key):
         self.episode_counts.pop(key, None)
@@ -104,6 +133,13 @@ class RecoveryScope:
             }
         )
         async with self.reservation_lock:
+            previous = self.states.get(key)
+            if previous is not None and any(previous.counts.get(counter, 0) > state.counts.get(counter, 0)
+                for counter in previous.counts):
+                from sagents.v2.contracts.errors import RuntimeErrorInfo, ErrorCategory, SageV2Error
+                raise SageV2Error(RuntimeErrorInfo(code="model.provider_state_invalid",
+                    category=ErrorCategory.VALIDATION,
+                    message="Stale recovery dispatch cannot replace a newer reservation."))
             self.states[key] = state
             if self.persist is not None:
                 await self.persist(
@@ -122,6 +158,15 @@ class RecoveryScope:
                     decision,
                 )
         return state
+
+    async def complete_call(self, key, state):
+        await self.record_dispatch(key, state, completed=True)
+        # Nested compatibility reservations are finished with this response;
+        # replay must not mistake them for another pending logical call.
+        for child_key, child in tuple(self.states.items()):
+            if child_key.startswith(f"{key}:"):
+                await self.record_dispatch(child_key, child, completed=True)
+        self.states.pop(key, None)
 
     async def wait(self, seconds):
         if self.check is None:
@@ -161,6 +206,7 @@ class RecoveryScope:
         self.closed_episodes.discard(self.step_key)
         self.episode_counts[self.step_key] = count + 1
         self.episode_deadlines[self.step_key] = deadline
+        self.refresh_deadlines()
         return state.model_copy(
             update={
                 "run_requests": self.run_requests,
@@ -203,7 +249,7 @@ async def reserve_additional_request(kind, *, purpose, error=None):
     scope = _active.get()
     if scope is None:
         return  # Direct provider use still has locally bounded negotiations.
-    key = f"{scope.step_key}:{purpose}"
+    key = f"{_call_key.get() or scope.step_key}:{purpose}" if kind == "compatibility" else f"{scope.step_key}:{purpose}"
     state = scope.states.get(key, ModelRecoveryState()).model_copy(
         update={"run_requests": scope.run_requests}
     )
@@ -284,7 +330,7 @@ async def recovery_operation():
                     await scope.finish_episode()
 
 
-async def schedule_failure_recovery(error, *, purpose):
+async def schedule_failure_recovery(error, *, purpose, key=None, transient_retries=None):
     """Reserve a policy decision for an outer operation with its own timeout."""
     import random
     from sagents.v2.contracts.errors import SageV2Error
@@ -294,7 +340,7 @@ async def schedule_failure_recovery(error, *, purpose):
     scope = _active.get()
     if scope is None:
         raise RuntimeError("Recovery requires an operation scope")
-    key = f"{scope.step_key}:{purpose}"
+    key = key or f"{scope.step_key}:{purpose}"
     state = scope.states.get(key, ModelRecoveryState()).model_copy(
         update={
             "run_requests": scope.run_requests,
@@ -303,10 +349,13 @@ async def schedule_failure_recovery(error, *, purpose):
         }
     )
     now = scope.clock()
+    config = scope.config
+    if transient_retries is not None:
+        config = config.model_copy(update={"transient_retries": min(transient_retries, config.transient_retries)})
     decision = ModelRecoveryPolicy().decide(
         error,
         state,
-        scope.config,
+        config,
         now=now,
         purpose=purpose,
         jitter=random.uniform(0, 0.25),
@@ -330,3 +379,75 @@ async def schedule_failure_recovery(error, *, purpose):
     )
     await scope.reserve(key, state, error, decision)
     return decision
+
+
+_call_key: ContextVar[str | None] = ContextVar("model_recovery_call_key", default=None)
+
+
+@contextmanager
+def recovery_call(request, purpose):
+    """Claim one logical call; identical concurrent calls never adopt each other.
+
+    A semantic fingerprint finds a pending reservation after request IDs are
+    rebuilt on restart. Multiple matching reservations are ambiguous, not guessed.
+    Old purpose-only keys are accepted only while unclaimed.
+    """
+    import hashlib
+    import json
+    from sagents.v2.contracts.common import new_id
+    from sagents.v2.contracts.errors import RuntimeErrorInfo, ErrorCategory, SageV2Error
+    scope = current_recovery_scope()
+    purpose = purpose or getattr(request, "metadata", {}).get("purpose", "auxiliary")
+    legacy = f"{scope.step_key}:{purpose}"
+    semantic = request.model_dump(mode="json", exclude={"request_id"})
+    digest = hashlib.sha256(json.dumps(semantic, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    prefix = f"{legacy}:call:{digest}:"
+    candidates = set()
+    for saved_key, state in scope.states.items():
+        if state.pending_action is None:
+            continue
+        if saved_key == legacy:
+            candidate = legacy
+        elif saved_key.startswith(prefix):
+            # Compatibility reservations live below their logical call. They
+            # can identify it after a crash before the parent had to retry.
+            candidate = prefix + saved_key[len(prefix):].split(":", 1)[0]
+        else:
+            continue
+        if candidate not in scope.active_calls:
+            candidates.add(candidate)
+    if len(candidates) > 1:
+        raise SageV2Error(RuntimeErrorInfo(code="model.provider_state_invalid",
+            category=ErrorCategory.VALIDATION,
+            message="Multiple pending model calls match the restored request; cannot resume safely."))
+    key = next(iter(candidates)) if candidates else prefix + new_id("call")
+    if key in scope.active_calls:
+        key = prefix + new_id("call")
+    scope.active_calls.add(key)
+    token = _call_key.set(key)
+    try:
+        yield key
+    finally:
+        _call_key.reset(token)
+        scope.active_calls.discard(key)
+
+
+async def resume_pending_recovery(scope, key, purpose):
+    """Honor durable waits; uncertain dispatched requests consume another slot."""
+    from sagents.v2.contracts.model_recovery import ModelFailure, ModelFailureKind
+    from sagents.v2.contracts.errors import RuntimeErrorInfo, ErrorCategory
+    state = scope.states.get(key, ModelRecoveryState())
+    if state.pending_action is not None:
+        if state.deadline is not None:
+            existing = scope.episode_deadlines.get(scope.step_key)
+            scope.episode_deadlines[scope.step_key] = min(existing, state.deadline) if existing else state.deadline
+        if state.dispatch_started:
+            error = RuntimeErrorInfo(code="model.recovery_interrupted", category=ErrorCategory.VALIDATION,
+                message="A previous model recovery request may have been sent.", safe_to_resume=True,
+                metadata={"model_failure": ModelFailure(kind=state.pending_kind or ModelFailureKind.UNKNOWN).model_dump(mode="json")})
+            await schedule_failure_recovery(error, purpose=purpose, key=key)
+            state = scope.states[key]
+        if state.retry_not_before is not None:
+            async with scope.enforce_deadline():
+                await scope.wait(max(0, (state.retry_not_before - scope.clock()).total_seconds()))
+    return state

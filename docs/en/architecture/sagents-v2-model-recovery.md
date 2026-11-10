@@ -19,6 +19,10 @@ Providers identify protocol facts, `ModelRecoveryPolicy` selects an action, and 
 
 Concurrent operations sharing a recovery episode must all succeed before its budget is released. A successful sibling cannot clear a failed operation's state. Fresh requests and resumed recovery use the same guidance templates. Server waits exceeding the remaining budget stop directly, including extremely large finite values, without overflowing datetime arithmetic.
 
+Each logical call has an independent durable recovery identity. Concurrent calls with the same purpose share only episode and Run budgets. Rebuilt request IDs match a unique pending call by a semantic fingerprint; ambiguous matches stop rather than guessing ownership. Only the digest is stored, not the original input. Deadlines created or shortened during parameter negotiation also apply immediately to active primary and auxiliary calls.
+
+Summary transport recovery shares waiting, dispatch reservations and restart handling with other calls, releasing summary capacity during backoff. The user simulator validates its schema at runtime to handle truncation across protocols, without relying on raw finish strings or requiring native provider JSON support.
+
 ## Contracts
 
 `ModelResponse.termination` is an optional, automatically normalized termination state: `complete`, `tool_calls`, `truncated`, `paused`, `refused`, `empty`, or `unknown`. The original `finish_reason` is retained. Empty output is checked even with missing usage or output_tokens=0. Reasoning alone cannot replace a deliverable answer.

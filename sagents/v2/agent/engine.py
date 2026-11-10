@@ -2533,50 +2533,56 @@ class AgentLoopEngine:
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
 
-        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
-        iterator = stream.__aiter__()
-        pending = None
-        poll_seconds = 0.1
-        try:
-            while True:
-                if pending is None:
-                    pending = asyncio.create_task(anext(iterator))
-                timeout = poll_seconds
-                deadline_expired = False
-                if budget.deadline is not None:
-                    remaining = (budget.deadline - self.clock()).total_seconds()
-                    if remaining <= 0:
-                        deadline_expired = True
-                        timeout = 0
-                    else:
+        from contextlib import AsyncExitStack
+        from sagents.v2.model.recovery_scope import current_recovery_scope
+        async with AsyncExitStack() as stack:
+            scope = current_recovery_scope()
+            if scope is not None:
+                await stack.enter_async_context(scope.enforce_deadline())
+            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+            iterator = stream.__aiter__()
+            pending = None
+            poll_seconds = 0.1
+            try:
+                while True:
+                    if pending is None:
+                        pending = asyncio.create_task(anext(iterator))
+                    timeout = poll_seconds
+                    deadline_expired = False
+                    if budget.deadline is not None:
+                        remaining = (budget.deadline - self.clock()).total_seconds()
+                        if remaining <= 0:
+                            deadline_expired = True
+                            timeout = 0
+                        else:
+                            timeout = min(timeout, remaining)
+                    if recovery_deadline is not None:
+                        remaining = (recovery_deadline - self.clock()).total_seconds()
+                        if remaining <= 0:
+                            raise SageV2Error(RuntimeErrorInfo(code="model.recovery_exhausted",
+                                category=ErrorCategory.VALIDATION, message="Model recovery deadline reached"))
                         timeout = min(timeout, remaining)
-                if recovery_deadline is not None:
-                    remaining = (recovery_deadline - self.clock()).total_seconds()
-                    if remaining <= 0:
-                        raise SageV2Error(RuntimeErrorInfo(code="model.recovery_exhausted",
-                            category=ErrorCategory.VALIDATION, message="Model recovery deadline reached"))
-                    timeout = min(timeout, remaining)
-                done, _ = await asyncio.wait({pending}, timeout=timeout)
-                if done:
-                    try:
-                        event = pending.result()
-                    except StopAsyncIteration:
+                    done, _ = await asyncio.wait({pending}, timeout=timeout)
+                    if done:
+                        try:
+                            event = pending.result()
+                        except StopAsyncIteration:
+                            return
+                        pending = None
+                        yield event, None
+                        continue
+                    if deadline_expired:
+                        expired = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+                        if expired.error is not None:
+                            raise SageV2Error(expired.error)
+                    current = await self.runtime.get_run(run.run_id)
+                    if current.state != RunState.RUNNING:
+                        yield None, current
                         return
-                    pending = None
-                    yield event, None
-                    continue
-                if deadline_expired:
-                    expired = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
-                    if expired.error is not None:
-                        raise SageV2Error(expired.error)
-                current = await self.runtime.get_run(run.run_id)
-                if current.state != RunState.RUNNING:
-                    yield None, current
-                    return
-        finally:
-            if pending is not None and not pending.done():
-                pending.cancel()
-                await asyncio.gather(pending, return_exceptions=True)
+            finally:
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
 
     async def stream_model_step(self, run, request, context, state, step_id) -> tuple[RunSnapshot, ModelResponse | None, RunSnapshot | None]:
         """Normalize one provider stream into canonical Item lifecycle events.

@@ -103,12 +103,7 @@ class ModelConversationSummarizer:
             nonlocal first
             if first:
                 first = False
-                from sagents.v2.model.recovery_scope import current_recovery_scope, reserve_additional_request
-                active = current_recovery_scope()
-                if (active and active.episode_counts.get(active.step_key, 0)
-                    and f"{active.step_key}:auxiliary_context" not in active.states):
-                    await reserve_additional_request("context", purpose="recovery_summary")
-                return await self._summarize_with_retries(request)
+                return await self._summarize_with_retries(request, account_initial=True)
             from sagents.v2.model.recovery_scope import reserve_additional_request
             await reserve_additional_request("context", purpose="summary_fragment")
             fragment_request = request.model_copy(
@@ -139,141 +134,61 @@ class ModelConversationSummarizer:
             payload["open_tasks"] = snapshot.get("open_tasks", [])
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
-    async def _summarize_with_retries(self, request: SummarizationRequest) -> str:
-        async with auxiliary_capacity("context-summary"):
-            logger = LOGGER.bind(
-                session_id=request.scope.session_id,
-                run_id=request.scope.run_id,
-                correlation_id=new_id("summary_operation"),
-            )
-            started = asyncio.get_running_loop().time()
-            from sagents.v2.model.recovery_scope import current_recovery_scope
-            scope = current_recovery_scope()
-            retry_limit = min(self._MAX_TIMEOUT_RETRIES, scope.config.transient_retries) if scope else self._MAX_TIMEOUT_RETRIES
-            for timeout_attempt in range(retry_limit + 1):
-                progress = {
-                    "attempt": 0,
-                    "text_delta_count": 0,
-                    "reasoning_delta_count": 0,
-                    "timeout_attempt": timeout_attempt + 1,
-                    "timeout_retry_limit": retry_limit,
-                }
-                attributes = {
-                    "model_binding": self.model_binding,
-                    "source_message_count": len(request.messages),
-                    "target_tokens": request.target_tokens,
-                    "timeout_seconds": self.timeout_seconds,
-                    "idle_timeout_seconds": self.idle_timeout_seconds,
-                    **progress,
-                }
-                logger.info(
-                    "context.summary.attempt_started",
-                    "Starting conversation summary attempt",
-                    attributes=attributes,
-                )
+    async def _summarize_with_retries(self, request: SummarizationRequest, *, account_initial=False) -> str:
+        from sagents.v2.model.recovery import execute_recoverable_operation
+        from sagents.v2.model.recovery_scope import current_recovery_scope, recovery_call
+        from sagents.v2.model.failures import failure_from_error
+        scope = current_recovery_scope()
+        logger = LOGGER.bind(session_id=request.scope.session_id, run_id=request.scope.run_id,
+            correlation_id=new_id("summary_operation"))
+        progress = {}
+
+        async def attempt():
+            progress.clear()
+            reservation = scope.states.get(key)
+            progress.update(attempt=0, text_delta_count=0, reasoning_delta_count=0,
+                timeout_attempt=(reservation.counts.get("transient", 0) if reservation else 0) + 1)
+            logger.info("context.summary.attempt_started", "Starting conversation summary attempt", attributes=progress)
+            # Capacity belongs to a request, never to backoff or a restored wait.
+            async with auxiliary_capacity("context-summary"):
                 try:
-                    try:
-                        # Each timeout retry gets a fresh total budget, including
-                        # capabilities discovery and both output-format attempts.
-                        async with asyncio.timeout(self.timeout_seconds):
-                            result = await self._summarize(request, progress)
-                    except TimeoutError as exc:
-                        raise self._timeout_error("total", progress) from exc
-                except Exception as exc:
-                    if isinstance(exc, SageV2Error) and exc.info.metadata.get("recovery", {}).get("action") == "stop_with_explanation":
-                        raise
-                    timeout_error = self._as_timeout_error(exc, progress)
-                    if (
-                        timeout_error is None
-                        and isinstance(exc, SageV2Error)
-                        and exc.info.retryable
-                        and exc.info.category
-                        in {
-                            ErrorCategory.PROVIDER_TRANSIENT,
-                            ErrorCategory.RATE_LIMITED,
-                        }
-                    ):
-                        # Summary output is derived, with no Tool side effects
-                        # or user-visible deltas. Retrying it cannot replay work.
-                        if timeout_attempt == retry_limit:
-                            raise
-                        from sagents.v2.model.recovery_scope import schedule_failure_recovery
-                        recovery = await schedule_failure_recovery(exc.info, purpose="summary_transport")
-                        delay = recovery.delay_seconds
-                        logger.warning(
-                            "context.summary.provider_retry",
-                            "Conversation summary provider failed; retrying",
-                            error=exc,
-                            attributes={
-                                **attributes,
-                                "retry_delay_seconds": delay,
-                                "provider_retry_attempt": timeout_attempt + 1,
-                            },
-                        )
-                        await scope.wait(delay)
-                        continue
-                    if timeout_error is None:
-                        logger.exception(
-                            "context.summary.failed",
-                            "Conversation summary failed",
-                            exc,
-                            attributes={**attributes, **progress},
-                        )
-                        raise
-                    exhausted = timeout_attempt == retry_limit
-                    delay = 0
-                    if not exhausted:
-                        from sagents.v2.model.recovery_scope import schedule_failure_recovery
-                        recovery = await schedule_failure_recovery(timeout_error.info, purpose="summary_transport")
-                        delay = recovery.delay_seconds
-                    attributes.update(
-                        {
-                            **timeout_error.info.metadata,
-                            "retry_delay_seconds": delay,
-                            "elapsed_seconds": asyncio.get_running_loop().time()
-                            - started,
-                            "timeout_retries_exhausted": exhausted,
-                        }
-                    )
-                    if exhausted:
-                        error = SageV2Error(
-                            timeout_error.info.model_copy(
-                                update={
-                                    "metadata": {
-                                        **timeout_error.info.metadata,
-                                        "timeout_retries_exhausted": True,
-                                    }
-                                }
-                            )
-                        )
-                        logger.exception(
-                            "context.summary.timeout_exhausted",
-                            "Conversation summary timeout retries exhausted",
-                            error,
-                            attributes=attributes,
-                        )
-                        raise error from exc
-                    logger.warning(
-                        "context.summary.timeout_retry",
-                        "Conversation summary timed out; retrying",
-                        error=timeout_error,
-                        attributes=attributes,
-                    )
-                    await scope.wait(delay)
-                else:
-                    logger.info(
-                        "context.summary.completed",
-                        "Conversation summary completed",
-                        attributes={
-                            **attributes,
-                            **progress,
-                            "elapsed_seconds": asyncio.get_running_loop().time()
-                            - started,
-                            "output_characters": len(result),
-                        },
-                    )
-                    return result
-            raise AssertionError("unreachable summary retry state")
+                    async with asyncio.timeout(self.timeout_seconds):
+                        return await self._summarize(request, progress)
+                except TimeoutError as exc:
+                    raise self._timeout_error("total", progress) from exc
+                except SageV2Error as exc:
+                    if failure_from_error(exc.info).kind.value in {"transport", "stream"}:
+                        timeout = self._as_timeout_error(exc, progress)
+                        if timeout is not None:
+                            raise timeout from exc
+                    raise
+
+        def on_retry(error, decision):
+            is_timeout = error.code == "context.summarizer.model_timeout"
+            logger.warning("context.summary.timeout_retry" if is_timeout else "context.summary.provider_retry",
+                "Conversation summary recovery scheduled", error=SageV2Error(error),
+                attributes={**error.metadata, **progress, "retry_delay_seconds": decision.delay_seconds})
+
+        with recovery_call(request, "summary_transport") as key:
+            pending = scope.states.get(key)
+            if (account_initial and scope.episode_counts.get(scope.step_key, 0)
+                and not (pending and pending.pending_action is not None)
+                and f"{scope.step_key}:auxiliary_context" not in scope.states):
+                from sagents.v2.model.recovery_scope import reserve_additional_request
+                await reserve_additional_request("context", purpose="recovery_summary")
+            try:
+                result = await execute_recoverable_operation(attempt, scope=scope, key=key,
+                    purpose="summary_transport", transient_retries=self._MAX_TIMEOUT_RETRIES, on_retry=on_retry)
+            except SageV2Error as exc:
+                is_timeout = exc.info.code == "context.summarizer.model_timeout"
+                if is_timeout:
+                    exc = SageV2Error(exc.info.model_copy(update={"metadata": {
+                        **exc.info.metadata, **progress, "timeout_retries_exhausted": True}}))
+                logger.exception("context.summary.timeout_exhausted" if is_timeout else "context.summary.failed",
+                    "Conversation summary failed", exc, attributes={**exc.info.metadata, **progress})
+                raise exc
+            logger.info("context.summary.completed", "Conversation summary completed", attributes=progress)
+            return result
 
     def _as_timeout_error(self, error, progress):
         if (
@@ -417,7 +332,8 @@ class ModelConversationSummarizer:
                 elif event.kind == ModelEventKind.REASONING_DELTA and event.delta:
                     progress["reasoning_delta_count"] += 1
             completed = await collect_response(self.model, model_request,
-                idle_timeout_seconds=self.idle_timeout_seconds, on_event=observe, manage_transport=False)
+                idle_timeout_seconds=self.idle_timeout_seconds, on_event=observe,
+                transient_retries=self._MAX_TIMEOUT_RETRIES)
             async def record_failed_output():
                 from sagents.v2.model.recovery_scope import current_recovery_scope
                 scope = current_recovery_scope()

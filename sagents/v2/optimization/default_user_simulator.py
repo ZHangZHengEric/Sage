@@ -13,14 +13,15 @@ from sagents.v2.optimization.user_simulator import (
 )
 
 
-async def generate_user_text(provider, messages, *, temperature=None):
+async def generate_user_text(provider, messages, *, temperature=None, output_schema=None):
     """One plain model request, with no agent, tools, grader or hidden references."""
     from sagents.v2.optimization.python_user_simulator import UserSimulationExecutionError
     request = ModelRequest(request_id='user-simulator', run_id='user-simulator',
-        model_binding=provider.model_binding, messages=tuple(messages), temperature=temperature)
+        model_binding=provider.model_binding, messages=tuple(messages), temperature=temperature,
+        metadata={"output_validation_schema": output_schema, "json_fence_compatible": True} if output_schema else {})
     from sagents.v2.model.recovery import collect_response
     response = await collect_response(provider, request, purpose="user_simulator")
-    if response is None or response.tool_calls or response.finish_reason in {'length', 'max_tokens', 'incomplete'}:
+    if response is None or response.tool_calls or response.termination.value == 'truncated':
         raise UserSimulationExecutionError('User ModelProvider did not complete a text response')
     if not response.text.strip():
         raise UserSimulationExecutionError('User ModelProvider returned empty text')
@@ -61,7 +62,7 @@ class DefaultUserSimulator(UserSimulator):
         async with self.provider_factory(request) as provider:
             for attempt in range(3):
                 try:
-                    text = await generate_user_text(provider, messages)
+                    text = await generate_user_text(provider, messages, output_schema=UserSimulationReply.model_json_schema())
                 except SageV2Error as error:
                     if error.info.retryable and error.info.metadata.get("recovery", {}).get("action") != "stop_with_explanation":
                         raise OptimizationTransientFailure('User ModelProvider transport interrupted') from error
