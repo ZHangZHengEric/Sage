@@ -1,7 +1,7 @@
 """SAgents V2 module for model/plugins/openai_compatible.py."""
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import normalize_provider_failure
+from sagents.v2.model.recovery_policy import annotate_stream_failure
 
 import json
 from sagents.v2.model.wire_diagnostics import record_wire_event
@@ -319,6 +319,14 @@ class OpenAICompatibleModelProvider:
         response_started = False
         terminal_event_received = False
         compatibility_fallback: dict[str, Any] | None = None
+        def stream_failure(error):
+            observed_usage = usage
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal_event_received,
+                text=text, reasoning=reasoning, tools=tool_fragments,
+            ))
+
         try:
             (
                 upstream,
@@ -448,9 +456,9 @@ class OpenAICompatibleModelProvider:
                                     accumulator["arguments"], str(arguments)
                                 )
         except SageV2Error as exc:
-            raise SageV2Error(normalize_provider_failure(exc.info, self.config.provider_id)) from exc
+            raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=response_started, provider=self.config.provider_id) from exc
+            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
         finally:
             if upstream is not None:
                 closer = getattr(upstream, "close", None) or getattr(
@@ -462,10 +470,10 @@ class OpenAICompatibleModelProvider:
                         await result
 
         if not terminal_event_received:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
                 response_started=response_started,
-            )
+            ).info)
 
         tool_calls: list[ModelToolCall] = []
         signatures_by_id: dict[str, str] = {}

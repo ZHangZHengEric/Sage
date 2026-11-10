@@ -590,3 +590,24 @@ def test_factory_reuses_probed_thinking_dialect_without_overriding_enabled_reaso
         payload["generationConfig"]["thinkingConfig"]["thinkingBudget"]
         == expected_budget
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_frame", [False, True])
+async def test_failed_stream_preserves_usage_and_progress(error_frame):
+    events = [event([{"text": "partial"}], usageMetadata={
+        "promptTokenCount": 9, "candidatesTokenCount": 2,
+    })]
+    if error_frame:
+        events.append({"error": {"code": 503, "status": "UNAVAILABLE"}})
+    provider, client, _ = provider_for(events)
+    try:
+        with pytest.raises(SageV2Error) as caught:
+            _ = [value async for value in provider.stream(request())]
+        failure = caught.value.info.metadata["model_failure"]
+        assert failure["usage"]["input_tokens"] == 9
+        assert failure["usage"]["output_tokens"] == 2
+        assert failure["has_text"] is True
+        assert failure["terminal_received"] is False
+    finally:
+        await client.aclose()

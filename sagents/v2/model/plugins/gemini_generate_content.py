@@ -6,7 +6,7 @@ and persisted Session history, including signature-only streaming Parts.
 """
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import normalize_provider_failure
+from sagents.v2.model.recovery_policy import annotate_stream_failure
 
 import base64
 import copy
@@ -325,6 +325,22 @@ class GeminiGenerateContentModelProvider:
         provider_usage: dict[str, Any] = {}
         terminal = started = False
         finish_reason = "completed"
+        def stream_failure(error):
+            thoughts = self._counter(provider_usage, "thoughtsTokenCount")
+            cached = self._counter(provider_usage, "cachedContentTokenCount")
+            observed_usage = UsageSummary(
+                reported=bool(provider_usage),
+                input_tokens=max(self._counter(provider_usage, "promptTokenCount"), cached),
+                output_tokens=self._counter(provider_usage, "candidatesTokenCount") + thoughts,
+                cached_input_tokens=cached, reasoning_tokens=thoughts,
+                models=(self.config.model,), provider_usage=provider_usage,
+            )
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal,
+                text=text, reasoning=reasoning, tools=calls,
+            ))
+
         try:
             record_wire_event(
                 {"diagnostic_event": "request_attempt", "payload": payload}
@@ -431,13 +447,13 @@ class GeminiGenerateContentModelProvider:
                                 "max_tokens" if reason == "MAX_TOKENS" else "completed"
                             )
         except SageV2Error as exc:
-            raise SageV2Error(normalize_provider_failure(exc.info, self.config.provider_id)) from exc
+            raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=started, provider=self.config.provider_id) from exc
+            raise stream_failure(provider_error(exc, response_started=started, provider=self.config.provider_id).info) from exc
         if not terminal:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id, response_started=started
-            )
+            ).info)
         thoughts = self._counter(provider_usage, "thoughtsTokenCount")
         cached = self._counter(provider_usage, "cachedContentTokenCount")
         yield ModelStreamEvent(

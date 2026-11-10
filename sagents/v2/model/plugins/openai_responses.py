@@ -1,7 +1,7 @@
 """OpenAI Responses API adapter for the v2 model capability port."""
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import normalize_provider_failure
+from sagents.v2.model.recovery_policy import annotate_stream_failure
 
 from sagents.v2.model.wire_diagnostics import record_wire_event
 
@@ -315,6 +315,14 @@ class OpenAIResponsesModelProvider:
         response_started = False
         terminal_event_received = False
         compatibility_fallback: dict[str, Any] | None = None
+        def stream_failure(error):
+            observed_usage = usage
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal_event_received,
+                text=text, reasoning=reasoning, tools=tool_fragments,
+            ))
+
         try:
             try:
                 record_wire_event(
@@ -445,6 +453,14 @@ class OpenAIResponsesModelProvider:
                 if event_type in {"response.failed", "error"} or (
                     not event_type and wire_value(event, "error")
                 ):
+                    failed_response = wire_value(event, "response")
+                    if event_type == "response.failed":
+                        terminal_event_received = True
+                    if failed_response is not None:
+                        response_id = str(wire_value(failed_response, "id", response_id) or response_id)
+                        raw_usage = wire_value(failed_response, "usage")
+                        if raw_usage is not None:
+                            usage = self._usage(raw_usage)
                     error = wire_value(event, "error") or wire_value(
                         wire_value(event, "response"), "error"
                     )
@@ -464,17 +480,17 @@ class OpenAIResponsesModelProvider:
                     )
         except Exception as exc:
             if isinstance(exc, SageV2Error):
-                raise SageV2Error(normalize_provider_failure(exc.info, self.config.provider_id)) from exc
-            raise provider_error(exc, response_started=response_started, provider=self.config.provider_id) from exc
+                raise stream_failure(exc.info) from exc
+            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
         finally:
             if upstream is not None:
                 await self._close_stream(upstream)
 
         if not terminal_event_received:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
                 response_started=response_started,
-            )
+            ).info)
 
         calls = tuple(
             parse_tool_arguments(

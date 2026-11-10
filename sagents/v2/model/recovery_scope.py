@@ -28,6 +28,26 @@ class RecoveryScope:
         async with self.reservation_lock:
             if self.check is not None:
                 await self.check()
+            # Decisions can race while the host check awaits storage. Recheck
+            # the category budget under the same lock as shared accounting.
+            previous = self.states.get(key)
+            if previous is not None and decision.counter is not None:
+                from sagents.v2.contracts.errors import (
+                    RuntimeErrorInfo, ErrorCategory, SageV2Error,
+                )
+                consumed = previous.counts.get(decision.counter, 0)
+                if consumed >= decision.limit:
+                    raise SageV2Error(RuntimeErrorInfo(
+                        code="model.recovery_exhausted",
+                        category=ErrorCategory.VALIDATION,
+                        message="Model recovery category budget exhausted",
+                        safe_to_resume=True,
+                    ))
+                counts = dict(previous.counts)
+                for counter, count in state.counts.items():
+                    counts[counter] = max(counts.get(counter, 0), count)
+                counts[decision.counter] = max(counts[decision.counter], consumed + 1)
+                state = state.model_copy(update={"counts": counts})
             state = self.account(state)
             self.states[key] = state
             if self.persist is not None:

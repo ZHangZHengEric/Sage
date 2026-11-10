@@ -110,6 +110,23 @@ def annotate_error(error: RuntimeErrorInfo, failure: ModelFailure) -> RuntimeErr
     )
 
 
+def annotate_stream_failure(error, *, provider, usage, response_id,
+                            terminal_received, text, reasoning, tools):
+    """Keep already observed usage and progress when a stream fails or ends early."""
+    error = normalize_provider_failure(error, provider)
+    failure = failure_from_error(error).model_copy(update={
+        "usage": usage.model_dump(mode="json") if usage.reported else None,
+        "response_id": response_id,
+        "terminal_received": terminal_received,
+        "has_text": bool(text),
+        "has_reasoning": bool(reasoning),
+        "has_tool_calls": bool(tools),
+    })
+    return annotate_error(error.model_copy(update={"metadata": {
+        **error.metadata, "usage": usage.model_dump(mode="json"),
+    }}), failure)
+
+
 def checked_response(response, request=None):
     """Validate semantic completion before committing Items or executing tools."""
     if len({call.tool_call_id for call in response.tool_calls}) != len(
@@ -158,7 +175,10 @@ def checked_response(response, request=None):
         kind, code = Kind.PAUSED, "model.response_paused"
     elif termination == ModelTermination.UNKNOWN:
         kind, code = Kind.PROTOCOL, "model.response_unknown"
-    elif termination == ModelTermination.EMPTY:
+    elif termination == ModelTermination.EMPTY or (
+        termination in {ModelTermination.COMPLETE, ModelTermination.TOOL_CALLS}
+        and not response.text.strip() and not response.tool_calls
+    ):
         kind = Kind.REASONING_ONLY if response.reasoning.strip() else Kind.EMPTY
         code = (
             "model.reasoning_only"

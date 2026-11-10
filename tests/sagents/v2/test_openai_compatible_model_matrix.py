@@ -819,7 +819,7 @@ async def test_provider_error_matrix(status, category, retryable):
 
 @pytest.mark.asyncio
 async def test_chat_compatible_rejects_stream_without_finish_reason():
-    stream = FakeStream((chunk(content="partial"),))
+    stream = FakeStream((chunk(content="partial", usage=SimpleNamespace(prompt_tokens=9, completion_tokens=2)),))
     provider = OpenAICompatibleModelProvider(
         config(), client=FakeClient(FakeCompletions(stream=stream))
     )
@@ -830,6 +830,11 @@ async def test_chat_compatible_rejects_stream_without_finish_reason():
     assert caught.value.info.code == "model.stream_incomplete"
     assert caught.value.info.retryable is True
     assert stream.closed is True
+    failure = caught.value.info.metadata["model_failure"]
+    assert failure["usage"]["input_tokens"] == 9
+    assert failure["usage"]["output_tokens"] == 2
+    assert failure["has_text"] is True
+    assert failure["terminal_received"] is False
 
 
 @pytest.mark.asyncio

@@ -749,6 +749,7 @@ async def test_anthropic_messages_rejects_stream_without_message_stop():
         AnthropicMessagesConfig(model="claude-test", capabilities=CAPABILITIES),
         client=FakeHTTPClient(
             (
+                {"type": "message_start", "message": {"id": "partial_usage", "usage": {"input_tokens": 9}}},
                 {
                     "type": "content_block_delta",
                     "index": 0,
@@ -763,6 +764,28 @@ async def test_anthropic_messages_rejects_stream_without_message_stop():
 
     assert caught.value.info.code == "model.stream_incomplete"
     assert caught.value.info.retryable is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_frame", [False, True])
+async def test_anthropic_failed_stream_preserves_reported_usage(error_frame):
+    events = [
+        {"type": "message_start", "message": {"id": "partial_usage", "usage": {"input_tokens": 9}}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "partial"}},
+    ]
+    if error_frame:
+        events.append({"type": "error", "error": {"type": "overloaded_error"}})
+    provider = AnthropicMessagesModelProvider(
+        AnthropicMessagesConfig(model="claude-test", capabilities=CAPABILITIES),
+        client=FakeHTTPClient(events),
+    )
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+    failure = caught.value.info.metadata["model_failure"]
+    assert failure["usage"]["reported"] is True
+    assert failure["usage"]["input_tokens"] == 9
+    assert failure["has_text"] is True
+    assert failure["terminal_received"] is False
 
 
 @pytest.mark.asyncio
@@ -1079,3 +1102,27 @@ async def test_builtin_factory_resolves_credentials_through_declared_provider(mo
     assert constructor_arguments["api_key"] == "dependency-secret"
     assert provider.raw_client is client
     assert context.config == {"route": route.model_dump(mode="json")}
+
+
+@pytest.mark.asyncio
+async def test_responses_failed_terminal_preserves_usage_and_progress():
+    stream = FakeAsyncStream([
+        {"type": "response.output_text.delta", "delta": "partial"},
+        {"type": "response.failed", "response": {
+            "id": "failed_response", "usage": {"input_tokens": 9, "output_tokens": 2},
+            "error": {"code": "server_error", "message": "fixture"},
+        }},
+    ])
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="gpt-test", capabilities=CAPABILITIES),
+        client=SimpleNamespace(responses=FakeResponses(stream)),
+    )
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+    failure = caught.value.info.metadata["model_failure"]
+    assert failure["usage"]["input_tokens"] == 9
+    assert failure["usage"]["output_tokens"] == 2
+    assert failure["has_text"] is True
+    assert failure["terminal_received"] is True
+    assert failure["response_id"] == "failed_response"
+    assert stream.closed

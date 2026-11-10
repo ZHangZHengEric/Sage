@@ -1,7 +1,7 @@
 """Anthropic Messages API adapter implemented against the public HTTP protocol."""
 
 from __future__ import annotations
-from sagents.v2.model.recovery_policy import normalize_provider_failure
+from sagents.v2.model.recovery_policy import annotate_stream_failure
 
 import base64
 import json
@@ -315,6 +315,21 @@ class AnthropicMessagesModelProvider:
         thinking_blocks: dict[int, dict[str, Any]] = {}
         response_started = False
         terminal_event_received = False
+        def stream_failure(error):
+            normalized = canonical_token_usage(provider_usage, input_mode="disjoint")
+            observed_usage = UsageSummary(
+                reported=usage_reported, input_tokens=normalized.input_tokens,
+                output_tokens=normalized.output_tokens,
+                cached_input_tokens=normalized.cached_input_tokens,
+                reasoning_tokens=normalized.reasoning_tokens,
+                models=(self.config.model,), provider_usage=provider_usage,
+            )
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal_event_received,
+                text=text, reasoning=reasoning, tools=tools,
+            ))
+
         try:
             record_wire_event(
                 {"diagnostic_event": "request_attempt", "payload": payload}
@@ -433,15 +448,15 @@ class AnthropicMessagesModelProvider:
                             code=error.get("type") if isinstance(error, dict) else None,
                         )
         except SageV2Error as exc:
-            raise SageV2Error(normalize_provider_failure(exc.info, self.config.provider_id)) from exc
+            raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=response_started, provider=self.config.provider_id) from exc
+            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
 
         if not terminal_event_received:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
                 response_started=response_started,
-            )
+            ).info)
 
         usage = canonical_token_usage(provider_usage, input_mode="disjoint")
         usage_summary = UsageSummary(

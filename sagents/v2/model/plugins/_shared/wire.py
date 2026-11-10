@@ -264,9 +264,9 @@ def provider_error(exc: Exception, *, response_started: bool = False, provider: 
         kind = K.QUOTA
     elif status == 404 or types & {"model_not_found", "not_found_error"}:
         kind = K.ROUTE
-    elif status in {None, 200, 400, 413, 422} and (
-        types & {"context_length_exceeded", "context_window_exceeded", "prompt_too_long"}
-        or ((not types or types <= {"invalid_request_error", "invalid_request", "invalid_argument", "bad_request"})
+    elif types & {"context_length_exceeded", "context_window_exceeded", "prompt_too_long"} or (
+        status in {None, 200, 400, 413, 422}
+        and ((not types or types <= {"invalid_request_error", "invalid_request", "invalid_argument", "bad_request"})
             and (any(v in details for v in _CONTEXT_WINDOW_MARKERS)
                  or ("input token count" in details and "exceeds" in details)))):
         kind = K.CONTEXT
@@ -274,16 +274,24 @@ def provider_error(exc: Exception, *, response_started: bool = False, provider: 
         kind = K.REFUSED
     elif types & {"invalid_image", "image_parse_error", "image_url_invalid", "media_invalid", "unsupported_mime_type"}:
         kind = K.MEDIA
+    elif types & {"not_implemented", "unsupported_operation", "unsupported_endpoint"}:
+        kind = K.UNSUPPORTED
+    elif types & {"rate_limit_exceeded", "rate_limit_error", "resource_exhausted"}:
+        kind = K.RATE_LIMIT
+    elif types & {"invalid_request_error", "invalid_argument"}:
+        kind = K.INVALID_REQUEST
+    elif types & {
+        "server_error", "internal_server_error", "overloaded_error", "server_is_overloaded", "no_capacity", "api_error", "response_failed"}:
+        kind = K.OVERLOADED
     elif status == 413:
         kind = K.PAYLOAD
-    elif status == 429 or types & {"rate_limit_exceeded", "rate_limit_error", "resource_exhausted"}:
+    elif status == 429:
         kind = K.RATE_LIMIT
-    elif status in {400, 422} or types & {"invalid_request_error", "invalid_argument"}:
+    elif status in {400, 422}:
         kind = K.INVALID_REQUEST
-    elif status in {501, 505} or types & {"not_implemented", "unsupported_operation", "unsupported_endpoint"}:
+    elif status in {501, 505}:
         kind = K.UNSUPPORTED
-    elif status in {500, 502, 503, 504, 529} or types & {
-        "server_error", "internal_server_error", "overloaded_error", "server_is_overloaded", "no_capacity", "api_error", "response_failed"}:
+    elif status in {500, 502, 503, 504, 529}:
         kind = K.OVERLOADED
     elif status in {408, 409, 425}:
         kind = K.TRANSPORT

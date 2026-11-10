@@ -44,6 +44,10 @@ NOW = datetime(2026, 11, 10, tzinfo=timezone.utc)
         (400, "invalid_request_error", K.INVALID_REQUEST, False),
         (200, "content_filter", K.REFUSED, False),
         (200, "new_unknown_error", K.UNKNOWN, False),
+        (400, "no_capacity", K.OVERLOADED, True),
+        (429, "unsupported_endpoint", K.UNSUPPORTED, False),
+        (503, "context_length_exceeded", K.CONTEXT, True),
+        (429, "invalid_request_error", K.INVALID_REQUEST, False),
     ],
 )
 def test_failure_mapping(status, code, kind, retry):
@@ -589,3 +593,35 @@ async def test_old_checkpoint_episode_counters_seed_the_shared_scope():
     scope = await loop._create_recovery_scope(run, state, command, native.CONTEXT)
     assert scope.episode_counts[scope.step_key] == 3
     assert scope.run_requests == 3
+
+
+@pytest.mark.asyncio
+async def test_concurrent_parameter_repairs_cannot_reuse_category_budget():
+    import asyncio
+    from sagents.v2.model.recovery_scope import (
+        RecoveryScope, recovery_scope, reserve_additional_request,
+    )
+
+    async def check():
+        # A real host check awaits storage, allowing a sibling to reserve.
+        await asyncio.sleep(0)
+
+    scope = RecoveryScope(check=check)
+    with recovery_scope(scope):
+        results = await asyncio.gather(
+            *(reserve_additional_request("compatibility", purpose="same_field")
+              for _ in range(3)),
+            return_exceptions=True,
+        )
+    assert sum(result is None for result in results) == 1
+    assert all(result is None or isinstance(result, SageV2Error) for result in results)
+    assert scope.run_requests == 1
+    assert scope.states["operation:same_field"].counts["compatibility"] == 1
+
+
+@pytest.mark.parametrize("termination", [T.COMPLETE, T.TOOL_CALLS])
+def test_explicit_terminal_state_does_not_make_empty_output_usable(termination):
+    response = ModelResponse(response_id="empty-explicit", finish_reason="stop", termination=termination)
+    with pytest.raises(SageV2Error) as caught:
+        checked_response(response)
+    assert failure_from_error(caught.value.info).kind == K.EMPTY

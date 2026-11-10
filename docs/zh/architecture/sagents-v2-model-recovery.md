@@ -1,3 +1,14 @@
+---
+layout: default
+title: LLM 异常恢复
+parent: 架构
+nav_order: 12
+lang: zh
+ref: v2-model-recovery
+---
+
+{% include lang_switcher.html %}
+
 # LLM 异常分类与有界恢复
 
 Provider 负责识别协议事实，`ModelRecoveryPolicy` 负责确定恢复动作，Agent Loop 和辅助调用负责执行。正常生成结束与用户任务完成是两个独立判断。不会自动切换 Provider 或模型。
@@ -53,26 +64,3 @@ Agent checkpoint codec 更新为 `agent-loop/4`，兼容读取旧版本；旧重
 运行 `tests/sagents/v2/test_model_recovery_policy.py` 及四个 Provider、Agent Loop、辅助调用和协议转换测试。空响应 session 使用合成数据验证成功工具只执行一次、恢复一次后完成或明确停止。
 
 升级时关注：默认无限重试变为有限；SDK 重试关闭；新 codec 由新版本读取，旧二进制不保证能恢复新 checkpoint。真实 API smoke test 与生产发布需要在相应服务环境另行执行，离线协议测试不等于真实服务验收。
-
-
-本次本地验证：剔除 12 个受本机沙箱权限或可选依赖限制的测试文件后，v2 Python 回归 3908 项通过、139 项跳过；最新恢复/取消专项 431 项通过。Web 189 项、Terminal 协议 16 项通过，Desktop Dart 静态检查无问题。完整运行中的沙箱/可选依赖失败不能计作通过，其中抽取的 16 项已在未修改基线复现。生产发布前仍须在具备依赖与权限的环境重跑完整测试，并完成四协议真实 API smoke test。
-
-
-## 与 PR #328 的覆盖关系
-
-对照 [PR #328](https://github.com/ZHangZHengEric/Sage/pull/328) 的 `f6eea8ac70887139c3b3ce9f179b88e1e5ba36ad`：该 PR 针对 HTTP 200 SSE 内的 `server_is_overloaded` / `no_capacity` 容量错误，以及 Responses 缺少 `type` 的顶层 `error` 帧。它补充协议识别后复用既有指数退避，没有增加空响应引导或统一恢复预算。其真实 OpenAI SDK + MockTransport 回归同时验证流开始前/后报错、成功/耗尽、关闭响应和不重复工具执行。
-
-最初的统一恢复实现确实遗漏了上述两个错误码及无 type 帧，现已吸收到共享分类器和 Responses 适配器；相应 PR 测试扩展也已纳入本地测试。容量错误映射为 `overloaded`，走有限原样重试，不能使用空响应的 user 指导。
-
-复查同时补充：
-
-- 结构化错误码优先于正文中的上下文超限关键词，避免将过载误送入压缩。
-- 辅助调用补指导后发生传输故障，原样重试保留已经修复的请求投影。
-- 恢复 checkpoint 保存指导类别与最早可重发时间；重启后遵守 Retry-After 剩余等待。
-- 辅助失败响应的已知 usage 写入 Run 用量事件，下一次恢复前执行 token 预算检查；缺失 usage 仍标为未知。
-- 老 checkpoint 即使没有新版恢复事件，已消费的 episode 次数也会初始化共享计数。
-
-这里的真实 SDK 回归使用模拟 HTTP/SSE，不是远端服务 smoke test。PR #328 已通过保留原提交的 merge 合入 main（`b7f3bb6dcba4d9a72226627bc7d488d19132a027`），完整恢复改造在其后的独立分支提交；未向原作者分支追加本次大范围修改。
-
-
-PR 对照后的验证：协议/恢复/Agent/辅助调用专项 559 项通过；PR 涉及的两个协议测试文件 118 项通过。较大范围回归 3972 项通过、139 项跳过，1 项外部 MCP stdio 测试超过 30 秒超时，该文件单独复跑 1 项通过。此轮仍沿用前述 12 个环境受限文件及 live/可选观测依赖测试的排除列表，不能据此宣称完整环境测试全部通过。

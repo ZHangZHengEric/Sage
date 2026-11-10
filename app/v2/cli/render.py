@@ -53,10 +53,17 @@ class PlainRenderer:
         self._announced_session: str | None = None
         self._tool_names: dict[tuple[str, str], str] = {}
         self._questionnaires: set[tuple[str, str]] = set()
+        self._recovery_status = False
 
     def handle(self, event: RuntimeEvent) -> None:
         self.last_sequence = max(self.last_sequence, event.run_sequence)
         data = event.data
+        if event.type in {
+            "message.started", "step.recovery_completed", "step.completed",
+            "step.failed", "turn.failed", "run.completed", "run.failed",
+            "run.cancelled", "run.suspended",
+        }:
+            self._clear_recovery_status()
         # RuntimeEvent validates the event type against its payload kind.
         # These casts express that contract without adding runtime checks.
         if event.type == "item.completed":
@@ -136,8 +143,13 @@ class PlainRenderer:
             recovery = error.metadata.get("recovery") if error else None
             if recovery:
                 label = "Model temporarily unavailable; retrying" if recovery.get("action") == "retry_same_request" else "Recovering model output"
-                self.out.write(f"\r{label} (attempt {recovery.get('attempt', 1)})\033[K")
-                self.out.flush()
+                text = f"{label} (attempt {recovery.get('attempt', 1)})"
+                if self.err.isatty():
+                    self.err.write(f"\r{text}\033[K")
+                    self.err.flush()
+                    self._recovery_status = True
+                else:
+                    self.notice(text)
             return
         if event.type == "run.failed":
             data = cast(RunEventData, data)
@@ -173,6 +185,7 @@ class PlainRenderer:
                     + (f" — {payload.get('text')}" if payload.get("text") else "")
                 )
         elif kind == "cli_v2_result":
+            self._clear_recovery_status()
             self._tool_names.clear()
             self._questionnaires.clear()
             if payload.get("state") != "completed":
@@ -180,8 +193,15 @@ class PlainRenderer:
                 self.notice(f"[result] state={payload.get('state')}{suffix}")
 
     def notice(self, text: str) -> None:
+        self._clear_recovery_status()
         self.err.write(text + "\n")
         self.err.flush()
+
+    def _clear_recovery_status(self) -> None:
+        if self._recovery_status:
+            self.err.write("\r\033[K")
+            self.err.flush()
+            self._recovery_status = False
 
 
 class JsonRenderer:
