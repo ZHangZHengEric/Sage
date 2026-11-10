@@ -402,7 +402,9 @@ class OpenAIResponsesModelProvider:
                         self._record_reasoning_item(reasoning_items, item)
                         self._record_tool_item(tool_fragments, item, replace=True)
                     continue
-                if event_type in {"response.failed", "error"}:
+                if event_type in {"response.failed", "error"} or (
+                    not event_type and wire_value(event, "error")
+                ):
                     error = wire_value(event, "error") or wire_value(
                         wire_value(event, "response"), "error"
                     )

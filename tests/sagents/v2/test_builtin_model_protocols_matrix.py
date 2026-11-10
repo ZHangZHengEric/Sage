@@ -1007,12 +1007,14 @@ def test_existing_protocol_default_base_urls_are_preserved(provider_id, expected
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("event_type", ["response.failed", "error"])
+@pytest.mark.parametrize("event_type", ["response.failed", "error", "nested_error", None])
 @pytest.mark.parametrize(
     "code,expected",
     [
         ("context_length_exceeded", "model.context_window_exceeded"),
         ("server_error", "model.provider_transient"),
+        ("server_is_overloaded", "model.provider_transient"),
+        ("no_capacity", "model.provider_transient"),
         ("rate_limit_exceeded", "model.provider_transient"),
         ("invalid_api_key", "model.provider_permanent"),
     ],
@@ -1021,9 +1023,13 @@ async def test_responses_stream_errors_keep_codes_for_recovery(
     event_type, code, expected
 ):
     payload = {"code": code, "message": "upstream rejected request"}
-    event = {"type": event_type}
+    event = {"type": event_type} if event_type else {}
     if event_type == "response.failed":
         event["response"] = {"error": payload}
+    elif event_type == "nested_error":
+        event = {"type": "error", "error": payload}
+    elif event_type is None:
+        event["error"] = payload
     else:
         event.update(payload)
     upstream = FakeAsyncStream((event,))
