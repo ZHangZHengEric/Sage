@@ -559,3 +559,40 @@ async def test_reconciliation_of_another_operation_cannot_clear_unknown_write():
     assert result.state == native.RunState.FAILED
     assert len(engine.tool_executor.calls) == 1
     await assert_no_manual(runtime, handle.run_id)
+
+
+async def test_child_budget_failure_still_reports_unverified_tool_effects():
+    from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
+    from sagents.v2.agent.multi_agent.contracts import DelegationTask
+
+    model = ScriptedModelProvider(
+        (step(calls=(call("write_value", key="x", value="1"),)),)
+    )
+    runtime, handle, engine, _ = await setup(
+        model, max_steps=1, automatic_stage_continuation=False
+    )
+    engine.tool_executor = native.UncertainToolExecutor(())
+    result = await engine.execute(handle.run_id, native.CONTEXT)
+    executor = LoopChildRunExecutor(
+        runtime=runtime,
+        loop_factory=lambda *args: engine,
+        resolved_spec_hash="sha256:test",
+    )
+    delegated = await executor._result(
+        DelegationTask(
+            task_id="task",
+            agent_id="child",
+            task_name="write",
+            original_task="write",
+            content="write",
+        ),
+        handle.session_id,
+        result,
+    )
+    assert delegated.outcome == native.RunState.FAILED
+    assert delegated.error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+    assert delegated.error.metadata["child_failure_code"] == "budget.max_steps"
+    assert delegated.error.metadata["unresolved_operation_ids"] == [
+        engine.tool_executor.calls[0].operation_id
+    ]
+    await assert_no_manual(runtime, handle.run_id)
