@@ -221,3 +221,9 @@ prefix changes to compaction or dynamic system content; use wire diagnostics to
 inspect response-block replay and the requests actually received by the supplier.
 
 Reference: [Anthropic preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking).
+
+With binding controls enabled, `reasoning_mode="minimum"` uses adaptive thinking
+with the lowest supported adaptive effort from the capability profile. Unprobed
+routes use `low`; an explicitly empty supported-effort list omits effort. This
+path never combines binding with disabled thinking or sends temperature/top_p,
+and preserves the configured display setting.

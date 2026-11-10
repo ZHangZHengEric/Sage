@@ -248,3 +248,112 @@ async def test_cleaned_prefix_preserves_new_thinking_across_multiple_turns(
         ]
         assert len(thinking) == 2 * (turn + 1)
         assert old.provider_state == original_state
+
+
+@pytest.mark.parametrize("binding_source", ["config", "extra_body"])
+@pytest.mark.parametrize(
+    "strategy,expected_effort",
+    [
+        ({}, "low"),
+        (
+            {
+                "reasoning_disable_strategy": "thinking_type_disabled",
+                "supported_reasoning_efforts": ["high", "medium"],
+            },
+            "medium",
+        ),
+        (
+            {"reasoning_disable_strategy": "omit", "supported_reasoning_efforts": []},
+            None,
+        ),
+    ],
+)
+def test_minimum_with_binding_uses_adaptive_and_lowest_supported_effort(
+    binding_source, strategy, expected_effort
+):
+    binding = {"prefix_mismatch_behavior": "drop_block"}
+    extra = {"thinking": {"display": "omitted"}}
+    options = {}
+    if binding_source == "config":
+        options["thinking_prefix_mismatch_behavior"] = "drop_block"
+    else:
+        extra["thinking"]["block_binding"] = binding
+    provider = AnthropicMessagesModelProvider(
+        AnthropicMessagesConfig(
+            model="test",
+            capabilities=CAPABILITIES,
+            reasoning_effort="high",
+            invocation_strategy=strategy,
+            default_temperature=0.2,
+            default_top_p=0.9,
+            extra_body=extra,
+            **options,
+        ),
+        client=FakeHTTPClient(()),
+    )
+    original = provider.config.model_dump()
+    primary = provider.diagnostic_request(request())
+    minimum = provider.diagnostic_request(request(reasoning_mode="minimum"))
+    assert minimum["thinking"] == {
+        "type": "adaptive",
+        "display": "omitted",
+        "block_binding": binding,
+    }
+    assert minimum.get("output_config", {}).get("effort") == expected_effort
+    assert "temperature" not in minimum
+    assert "top_p" not in minimum
+    assert provider.diagnostic_request(request()) == primary
+    assert provider.config.model_dump() == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial_citations", [None, []])
+async def test_nullable_citations_stream_and_replay(initial_citations):
+    citation = {
+        "type": "char_location",
+        "cited_text": "source",
+        "document_index": 0,
+        "start_char_index": 0,
+        "end_char_index": 6,
+    }
+    client = FakeHTTPClient(
+        (
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "text",
+                    "text": "",
+                    "citations": initial_citations,
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "answer"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "citations_delta", "citation": citation},
+            },
+            {"type": "message_stop"},
+        )
+    )
+    provider = AnthropicMessagesModelProvider(
+        AnthropicMessagesConfig(model="test", capabilities=CAPABILITIES), client=client
+    )
+    events = [event async for event in provider.stream(request())]
+    response = events[-1].response
+    assert response.text == "answer"
+    replay = provider.diagnostic_request(
+        request(
+            messages=(
+                *request().messages,
+                ModelMessage(role="assistant", provider_state=response.provider_state),
+            )
+        )
+    )
+    assert replay["messages"][-1]["content"] == [
+        {"type": "text", "text": "answer", "citations": [citation]}
+    ]

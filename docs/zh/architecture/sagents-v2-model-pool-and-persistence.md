@@ -187,3 +187,8 @@ python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagent
 检查响应块回放及供应商实际接收到的请求。
 
 参考：[Anthropic preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)。
+
+开启 binding 控制时，`reasoning_mode="minimum"` 使用 adaptive thinking，
+优先选择能力探测支持的最低 adaptive effort；未探测时使用 `low`，显式空的
+effort 支持列表则不发送 effort。此路径不会将 binding 与 disabled 组合，
+也不会发送 temperature/top_p，已有 display 设置保持不变。

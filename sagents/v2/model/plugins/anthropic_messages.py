@@ -259,13 +259,35 @@ class AnthropicMessagesModelProvider:
                         "none": "none",
                     }[request.tool_choice]
                 }
+        configured_binding = self.config.extra_body.get("thinking", {}).get(
+            "block_binding"
+        )
+        behavior = self.config.thinking_prefix_mismatch_behavior
+        binding_enabled = behavior is not None or bool(configured_binding)
         effort = self.config.reasoning_effort
         if request.reasoning_mode == "minimum":
             _, effort = minimum_reasoning_control(
                 self.config.invocation_strategy,
                 default_disable="thinking_type_disabled",
             )
-        if effort is None:
+            if binding_enabled:
+                # Binding controls require adaptive thinking on current models.
+                # Use the least supported adaptive effort rather than disabling
+                # thinking. An explicitly empty profile must not invent effort.
+                supported = self.config.invocation_strategy.get(
+                    "supported_reasoning_efforts", ("low",)
+                )
+                effort = next(
+                    (
+                        value
+                        for value in ("minimal", "low", "medium", "high", "xhigh", "max")
+                        if value in supported
+                    ),
+                    None,
+                )
+        if effort is None and not (
+            binding_enabled and request.reasoning_mode == "minimum"
+        ):
             temperature = (
                 request.temperature
                 if request.temperature is not None
@@ -305,19 +327,18 @@ class AnthropicMessagesModelProvider:
             thinking.setdefault("type", "adaptive")
             payload["thinking"] = thinking
         if request.reasoning_mode == "minimum":
-            payload["thinking"] = (
-                {"type": "adaptive", "display": "summarized"}
-                if effort is not None
-                else {"type": "disabled"}
-            )
-        configured_binding = self.config.extra_body.get("thinking", {}).get(
-            "block_binding"
-        )
+            if effort is not None or binding_enabled:
+                thinking = dict(payload.get("thinking") or {})
+                thinking["type"] = "adaptive"
+                thinking.pop("budget_tokens", None)
+                thinking.setdefault("display", "summarized")
+                payload["thinking"] = thinking
+            else:
+                payload["thinking"] = {"type": "disabled"}
         if configured_binding is not None:
             payload.setdefault("thinking", {})["block_binding"] = copy.deepcopy(
                 configured_binding
             )
-        behavior = self.config.thinking_prefix_mismatch_behavior
         if behavior is not None:
             thinking = dict(payload.get("thinking") or {"type": "adaptive"})
             thinking["block_binding"] = {
@@ -490,9 +511,10 @@ class AnthropicMessagesModelProvider:
                                     kind=ModelEventKind.TEXT_DELTA, delta=value
                                 )
                         elif delta_type == "citations_delta":
-                            content_blocks[index].setdefault("citations", []).append(
-                                copy.deepcopy(delta["citation"])
-                            )
+                            block = content_blocks[index]
+                            if block.get("citations") is None:
+                                block["citations"] = []
+                            block["citations"].append(copy.deepcopy(delta["citation"]))
                         elif delta_type == "thinking_delta":
                             value = str(delta.get("thinking") or "")
                             if value:
