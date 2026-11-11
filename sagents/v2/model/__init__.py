@@ -59,6 +59,13 @@ _CAPABILITIES = "sagents.v2.model.capability_contracts"
 _PROBES = "sagents.v2.model.capability_probe"
 _PROTOCOLS = "sagents.v2.model.protocols"
 _EXPORTS = {
+    "ModelTermination": ("sagents.v2.contracts.model_recovery", "ModelTermination"),
+    "ModelFailure": ("sagents.v2.contracts.model_recovery", "ModelFailure"),
+    "ModelFailureKind": ("sagents.v2.contracts.model_recovery", "ModelFailureKind"),
+    "ModelRecoveryConfig": ("sagents.v2.contracts.model_recovery", "ModelRecoveryConfig"),
+    "ModelRecoveryDecision": ("sagents.v2.contracts.model_recovery", "ModelRecoveryDecision"),
+    "ModelRecoveryAction": ("sagents.v2.contracts.model_recovery", "ModelRecoveryAction"),
+    "ModelRecoveryPolicy": ("sagents.v2.model.recovery_policy", "ModelRecoveryPolicy"),
     "CanonicalTokenUsage": (
         "sagents.v2.model.plugins._shared.usage",
         "CanonicalTokenUsage",

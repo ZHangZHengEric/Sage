@@ -12,6 +12,7 @@ from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, Tool
 from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot
 from sagents.v2.contracts.items import ContentBlock
+from sagents.v2.contracts.model_recovery import ModelRecoveryConfig
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
 from sagents.v2.contracts.runtime_skills import RuntimeSkillAttachment
 
@@ -49,10 +50,23 @@ class RunConfig(StrictModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     max_total_tokens: int | None = Field(default=None, gt=0)
     deadline_seconds: float | None = Field(default=None, gt=0)
-    # Infrastructure outages do not require a human decision after a handful
-    # of attempts. Hosts can opt into a finite limit; explicit Run budgets and
-    # cancellation remain authoritative when this is None.
+    # Legacy explicit integers remain supported; None now selects finite defaults.
     transient_retry_limit: int | None = Field(default=None, ge=0)
+    model_recovery: ModelRecoveryConfig = Field(default_factory=ModelRecoveryConfig)
+
+    @model_validator(mode="after")
+    def validate_recovery_config(self):
+        if self.transient_retry_limit is not None:
+            if ("model_recovery" in self.model_fields_set
+                and "transient_retries" in self.model_recovery.model_fields_set
+                and self.model_recovery.transient_retries != self.transient_retry_limit):
+                raise ValueError("transient_retry_limit conflicts with model_recovery.transient_retries")
+            object.__setattr__(self, "model_recovery", self.model_recovery.model_copy(
+                update={"transient_retries": self.transient_retry_limit}))
+        return self
+
+    # Legacy hosts can explicitly retain manual recovery interactions.
+    autonomous_error_recovery: bool = True
     automatic_stage_continuation: bool = True
     max_stages: int | None = Field(default=None, gt=0)
     flow_boundary: Literal["complete_node", "continue_node"] | None = None

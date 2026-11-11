@@ -459,8 +459,10 @@ async def test_prompt_decider_maps_keys_and_falls_back_on_eof():
     ) == InteractionAnswer("approve_and_remember", {"scope": "session"})
 
 
+@pytest.mark.parametrize("terminal", [False, True])
+@pytest.mark.parametrize("partial", [False, True])
 async def test_transient_provider_failure_retries_and_completes_headless(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, terminal, partial,
 ):
     from sagents.v2.agent import AgentLoopEngine
 
@@ -480,8 +482,17 @@ async def test_transient_provider_failure_retries_and_completes_headless(
             ScriptedModelStep(events=(_delta("Recovered."), _completed("Recovered."))),
         )
     )
+    if partial:
+        original_stream = failing_model.stream
+        async def interrupted_stream(request):
+            if not failing_model.requests:
+                yield _delta("Partial")
+            async for event in original_stream(request):
+                yield event
+        monkeypatch.setattr(failing_model, "stream", interrupted_stream)
     _, _, agent, command = await make_agent(tmp_path, failing_model)
     out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(err, "isatty", lambda: terminal)
     renderer = PlainRenderer(out, err)
 
     outcome = await run_task(
@@ -499,7 +510,16 @@ async def test_transient_provider_failure_retries_and_completes_headless(
     assert "step.retry_scheduled" in outcome.event_types
     assert "interaction.requested" not in outcome.event_types
     assert "non-interactive decision:" not in err.getvalue()
-    assert out.getvalue() == "Recovered.\n"
+    assert out.getvalue() == ("Partial\nRecovered.\n" if partial else "Recovered.\n")
+    if partial:
+        assert "preceding fragment is incomplete" in err.getvalue()
+    assert "Model temporarily unavailable; retrying" in err.getvalue()
+    if terminal:
+        assert "\r\033[K" in err.getvalue()
+        assert not renderer._recovery_status
+    else:
+        assert "\033" not in err.getvalue()
+        assert "\r" not in err.getvalue()
 
 
 def test_binding_provider_exposes_host_workspace_paths(tmp_path):
@@ -2849,13 +2869,16 @@ async def test_partial_write_of_a_reconcilable_tool_is_verified_from_the_workspa
     assert "[tool] file_update reconciling" in err.getvalue()
 
 
-async def test_partial_write_without_reconciliation_asks_the_user_and_continues(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("autonomous", [True, False])
+async def test_partial_write_without_reconciliation_obeys_recovery_mode(
+    tmp_path, monkeypatch, autonomous
 ):
-    """file_write 写完后结果丢失：无法自动核对，交给用户；答 mark_failed 后 Run 继续并完成。"""
+    """默认保留写入并停止；显式兼容模式仍支持人工核对协议。"""
 
     lose_result_after_write(monkeypatch)
     workspace, _, agent, command = await make_agent(tmp_path, update_notes_model("file_write"))
+    command = command.model_copy(update={"config": command.config.model_copy(
+        update={"autonomous_error_recovery": autonomous})})
     err = io.StringIO()
 
     outcome = await run_task(
@@ -2866,6 +2889,14 @@ async def test_partial_write_without_reconciliation_asks_the_user_and_continues(
         decider=PromptInteractionDecider(line_source("a", "x", "f"), err=err),
     )
     await agent.close()
+
+    if autonomous:
+        assert outcome.state == RunState.FAILED
+        assert (workspace / "notes.txt").read_text() == "alpha\ngamma\n"
+        assert outcome.event_types.count("tool.call.started") == 1
+        assert outcome.event_types.count("interaction.requested") == 1  # approval only
+        assert "did the tool call take effect?" not in err.getvalue()
+        return
 
     assert outcome.state == RunState.COMPLETED
     assert (workspace / "notes.txt").read_text() == "alpha\ngamma\n"

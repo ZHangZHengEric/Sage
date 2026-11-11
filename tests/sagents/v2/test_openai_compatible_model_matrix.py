@@ -633,27 +633,15 @@ async def test_output_tokens_without_semantic_fields_are_a_provider_error():
         config(), client=FakeClient(FakeCompletions(stream=stream))
     )
 
+    events = [event async for event in provider.stream(request())]
+    response = events[-1].response
+    assert response.termination.value == "empty"
+    assert response.usage.output_tokens == 43
+    from sagents.v2.model.recovery_policy import checked_response
     with pytest.raises(SageV2Error) as caught:
-        _ = [event async for event in provider.stream(request())]
-
+        checked_response(response)
     assert caught.value.info.code == "model.empty_semantic_response"
-    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
-    assert caught.value.info.retryable is True
-    assert caught.value.info.metadata == {
-        "output_tokens": 43,
-        "finish_reason": "stop",
-        "observed_choice_fields": ["delta", "finish_reason"],
-        "observed_delta_fields": [
-            "content",
-            "reasoning_content",
-            "tool_calls",
-        ],
-        "observed_delta_field_types": {
-            "content": ["null"],
-            "reasoning_content": ["null"],
-            "tool_calls": ["array"],
-        },
-    }
+    assert caught.value.info.category == ErrorCategory.VALIDATION
     assert stream.closed is True
 
 
@@ -831,7 +819,7 @@ async def test_provider_error_matrix(status, category, retryable):
 
 @pytest.mark.asyncio
 async def test_chat_compatible_rejects_stream_without_finish_reason():
-    stream = FakeStream((chunk(content="partial"),))
+    stream = FakeStream((chunk(content="partial", usage=SimpleNamespace(prompt_tokens=9, completion_tokens=2)),))
     provider = OpenAICompatibleModelProvider(
         config(), client=FakeClient(FakeCompletions(stream=stream))
     )
@@ -842,6 +830,11 @@ async def test_chat_compatible_rejects_stream_without_finish_reason():
     assert caught.value.info.code == "model.stream_incomplete"
     assert caught.value.info.retryable is True
     assert stream.closed is True
+    failure = caught.value.info.metadata["model_failure"]
+    assert failure["usage"]["input_tokens"] == 9
+    assert failure["usage"]["output_tokens"] == 2
+    assert failure["has_text"] is True
+    assert failure["terminal_received"] is False
 
 
 @pytest.mark.asyncio

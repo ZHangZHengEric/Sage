@@ -1,5 +1,6 @@
 """Shared deterministic rules for continuation plugins."""
 from __future__ import annotations
+from sagents.v2.contracts.model_recovery import ModelTermination
 
 from html import unescape
 
@@ -12,6 +13,13 @@ from sagents.v2.i18n import recovery_payload, tr
 _OUTPUT_LIMIT_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
 
 
+def _output_limited(context):
+    return (
+        context.response.termination == ModelTermination.TRUNCATED
+        or context.response.finish_reason.lower() in _OUTPUT_LIMIT_REASONS
+    )
+
+
 class QuestionnaireRule:
     """Publish a questionnaire without reserving the Session for a reply."""
 
@@ -21,7 +29,7 @@ class QuestionnaireRule:
             if (
                 not context.pending_tool_calls
                 and not context.response.tool_calls
-                and context.response.finish_reason not in _OUTPUT_LIMIT_REASONS
+                and not _output_limited(context)
                 and _has_inline_questionnaire(context.response.text)
             ):
                 return ContinuationDecision(
@@ -55,7 +63,7 @@ class BudgetRule:
     async def evaluate(self, context: ContinuationContext):
         if context.step_number >= context.max_steps and (
             context.response.tool_calls
-            or context.response.finish_reason in _OUTPUT_LIMIT_REASONS
+            or _output_limited(context)
             or not context.response.text.strip()
             or (context.explicit_status or "").lower()
             in {"continue_work", "continue", "in_progress"}
@@ -102,7 +110,7 @@ class ResponseLimitRule:
     """A provider output limit is not evidence that the user task is complete."""
 
     async def evaluate(self, context: ContinuationContext):
-        if context.response.finish_reason not in _OUTPUT_LIMIT_REASONS:
+        if not _output_limited(context):
             return None
         if (
             context.requested_interaction is not None

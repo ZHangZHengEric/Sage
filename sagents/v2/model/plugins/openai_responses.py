@@ -1,6 +1,7 @@
 """OpenAI Responses API adapter for the v2 model capability port."""
 
 from __future__ import annotations
+from sagents.v2.model.failures import annotate_stream_failure
 
 from sagents.v2.model.wire_diagnostics import record_wire_event
 
@@ -10,6 +11,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import Field
 
+from sagents.v2.contracts.errors import SageV2Error, RuntimeErrorInfo, ErrorCategory
 from sagents.v2.contracts.common import StrictModel, new_id
 from sagents.v2.contracts.items import (
     AudioBlock,
@@ -129,12 +131,16 @@ class OpenAIResponsesModelProvider:
         self._owns_client = client is None
         if client is not None:
             self._client = client
+            if isinstance(getattr(client, "max_retries", None), int) and client.max_retries:
+                import warnings
+                warnings.warn("Injected model clients must disable SDK retries (max_retries=0)", RuntimeWarning, stacklevel=2)
         else:
             assert credential is not None
             self._client = AsyncOpenAI(
                 api_key=credential.secret.get_secret_value(),
                 base_url=config.base_url,
                 timeout=config.timeout_seconds,
+                max_retries=0,
             )
         self._reasoning_control_rejected = False
 
@@ -300,6 +306,7 @@ class OpenAIResponsesModelProvider:
         upstream = None
         response_id = new_id("model_response")
         text = ""
+        refused = False
         reasoning = ""
         finish_reason = "completed"
         usage = UsageSummary(models=(self.config.model,))
@@ -308,6 +315,14 @@ class OpenAIResponsesModelProvider:
         response_started = False
         terminal_event_received = False
         compatibility_fallback: dict[str, Any] | None = None
+        def stream_failure(error):
+            observed_usage = usage
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal_event_received,
+                text=text, reasoning=reasoning, tools=tool_fragments,
+            ))
+
         try:
             try:
                 record_wire_event(
@@ -321,9 +336,11 @@ class OpenAIResponsesModelProvider:
                         "error": {"type": type(exc).__name__, "message": str(exc)},
                     }
                 )
-                fallback_payload = self._reasoning_fallback_request(payload, exc)
+                fallback_payload = None if request.metadata.get("capability_probe") else self._reasoning_fallback_request(payload, exc)
                 if fallback_payload is None:
                     raise
+                from sagents.v2.model.recovery_scope import reserve_additional_request
+                await reserve_additional_request("compatibility", purpose="responses_reasoning")
                 record_wire_event(
                     {"diagnostic_event": "request_attempt", "payload": fallback_payload}
                 )
@@ -336,7 +353,15 @@ class OpenAIResponsesModelProvider:
                 }
             async for event in upstream:
                 record_wire_event(event)
-                event_type = str(wire_value(event, "type", ""))
+                event_type = str(wire_value(event, "type", "") or "")
+                if event_type == "response.refusal.delta":
+                    refused = True
+                    value = str(wire_value(event, "delta", "") or "")
+                    text += value
+                    if value:
+                        response_started = True
+                        yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=value)
+                    continue
                 if event_type == "response.output_text.delta":
                     delta = str(wire_value(event, "delta", "") or "")
                     if delta:
@@ -360,6 +385,10 @@ class OpenAIResponsesModelProvider:
                     continue
                 if event_type == "response.output_item.added":
                     item = wire_value(event, "item")
+                    if wire_value(item, "type") not in {"message", "function_call", "reasoning"}:
+                        raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
+                            category=ErrorCategory.PROVIDER_PERMANENT,
+                            message="Unsupported Responses output item", safe_to_resume=True))
                     if wire_value(item, "type") in {"function_call", "reasoning"}:
                         response_started = True
                     self._record_reasoning_item(reasoning_items, item)
@@ -398,11 +427,40 @@ class OpenAIResponsesModelProvider:
                         )
                     raw_usage = wire_value(response, "usage")
                     usage = self._usage(raw_usage)
+                    final_text = []
+                    for output_item in wire_value(response, "output", ()) or ():
+                        if wire_value(output_item, "type") not in {"message", "function_call", "reasoning"}:
+                            raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
+                                category=ErrorCategory.PROVIDER_PERMANENT,
+                                message="Unsupported Responses output item", safe_to_resume=True))
+                        for block in wire_value(output_item, "content", ()) or ():
+                            block_type = wire_value(block, "type")
+                            if block_type == "refusal":
+                                refused = True
+                                final_text.append(str(wire_value(block, "refusal", "") or ""))
+                            elif block_type == "output_text":
+                                final_text.append(str(wire_value(block, "text", "") or ""))
+                            else:
+                                raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
+                                    category=ErrorCategory.PROVIDER_PERMANENT,
+                                    message="Unsupported Responses message content", safe_to_resume=True))
+                    if final_text:
+                        text = "".join(final_text)
                     for item in wire_value(response, "output", ()) or ():
                         self._record_reasoning_item(reasoning_items, item)
                         self._record_tool_item(tool_fragments, item, replace=True)
                     continue
-                if event_type in {"response.failed", "error"}:
+                if event_type in {"response.failed", "error"} or (
+                    not event_type and wire_value(event, "error")
+                ):
+                    failed_response = wire_value(event, "response")
+                    if event_type == "response.failed":
+                        terminal_event_received = True
+                    if failed_response is not None:
+                        response_id = str(wire_value(failed_response, "id", response_id) or response_id)
+                        raw_usage = wire_value(failed_response, "usage")
+                        if raw_usage is not None:
+                            usage = self._usage(raw_usage)
                     error = wire_value(event, "error") or wire_value(
                         wire_value(event, "response"), "error"
                     )
@@ -421,20 +479,18 @@ class OpenAIResponsesModelProvider:
                         status_code=wire_value(error, "status_code"),
                     )
         except Exception as exc:
-            from sagents.v2.contracts.errors import SageV2Error
-
             if isinstance(exc, SageV2Error):
-                raise
-            raise provider_error(exc, response_started=response_started) from exc
+                raise stream_failure(exc.info) from exc
+            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
         finally:
             if upstream is not None:
                 await self._close_stream(upstream)
 
         if not terminal_event_received:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
                 response_started=response_started,
-            )
+            ).info)
 
         calls = tuple(
             parse_tool_arguments(
@@ -457,7 +513,7 @@ class OpenAIResponsesModelProvider:
                 text=text,
                 reasoning=reasoning,
                 tool_calls=calls,
-                finish_reason=finish_reason,
+                finish_reason="refusal" if refused else finish_reason,
                 usage=usage,
                 provider_metadata={
                     "provider_id": self.config.provider_id,
@@ -486,6 +542,9 @@ class OpenAIResponsesModelProvider:
         if self._provider_status(exc) not in {400, 422}:
             return None
         if "reasoning" not in payload:
+            return None
+        details = str(exc).lower()
+        if "reasoning" not in details or not any(v in details for v in ("unsupported", "not supported", "unknown parameter", "unrecognized")):
             return None
         fallback = dict(payload)
         fallback.pop("reasoning", None)

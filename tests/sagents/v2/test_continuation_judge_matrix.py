@@ -336,7 +336,7 @@ async def test_llm_judge_repeated_plain_text_requests_recovery_guidance():
 
 
 @pytest.mark.asyncio
-async def test_llm_judge_invalid_output_matches_v1_and_continues_once():
+async def test_llm_judge_invalid_output_stops_after_bounded_repairs():
     invalid = ScriptedModelStep(
         events=(
             ModelStreamEvent(
@@ -350,17 +350,14 @@ async def test_llm_judge_invalid_output_matches_v1_and_continues_once():
             ),
         )
     )
-    model = ScriptedModelProvider((invalid,))
+    model = ScriptedModelProvider((invalid, invalid, invalid))
     policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
-    decision = await policy.decide(_context())
-
-    assert decision.action == ContinuationAction.CONTINUE_STEP
-    assert decision.reason_code == "judge.invalid_output"
-    assert decision.reason == "completion Judge returned invalid JSON"
-    assert "force_tool_choice_required_next" not in decision.metadata
-    assert decision.usage.input_tokens == 3
-    assert len(model.requests) == 1
+    with pytest.raises(SageV2Error) as caught:
+        await policy.decide(_context())
+    assert caught.value.info.code == "model.structured_output_invalid"
+    assert caught.value.info.metadata["usage"]["input_tokens"] == 9
+    assert len(model.requests) == 3
 
 
 @pytest.mark.asyncio
@@ -378,14 +375,14 @@ async def test_llm_judge_empty_output_has_a_stable_non_parser_reason():
         )
     )
     policy = LLMJudgeContinuationPolicy(
-        LLMContinuationJudge(cast(ModelProvider, ScriptedModelProvider((empty,))))
+        LLMContinuationJudge(cast(ModelProvider, ScriptedModelProvider((empty, empty))))
     )
 
-    decision = await policy.decide(_context())
-
-    assert decision.reason_code == "judge.invalid_output"
-    assert decision.reason == "completion Judge returned an empty response"
-    assert "line 1 column 1" not in decision.reason
+    with pytest.raises(SageV2Error) as caught:
+        await policy.decide(_context())
+    assert caught.value.info.code == "model.empty_semantic_response"
+    assert caught.value.info.metadata["recovery"]["reason"] == "recovery_attempts_exhausted"
+    assert "line 1 column 1" not in caught.value.info.message
 
 
 @pytest.mark.asyncio
@@ -515,7 +512,7 @@ async def test_hybrid_accepts_v1_judge_continuation():
 
 
 @pytest.mark.asyncio
-async def test_hybrid_invalid_judge_output_falls_back_to_final_text():
+async def test_hybrid_invalid_judge_output_cannot_complete_the_run():
     invalid = ScriptedModelStep(
         events=(
             ModelStreamEvent(
@@ -528,14 +525,13 @@ async def test_hybrid_invalid_judge_output_falls_back_to_final_text():
             ),
         )
     )
-    model = ScriptedModelProvider((invalid,))
+    model = ScriptedModelProvider((invalid, invalid, invalid))
     policy = HybridContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
-    decision = await policy.decide(_context())
-
-    assert decision.action == ContinuationAction.COMPLETE_RUN
-    assert decision.reason_code == "hybrid.fallback_text_final"
-    assert decision.metadata["fallback"] == "judge_invalid_output"
+    with pytest.raises(SageV2Error) as caught:
+        await policy.decide(_context())
+    assert caught.value.info.code == "model.structured_output_invalid"
+    assert len(model.requests) == 3
 
 
 @pytest.mark.asyncio
@@ -554,7 +550,7 @@ async def test_explicit_status_only_requests_guidance_at_step_limit():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("finish_reason", ["length", "max_tokens", "max_output_tokens"])
+@pytest.mark.parametrize("finish_reason", ["length", "max_tokens", "max_output_tokens", "MAX_TOKENS"])
 @pytest.mark.parametrize(
     "policy_name", ["deterministic", "explicit", "hybrid", "judge"]
 )

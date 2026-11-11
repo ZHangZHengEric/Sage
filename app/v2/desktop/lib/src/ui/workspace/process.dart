@@ -459,7 +459,10 @@ String _messageDisplayText(BuildContext context, ChatMessage message) {
   final animationsDisabled =
       (media?.disableAnimations ?? false) ||
       (media?.accessibleNavigation ?? false);
-  return animationsDisabled ? message.text : message.renderedText;
+  final text = animationsDisabled ? message.text : message.renderedText;
+  return message.interrupted
+      ? '$text\n\n[${context.l10n.text('workspace.outputInterrupted')}]'
+      : text;
 }
 
 class _ProcessActivityGroup extends StatefulWidget {

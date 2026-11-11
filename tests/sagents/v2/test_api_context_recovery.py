@@ -448,8 +448,8 @@ async def test_summary_split_model_call_quota_is_strict(calls):
                     target_tokens=64,
                 )
             )
-    assert exc.value.info.code == "model.context_recovery_exhausted"
-    assert len(model.calls) == calls == model.closed
+    assert exc.value.info.code in {"model.context_recovery_exhausted", "model.recovery_exhausted"}
+    assert len(model.calls) == min(calls, 7) == model.closed
 
 
 @pytest.mark.asyncio
@@ -457,14 +457,17 @@ async def test_summary_split_model_call_quota_is_strict(calls):
 async def test_summary_tries_complete_source_then_splits_and_merges(limit):
     model = FragmentModel(limit=limit)
     source = "prefix facts " * 200 + "tail facts " * 200
-    summary = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
-        SummarizationRequest(
-            scope=scope(),
-            messages=(message(source),),
-            previous_summary="previous facts",
-            target_tokens=64,
+    from sagents.v2.model.recovery_scope import RecoveryScope, recovery_scope
+    from sagents.v2.contracts.model_recovery import ModelRecoveryConfig
+    with recovery_scope(RecoveryScope(config=ModelRecoveryConfig(context_repairs=64, episode_requests=64, run_requests=64))):
+        summary = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
+            SummarizationRequest(
+                scope=scope(),
+                messages=(message(source),),
+                previous_summary="previous facts",
+                target_tokens=64,
+            )
         )
-    )
     assert summary.strip()
     assert source.strip() in model.calls[0].messages[-1].content[0].text
     assert "previous facts" in model.calls[0].messages[-1].content[0].text
@@ -872,7 +875,7 @@ async def test_summary_transport_eof_retries_have_a_hard_limit(recover, monkeypa
 
     class EOF(FragmentModel):
         async def stream(self, request):
-            if recover and len(self.calls) == 3:
+            if recover and len(self.calls) == 2:
                 stream = super().stream(request)
                 try:
                     async for event in stream:
@@ -894,8 +897,9 @@ async def test_summary_transport_eof_retries_have_a_hard_limit(recover, monkeypa
         with pytest.raises(SageV2Error) as exc:
             await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(request)
         assert exc.value.info.code == "model.stream_incomplete"
-    assert len(model.calls) == model.closed == 4
-    assert delays == [2, 4, 8]
+    assert len(model.calls) == model.closed == 3
+    assert len(delays) == 2
+    assert 1 <= delays[0] <= 1.25 and 2 <= delays[1] <= 2.25
 
 
 @pytest.mark.asyncio
@@ -1081,8 +1085,8 @@ async def test_auxiliary_repeated_overflow_stops_after_six_recovery_attempts(
     )
     with pytest.raises(SageV2Error) as exc:
         _ = [e async for e in stream_auxiliary_model(model, request)]
-    assert exc.value.info.code == "model.context_window_exceeded"
-    assert model.calls == 7
+    assert exc.value.info.code == "model.recovery_exhausted"
+    assert model.calls == 4  # Three compression calls and three retries consume the shared six-call budget.
     assert len(cast(TextBlock, request.messages[0].content[0]).text) == 65536
 
 

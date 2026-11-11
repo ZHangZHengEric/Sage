@@ -821,6 +821,10 @@ class _MessageListState extends State<_MessageList> {
       }
       children.add(const SizedBox(height: 26));
     }
+    if (conversation.modelRecoveryNotice != null) {
+      children.add(Text(conversation.modelRecoveryNotice!));
+      children.add(const SizedBox(height: 14));
+    }
     if (conversation.thinking) {
       children.add(const _RunningThinkingStatus());
       children.add(const SizedBox(height: 14));

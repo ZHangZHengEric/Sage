@@ -173,7 +173,12 @@ class _DelegationMethods:
         )
         return ReconcileResult(
             operation_id=call.operation_id,
-            state=ReconcileState.SUCCEEDED,
+            state=(
+                ReconcileState.UNKNOWN
+                if result.error
+                and result.error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+                else ReconcileState.SUCCEEDED
+            ),
             result=result,
         )
 
@@ -229,6 +234,31 @@ class _DelegationMethods:
             "results": [value.model_dump(mode="json") for value in results],
             "child_run_ids": [value.child_run_id for value in results],
         }
+        uncertain = [
+            value
+            for value in results
+            if value.error
+            and (
+                value.error.code == "tool.outcome_unverified"
+                or value.error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+                or value.error.metadata.get("side_effect_state") == "unknown"
+            )
+        ]
+        if uncertain:
+            return ToolExecutionResult(
+                tool_call_id=invocation.call.tool_call_id,
+                operation_id=invocation.call.operation_id,
+                content=(JsonBlock(value=payload),),
+                error=RuntimeErrorInfo(
+                    code="tool.outcome_unverified",
+                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                    message="A delegated operation has an unverified side effect. Reuse the existing child runs; do not start replacement tasks.",
+                    metadata={
+                        "side_effect_state": "unknown",
+                        "child_run_ids": [value.child_run_id for value in uncertain],
+                    },
+                ),
+            )
         pending = []
         interaction_reader = getattr(
             self.coordinator.executor, "pending_interaction", None

@@ -1080,6 +1080,7 @@ def error_recovery_payload(
     language: str | None,
     *,
     resumable: bool,
+    interactive: bool = True,
 ) -> dict[str, Any]:
     """Build one locale-complete questionnaire for a runtime failure."""
 
@@ -1119,6 +1120,9 @@ def error_recovery_payload(
         reason_code=error.code,
         questions=questions,
     )
+    if not interactive:
+        payload["questions"] = []
+        payload["guidance"] = ""
     payload.update(
         {
             # Questionnaire clients render the title and questions. Make the
@@ -1128,6 +1132,7 @@ def error_recovery_payload(
             "prompt": error.message,
             "error": error.model_dump(mode="json", exclude_none=True),
             "resumable": resumable,
+            "requires_user_action": interactive and resumable,
             "preserve_step_budget": resumable,
         }
     )

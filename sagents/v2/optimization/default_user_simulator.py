@@ -1,33 +1,27 @@
 """Built-in scenario user; no benchmark-specific behavior or grading access."""
 from __future__ import annotations
+from sagents.v2.model.recovery_scope import scoped_recovery
 
 import json
 import re
 
 from sagents.v2.contracts.items import TextBlock
-from sagents.v2.model.contracts import ModelEventKind, ModelMessage, ModelRequest
+from sagents.v2.model.contracts import ModelMessage, ModelRequest
 from sagents.v2.optimization.principles import DIALOGUE_USER_PRINCIPLES
 from sagents.v2.optimization.user_simulator import (
     UserSimulator, UserSimulatorDescriptor, UserSimulationReply,
 )
 
 
-async def generate_user_text(provider, messages, *, temperature=None):
+async def generate_user_text(provider, messages, *, temperature=None, output_schema=None):
     """One plain model request, with no agent, tools, grader or hidden references."""
     from sagents.v2.optimization.python_user_simulator import UserSimulationExecutionError
     request = ModelRequest(request_id='user-simulator', run_id='user-simulator',
-        model_binding=provider.model_binding, messages=tuple(messages), temperature=temperature)
-    response = None
-    stream = provider.stream(request)
-    try:
-        async for event in stream:
-            if event.kind == ModelEventKind.COMPLETED:
-                response = event.response
-    finally:
-        close = getattr(stream, 'aclose', None)
-        if close is not None:
-            await close()
-    if response is None or response.tool_calls or response.finish_reason in {'length', 'max_tokens', 'incomplete'}:
+        model_binding=provider.model_binding, messages=tuple(messages), temperature=temperature,
+        metadata={"output_validation_schema": output_schema, "json_fence_compatible": True} if output_schema else {})
+    from sagents.v2.model.recovery import collect_response
+    response = await collect_response(provider, request, purpose="user_simulator")
+    if response is None or response.tool_calls or response.termination.value == 'truncated':
         raise UserSimulationExecutionError('User ModelProvider did not complete a text response')
     if not response.text.strip():
         raise UserSimulationExecutionError('User ModelProvider returned empty text')
@@ -51,6 +45,7 @@ class DefaultUserSimulator(UserSimulator):
             self.descriptor = self.descriptor.model_copy(update={
                 'version': hashlib.sha256(instructions.encode()).hexdigest()})
 
+    @scoped_recovery
     async def reply(self, request):
         system = DIALOGUE_USER_PRINCIPLES + '\nReturn one JSON object matching response_schema. '
         system += ('When continuing, provide a nonblank message and no stop_reason. When stopping, provide an empty message and stop_reason=completed, transferred or out_of_scope. Always provide a nonblank rationale.')
@@ -67,9 +62,9 @@ class DefaultUserSimulator(UserSimulator):
         async with self.provider_factory(request) as provider:
             for attempt in range(3):
                 try:
-                    text = await generate_user_text(provider, messages)
+                    text = await generate_user_text(provider, messages, output_schema=UserSimulationReply.model_json_schema())
                 except SageV2Error as error:
-                    if error.info.retryable:
+                    if error.info.retryable and error.info.metadata.get("recovery", {}).get("action") != "stop_with_explanation":
                         raise OptimizationTransientFailure('User ModelProvider transport interrupted') from error
                     raise UserSimulationExecutionError('User ModelProvider rejected the request') from error
                 fenced = re.fullmatch(r'\s*```(?:json)?\s*\n?(.*?)\n?```\s*', text, re.DOTALL)
@@ -78,6 +73,8 @@ class DefaultUserSimulator(UserSimulator):
                 except ValidationError:
                     if attempt == 2:
                         raise UserSimulationExecutionError('Built-in user returned invalid decisions after three attempts') from None
+                    from sagents.v2.model.recovery_scope import reserve_additional_request
+                    await reserve_additional_request("arguments", purpose="simulator_schema")
                     messages = (*messages,
                         ModelMessage(role='assistant', content=(TextBlock(text=text),)),
-                        ModelMessage(role='user', content=(TextBlock(text='Invalid decision. Return valid JSON matching response_schema; provide a nonblank rationale, a nonblank message when continuing, or an empty message and explicit stop_reason when stopping.'),)))
+                        ModelMessage(role='user', content=(TextBlock(text='Invalid decision. Return valid JSON matching response_schema; provide a nonblank rationale, a nonblank message when continuing, or an empty message and explicit stop_reason when stopping.'),), metadata={"inference_view_only": True, "runtime_continuation_guidance": True}))

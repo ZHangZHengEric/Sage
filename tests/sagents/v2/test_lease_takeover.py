@@ -14,7 +14,7 @@ from datetime import timedelta
 import pytest
 
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.commands import RunConfig, InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
@@ -385,6 +385,7 @@ async def test_lease_loss_with_remote_tool_in_flight_does_not_replay_it(
     handle = await agent.start_run(
         StartRun(
             agent_id="root",
+            config=RunConfig(autonomous_error_recovery=False),
             idempotency_key="start",
             input=(InputItem(role="user", content=(TextBlock(text="original"),)),),
             resolved_spec_hash="sha256:restart",

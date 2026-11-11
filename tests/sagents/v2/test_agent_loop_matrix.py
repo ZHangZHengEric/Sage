@@ -228,6 +228,7 @@ async def setup_loop(
     deadline_seconds=None,
     transient_retry_limit=3,
     automatic_stage_continuation=False,
+    autonomous_error_recovery=False,
     max_stages=None,
     clock=None,
     actor_context=CONTEXT,
@@ -258,6 +259,7 @@ async def setup_loop(
                 deadline_seconds=deadline_seconds,
                 transient_retry_limit=transient_retry_limit,
                 automatic_stage_continuation=automatic_stage_continuation,
+                autonomous_error_recovery=autonomous_error_recovery,
                 max_stages=max_stages,
                 flow_boundary=flow_boundary,
                 metadata=(
@@ -1383,7 +1385,10 @@ async def test_invalid_judge_output_does_not_leak_parser_error_into_next_request
     result = await loop.execute(handle.run_id, CONTEXT)
 
     assert result.state == RunState.COMPLETED
-    assert len(executor.calls) == 1
+    assert len(executor.calls) == 0
+    assert len(judge.requests) == 2
+    assert any(m.metadata.get("runtime_continuation_guidance") for m in judge.requests[1].messages)
+    assert len(model.requests) == 1
 
 
 @pytest.mark.asyncio
@@ -2094,11 +2099,11 @@ async def test_repeated_empty_semantic_responses_explain_exhausted_retries():
     result = await loop.execute(handle.run_id, CONTEXT)
 
     assert result.state == RunState.FAILED
-    assert len(model.requests) == 3
+    assert len(model.requests) == 2
     events = await runtime.session_store.read_events(handle.run_id)
     error = cast(RunEventData, events[-1].data).error
     assert error.code == "model.empty_semantic_response"
-    assert error.metadata["transparent_retries_exhausted"] == 2
+    assert error.metadata["transparent_retries_exhausted"] == 1
     assert not any(event.type == "interaction.requested" for event in events)
 
 
@@ -2416,7 +2421,7 @@ async def test_user_input_resume_rebuilds_ledger_from_events_not_checkpoint_mess
     suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     checkpoint = await runtime.session_store.get_checkpoint(suspension.checkpoint_id)
-    assert checkpoint.checkpoint_codec_version == "agent-loop/3"
+    assert checkpoint.checkpoint_codec_version == "agent-loop/4"
     assert "messages" not in checkpoint.state
 
     await runtime.reply_interaction(
@@ -4310,9 +4315,11 @@ async def test_argument_recovery_budget_survives_pause_and_new_engine():
     )
     result = await fresh.resume(handle.run_id, CONTEXT)
     assert result.state == RunState.FAILED
-    assert len(fresh_model.requests) == 2
+    # The request sent before pause remains charged; only one repair remains.
+    assert len(fresh_model.requests) == 1
     final_checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
-    assert final_checkpoint.state["model_argument_recovery_attempts"] == 2
+    assert final_checkpoint.state["model_argument_recovery_attempts"] == 1
+    assert final_checkpoint.state["model_recovery"]["counts"]["arguments"] == 2
 
 
 @pytest.mark.asyncio
@@ -5128,7 +5135,7 @@ async def test_mcp_unknown_returns_error_and_keeps_parallel_results(cold_restart
 
 
 @pytest.mark.asyncio
-async def test_default_outage_recovery_outlives_step_budget_without_replaying_write(monkeypatch):
+async def test_default_outage_recovery_is_finite_without_replaying_write(monkeypatch):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
     error = RuntimeErrorInfo(
         code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
@@ -5144,11 +5151,11 @@ async def test_default_outage_recovery_outlives_step_budget_without_replaying_wr
         tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
     )
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == RunState.COMPLETED
+    assert result.state == RunState.FAILED
     assert len(executor.calls) == 1
     events = await runtime.session_store.read_events(handle.run_id)
     retries = [e for e in events if e.type == "step.retry_scheduled"]
-    assert len(retries) == 30
+    assert len(retries) == 2
     assert all(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).metadata["automatic_recovery"] for e in retries)
     assert not [e for e in events if e.type == "interaction.requested"]
     assert all(req.messages == model.requests[1].messages for req in model.requests[2:])
@@ -5165,7 +5172,7 @@ async def test_network_failure_in_request_preparation_recovers_automatically(mon
     async def prepare(**kwargs):
         nonlocal attempts
         attempts += 1
-        if attempts <= 5:
+        if attempts <= 2:
             raise SageV2Error(RuntimeErrorInfo(
                 code="context.provider_unavailable", category=ErrorCategory.PROVIDER_TRANSIENT,
                 message="auxiliary model offline", retryable=True,
@@ -5174,7 +5181,7 @@ async def test_network_failure_in_request_preparation_recovers_automatically(mon
 
     monkeypatch.setattr(loop.step_request_builder, "prepare", prepare)
     assert (await loop.execute(handle.run_id, CONTEXT)).state == RunState.COMPLETED
-    assert attempts == 6
+    assert attempts == 3
     assert len(model.requests) == 1
 
 
@@ -5237,7 +5244,7 @@ async def test_network_retry_respects_deadline_without_another_provider_request(
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.FAILED
     assert len(model.requests) == 1
-    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(result.run_id)).error).code == "budget.deadline"
+    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(result.run_id)).error).metadata["recovery"]["reason"] == "retry_after_exceeds_deadline"
     assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 

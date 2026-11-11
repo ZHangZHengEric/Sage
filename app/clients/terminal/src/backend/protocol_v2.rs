@@ -414,6 +414,14 @@ fn parse_native_event(
             )],
             None => Vec::new(),
         },
+        "step.retry_scheduled" => {
+            let action = data.get("error").and_then(|e| e.pointer("/metadata/recovery/action")).and_then(Value::as_str);
+            match action {
+                Some("retry_same_request") => vec![BackendEvent::Status("Model temporarily unavailable; retrying".into())],
+                Some(_) => vec![BackendEvent::Status("Recovering model output".into())],
+                None => Vec::new(),
+            }
+        }
         "run.failed" => {
             let Some(error) = data.get("error").and_then(Value::as_object) else {
                 return Vec::new();
@@ -449,6 +457,13 @@ fn parse_completed_tool_item(
     let Some(body) = item.get("data").and_then(Value::as_object) else {
         return Vec::new();
     };
+    if str_field(body, "kind") == Some("message")
+        && str_field(body, "role") == Some("assistant")
+        && matches!(str_field(item, "status"), Some("cancelled" | "suspended" | "failed"))
+    {
+        return vec![BackendEvent::Message(MessageKind::System,
+            "Model output interrupted; preceding fragment is incomplete".into())];
+    }
     let Some(call_id) = str_field(body, "tool_call_id") else {
         return Vec::new();
     };

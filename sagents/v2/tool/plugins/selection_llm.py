@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from sagents.v2.model.recovery_scope import scoped_recovery
+
 from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxiliary_model
 
-import asyncio
 import json
 
 from sagents.v2.contracts.common import new_id
@@ -39,6 +40,7 @@ class LLMToolSelectionPolicy(ToolSelectionState):
         self._selected_by_run: dict[str, tuple[str, ...]] = {}
         self._prepared_strategy_by_run: dict[str, str] = {}
 
+    @scoped_recovery
     async def prepare(self, context: ToolSelectionPrepareContext) -> None:
         self._remember_catalog(context.run_id, context.tools)
         if not context.tools:
@@ -112,33 +114,26 @@ class LLMToolSelectionPolicy(ToolSelectionState):
             max_output_tokens=None,
             response_format="json_object",
             tool_choice="none",
-            metadata={"purpose": "tool_selection"},
+            metadata={"purpose": "tool_selection", "output_validation_schema": {
+                "type": "object", "required": ["tools"],
+                "properties": {"tools": {"type": "array", "items": {
+                    "type": "string", "enum": [tool.name for tool in context.tools]}}},
+            }},
         )
         response = None
-        stream = stream_auxiliary_model(context.model, request)
+        stream = stream_auxiliary_model(
+            context.model, request, timeout_seconds=self.config.model_timeout_seconds,
+            timeout_error=auxiliary_model_timeout_error(
+                code="tool_selection.model_timeout", operation="LLM Tool selection",
+                timeout_seconds=self.config.model_timeout_seconds, plugin_id=self.plugin_id,
+            ).info,
+        )
         try:
-            async with asyncio.timeout(self.config.model_timeout_seconds):
-                iterator = stream.__aiter__()
-                try:
-                    first_event = await anext(iterator)
-                except StopAsyncIteration:
-                    first_event = None
-                if first_event is not None and first_event.response is not None:
-                    response = first_event.response
-                async for event in iterator:
-                    if event.response is not None:
-                        response = event.response
-        except TimeoutError as exc:
-            raise auxiliary_model_timeout_error(
-                code="tool_selection.model_timeout",
-                operation="LLM Tool selection",
-                timeout_seconds=self.config.model_timeout_seconds,
-                plugin_id=self.plugin_id,
-            ) from exc
+            async for event in stream:
+                if event.response is not None:
+                    response = event.response
         finally:
-            closer = getattr(stream, "aclose", None)
-            if closer is not None:
-                await closer()
+            await stream.aclose()
         try:
             names = _parse_llm_tool_names(
                 response.text if response else "", context.tools

@@ -1,20 +1,21 @@
 """Anthropic Messages API adapter implemented against the public HTTP protocol."""
 
 from __future__ import annotations
+from sagents.v2.model.failures import annotate_stream_failure
 
 import base64
+import copy
+import hashlib
 import json
-from sagents.v2.model.wire_diagnostics import record_wire_event
-
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import Field
 
+from sagents.v2.contracts.errors import SageV2Error, RuntimeErrorInfo, ErrorCategory
 from sagents.v2.contracts.common import StrictModel, new_id
-from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import (
     AudioBlock,
     FileBlock,
@@ -25,18 +26,6 @@ from sagents.v2.contracts.items import (
     UsageSummary,
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
-from sagents.v2.runtime.credentials.contracts import CredentialMaterial
-from sagents.v2.model.plugins._shared.wire import (
-    compact_json,
-    minimum_reasoning_control,
-    parse_tool_arguments,
-    provider_error,
-    ProviderStreamFailure,
-    stream_incomplete_error,
-    validate_extra_body,
-    wire_json_value,
-)
-from sagents.v2.model.plugins._shared.usage import canonical_token_usage
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
@@ -45,7 +34,19 @@ from sagents.v2.model.contracts import (
     ModelResponse,
     ModelStreamEvent,
 )
-
+from sagents.v2.model.plugins._shared.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.wire import (
+    ProviderStreamFailure,
+    compact_json,
+    minimum_reasoning_control,
+    parse_tool_arguments,
+    provider_error,
+    stream_incomplete_error,
+    validate_extra_body,
+    wire_json_value,
+)
+from sagents.v2.model.wire_diagnostics import record_wire_event
+from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 
 _HOST_OWNED_REQUEST_FIELDS = frozenset(
     {
@@ -77,6 +78,7 @@ class AnthropicMessagesConfig(StrictModel):
     timeout_seconds: float = Field(default=120, gt=0)
     prompt_cache: bool = True
     automatic_prompt_cache: bool = True
+    thinking_prefix_mismatch_behavior: Literal["drop_block", "error"] | None = None
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
@@ -230,7 +232,8 @@ class AnthropicMessagesModelProvider:
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         self._validate_request(request)
-        system, messages = self._messages(request.messages)
+        bindings: list[tuple[int, int, str]] = []
+        system, messages = self._messages(request.messages, bindings=bindings)
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -256,13 +259,35 @@ class AnthropicMessagesModelProvider:
                         "none": "none",
                     }[request.tool_choice]
                 }
+        configured_binding = self.config.extra_body.get("thinking", {}).get(
+            "block_binding"
+        )
+        behavior = self.config.thinking_prefix_mismatch_behavior
+        binding_enabled = behavior is not None or bool(configured_binding)
         effort = self.config.reasoning_effort
         if request.reasoning_mode == "minimum":
             _, effort = minimum_reasoning_control(
                 self.config.invocation_strategy,
                 default_disable="thinking_type_disabled",
             )
-        if effort is None:
+            if binding_enabled:
+                # Binding controls require adaptive thinking on current models.
+                # Use the least supported adaptive effort rather than disabling
+                # thinking. An explicitly empty profile must not invent effort.
+                supported = self.config.invocation_strategy.get(
+                    "supported_reasoning_efforts", ("low",)
+                )
+                effort = next(
+                    (
+                        value
+                        for value in ("minimal", "low", "medium", "high", "xhigh", "max")
+                        if value in supported
+                    ),
+                    None,
+                )
+        if effort is None and not (
+            binding_enabled and request.reasoning_mode == "minimum"
+        ):
             temperature = (
                 request.temperature
                 if request.temperature is not None
@@ -293,14 +318,97 @@ class AnthropicMessagesModelProvider:
             reserved_fields=_HOST_OWNED_REQUEST_FIELDS,
             provider=self.config.provider_id,
         )
+        thinking = {
+            **payload.get("thinking", {}),
+            **self.config.extra_body.get("thinking", {}),
+        }
         payload.update(self.config.extra_body)
+        if thinking:
+            thinking.setdefault("type", "adaptive")
+            payload["thinking"] = thinking
         if request.reasoning_mode == "minimum":
-            payload["thinking"] = (
-                {"type": "adaptive", "display": "summarized"}
-                if effort is not None
-                else {"type": "disabled"}
+            if effort is not None or binding_enabled:
+                thinking = dict(payload.get("thinking") or {})
+                thinking["type"] = "adaptive"
+                thinking.pop("budget_tokens", None)
+                thinking.setdefault("display", "summarized")
+                payload["thinking"] = thinking
+            else:
+                payload["thinking"] = {"type": "disabled"}
+        if configured_binding is not None:
+            payload.setdefault("thinking", {})["block_binding"] = copy.deepcopy(
+                configured_binding
             )
+        if behavior is not None:
+            thinking = dict(payload.get("thinking") or {"type": "adaptive"})
+            thinking["block_binding"] = {
+                **thinking.get("block_binding", {}),
+                "prefix_mismatch_behavior": behavior,
+            }
+            payload["thinking"] = thinking
+        if behavior is None and not configured_binding:
+            expected_prefixes = {
+                (message_index, offset): expected
+                for message_index, offset, expected in bindings
+            }
+            cleaned: list[dict[str, Any]] = []
+            invalid = False
+            for message_index, message in enumerate(messages):
+                for offset, block in enumerate(message["content"]):
+                    expected = expected_prefixes.get((message_index, offset))
+                    if expected is not None:
+                        # Each response binds to the request actually sent.
+                        # Earlier invalid blocks have already been removed here,
+                        # so a later response generated after cleanup can match.
+                        invalid = self._prefix_digest(payload, cleaned) != expected
+                    # Without its own provenance, a legacy block following a
+                    # mismatch remains invalid until a verified boundary.
+                    if invalid and block.get("type") in {
+                        "thinking",
+                        "redacted_thinking",
+                    }:
+                        continue
+                    self._append_message(cleaned, message["role"], [block])
+            payload["messages"] = cleaned
         return payload
+
+    @staticmethod
+    def _prefix_digest(payload, messages):
+        prefix = copy.deepcopy(
+            {
+                "system": payload.get("system", []),
+                "tools": payload.get("tools", []),
+                "messages": messages,
+            }
+        )
+        # Cache hints are transport metadata, not conversation content. Never
+        # remove similarly named keys inside user JSON or tool arguments.
+        for block in [*prefix["system"], *prefix["tools"]]:
+            block.pop("cache_control", None)
+        for message in prefix["messages"]:
+            for block in message["content"]:
+                block.pop("cache_control", None)
+        return hashlib.sha256(
+            json.dumps(prefix, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    def request_headers(self) -> dict[str, str]:
+        headers = dict(self.config.extra_headers)
+        thinking = self.config.extra_body.get("thinking") or {}
+        if self.config.thinking_prefix_mismatch_behavior is not None or thinking.get(
+            "block_binding"
+        ):
+            values = []
+            for key in list(headers):
+                if key.lower() == "anthropic-beta":
+                    values.extend(
+                        value.strip()
+                        for value in headers.pop(key).split(",")
+                        if value.strip()
+                    )
+            values.append("thinking-binding-controls-2026-08-01")
+            headers["anthropic-beta"] = ",".join(dict.fromkeys(values))
+        return headers
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         payload = self.diagnostic_request(request)
@@ -312,8 +420,25 @@ class AnthropicMessagesModelProvider:
         usage_reported = False
         tools: dict[int, dict[str, str]] = {}
         thinking_blocks: dict[int, dict[str, Any]] = {}
+        content_blocks: dict[int, dict[str, Any]] = {}
+        input_transformations = None
         response_started = False
         terminal_event_received = False
+        def stream_failure(error):
+            normalized = canonical_token_usage(provider_usage, input_mode="disjoint")
+            observed_usage = UsageSummary(
+                reported=usage_reported, input_tokens=normalized.input_tokens,
+                output_tokens=normalized.output_tokens,
+                cached_input_tokens=normalized.cached_input_tokens,
+                reasoning_tokens=normalized.reasoning_tokens,
+                models=(self.config.model,), provider_usage=provider_usage,
+            )
+            return SageV2Error(annotate_stream_failure(
+                error, provider=self.config.provider_id, usage=observed_usage,
+                response_id=response_id, terminal_received=terminal_event_received,
+                text=text, reasoning=reasoning, tools=tools,
+            ))
+
         try:
             record_wire_event(
                 {"diagnostic_event": "request_attempt", "payload": payload}
@@ -328,6 +453,10 @@ class AnthropicMessagesModelProvider:
                     if event_type == "message_start":
                         message = event.get("message") or {}
                         response_id = str(message.get("id") or response_id)
+                        if "input_transformations" in message:
+                            input_transformations = wire_json_value(
+                                message["input_transformations"]
+                            )
                         usage = message.get("usage") or {}
                         if usage:
                             usage_reported = True
@@ -337,7 +466,20 @@ class AnthropicMessagesModelProvider:
                     elif event_type == "content_block_start":
                         index = int(event.get("index") or 0)
                         block = event.get("content_block") or {}
-                        if block.get("type") == "tool_use":
+                        if block.get("type") not in {"tool_use", "text", "thinking", "redacted_thinking"}:
+                            raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
+                                category=ErrorCategory.PROVIDER_PERMANENT,
+                                message="Unsupported Anthropic content block", safe_to_resume=True))
+                        content_blocks[index] = copy.deepcopy(block)
+                        if block.get("type") == "text":
+                            value = str(block.get("text") or "")
+                            if value:
+                                response_started = True
+                                text += value
+                                yield ModelStreamEvent(
+                                    kind=ModelEventKind.TEXT_DELTA, delta=value
+                                )
+                        elif block.get("type") == "tool_use":
                             response_started = True
                             tools[index] = {
                                 "id": str(block.get("id") or new_id("tool_call")),
@@ -349,16 +491,18 @@ class AnthropicMessagesModelProvider:
                             "redacted_thinking",
                         }:
                             response_started = True
-                            thinking_blocks[index] = {
-                                key: value
-                                for key, value in block.items()
-                                if key in {"type", "thinking", "signature", "data"}
-                            }
+                            thinking_blocks[index] = copy.deepcopy(block)
                     elif event_type == "content_block_delta":
                         index = int(event.get("index") or 0)
                         delta = event.get("delta") or {}
                         delta_type = delta.get("type")
                         if delta_type == "text_delta":
+                            block = content_blocks.setdefault(
+                                index, {"type": "text", "text": ""}
+                            )
+                            block["text"] = block.get("text", "") + str(
+                                delta.get("text") or ""
+                            )
                             value = str(delta.get("text") or "")
                             if value:
                                 response_started = True
@@ -366,6 +510,11 @@ class AnthropicMessagesModelProvider:
                                 yield ModelStreamEvent(
                                     kind=ModelEventKind.TEXT_DELTA, delta=value
                                 )
+                        elif delta_type == "citations_delta":
+                            block = content_blocks[index]
+                            if block.get("citations") is None:
+                                block["citations"] = []
+                            block["citations"].append(copy.deepcopy(delta["citation"]))
                         elif delta_type == "thinking_delta":
                             value = str(delta.get("thinking") or "")
                             if value:
@@ -422,16 +571,16 @@ class AnthropicMessagesModelProvider:
                             message or "Anthropic Messages API failed",
                             code=error.get("type") if isinstance(error, dict) else None,
                         )
-        except SageV2Error:
-            raise
+        except SageV2Error as exc:
+            raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise provider_error(exc, response_started=response_started) from exc
+            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
 
         if not terminal_event_received:
-            raise stream_incomplete_error(
+            raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
                 response_started=response_started,
-            )
+            ).info)
 
         usage = canonical_token_usage(provider_usage, input_mode="disjoint")
         usage_summary = UsageSummary(
@@ -457,6 +606,17 @@ class AnthropicMessagesModelProvider:
             )
             for _, value in sorted(tools.items())
         )
+        for index, block in thinking_blocks.items():
+            content_blocks[index] = block
+        for (index, _), call in zip(sorted(tools.items()), calls, strict=True):
+            content_blocks.setdefault(
+                index,
+                {
+                    "type": "tool_use",
+                    "id": call.tool_call_id,
+                    "name": call.name,
+                },
+            )["input"] = copy.deepcopy(call.arguments)
         yield ModelStreamEvent(
             kind=ModelEventKind.COMPLETED,
             response=ModelResponse(
@@ -470,16 +630,27 @@ class AnthropicMessagesModelProvider:
                     "provider_id": self.config.provider_id,
                     "model": self.config.model,
                     "api": "anthropic-messages",
+                    **(
+                        {"input_transformations": input_transformations}
+                        if input_transformations is not None
+                        else {}
+                    ),
                 },
                 provider_state=make_provider_state(
                     "anthropic_messages",
                     {
+                        "prefix_digest": self._prefix_digest(
+                            payload, payload["messages"]
+                        ),
+                        "content_blocks": [
+                            content_blocks[index] for index in sorted(content_blocks)
+                        ],
                         "thinking_blocks": [
                             thinking_blocks[index] for index in sorted(thinking_blocks)
-                        ]
+                        ],
                     },
                 )
-                if thinking_blocks
+                if content_blocks
                 else {},
             ),
         )
@@ -488,7 +659,9 @@ class AnthropicMessagesModelProvider:
     async def _open_stream(self, payload: dict[str, Any]):
         """Accept both httpx clients and small injected protocol test clients."""
 
-        stream = self._client.stream("POST", "/v1/messages", json=payload)
+        stream = self._client.stream(
+            "POST", "/v1/messages", json=payload, headers=self.request_headers()
+        )
         async with stream as response:
             yield response
 
@@ -498,7 +671,7 @@ class AnthropicMessagesModelProvider:
 
         async for line in response.aiter_lines():
             line = line.strip()
-            if not line or line.startswith("event:") or line.startswith(":"):
+            if not line or line.startswith(("event:", ":")):
                 continue
             if not line.startswith("data:"):
                 continue
@@ -554,7 +727,7 @@ class AnthropicMessagesModelProvider:
         )
 
     def _messages(
-        self, messages: tuple[ModelMessage, ...]
+        self, messages: tuple[ModelMessage, ...], *, bindings=None
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         system: list[dict[str, Any]] = []
         output: list[dict[str, Any]] = []
@@ -586,6 +759,24 @@ class AnthropicMessagesModelProvider:
                     message.provider_state, "anthropic_messages"
                 )
                 if state is not None:
+                    if bindings is not None and isinstance(
+                        state.get("prefix_digest"), str
+                    ):
+                        same_role = bool(output and output[-1]["role"] == "assistant")
+                        bindings.append(
+                            (
+                                len(output) - 1 if same_role else len(output),
+                                len(output[-1]["content"]) if same_role else 0,
+                                state["prefix_digest"],
+                            )
+                        )
+                    if isinstance(state.get("content_blocks"), list):
+                        content = copy.deepcopy(state["content_blocks"])
+                        self._append_message(output, "assistant", content)
+                        self._remember_cache_candidate(
+                            message, content, cache_candidates
+                        )
+                        continue
                     stored_blocks = state.get("thinking_blocks")
                     if isinstance(stored_blocks, list):
                         content = [

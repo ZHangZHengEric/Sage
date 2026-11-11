@@ -359,7 +359,7 @@ async def test_postgres_approval_checkpoint_resumes_after_restart(
     suspension = await reopened.get_suspension(run.suspension_id)
     interaction = await reopened.get_interaction(suspension.interaction_id)
     checkpoint = await reopened.get_checkpoint(suspension.checkpoint_id)
-    assert checkpoint.checkpoint_codec_version == "agent-loop/3"
+    assert checkpoint.checkpoint_codec_version == "agent-loop/4"
     assert await reopened.filter_suspended_session_ids([handle.session_id]) == {
         handle.session_id
     }

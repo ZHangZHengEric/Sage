@@ -455,3 +455,14 @@ def test_file_request_progress_does_not_change_recovery_identity():
     new={**old,'reading':'new','files':[{**old['files'][0],'read_through_line':5,'remaining_read_ranges':[[6,10]]}]}
     assert key(old)==key(new)
     assert key(old)!=key({**new,'sha256':'different'})
+
+
+def test_exhausted_model_recovery_cannot_restart_an_evaluation():
+    from sagents.v2.optimization.recovery import model_transport_interrupted, OptimizationModelRecoveryExhausted
+    from sagents.v2.optimization.call_isolation import retry_allowed
+    observation = OptimizationObservation(state='failed', evidence={'error': {
+        'code': 'model.provider_transient', 'category': 'provider_transient', 'retryable': True,
+        'metadata': {'recovery': {'action': 'stop_with_explanation'}}}})
+    with pytest.raises(OptimizationModelRecoveryExhausted) as caught:
+        model_transport_interrupted(observation)
+    assert not retry_allowed(caught.value)

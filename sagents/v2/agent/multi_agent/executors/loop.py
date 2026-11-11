@@ -152,7 +152,9 @@ class LoopChildRunExecutor:
             deadline_seconds=parent_command.config.deadline_seconds,
             max_stages=parent_command.config.max_stages,
             automatic_stage_continuation=parent_command.config.automatic_stage_continuation,
+            autonomous_error_recovery=parent_command.config.autonomous_error_recovery,
             transient_retry_limit=parent_command.config.transient_retry_limit,
+            model_recovery=parent_command.config.model_recovery,
             priority=parent_command.config.priority,
         )
         if self.run_config_resolver is not None:
@@ -497,6 +499,29 @@ class LoopChildRunExecutor:
                 for block in item.data.content
             )
             error = result.error
+            command = await self.runtime.session_store.get_start_command(run.run_id)
+            if command.config.autonomous_error_recovery:
+                from sagents.v2.agent.autonomous_recovery import unresolved_effects
+
+                pending = unresolved_effects(
+                    await self.runtime.session_store.read_events(run.run_id)
+                )
+                if pending:
+                    error = RuntimeErrorInfo(
+                        code="tool.outcome_unverified",
+                        category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                        message="The delegated run ended with unverified tool side effects. Reuse its recorded operations; do not start replacement work.",
+                        metadata={
+                            "side_effect_state": "unknown",
+                            "unresolved_operation_ids": [
+                                data.operation_id for _, data in pending
+                            ],
+                            "child_failure_code": error.code if error else None,
+                            "child_failure_category": error.category.value
+                            if error
+                            else None,
+                        },
+                    )
         elif run.state == RunState.SUSPENDED:
             error = RuntimeErrorInfo(
                 code="agent.child_suspended",

@@ -36,6 +36,7 @@ let supplementAttempt = null
 let sendAttempt = null
 let agentBinding = 0
 const error = ref('')
+const recovery = ref(null)
 const hasModel = ref(true)
 const agents = ref([])
 const interaction = ref(null)
@@ -120,6 +121,7 @@ function bindAgent() {
       interaction.value = next
       if (!next) deciding.value = null
     },
+    onRecovery(value) { if (binding === agentBinding) recovery.value = value },
     onStarted() { if (binding === agentBinding) streamStarted.value = true },
     onSteerApplied(id) {
       if (binding !== agentBinding || !id) return
@@ -489,6 +491,7 @@ onUnmounted(() => {
           <div v-if="historyOffset < historyTotal && !historyLoading && !historyFailed" ref="historyEnd" class="history-end" aria-hidden="true"></div>
           <p v-if="!isStart && !messages.length && !historyLoading && !pending && !historyFailed && ready" class="conversation-no-messages">{{ readOnly ? '这段会话还没有消息' : '输入消息，继续这段会话' }}</p>
         </div>
+        <p v-if="pending && recovery" role="status">{{ recovery.action === 'retry_same_request' ? '模型服务暂时不可用，正在重试' : '正在修正模型输出' }}（{{ recovery.attempt }}）</p>
         <div v-if="(error && !decisionError) || setupFailed || (!initializing && !readOnly && ((!hasModel && !agentPackage) || !agentAvailable)) || historyLoading" class="conversation-notices">
           <p v-if="historyLoading" role="status">加载会话中…</p>
           <p v-if="!initializing && !hasModel && !readOnly && !agentPackage" class="notice">还没有可用模型，<router-link to="/models">配置模型</router-link>后即可发送。</p>

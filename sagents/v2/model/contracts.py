@@ -10,6 +10,7 @@ from pydantic import Field, field_validator, model_validator
 from sagents.v2.contracts.common import Identifier, StrictModel, ToolName, VerbatimText
 from sagents.v2.contracts.items import ContentBlock, UsageSummary
 from sagents.v2.contracts.provider_state import validate_provider_state
+from sagents.v2.contracts.model_recovery import ModelTermination
 
 
 class ModelEventKind(str, Enum):
@@ -114,6 +115,7 @@ class ModelResponse(StrictModel):
     reasoning: str = ""
     tool_calls: tuple[ModelToolCall, ...] = ()
     finish_reason: str
+    termination: ModelTermination | None = None
     usage: UsageSummary = Field(default_factory=UsageSummary)
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
     provider_state: dict[str, Any] = Field(default_factory=dict)
@@ -121,6 +123,26 @@ class ModelResponse(StrictModel):
     _validate_provider_state = field_validator("provider_state")(
         validate_provider_state
     )
+
+
+    @model_validator(mode="after")
+    def normalize_termination(self) -> "ModelResponse":
+        if self.termination is not None:
+            return self
+        reason = self.finish_reason.lower()
+        if reason in {"refusal", "content_filter", "safety", "blocked", "recitation"}:
+            value = ModelTermination.REFUSED
+        elif reason == "pause_turn":
+            value = ModelTermination.PAUSED
+        elif reason in {"length", "max_tokens", "max_output_tokens", "model_context_window_exceeded"}:
+            value = ModelTermination.TRUNCATED
+        elif reason in {"stop", "completed", "end_turn", "stop_sequence", "tool_calls", "tool_use", "function_call"}:
+            value = (ModelTermination.TOOL_CALLS if self.tool_calls else
+                     ModelTermination.COMPLETE if self.text.strip() else ModelTermination.EMPTY)
+        else:
+            value = ModelTermination.UNKNOWN
+        object.__setattr__(self, "termination", value)
+        return self
 
 
 class ModelStreamEvent(StrictModel):

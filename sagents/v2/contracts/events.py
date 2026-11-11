@@ -327,7 +327,8 @@ EVENT_CATALOG.update(
 )
 EVENT_CATALOG.update(
     _definitions(
-        ("step.started", "step.completed", "step.failed", "step.retry_scheduled"),
+        ("step.started", "step.completed", "step.failed", "step.retry_scheduled",
+         "step.recovery_dispatched", "step.recovery_completed"),
         "step",
         terminal=("step.completed", "step.failed"),
     )
