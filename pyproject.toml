@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary,pool]>=3.2,<4", "SQLAlchemy[asyncio]>=2.0,<2.2"]
+postgres = ["psycopg[binary]>=3.2,<4", "psycopg-pool>=3.3.2,<4", "SQLAlchemy[asyncio]>=2.0,<2.2"]
 mysql = ["aiomysql>=0.2.0", "SQLAlchemy[asyncio]>=2.0,<2.2"]
 redis = ["redis>=5.0.0"]
 cube = ["cubesandbox>=0.7.3,<1"]

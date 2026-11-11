@@ -282,6 +282,25 @@ async def test_postgres_concurrent_bootstrap_and_connection_reuse(postgres_store
     assert closed.value.info.code == "session_store.closed"
 
 
+async def test_postgres_session_authorization_recovers_from_dead_idle_connection(
+    postgres_stores,
+):
+    from tests.sagents.v2.test_sql_session_store_contract import command, CONTEXT
+
+    writer, reader = postgres_stores(), postgres_stores()
+    created = await writer.create_run(command(), CONTEXT)
+    async with reader._reader_connection() as connection:
+        idle_pid = connection.info.backend_pid
+
+    async with writer._writer_connection() as connection:
+        cursor = await connection.execute(
+            "SELECT pg_terminate_backend(%s, 5000)", (idle_pid,)
+        )
+        assert (await cursor.fetchone())[0] is True
+
+    await reader.authorize_session_actor(created.handle.session_id, CONTEXT)
+
+
 @pytest.mark.parametrize("decision", ["approve_once", "deny"])
 async def test_postgres_approval_checkpoint_resumes_after_restart(
     business_store_factory, decision

@@ -153,6 +153,7 @@ class _PostgresSessionState(
                 timeout=self._connection_budget.timeout,
                 open=False,
                 configure=configure,
+                check=AsyncConnectionPool.check_connection,
                 kwargs={}
                 if "connect_timeout" in dict(parse_qsl(urlsplit(self.dsn).query))
                 else {"connect_timeout": max(1, int(self._connection_budget.timeout))},
