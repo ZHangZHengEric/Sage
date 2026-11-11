@@ -39,7 +39,7 @@ Sage、Desktop、Server 和 SAgents 默认指当前 v2 实现。旧版单独见 
 | 🧬 **首次 RSI** — 无需 API Key 查看脚本闭环 | [离线流程演示](docs/zh/applications/FIRST_RSI_RUN.md) |
 | 💻 **Desktop** — 配置智能体、运行 RSI、选择版本 | [桌面端指南](app/v2/desktop/README.md) |
 | 🌐 **Server** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
-| 🧠 **SAgents** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md#quick-start) |
+| 🧠 **SAgents** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md) |
 | 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
 
 <details>
