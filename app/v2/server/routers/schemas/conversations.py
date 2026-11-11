@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+from sagents.v2.contracts.run_state import RunState
 from ag_ui.core import RunAgentInput
 from pydantic import BaseModel, Field, model_validator
 
@@ -75,4 +76,40 @@ class ThreadEventPage(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+
+class TimingEntry(BaseModel):
+    kind: Literal["preparation", "model", "tool", "framework", "cleanup", "waiting", "first_token"]
+    start_ms: float
+    end_ms: float
+    purpose: str | None = None
+    tool_call_id: str | None = None
+
+
+class TimingTimeline(BaseModel):
+    wall_ms: float
+    entries: list[TimingEntry]
+    truncated: bool
+
+
+class RunTiming(BaseModel):
+    scope: Literal["sdk_entry", "execution_only"]
+    coverage: Literal["complete", "incomplete"]
+    total_ms: float | None = None
+    first_token_ms: float | None = None
+    first_text_ms: float | None = None
+    first_text_request_ms: float | None = None
+    model_ttft_ms: float | None = None
+    model_ms: float | None = None
+    tool_ms: float | None = None
+    framework_ms: float | None = None
+    overlap_ms: float | None = None
+    waiting_ms: float | None = None
+    timeline: TimingTimeline | None = None
+
+
+class ThreadRunTiming(BaseModel):
+    state: RunState
+    timing: RunTiming | None = None
 

@@ -655,3 +655,30 @@ def test_standalone_agent_finishes_on_its_own_terminal_event():
     assert len(trace.spans) == 1
     assert trace.spans[0].attributes["sage.performance.total_ms"] == 3000
     assert not source._timings._performance
+
+
+@pytest.mark.asyncio
+async def test_phoenix_run_timing_queries_only_the_requested_run(monkeypatch):
+    from sagents.v2.runtime.observability.plugins.external import phoenix_query
+
+    sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    capture = TraceCapture()
+    setattr(sink, "trace_sink", capture)
+    capture_sample(sink)
+    requests = []
+
+    async def request(source, client, path, params, *, method, body, headers):
+        requests.append(body)
+        response = projected_response([phoenix_span(span) for span in capture.spans])
+        return response.content, response.headers["content-type"]
+
+    monkeypatch.setattr(phoenix_query, "request", request)
+    row = await sink.run_timing(session_id="s", run_id="r", start=BASE, end=BASE + 100)
+    assert row is not None
+    assert row["total_ms"] == 10000
+    assert len(requests) == 1
+    condition = requests[0]["queries"][0]["filter"]["condition"]
+    assert 'attributes["session_id"] == "s"' in condition
+    assert 'attributes["run_id"] == "r"' in condition
+    assert "sage.performance.data" in requests[0]["queries"][0]["select"]
+    assert await sink.run_timing(session_id="other", run_id="r", start=BASE, end=BASE + 100) is None

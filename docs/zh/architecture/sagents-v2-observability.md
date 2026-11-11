@@ -53,10 +53,10 @@ capabilities:
 | `mcp.discovery.completed` | 连接初始化、工具列表读取、连接清理的 `connect_ms/list_tools_ms/close_ms`；缓存命中不会重复发现 |
 | `agent.state.commit` | 状态提交整体耗时，`event_types` 标识提交边界 |
 | `session.mysql.commit` | 准备、连接等待、SQL 写入、事务提交的 `preparation_ms/connection_wait_ms/write_ms/commit_ms` |
-| `model.first_text` | 当前模型请求收到首个非空正文 delta 的 `first_text_ms`，排除 reasoning |
+| `model.first_text` | 当前模型请求收到首个非空白正文 delta 或完整响应正文的 `first_text_ms`，排除 reasoning |
 | `agui.first_text` | 从 ConversationService.start 进入到首段 Assistant 正文准备发送 SSE 的耗时；不包含浏览器渲染，重放通过 `replayed` 标识 |
 
-`model.request.completed` 也包含 `first_text_ms`；只返回完整响应、没有正文 delta 的模型该字段为空。
+`model.request.completed` 也包含 `first_text_ms` 和绝对时间 `first_text_at`；只返回完整正文的模型在收到完成响应时记录，空白正文不计为首段正文。
 `agui.run.started` 的 `preparation_ms` 记录进入服务到开始准备运行前的耗时，
 `agui.run.completed` 的 `duration_ms` 记录包含接纳与收尾的整体耗时。
 父子阶段存在重叠，例如上下文构建包含在模型请求准备中，MySQL 提交包含在状态提交中，不能直接相加。
@@ -83,6 +83,24 @@ Server 既有诊断 SQLite 的模型记录与运行日志由单线程后台队�
 诊断导出和服务关闭最多等待 3 秒刷入；导出仍有待写入时，manifest 的
 `diagnostic_writes_pending` 为 true。关闭超时会取消尚未开始的诊断操作并计数；
 这些记录是 best effort 诊断资料，不参与运行恢复，不新增业务表。
+
+## 对话时间与单轮瀑布图
+
+V2 Web 在用户消息和助手正文旁按浏览器本地时区显示时间；实时流和历史回放使用相同的事件时间。每个原生 Run 的最后一段助手正文提供「耗时统计」。时间和 Run 关联信息只用于展示，不随下一轮模型输入发送。
+
+`GET /api/threads/{thread_id}/runs/{run_id}/timing` 校验会话归属，并支持管理员现有的代查看规则。非终态、观测未启用或记录不可用时 `timing` 为空；查询失败返回 503。查询复用 SQLite 观测投影或外部 Trace，不新增业务存储。
+
+| 字段 | 含义 |
+| --- | --- |
+| `state` | SessionStore 中的原生 Run 状态 |
+| `timing.scope` / `coverage` | 采集边界及完整性；缺失数据不按零展示 |
+| `timing.total_ms` / `waiting_ms` | 扣除暂停等待的执行耗时 / 暂停等待时长 |
+| `timing.first_text_ms` / `first_text_request_ms` | 从本轮执行开始 / 从对应模型请求开始到首段正文的耗时 |
+| `timing.timeline.wall_ms` | 包含暂停等待的时间轴跨度 |
+| `timing.timeline.entries` | 按起点排序的准备、模型、工具、框架、收尾、等待和首 token 时间点，保留并行关系 |
+| `timing.timeline.truncated` | 阶段超过 300 条时为真；页面每次展示 24 条，截断数据不标记最长执行段 |
+
+瀑布图一小时以内统一显示秒；执行耗时扣除等待，时间轴保留等待区间，模型和工具重叠的耗时不能直接相加。
 
 ## 文件诊断
 

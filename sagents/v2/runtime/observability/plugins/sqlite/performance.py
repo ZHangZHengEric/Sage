@@ -7,7 +7,7 @@ from contextlib import closing
 import hashlib
 import sqlite3
 
-from ...performance.aggregation import EVENTS, timestamp, timing_report
+from ...performance.aggregation import EVENTS, build_run, model_first_text_at, timestamp, timing_report
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS performance_events (
@@ -31,7 +31,8 @@ def project_log(db, row):
         return
     attrs = row.get("attributes") or {}
     # Deliberate allowlist: no messages, arguments, errors or model content.
-    at = timestamp(row["timestamp"])
+    at = timestamp(attrs.get("first_text_at") if event == "model.first_text"
+                   and attrs.get("first_text_at") else row["timestamp"])
     identity = (
         row.get("tool_call_id") if event.startswith("tool.") else row.get("request_id")
     )
@@ -55,12 +56,7 @@ def project_log(db, row):
         ),
     )
     # First text is also available from completion telemetry at info log level.
-    if (
-        event == "model.request.completed"
-        and attrs.get("first_text_ms") is not None
-        and attrs.get("duration_ms") is not None
-    ):
-        first = at - (attrs["duration_ms"] - attrs["first_text_ms"]) / 1000
+    if event == "model.request.completed" and (first := model_first_text_at(attrs, at)) is not None:
         projected = {**row, "event": "model.first_text", "timestamp": first}
         project_log(db, projected)
 
@@ -91,7 +87,8 @@ def backfill(path):
           json_extract(payload,'$.event'),json_extract(payload,'$.tool_call_id'),json_extract(payload,'$.request_id'),
           json_extract(payload,'$.turn_id'),json_extract(payload,'$.attributes.agent_id'),
           json_extract(payload,'$.attributes.purpose'),json_extract(payload,'$.attributes.started_at'),
-          json_extract(payload,'$.attributes.first_text_ms'),json_extract(payload,'$.attributes.duration_ms'),
+          json_extract(payload,'$.attributes.first_text_ms'),json_extract(payload,'$.attributes.first_text_at'),
+          json_extract(payload,'$.attributes.duration_ms'),
           json_extract(payload,'$.attributes.run_state')
           FROM logs WHERE json_extract(payload,'$.event') IN ({names})""",
             tuple(EVENTS),
@@ -109,6 +106,7 @@ def backfill(path):
             purpose,
             start,
             first,
+            first_at,
             duration,
             state,
         ) in rows:
@@ -127,6 +125,7 @@ def backfill(path):
                         purpose=purpose,
                         started_at=start,
                         first_text_ms=first,
+                        first_text_at=first_at,
                         duration_ms=duration,
                         run_state=state,
                     ),
@@ -158,6 +157,24 @@ def backfill(path):
             )
             models += 1
         return {"events": count, "models": models}
+
+
+def run_timing(path, *, session_id, run_id):
+    scope = (run_id, session_id)
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)) as db, db:
+        db.row_factory = sqlite3.Row
+        db.execute("BEGIN")
+        events = [dict(row) for row in db.execute(
+            "SELECT * FROM performance_events WHERE run_id=? AND session_id=? LIMIT 10001",
+            scope,
+        )]
+        if not events or len(events) > 10000:
+            return None
+        models = [dict(row) for row in db.execute(
+            "SELECT * FROM performance_models WHERE run_id=? AND session_id=? LIMIT 10001",
+            scope,
+        )]
+    return build_run(events, models, include_timeline=True) if len(models) <= 10000 else None
 
 
 def report(

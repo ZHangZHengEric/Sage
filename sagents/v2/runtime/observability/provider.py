@@ -129,6 +129,12 @@ class ObservabilityProvider:
             timezone_name=timezone_name,
         )
 
+    async def run_timing(self, *, session_id: str, run_id: str, start: float, end: float):
+        query = self._performance_query
+        if not self.performance_available or query is None:
+            return None
+        return await query.run_timing(session_id=session_id, run_id=run_id, start=start, end=end)
+
     async def list_model_requests(self, *, session_id: str, run_ids: set[str] | None):
         """Query authorized Runs, or local history of a host-authorized Session.
 

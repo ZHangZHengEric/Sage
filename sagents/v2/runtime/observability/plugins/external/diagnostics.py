@@ -4,8 +4,9 @@ from __future__ import annotations
 import asyncio
 import httpx
 from .evidence import ExternalEvidenceSink
-from .._shared.query import QueryCache
-from ...performance.aggregation import timing_report
+from .phoenix_query import performance_spans
+from .._shared.query import QueryCache, query_budget
+from ...performance.aggregation import build_run, timing_report
 from ...performance.capture import PerformanceCapture
 from ...performance.trace_projection import timing_rows
 
@@ -112,6 +113,28 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         result = await asyncio.to_thread(aggregate)
         result.update(source=self.backend, capture_failures=self.capture_failures)
         return result
+
+    async def run_timing(self, *, session_id, run_id, start, end):
+        async with httpx.AsyncClient() as client, query_budget():
+            if self.backend == "phoenix":
+                spans, truncated = await performance_spans(
+                    self, client, start=start, end=end, session_id=session_id, run_id=run_id,
+                )
+            else:
+                spans, truncated = await self._query(client, start=start, end=end, run_id=run_id)
+        if truncated:
+            return None
+
+        def aggregate():
+            scoped = [
+                span for span in spans
+                if span["attributes"].get("session_id") == session_id
+                and span["attributes"].get("run_id") == run_id
+            ]
+            events, models = timing_rows(scoped)
+            return build_run(events[run_id], models[run_id], include_timeline=True)
+
+        return await asyncio.to_thread(aggregate)
 
     def write(self, record):
         self._timings.begin_log(record)

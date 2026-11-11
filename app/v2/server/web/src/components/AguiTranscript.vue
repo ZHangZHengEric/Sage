@@ -8,10 +8,20 @@ import { interactionCallId, textOf, transcriptMessages } from '../agui/presentat
 import { toolState } from '../agui/tool-state.js'
 import '../conversation-process.css'
 const props = defineProps({ messages: { type: Array, default: () => [] }, pending: Boolean, interaction: { type: Object, default: null }, readOnly: Boolean, decisionBusy: Boolean, decisionError: String, answer: String })
-const emit = defineEmits(['decide', 'update:answer', 'open-workspace'])
+const emit = defineEmits(['decide', 'update:answer', 'open-workspace', 'show-timing'])
 const root = ref(null), copied = ref(''), copyError = ref('')
 const results = computed(() => new Map(props.messages.filter(message => message.role === 'tool' && message.toolCallId).map(message => [message.toolCallId, message])))
 const visibleMessages = computed(() => transcriptMessages(props.messages))
+const messageTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23' })
+const timingReplies = computed(() => {
+  const replies = new Map()
+  for (const message of visibleMessages.value) {
+    if (message.role === 'assistant' && message.timingRunId && textOf(message).trim()) {
+      replies.set(message.timingRunId, message.id)
+    }
+  }
+  return new Set(replies.values())
+})
 const copyableReplies = computed(() => {
   const ids = new Set()
   let foundReply = false
@@ -50,6 +60,7 @@ defineExpose({ focusInteraction })
         <div v-if="message.role === 'assistant' && !continuation(message)" class="msg-avatar" aria-hidden="true"><img src="/sage_logo.svg" alt="" /></div>
         <div class="msg-stack">
           <header v-if="message.role !== 'reasoning' && message.role !== 'user' && message.role !== 'assistant' && !continuation(message)" class="msg-meta">{{ roleLabel(message.role) }}</header>
+          <time v-if="message.timestamp != null && (message.role === 'user' || (message.role === 'assistant' && !continuation(message)))" class="message-time" :datetime="new Date(message.timestamp).toISOString()">{{ messageTime.format(message.timestamp) }}</time>
           <MessageBody v-if="message.role === 'assistant' && textOf(message)" :text="textOf(message)" />
           <pre v-else-if="message.role === 'tool'" class="orphan-tool-result">{{ textOf(message) }}</pre>
           <details v-else-if="message.role === 'reasoning'" :key="`${message.id}-${Boolean(message.reasoningStreaming && pending)}`" class="process-reasoning" :open="Boolean(message.reasoningStreaming && pending)">
@@ -66,7 +77,10 @@ defineExpose({ focusInteraction })
               </div>
             </ToolCallCard>
           </section>
-          <div v-if="copyableReplies.has(message.id) && !pending" class="message-actions"><button type="button" @click="copyMessage(message)"><AppIcon name="copy" />{{ copied === message.id ? '已复制' : '复制回复' }}</button></div>
+          <div v-if="!pending && (copyableReplies.has(message.id) || timingReplies.has(message.id))" class="message-actions">
+            <button v-if="copyableReplies.has(message.id)" type="button" @click="copyMessage(message)"><AppIcon name="copy" />{{ copied === message.id ? '已复制' : '复制回复' }}</button>
+            <button v-if="timingReplies.has(message.id)" type="button" aria-haspopup="dialog" @click="$emit('show-timing', message.timingRunId)"><AppIcon name="clock" />耗时统计</button>
+          </div>
         </div>
       </div>
     </article>

@@ -47,6 +47,10 @@ class PerformanceQuery(Protocol):
 
     available: bool
 
+    async def run_timing(
+        self, *, session_id: str, run_id: str, start: float, end: float,
+    ) -> dict[str, Any] | None: ...
+
     async def report(
         self,
         *,

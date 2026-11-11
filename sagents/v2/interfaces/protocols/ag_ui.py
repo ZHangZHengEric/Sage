@@ -452,6 +452,11 @@ class AgUiProtocolAdapter:
         )
 
     def _frame(self, event, name, payload):
+        if name == "TEXT_MESSAGE_START":
+            payload = {**payload, "timestamp": int(event.occurred_at.timestamp() * 1000)}
+            if payload["role"] == "assistant":
+                # Keep the native Run identity across AG-UI stream resumptions.
+                payload["rawEvent"] = {"run_id": event.run_id}
         return frame(
             event,
             protocol=self.protocol,

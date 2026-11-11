@@ -37,7 +37,7 @@ LOG_FIELDS = frozenset(
     }
 )
 LOG_ATTRIBUTES = frozenset(
-    {"agent_id", "purpose", "started_at", "run_state", "duration_ms", "first_text_ms"}
+    {"agent_id", "purpose", "started_at", "run_state", "duration_ms", "first_text_ms", "first_text_at"}
 )
 
 

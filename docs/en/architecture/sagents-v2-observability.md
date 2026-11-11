@@ -54,7 +54,7 @@ Enable `SAGE_SERVER_LOG_LEVEL=debug` to collect phase logs. Stable event names c
 | `model.first_text` | `first_text_ms` to the first nonempty body delta, excluding reasoning |
 | `agui.first_text` | ConversationService.start to preparing the first Assistant body SSE; excludes browser rendering; `replayed` marks replay |
 
-`model.request.completed` also records `first_text_ms`, which is empty for models without body deltas. `agui.run.started.preparation_ms` covers entry to Run preparation, and `agui.run.completed.duration_ms` includes admission and cleanup. Nested phases overlap and must not be added together.
+`model.request.completed` also records `first_text_ms` and absolute `first_text_at`. A model that only returns a complete response records its first nonblank body at completion; whitespace does not count. `agui.run.started.preparation_ms` covers entry to Run preparation, and `agui.run.completed.duration_ms` includes admission and cleanup. Nested phases overlap and must not be added together.
 
 Live execution authorization reads current Agent policy, user and API Key concurrently with separate database Sessions. Root and child checks also run concurrently, intersected with frozen admission permissions. Revocation results are not cached. Dependent transaction writes and pre-tool durable boundaries remain sequential.
 
@@ -63,6 +63,24 @@ Catalog reads load only the selected Agent and reachable Team members. Ordinary 
 Reproduce the local catalog benchmark with `python -m scripts.v2.benchmark_admission --agents 100 --samples 7`. On 2026-10-19, the same SQLite dataset with 100 test Agents and one default Agent took a median 24.870 ms for five SQL statements and 101 packages versus 1.419 ms for two statements and one package. This verifies reduced query scope, not production cold-start latency or elimination of an observed eleven-second entry wait.
 
 Server diagnostic SQLite writes use a single background worker and at most 64 pending operations. Inference and tools do not wait for diagnostic disk writes. Saturation and failures increment `capture_failures_since_start`. Export and shutdown flush for at most three seconds; exports mark pending writes with `diagnostic_writes_pending`. Shutdown timeout cancels queued operations and counts them. These best-effort records do not participate in recovery or add business tables.
+
+## Conversation times and per-run waterfall
+
+V2 Web displays user and assistant-body timestamps in the browser's local timezone, using the same event time for live streams and replay. The last assistant body for each native Run opens its timing dialog. Display timestamps and Run associations are stripped from subsequent model input.
+
+`GET /api/threads/{thread_id}/runs/{run_id}/timing` checks Session ownership and supports the existing administrator view-user mechanism. Nonterminal Runs, disabled observations and unavailable records return null timing; query failures return 503. Queries reuse SQLite observation projections or external traces without business storage changes.
+
+| Field | Meaning |
+| --- | --- |
+| `state` | Native Run state from SessionStore |
+| `timing.scope` / `coverage` | Capture boundary and completeness; missing measurements stay unknown |
+| `timing.total_ms` / `waiting_ms` | Active execution duration / suspended waiting duration |
+| `timing.first_text_ms` / `first_text_request_ms` | Active Run time / corresponding model-request time to first body |
+| `timing.timeline.wall_ms` | Timeline duration including suspended waits |
+| `timing.timeline.entries` | Start-ordered preparation, model, tool, framework, cleanup, waiting and first-token entries, preserving parallel calls |
+| `timing.timeline.truncated` | True above 300 entries; the UI expands 24 at a time and omits longest-phase claims for truncated data |
+
+The waterfall uses seconds below one hour. Execution totals exclude waiting while the timeline retains it; overlapping model and tool durations must not be added together.
 
 ## Filesystem diagnostics
 

@@ -15,7 +15,9 @@ class SageHttpAgent extends HttpAgent {
   requestInit(input) {
     const init = { ...super.requestInit(input), credentials: 'same-origin' }
     if (!this.answer) {
-      return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId, ...(this.notificationConnectionId ? { notification_connection_id: this.notificationConnectionId } : {}), ...(this.agentPackage ? { agent_package: this.agentPackage } : {}) }) }
+      const body = JSON.parse(init.body)
+      body.messages = body.messages.map(({ timestamp, timingRunId, ...message }) => message)
+      return { ...init, body: JSON.stringify({ ...body, session_id: input.threadId, ...(this.notificationConnectionId ? { notification_connection_id: this.notificationConnectionId } : {}), ...(this.agentPackage ? { agent_package: this.agentPackage } : {}) }) }
     }
     // The resume endpoint takes an answer, not a Run: which of the pending
     // question's decisions this is, plus the run id of the stream it opens.
@@ -48,6 +50,20 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
     },
     onMessagesChanged({ messages }) {
       onMessages?.([...messages])
+    },
+    onTextMessageStartEvent({ event, messages }) {
+      const { messageId, role = "assistant", timestamp, name, subagentRunId } = event;
+      const timingRunId = event.rawEvent?.run_id;
+      if (timestamp === undefined && !timingRunId) return;
+      const details = { timestamp, ...(timingRunId ? { timingRunId } : {}) };
+      const existing = messages.find((message) => message.id === messageId);
+      return {
+        messages: existing
+          ? messages.map((message) =>
+              message.id === messageId && message.role === role ? { ...message, ...details } : message,
+            )
+          : [...messages, { id: messageId, role, content: "", name, subagentRunId, ...details }],
+      };
     },
     onReasoningMessageStartEvent({ event, messages }) {
       const existing = messages.find(message => message.id === event.messageId)

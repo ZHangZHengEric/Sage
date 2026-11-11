@@ -53,35 +53,49 @@ test('transcript joins tool results, hides empty assistants, and folds completed
   assert.match(html, /Standalone result/)
 })
 
-test('history keeps reasoning before an answer started before the first reasoning delta', async (t) => {
+test("history keeps reasoning before an answer started before the first reasoning delta", async (t) => {
   const sequence = [
-    { type: 'RUN_STARTED', threadId: 'thread', runId: 'run' },
-    { type: 'REASONING_START', messageId: 'reason' },
-    { type: 'REASONING_MESSAGE_START', messageId: 'reason', role: 'reasoning' },
-    { type: 'TEXT_MESSAGE_START', messageId: 'answer', role: 'assistant' },
-    { type: 'REASONING_MESSAGE_CONTENT', messageId: 'reason', delta: 'Thinking first' },
-    { type: 'REASONING_MESSAGE_END', messageId: 'reason' },
-    { type: 'REASONING_END', messageId: 'reason' },
-    { type: 'TEXT_MESSAGE_CONTENT', messageId: 'answer', delta: 'Answer second' },
-    { type: 'TEXT_MESSAGE_END', messageId: 'answer' },
-    { type: 'RUN_FINISHED', threadId: 'thread', runId: 'run' },
-  ]
-  t.mock.method(globalThis, 'fetch', async () => new Response(sequence.map(event =>
-    `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } }))
-  const agent = createAguiAgent()
-  await agent.runAgent({ runId: 'run', tools: [], context: [] })
-  const server = await createServer({ server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
-  t.after(() => server.close())
-  const { default: Transcript } = await server.ssrLoadModule('/src/components/AguiTranscript.vue')
+    { type: "RUN_STARTED", threadId: "thread", runId: "run" },
+    { type: "REASONING_START", messageId: "reason" },
+    { type: "REASONING_MESSAGE_START", messageId: "reason", role: "reasoning" },
+    { type: "TEXT_MESSAGE_START", messageId: "answer", role: "assistant", timestamp: 1794277530000,
+      rawEvent: { run_id: "native-run" } },
+    { type: "REASONING_MESSAGE_CONTENT", messageId: "reason", delta: "Thinking first" },
+    { type: "REASONING_MESSAGE_END", messageId: "reason" },
+    { type: "REASONING_END", messageId: "reason" },
+    { type: "TEXT_MESSAGE_CONTENT", messageId: "answer", delta: "Answer second" },
+    { type: "TEXT_MESSAGE_END", messageId: "answer" },
+    { type: "RUN_FINISHED", threadId: "thread", runId: "run" },
+  ];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(sequence.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+  );
+  const agent = createAguiAgent();
+  await agent.runAgent({ runId: "run", tools: [], context: [] });
+  const server = await createServer({ server: { middlewareMode: true, watch: null, hmr: false, ws: false } });
+  t.after(() => server.close());
+  const { default: Transcript } = await server.ssrLoadModule("/src/components/AguiTranscript.vue");
   for (const messages of [agent.messages, messagesFromEvents(sequence)]) {
-    assert.deepEqual(messages.map(message => message.id), ['reason', 'answer'])
-    assert.equal(messages[0].content, 'Thinking first')
-    assert.equal(messages[0].reasoningStreaming, false)
-    const html = await renderToString(createSSRApp(Transcript, { messages }))
-    assert.ok(html.indexOf('Thinking first') < html.indexOf('Answer second'))
-    assert.doesNotMatch(html, /<details[^>]* open/)
+    assert.deepEqual(
+      messages.map((message) => message.id),
+      ["reason", "answer"],
+    );
+    assert.equal(messages[0].content, "Thinking first");
+    assert.equal(messages[0].reasoningStreaming, false);
+    assert.equal(messages[1].timestamp, 1794277530000);
+    assert.equal(messages[1].timingRunId, "native-run");
+    const html = await renderToString(createSSRApp(Transcript, { messages }));
+    assert.ok(html.indexOf("Thinking first") < html.indexOf("Answer second"));
+    assert.match(html, /<time[^>]*datetime="2026-11-10T02:25:30.000Z"/);
+    assert.equal((html.match(/耗时统计/g) || []).length, 1);
+    assert.doesNotMatch(html, /<details[^>]* open/);
   }
-})
+});
 
 test('process-only messages have no avatar or empty text, and copy actions belong to the last reply of each turn', async (t) => {
   const server = await createServer({ optimizeDeps: { noDiscovery: true, entries: [] }, server: { middlewareMode: true, watch: null, hmr: false, ws: false } })

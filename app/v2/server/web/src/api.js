@@ -30,8 +30,8 @@ export function isForeign(item) {
   return Boolean(item?._owner && item._owner.user_id !== getUser()?.user_id)
 }
 
-function read(path, owner) {
-  return request(path, owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {})
+function read(path, owner, signal) {
+  return request(path, { signal, ...(owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {}) })
 }
 
 let usersRequest = null
@@ -219,6 +219,7 @@ export const api = {
     const item = await request(`${isAdmin() ? '/api/admin/threads' : '/api/threads'}/${encodeURIComponent(id)}`)
     return isAdmin() ? { ...item, _owner: { user_id: item.user_id, username: item.username } } : item
   },
+  threadRunTiming: (threadId, runId, owner, signal) => read(`/api/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/timing`, owner, signal),
   threadEvents: (id, limit = 500, owner, offset) => read(`/api/threads/${encodeURIComponent(id)}/events?limit=${limit}${offset === undefined ? "" : `&offset=${offset}`}`, owner),
   deleteThread: (id) => request(`/api/threads/${id}`, { method: 'DELETE' }),
   adminUsers: () => request('/api/admin/users'),

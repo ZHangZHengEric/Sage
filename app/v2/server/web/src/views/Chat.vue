@@ -5,6 +5,7 @@ import { createAguiAgent, resumeAgui, runAgui } from '../agui/session.js'
 import { decisionErrorText } from '../agui/presentation.js'
 import { messagesBeforeLastRun, messagesFromEvents, pendingInteraction } from '../agui/replay.js'
 import AguiTranscript from '../components/AguiTranscript.vue'
+import RunTimingDialog from '../components/RunTimingDialog.vue'
 import WorkspacePanel from '../components/WorkspacePanel.vue'
 import AppIcon from '../components/AppIcon.vue'
 import ChatSkillInput from '../components/ChatSkillInput.vue'
@@ -17,6 +18,8 @@ const initializing = ref(true), configurationLoaded = ref(false), setupFailed = 
 
 const threads = ref([])
 const threadId = ref('')
+const timingRunId = ref('')
+watch(threadId, () => { timingRunId.value = '' })
 const text = ref('')
 const selectedSkills = ref([])
 const notificationConnectionId = ref('')
@@ -30,7 +33,7 @@ const messages = shallowRef([])
 const pending = ref(false)
 const activeRunId = ref(''), streamStarted = ref(false), stopping = ref(false)
 const supplementing = ref(false), queuedSupplements = shallowRef([])
-const displayMessages = computed(() => [...messages.value, ...queuedSupplements.value.map(item => ({ id: item.messageId, role: 'user', content: item.content, steeringPending: true }))])
+const displayMessages = computed(() => [...messages.value, ...queuedSupplements.value.map(item => ({ id: item.messageId, role: 'user', content: item.content, timestamp: item.timestamp, steeringPending: true }))])
 const appliedSupplements = new Set()
 let supplementAttempt = null
 let sendAttempt = null
@@ -266,7 +269,7 @@ async function send() {
   if (!threadId.value) threadId.value = newId('thread')
   if (!sendAttempt || sendAttempt.threadId !== threadId.value || sendAttempt.agentId !== selectedAgentId.value || sendAttempt.content !== content) {
     sendAttempt = { threadId: threadId.value, agentId: selectedAgentId.value, content, runId: newId('run'),
-      message: { id: crypto.randomUUID(), role: 'user', content },
+      message: { id: crypto.randomUUID(), role: 'user', content, timestamp: Date.now() },
       messages: [...messages.value], interaction: interaction.value }
   }
   const attempt = sendAttempt
@@ -335,7 +338,7 @@ async function submit() {
   const runId = activeRunId.value, id = threadId.value
   if (!runId) return
   if (!supplementAttempt || supplementAttempt.runId !== runId || supplementAttempt.content !== content) {
-    supplementAttempt = { runId, content, messageId: newId('input') }
+    supplementAttempt = { runId, content, messageId: newId('input'), timestamp: Date.now() }
   }
   const attempt = supplementAttempt
   supplementing.value = true; error.value = ''
@@ -487,7 +490,7 @@ onUnmounted(() => {
       <div class="conversation-body">
         <div ref="scroller" class="thread-viewport">
           <div v-if="isStart" class="conversation-welcome"><img src="/sage_logo.svg" alt="" /><h1>有什么可以帮你？</h1></div>
-          <AguiTranscript v-else ref="transcript" :messages="displayMessages" :pending="pending" :interaction="activeInteraction" :read-only="readOnly" :decision-busy="Boolean(deciding)" :decision-error="decisionError" v-model:answer="interactionAnswer" @decide="decide" @open-workspace="workspaceOpen = true" />
+          <AguiTranscript v-else ref="transcript" :messages="displayMessages" :pending="pending" :interaction="activeInteraction" :read-only="readOnly" :decision-busy="Boolean(deciding)" :decision-error="decisionError" v-model:answer="interactionAnswer" @decide="decide" @open-workspace="workspaceOpen = true" @show-timing="timingRunId = $event" />
           <div v-if="historyOffset < historyTotal && !historyLoading && !historyFailed" ref="historyEnd" class="history-end" aria-hidden="true"></div>
           <p v-if="!isStart && !messages.length && !historyLoading && !pending && !historyFailed && ready" class="conversation-no-messages">{{ readOnly ? '这段会话还没有消息' : '输入消息，继续这段会话' }}</p>
         </div>
@@ -533,6 +536,7 @@ onUnmounted(() => {
         </footer>
       </div>
     </div>
+    <RunTimingDialog :thread-id="threadId" :run-id="timingRunId" :messages="messages" :owner="currentThread?._owner" @close="timingRunId = ''" />
     <WorkspacePanel v-if="workspaceOpen" :key="workspaceThreadId || selectedAgentId" :thread-id="workspaceThreadId" :agent-id="selectedAgentId" :owner="currentThread?._owner" @close="workspaceOpen = false" />
   </section>
 </template>

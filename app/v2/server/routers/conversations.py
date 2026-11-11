@@ -13,6 +13,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.v2.server.conversations import external_runs as access
+from app.v2.server.conversations.agui.mapping import validate_agui_id
+from app.v2.server.conversations.records import require_owned_thread
 from app.v2.server.conversations.cleanup import (
     delete_external_session, finish_file_operation, require_idle, reject_local_workspace_drive,
 )
@@ -31,6 +33,7 @@ from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS,
 from app.v2.server.routers.schemas.conversations import (
     AgentRunBody,
     ThreadEventPage,
+    ThreadRunTiming,
     ThreadPublic, ThreadListPage,
     ThreadResumeBody,
     ThreadCancelBody,
@@ -45,6 +48,8 @@ from app.v2.server.storage.external_workspaces import (
     workspace_parts,
 )
 from sagents.v2.agent.management import AgentPackageBundle
+from sagents.v2.contracts.common import utc_now
+from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.observability.contracts import DiagnosticEvidenceSource
 
@@ -162,6 +167,31 @@ async def get_thread_events(
     return success(
         await service.events(thread_id, user.user_id, limit=limit, offset=offset)
     )
+
+
+@thread_router.get("/{thread_id}/runs/{run_id}/timing", response_model=ApiResponse[ThreadRunTiming])
+async def get_thread_run_timing(
+    thread_id: str, run_id: str, user: ReadUser, host: HostDep, service: ConversationDep,
+):
+    validate_agui_id(thread_id, field="threadId")
+    validate_agui_id(run_id, field="runId")
+    require_owned_thread(await service.threads.find(thread_id), user.user_id)
+    run = await service.session_access.get_run(run_id, service.context_for(user.user_id))
+    if run.session_id != thread_id:
+        raise HTTPException(404, "run not found")
+    timing = None
+    if run.state in TERMINAL_RUN_STATES and host.observability is not None:
+        try:
+            async with asyncio.timeout(30):
+                timing = await host.observability.run_timing(
+                    session_id=thread_id, run_id=run.run_id,
+                    start=run.created_at.timestamp(), end=utc_now().timestamp(),
+                )
+        except (OSError, sqlite3.Error, httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError) as exc:
+            raise HTTPException(503, "耗时记录暂不可用") from exc
+        if timing is not None and timing["state"] != run.state.value:
+            timing = None
+    return success(ThreadRunTiming(state=run.state, timing=timing).model_dump(mode="json"))
 
 
 @thread_router.post(

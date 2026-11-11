@@ -660,19 +660,20 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_recording_provider_emits_model_request_logs(tmp_path):
+@pytest.mark.parametrize(("delta", "final_text"), [("done", "done"), (None, "done"), (" \n", " \n")])
+async def test_recording_provider_emits_model_request_logs(tmp_path, delta, final_text):
     from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
 
     sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
     logs = _CapturingLogSink()
     response = ModelResponse(
-        response_id="response_1", text="done", finish_reason="stop"
+        response_id="response_1", text=final_text, finish_reason="stop"
     )
     provider = ScriptedModelProvider(
         (
             ScriptedModelStep(
                 events=(
-                    ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="done"),
+                    *((ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=delta),) if delta is not None else ()),
                     ModelStreamEvent(
                         kind=ModelEventKind.COMPLETED,
                         response=response,
@@ -700,6 +701,10 @@ async def test_recording_provider_emits_model_request_logs(tmp_path):
     )
     [event async for event in recording.stream(request)]
     events = [record.event for record in logs.records]
+    if not final_text.strip():
+        assert events == ["model.request.started", "model.request.completed"]
+        assert logs.records[-1].attributes["first_text_at"] is None
+        return
     assert events == ["model.request.started", "model.first_text", "model.request.completed"]
     first_text = logs.records[1]
     assert first_text.attributes["first_text_ms"] >= 0
@@ -712,6 +717,9 @@ async def test_recording_provider_emits_model_request_logs(tmp_path):
     assert completed.attributes["agent_id"] == "main"
     assert completed.attributes["duration_ms"] >= 0
     assert completed.attributes["first_text_ms"] == first_text.attributes["first_text_ms"]
+    assert completed.attributes["first_text_at"] == first_text.attributes["first_text_at"]
+    if delta is None:
+        assert completed.attributes["ttfb_ms"] is None
 
 
 @pytest.mark.asyncio

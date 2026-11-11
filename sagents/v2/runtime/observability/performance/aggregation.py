@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import math
@@ -43,6 +44,16 @@ def timestamp(value):
     return value.timestamp()
 
 
+def model_first_text_at(attributes, completed_at):
+    observed = timestamp(attributes.get("first_text_at"))
+    if observed is not None:
+        return observed
+    elapsed, first = attributes.get("duration_ms"), attributes.get("first_text_ms")
+    if elapsed is not None and first is not None:
+        return completed_at - (elapsed - first) / 1000
+    return None
+
+
 def normalize_timing_rows(rows, *, incomplete=False):
     """Normalize captured timing rows without encoding them as Trace payloads."""
     events, models = defaultdict(list), defaultdict(dict)
@@ -57,7 +68,8 @@ def normalize_timing_rows(rows, *, incomplete=False):
             session_id=row["session_id"],
             run_id=rid,
             event=row["event"],
-            at=timestamp(row["timestamp"]),
+            at=timestamp(values.get("first_text_at") if row["event"] == "model.first_text"
+                         and values.get("first_text_at") else row["timestamp"]),
             agent_id=values.get("agent_id"),
             identity=row.get("tool_call_id")
             if row["event"].startswith("tool.")
@@ -70,17 +82,14 @@ def normalize_timing_rows(rows, *, incomplete=False):
             or observation.get("_observation_incomplete", False),
         )
         events[rid].append(event)
-        if (
-            row["event"] == "model.request.completed"
-            and values.get("first_text_ms") is not None
-            and values.get("duration_ms") is not None
-        ):
+        if row["event"] == "model.request.completed" and (
+            first := model_first_text_at(values, event["at"])
+        ) is not None:
             events[rid].append(
                 {
                     **event,
                     "event": "model.first_text",
-                    "at": event["at"]
-                    - (values["duration_ms"] - values["first_text_ms"]) / 1000,
+                    "at": first,
                 }
             )
     normalized = defaultdict(list)
@@ -154,7 +163,62 @@ def summarize(rows):
     return result
 
 
-def build_run(events, models):
+def interval_difference(windows, occupied):
+    """Subtract sorted, disjoint occupied ranges from sorted, disjoint windows."""
+    index = 0
+    for start, end in windows:
+        while index < len(occupied) and occupied[index][1] <= start:
+            index += 1
+        cursor = start
+        while index < len(occupied) and occupied[index][0] < end:
+            left, right = occupied[index]
+            if left > cursor:
+                yield cursor, left
+            cursor = max(cursor, right)
+            if right >= end:
+                break
+            index += 1
+        if cursor < end:
+            yield cursor, end
+
+
+def run_timeline(start, end, active, model_ranges, tools, framework, waiting, first_token):
+    entries = []
+
+    def add(kind, left, right, **details):
+        entries.append({
+            "kind": kind,
+            "start_ms": round((left - start) * 1000, 3),
+            "end_ms": round((right - start) * 1000, 3),
+            **details,
+        })
+
+    for left, right, purpose in model_ranges:
+        add("model", left, right, purpose=purpose)
+    for left, right, call_id in tools:
+        add("tool", left, right, tool_call_id=call_id)
+    if framework is not None:
+        preparation, cleanup, busy = framework
+        prepare_gaps = list(interval_difference(preparation, busy))
+        cleanup_gaps = list(interval_difference(cleanup, busy))
+        other = interval_difference(active, intervals([*busy, *prepare_gaps, *cleanup_gaps]))
+        for kind, ranges in (("preparation", prepare_gaps), ("framework", other), ("cleanup", cleanup_gaps)):
+            for left, right in ranges:
+                add(kind, left, right)
+    if waiting:
+        for left, right in interval_difference([(start, end)], active):
+            add("waiting", left, right)
+    if first_token is not None and start <= first_token <= end:
+        add("first_token", first_token, first_token)
+    entries.sort(key=lambda item: (item["start_ms"], item["end_ms"]))
+    return {
+        "wall_ms": round((end - start) * 1000, 3),
+        "entries": entries[:300],
+        "truncated": len(entries) > 300,
+    }
+
+
+def build_run(events, models, *, include_timeline=False):
     events.sort(key=lambda r: r["at"])
     starts = [r for r in events if r["event"] == "agent.run.started"]
     if not starts:
@@ -235,21 +299,22 @@ def build_run(events, models):
     )
     total = seconds(active)
 
-    def clipped(values):
-        return [
-            (max(a, s), min(b, e))
-            for a, b in values
-            for s, e in active
-            if a < e and b > s
-        ]
+    def clipped(left, right):
+        if right <= left:
+            return
+        index = bisect_right(active, left, key=lambda window: window[1])
+        while index < len(active) and active[index][0] < right:
+            start, end = active[index]
+            yield max(left, start), min(right, end)
+            index += 1
 
-    model_spans = clipped(
-        [
-            (m["started_at"], m["ended_at"])
-            for m in models
-            if m["started_at"] and m["ended_at"]
-        ]
-    )
+    model_ranges = [
+        (left, right, m["purpose"])
+        for m in models
+        if m["started_at"] and m["ended_at"]
+        for left, right in clipped(m["started_at"], m["ended_at"])
+    ]
+    model_spans = [(left, right) for left, right, _ in model_ranges]
     open_models = any(
         not m["started_at"] or not m["ended_at"] or m["ended_at"] < m["started_at"]
         for m in models
@@ -271,8 +336,13 @@ def build_run(events, models):
             else:
                 if e["at"] < t:
                     incomplete_tools = True
-                tools.append((t, e["at"]))
-    tools = clipped(tools)
+                tools.append((t, e["at"], e["identity"]))
+    tool_ranges = [
+        (left, right, call_id)
+        for start_at, end_at, call_id in tools
+        for left, right in clipped(start_at, end_at)
+    ]
+    tool_spans = [(left, right) for left, right, _ in tool_ranges]
     recorded_ids = {
         e["identity"] for e in events if e["event"] == "model.request.started"
     }
@@ -290,8 +360,9 @@ def build_run(events, models):
             or recorded_ids - known_ids
         )
     )
-    model_time, tool_time = seconds(model_spans), seconds(tools)
-    busy = seconds(model_spans + tools)
+    model_time, tool_time = seconds(model_spans), seconds(tool_spans)
+    busy_ranges = intervals(model_spans + tool_spans)
+    busy = sum(right - left for left, right in busy_ranges)
     main = sorted(
         (m for m in models if m["purpose"] == "agent" and m["started_at"]),
         key=lambda r: r["started_at"],
@@ -305,11 +376,14 @@ def build_run(events, models):
     tokens = [m["first_token_at"] for m in main if m["first_token_at"]]
     purposes_by_id = {m["request_id"]: m["purpose"] for m in models}
     texts = [
-        e["at"]
+        e
         for e in events
         if e["event"] == "model.first_text"
         and (e["purpose"] or purposes_by_id.get(e["identity"])) == "agent"
     ]
+    first_token = min(tokens, default=None)
+    first_text_event = min(texts, key=lambda e: e["at"], default=None)
+    first_text = first_text_event["at"] if first_text_event else None
     purposes = defaultdict(lambda: {"calls": 0, "ms": 0.0})
     for m in models:
         purposes[m["purpose"]]["calls"] += 1
@@ -317,7 +391,7 @@ def build_run(events, models):
             purposes[m["purpose"]]["ms"] += (
                 max(0, m["ended_at"] - m["started_at"]) * 1000
             )
-    return dict(
+    result = dict(
         run_id=starts[0]["run_id"],
         session_id=starts[0]["session_id"],
         agent_id=next((e["agent_id"] for e in starts if e["agent_id"]), ""),
@@ -329,10 +403,12 @@ def build_run(events, models):
         tool_ms=tool_time * 1000,
         overlap_ms=max(0, model_time + tool_time - busy) * 1000,
         framework_ms=max(0, total - busy) * 1000 if complete else None,
-        first_token_ms=seconds(clipped([(start, min(tokens))])) * 1000
-        if tokens
+        first_token_ms=sum(right - left for left, right in clipped(start, first_token)) * 1000
+        if first_token is not None
         else None,
-        first_text_ms=seconds(clipped([(start, min(texts))])) * 1000 if texts else None,
+        first_text_ms=sum(right - left for left, right in clipped(start, first_text)) * 1000
+        if first_text is not None
+        else None,
         model_ttft_ms=ttft * 1000 if ttft is not None else None,
         waiting_ms=max(0, end - start - total) * 1000,
         coverage="complete" if complete else "incomplete",
@@ -340,6 +416,25 @@ def build_run(events, models):
         tool_calls=tool_count,
         purposes=dict(purposes),
     )
+    if include_timeline and end >= start:
+        if first_text_event is not None:
+            request = next((m for m in main if m["request_id"] == first_text_event["identity"]), None)
+            if request is not None and first_text >= request["started_at"]:
+                result["first_text_request_ms"] = round((first_text - request["started_at"]) * 1000, 3)
+        framework = None
+        if complete:
+            preparation = intervals([
+                (start, starts[0]["at"]),
+                *((entry, body) for (entry, _), (body, _) in zip(active_segments, spans) if entry < body),
+            ])
+            cleanup = [(spans[-1][1], end)]
+            framework = preparation, cleanup, busy_ranges
+        result["timeline"] = run_timeline(
+            start, end, active, model_ranges, tool_ranges, framework,
+            not (missing_resume or unclosed_execution),
+            first_token,
+        )
+    return result
 
 
 def timing_report(

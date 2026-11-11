@@ -35,7 +35,7 @@ def table_rows(content, content_type):
     ]
 
 
-async def performance_spans(source, client, *, start, end, agent_id=""):
+async def performance_spans(source, client, *, start, end, agent_id="", session_id=None, run_id=None):
     fields = ["name", "start_time", "context.trace_id", "context.span_id"]
     attributes = [
         "session_id",
@@ -91,6 +91,14 @@ async def performance_spans(source, client, *, start, end, agent_id=""):
             }
             for row in rows
         ]
+
+    if run_id is not None:
+        found = await query(
+            [f"{attribute('session_id')} == {json.dumps(session_id)}",
+             f"{attribute('run_id')} == {json.dumps(run_id)}"],
+            source.max_spans + 1,
+        )
+        return found[: source.max_spans], len(found) > source.max_spans
 
     # Filter SDK entry time directly, not execution span start_time. In particular
     # never expand a historical cohort through the current wall clock.

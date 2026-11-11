@@ -4,6 +4,16 @@
 .conversation-transcript .msg-avatar { width: 24px; height: 24px; margin-top: 0; border-radius: 7px; background: transparent; }
 .conversation-transcript .msg-avatar img { width: 24px; height: 24px; }
 .conversation-transcript .msg-meta { font-size: 11px; margin: 0 0 10px; }
+.conversation-transcript .message-time {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.conversation-transcript .msg[data-role="user"] .message-time {
+  text-align: right;
+}
 .conversation-transcript .msg[data-role="user"] .msg-stack { max-width: 86%; }
 .conversation-transcript .msg[data-role="user"] .plain { font-size: 13px; line-height: 1.75; padding: 11px 16px; border: 1px solid var(--border); border-radius: 14px 14px 4px 14px; }
 .conversation-transcript .md { font-size: 14px; line-height: 1.85; }

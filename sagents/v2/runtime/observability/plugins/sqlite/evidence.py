@@ -296,6 +296,15 @@ class SessionDiagnostics:
 
         return await asyncio.to_thread(read)
 
+    async def run_timing(self, *, session_id, run_id, start, end):
+        from .performance import run_timing
+
+        def read():
+            self._flush()
+            return run_timing(self.path, session_id=session_id, run_id=run_id)
+
+        return await asyncio.to_thread(read)
+
     def snapshot(self, session_id: str, run_ids: set[str]):
         try:
             flushed = self._flush()

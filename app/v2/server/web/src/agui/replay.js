@@ -14,10 +14,20 @@ export function messagesFromEvents(events) {
   for (const event of events || []) {
     switch (event.type) {
       case 'TEXT_MESSAGE_START': {
+        const role = event.role || 'assistant'
+        const timingRunId = event.rawEvent?.run_id
+        const existing = byId.get(event.messageId)
+        if (existing?.role === role) {
+          existing.timestamp ??= event.timestamp
+          if (timingRunId) existing.timingRunId ??= timingRunId
+          break
+        }
         const message = {
           id: event.messageId,
-          role: event.role || 'assistant',
+          role,
           content: '',
+          timestamp: event.timestamp,
+          ...(timingRunId ? { timingRunId } : {}),
         }
         byId.set(event.messageId, message)
         messages.push(message)

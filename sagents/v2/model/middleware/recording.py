@@ -204,27 +204,27 @@ class RecordingModelProvider:
         finalized = False
         first_token_at = None
         first_text_at = None
-        first_token_persisted = False
+        first_output_persisted = False
 
-        async def persist_first_token() -> None:
-            nonlocal first_token_persisted
-            if first_token_at is None or first_token_persisted:
+        async def persist_first_output() -> None:
+            nonlocal first_output_persisted
+            if first_output_persisted:
                 return
-            recorder = getattr(self.sink, "record_model_first_token", None)
-            if recorder is not None:
-                await self._diagnose(
-                    "record_model_first_token",
-                    session_id=session_id,
-                    request=request,
-                    observed_at=first_token_at,
-                )
-            span.add_event("first_token", timestamp=first_token_at)
+            if first_token_at is not None:
+                if callable(getattr(self.sink, "record_model_first_token", None)):
+                    await self._diagnose(
+                        "record_model_first_token",
+                        session_id=session_id,
+                        request=request,
+                        observed_at=first_token_at,
+                    )
+                span.add_event("first_token", timestamp=first_token_at)
             if first_text_at is not None:
                 span.add_event("first_text", timestamp=first_text_at)
                 span.span.attributes["first_text_ms"] = elapsed_ms(
                     started_at, first_text_at
                 )
-            first_token_persisted = True
+            first_output_persisted = True
 
         provider_stream = None
         capture = None
@@ -266,19 +266,22 @@ class RecordingModelProvider:
                     first_token_at = utc_now()
                 if (
                     first_text_at is None
-                    and event.kind == ModelEventKind.TEXT_DELTA
-                    and event.delta
+                    and (
+                        (event.kind == ModelEventKind.TEXT_DELTA and event.delta and event.delta.strip())
+                        or (event.kind == ModelEventKind.COMPLETED and event.response and event.response.text.strip())
+                    )
                 ):
                     first_text_at = utc_now()
                     self._log(
                         "model.first_text", "收到模型首段正文", level="debug",
                         session_id=session_id, request=request,
                         attributes={"model_binding": request.model_binding, "purpose": purpose,
+                                    "first_text_at": first_text_at.isoformat(),
                                     "first_text_ms": elapsed_ms(started_at, first_text_at)},
                     )
                 if event.kind == ModelEventKind.COMPLETED:
                     assert event.response is not None
-                    await persist_first_token()
+                    await persist_first_output()
                     await self._diagnose(
                         "complete_model_request",
                         session_id=session_id,
@@ -301,6 +304,7 @@ class RecordingModelProvider:
                             "finish_reason": event.response.finish_reason,
                             "duration_ms": elapsed_ms(started_at, finished),
                             "ttfb_ms": elapsed_ms(started_at, first_token_at),
+                            "first_text_at": first_text_at.isoformat() if first_text_at is not None else None,
                             "first_text_ms": elapsed_ms(started_at, first_text_at),
                         },
                     )
@@ -312,7 +316,7 @@ class RecordingModelProvider:
             # authoritative successful diagnostic and span.
             if finalized:
                 raise
-            await persist_first_token()
+            await persist_first_output()
             await self._diagnose(
                 "fail_model_request",
                 session_id=session_id,
@@ -349,7 +353,7 @@ class RecordingModelProvider:
                 if not finalized:
                     closed = RuntimeError("model stream closed before completion")
                     try:
-                        await persist_first_token()
+                        await persist_first_output()
                         await self._diagnose(
                             "fail_model_request",
                             session_id=session_id,

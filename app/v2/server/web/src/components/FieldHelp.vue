@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, ref, useId } from 'vue'
 import AppIcon from './AppIcon.vue'
 
-defineProps({ label: { type: String, required: true }, text: { type: String, required: true } })
+defineProps({ label: { type: String, required: true }, text: { type: String, required: true }, triggerLabel: String })
 const id = useId(), root = ref(null), trigger = ref(null), tooltip = ref(null)
 const open = ref(false), position = ref({})
 let timer
@@ -40,7 +40,7 @@ onBeforeUnmount(() => { if (typeof window !== 'undefined') hide() })
 
 <template>
   <span ref="root" class="field-help" @pointerenter="cancelHide" @pointerleave="leave">
-    <button ref="trigger" type="button" :aria-label="`了解${label}的影响`" :aria-expanded="open" :aria-describedby="open ? id : undefined" @pointerenter="show" @focus="show" @blur="hide" @click="show"><AppIcon name="help" /></button>
+    <button ref="trigger" type="button" :aria-label="triggerLabel || `了解${label}的影响`" :aria-expanded="open" :aria-describedby="open ? id : undefined" @pointerenter="show" @focus="show" @blur="hide" @click="show"><AppIcon name="help" /></button>
     <span v-if="open" :id="id" ref="tooltip" role="tooltip" class="field-tooltip" :style="position">{{ text }}</span>
   </span>
 </template>

@@ -9,6 +9,8 @@ test('page transport sends the same session_id and compatibility threadId', asyn
     const body = JSON.parse(init.body)
     assert.equal(body.session_id, 'Kept-ID')
     assert.equal(body.threadId, 'Kept-ID')
+    assert.equal(body.messages[0].timestamp, undefined)
+    assert.equal(body.messages[0].timingRunId, undefined)
     return new Response([
       { type: 'RUN_STARTED', threadId: body.session_id, session_id: body.session_id, runId: body.runId },
       { type: 'RUN_FINISHED', threadId: body.session_id, session_id: body.session_id, runId: body.runId },
@@ -18,6 +20,7 @@ test('page transport sends the same session_id and compatibility threadId', asyn
   })
   const agent = createAguiAgent()
   agent.threadId = 'Kept-ID'
+  agent.addMessage({ id: 'user', role: 'user', content: 'hello', timestamp: Date.now(), timingRunId: 'local-only' })
   await agent.runAgent({ runId: 'r1', tools: [], context: [] })
   assert.equal(agent.threadId, 'Kept-ID')
 })

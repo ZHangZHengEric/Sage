@@ -11,7 +11,7 @@ from sagents.v2.runtime.observability.performance import (
     summarize,
 )
 from sagents.v2.runtime.observability.plugins.sqlite.performance import (
-    SCHEMA, project_log, project_model, report, backfill,
+    SCHEMA, project_log, project_model, report, backfill, run_timing,
 )
 from tests.app.v2.server.test_file_downloads import identity
 from tests.app.v2.server.test_admin import admin_login
@@ -151,11 +151,16 @@ def test_resumed_execution_excludes_human_wait_and_tracks_active_first_token():
         event(104, "agent.run.completed"),
         event(105, "server.run.performance.finished", state="completed"),
     ]
-    row = build_run(events, [model(100, 103, first=101)])
+    row = build_run(events, [model(100, 103, first=101)], include_timeline=True)
     assert row["total_ms"] == 8000
     assert row["waiting_ms"] == 97000
     assert row["first_token_ms"] == 4000
     assert row["framework_ms"] == 5000
+    assert row["timeline"]["wall_ms"] == 105000
+    assert [(entry["start_ms"], entry["end_ms"]) for entry in row["timeline"]["entries"]
+            if entry["kind"] == "waiting"] == [(2000, 99000)]
+    assert next(entry["start_ms"] for entry in row["timeline"]["entries"]
+                if entry["kind"] == "first_token") == 101000
 
 
 def test_auxiliary_llms_are_counted_but_not_user_first_text():
@@ -316,7 +321,7 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
     import asyncio
     from tests.app.v2.server.test_agui_chat import _run_input
 
-    user, _ = identity(client, "timing-user")
+    user, user_id = identity(client, "timing-user")
     original = service.conversations.runs._load_run_agent
     original_admission = service.conversations.admission.prepare
     boundaries = {}
@@ -353,3 +358,50 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
     assert row["coverage"] == "complete"
     assert row["framework_ms"] >= 100
     assert row["first_token_ms"] >= 100
+    path = f"/api/threads/thread-1/runs/{row['run_id']}/timing"
+    selected = client.get(path, headers=user)
+    assert selected.status_code == 200, selected.text
+    data = selected.json()["data"]
+    assert data["state"] == "completed"
+    for key in ("total_ms", "model_ms", "framework_ms", "first_text_ms"):
+        assert data["timing"][key] == row[key]
+    assert any(entry["kind"] == "model" for entry in data["timing"]["timeline"]["entries"])
+    other, _ = identity(client, "unrelated-timing-user")
+    assert client.get(path, headers=other).status_code == 404
+    assert client.get(path, headers={**admin, "X-Sage-View-User": user_id}).status_code == 200
+
+
+def test_run_timeline_keeps_parallel_calls_and_splits_framework_boundaries():
+    events, models = sample()
+    row = build_run(events, models, include_timeline=True)
+    assert [(entry["kind"], entry["start_ms"], entry["end_ms"])
+            for entry in row["timeline"]["entries"]] == [
+        ("preparation", 0, 2000),
+        ("model", 2000, 6000),
+        ("first_token", 3000, 3000),
+        ("tool", 3000, 8000),
+        ("framework", 8000, 9000),
+        ("cleanup", 9000, 10000),
+    ]
+    assert next(entry for entry in row["timeline"]["entries"] if entry["kind"] == "tool")["tool_call_id"] == "tool"
+    assert row["first_text_request_ms"] == 2000
+    models[0]["ended_at"] = None
+    row = build_run(events, models, include_timeline=True)
+    assert all(entry["kind"] not in {"model", "framework", "preparation", "cleanup"}
+               for entry in row["timeline"]["entries"])
+
+
+def test_timeline_caps_entries_and_keeps_run_query_scoped(tmp_path):
+    path = tmp_path / "observations.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.executescript(SCHEMA)
+        insert_sample(db)
+    selected = run_timing(path, session_id="s", run_id="r")
+    assert selected["timeline"]["wall_ms"] == 10000
+    assert run_timing(path, session_id="other", run_id="r") is None
+    assert run_timing(path, session_id="s", run_id="other") is None
+    events, models = sample()
+    calls = [{**models[0], "request_id": f"request-{index}"} for index in range(301)]
+    timeline = build_run(events, calls, include_timeline=True)["timeline"]
+    assert len(timeline["entries"]) == 300
+    assert timeline["truncated"] is True
