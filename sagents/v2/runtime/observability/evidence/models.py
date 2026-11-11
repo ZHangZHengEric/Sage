@@ -15,6 +15,14 @@ def _attribute(attrs, key):
     return value
 
 
+def _trace_body(attrs, direction, *semantic_keys):
+    for key in (f"{direction}.value", *semantic_keys, direction):
+        value = _attribute(attrs, key)
+        if value is not None:
+            return value
+    return None
+
+
 def _decode(value):
     if not isinstance(value, str):
         return value, False
@@ -94,7 +102,9 @@ def model_evidence(spans, captured=()):
             if attrs.get(field) is not None:
                 row.setdefault(field, attrs[field])
         if row.get("request") is None:
-            value, invalid = _decode(_attribute(attrs, "input.value"))
+            value, invalid = _decode(
+                _trace_body(attrs, "input", "gen_ai.input.messages")
+            )
             row["request"] = {
                 "model": attrs.get("model"),
                 "model_parameters": _decode(attrs.get("model_parameters"))[0],
@@ -107,7 +117,9 @@ def model_evidence(spans, captured=()):
             row["request_truncated"] = invalid or _truncated(value)
             row["field_sources"]["request"] = "trace_projection"
         if row.get("response") is None:
-            value, invalid = _decode(_attribute(attrs, "output.value"))
+            value, invalid = _decode(
+                _trace_body(attrs, "output", "gen_ai.output.messages")
+            )
             if value is not None:
                 row["response"] = (
                     value if isinstance(value, dict) else {"output": value}

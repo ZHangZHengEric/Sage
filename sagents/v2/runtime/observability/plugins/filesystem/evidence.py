@@ -80,8 +80,9 @@ class FilesystemDiagnosticSink:
         request: ModelRequest,
         provider: Mapping[str, Any],
         wire_request: Mapping[str, Any] | None = None,
+        observed_at: datetime | None = None,
     ) -> None:
-        started_at = utc_now()
+        started_at = observed_at or utc_now()
         request_payload = model_request_payload(request, wire_request)
         kind = self._request_kind(request, provider)
         record = {
@@ -105,6 +106,7 @@ class FilesystemDiagnosticSink:
         session_id: str,
         request: ModelRequest,
         response: ModelResponse,
+        observed_at: datetime | None = None,
     ) -> None:
         await asyncio.to_thread(
             self._finish_model_record,
@@ -116,6 +118,7 @@ class FilesystemDiagnosticSink:
                     response.model_dump(mode="json", exclude={"provider_metadata"})
                 )
             },
+            observed_at,
         )
 
     async def record_model_first_token(
@@ -137,7 +140,8 @@ class FilesystemDiagnosticSink:
         *,
         session_id: str,
         request: ModelRequest,
-        error: Exception,
+        error: BaseException,
+        observed_at: datetime | None = None,
     ) -> None:
         error_record: dict[str, Any] = {
             "type": type(error).__name__,
@@ -163,6 +167,7 @@ class FilesystemDiagnosticSink:
             request,
             "failed",
             {"error": error_record},
+            observed_at,
         )
 
     async def list_model_requests(
@@ -197,6 +202,7 @@ class FilesystemDiagnosticSink:
         request: ModelRequest,
         status: str,
         update: dict[str, Any],
+        observed_at: datetime | None,
     ) -> None:
         with self._write_lock:
             self._migrate_flat_records(session_id)
@@ -228,7 +234,7 @@ class FilesystemDiagnosticSink:
             safe_update = self._redact(update)
             record.update(safe_update)
             record["status"] = status
-            record["completed_at"] = utc_now().isoformat()
+            record["completed_at"] = (observed_at or utc_now()).isoformat()
             duration_ms = elapsed_ms(record.get("started_at"), record["completed_at"])
             ttfb_ms = elapsed_ms(record.get("started_at"), record.get("first_token_at"))
             if duration_ms is not None:

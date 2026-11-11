@@ -94,6 +94,7 @@ def test_phoenix_agent_model_and_tool_projection(content_mode):
         assert (
             json.loads(cast('str | bytes | bytearray', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', tool.attributes)["tool.parameters"]))["secret_key"] == "[REDACTED]"
         )
+    assert "input.value" not in cast('dict[str, Any]', tool.attributes)
     assert "never-export-me" not in str(exporter.get_finished_spans())
     # Phoenix unflattens dotted attributes. A scalar `input`/`output` blocks
     # the corresponding OpenInference namespace, hiding content in its UI.

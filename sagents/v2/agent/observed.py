@@ -166,16 +166,6 @@ class ObservedRunDriver(AgentLoopEngine):
             block.text for block in latest.content if isinstance(block, TextBlock)
         ).strip()
 
-    @staticmethod
-    def _tool_result_preview(result) -> str:
-        if result is None:
-            return ""
-        return "\n".join(
-            block.text
-            for block in getattr(result, "content", ()) or ()
-            if isinstance(block, TextBlock)
-        ).strip()
-
     async def execute(self, run_id: str, context: RequestContext) -> RunSnapshot:
         return await self._observe_run(
             run_id, context, resumed=False, body=super().execute
@@ -358,7 +348,6 @@ class ObservedRunDriver(AgentLoopEngine):
                 "tool_name": call.tool_name,
                 "operation_id": call.operation_id,
                 "arguments": trace_content(self._observed_trace_sink, call.arguments),
-                "input": trace_content(self._observed_trace_sink, call.arguments),
             },
         )
         logger = self._structured_logger()
@@ -409,12 +398,6 @@ class ObservedRunDriver(AgentLoopEngine):
             if result is None or getattr(result, "error", None) is not None
             else TraceStatus.OK,
             attributes={
-                "result": trace_content(
-                    self._observed_trace_sink, self._tool_result_preview(result)
-                ),
-                "output": trace_content(
-                    self._observed_trace_sink, getattr(result, "content", ())
-                ),
                 "execution_result": trace_content(
                     self._observed_trace_sink,
                     result.model_dump(mode="json") if result is not None else None,

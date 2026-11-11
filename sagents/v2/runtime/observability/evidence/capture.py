@@ -28,7 +28,10 @@ class DiagnosticCapture:
                     "original_bytes": size,
                     **{
                         key: value[key]
-                        for key in ("session_id", "run_id", "request_id", "status")
+                        for key in (
+                            "session_id", "run_id", "request_id", "status",
+                            "started_at", "completed_at", "first_token_at",
+                        )
                         if key in value
                     },
                 }
@@ -36,16 +39,15 @@ class DiagnosticCapture:
         return encoded
 
     async def begin_model_request(
-        self, *, session_id, request, provider, wire_request=None
+        self, *, session_id, request, provider, wire_request=None, observed_at=None
     ):
-        self._enqueue(
-            self._update,
+        self._record_model_change(
             session_id,
             request,
             {
                 "format_version": self.format_version,
                 "status": "started",
-                "started_at": utc_now().isoformat(),
+                "started_at": (observed_at or utc_now()).isoformat(),
                 "request_format": "provider_wire"
                 if wire_request is not None
                 else "normalized",
@@ -59,27 +61,25 @@ class DiagnosticCapture:
             },
         )
 
-    async def complete_model_request(self, *, session_id, request, response):
-        self._enqueue(
-            self._update,
+    async def complete_model_request(self, *, session_id, request, response, observed_at=None):
+        self._record_model_change(
             session_id,
             request,
             {
                 "status": "completed",
-                "completed_at": utc_now().isoformat(),
+                "completed_at": (observed_at or utc_now()).isoformat(),
                 "response_format": "normalized",
                 "response": response.model_dump(mode="json"),
             },
         )
 
-    async def fail_model_request(self, *, session_id, request, error):
-        self._enqueue(
-            self._update,
+    async def fail_model_request(self, *, session_id, request, error, observed_at=None):
+        self._record_model_change(
             session_id,
             request,
             {
                 "status": "failed",
-                "completed_at": utc_now().isoformat(),
+                "completed_at": (observed_at or utc_now()).isoformat(),
                 "error": {
                     "type": type(error).__name__,
                     "message": str(error),
@@ -91,17 +91,19 @@ class DiagnosticCapture:
         )
 
     async def record_model_stream(self, *, session_id, request, evidence):
-        self._enqueue(self._update, session_id, request, {"stream": evidence})
+        self._record_model_change(session_id, request, {"stream": evidence})
 
     async def record_model_first_token(
         self, *, session_id, request, observed_at: datetime
     ):
-        self._enqueue(
-            self._update,
+        self._record_model_change(
             session_id,
             request,
             {"first_token_at": observed_at.isoformat()},
         )
+
+    def _record_model_change(self, session_id, request, change):
+        self._enqueue(self._update, session_id, request, change)
 
     def write(self, record):
         # Process-wide/HTTP records without a trusted Run association are excluded.

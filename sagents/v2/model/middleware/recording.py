@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
 import json
+from inspect import Parameter, signature
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime
@@ -18,7 +18,7 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
 )
 from sagents.v2.model.provider import ModelProvider
-from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture
+from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture, wire_request_observer
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.runtime.observability.contracts import (
     DiagnosticSink,
@@ -52,6 +52,7 @@ class RecordingModelProvider:
     ) -> None:
         self.provider = provider
         self.sink = sink
+        self._timed_methods: dict[str, bool] = {}
         self.session_id_resolver = session_id_resolver
         self.provider_metadata = dict(provider_metadata or {})
         self.trace_sink = trace_sink
@@ -87,7 +88,17 @@ class RecordingModelProvider:
 
     async def _diagnose(self, method: str, **kwargs: Any) -> None:
         try:
-            await getattr(self.sink, method)(**kwargs)
+            callback = getattr(self.sink, method)
+            if "observed_at" in kwargs and method != "record_model_first_token":
+                if method not in self._timed_methods:
+                    parameters = signature(callback).parameters
+                    self._timed_methods[method] = "observed_at" in parameters or any(
+                        parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values()
+                    )
+                if not self._timed_methods[method]:
+                    # Existing SDK sinks may implement the original callback signature.
+                    kwargs.pop("observed_at")
+            await callback(**kwargs)
         except Exception:
             if self.logger is not None:
                 self.logger.warning(
@@ -151,56 +162,35 @@ class RecordingModelProvider:
                 },
             },
         )
-        diagnostic_request = getattr(self.provider, "diagnostic_request", None)
-        try:
-            wire_request = (
-                diagnostic_request(request) if diagnostic_request is not None else None
-            )
-            if inspect.isawaitable(wire_request):
-                wire_request = await wire_request
-        except BaseException as exc:
-            try:
-                await self._diagnose(
-                    "begin_model_request",
-                    session_id=session_id,
-                    request=request,
-                    provider=self.provider_metadata,
-                )
-                await self._diagnose(
-                    "fail_model_request",
-                    session_id=session_id,
-                    request=request,
-                    error=exc,
-                )
-            finally:
-                _end_model_span(span, started_at, None, error=exc)
-            self._log(
-                "model.request.failed",
-                "model request failed",
+        began = False
+
+        async def begin(wire_request=None, *, model=None, provider_id=None):
+            nonlocal began
+            if began:
+                return
+            began = True
+            metadata = self.provider_metadata
+            if wire_request is not None:
+                metadata = {**metadata, "provider_id": provider_id}
+                if "model" not in wire_request:
+                    metadata["model"] = model
+            await self._diagnose(
+                "begin_model_request",
                 session_id=session_id,
                 request=request,
-                error=exc,
-                attributes={"model_binding": request.model_binding, "purpose": purpose},
+                provider=metadata,
+                wire_request=wire_request,
+                observed_at=started_at,
             )
-            raise
-        if wire_request:
-            span.span.attributes["model"] = wire_request.get("model")
-            span.span.attributes["model_parameters"].update(
-                {
-                    key: wire_request[key]
-                    for key in (
-                        "temperature",
-                        "top_p",
-                        "max_tokens",
-                        "max_completion_tokens",
-                        "max_output_tokens",
-                        "seed",
-                        "reasoning_effort",
-                        "generationConfig",
-                    )
-                    if key in wire_request
-                }
+
+        async def observe_request(payload, *, model, provider, parameters):
+            # An internal provider fallback sends different controls under the
+            # same request ID. The span describes the last attempted payload.
+            span.span.attributes.update(
+                model=model, request_model=model, provider=provider, model_parameters=parameters,
             )
+            await begin(payload, model=model, provider_id=provider)
+
         finalized = False
         first_token_at = None
         first_text_at = None
@@ -236,18 +226,23 @@ class RecordingModelProvider:
         normalized_bytes = 0
         normalized_dropped = 0
         try:
-            await self._diagnose(
-                "begin_model_request",
-                session_id=session_id,
-                request=request,
-                provider=self.provider_metadata,
-                wire_request=wire_request,
-            )
             provider_stream = self.provider.stream(request)
-            events = _captured_events(provider_stream, capture) if capture else provider_stream
-            async for event in events:
+            async for event in _observed_events(provider_stream, capture, observe_request):
+                completed = event.kind == ModelEventKind.COMPLETED
+                first_token = (
+                    first_token_at is None
+                    and event.kind in {ModelEventKind.TEXT_DELTA, ModelEventKind.REASONING_DELTA}
+                    and event.delta
+                )
+                first_text = first_text_at is None and (
+                    (event.kind == ModelEventKind.TEXT_DELTA and event.delta and event.delta.strip())
+                    or (completed and event.response and event.response.text.strip())
+                )
+                observed_at = utc_now() if completed or first_token or first_text else None
+                if not began:
+                    await begin()
                 # Keep partial output even if normalization later rejects Tool JSON.
-                if capture is not None and event.kind != ModelEventKind.COMPLETED:
+                if capture is not None and not completed:
                     value = event.model_dump(mode="json")
                     size = len(json.dumps(value, ensure_ascii=False).encode())
                     if normalized_bytes + size <= capture.max_bytes:
@@ -255,23 +250,12 @@ class RecordingModelProvider:
                         normalized_bytes += size
                     else:
                         normalized_dropped += 1
-                if (
-                    first_token_at is None
-                    and event.kind
-                    in {ModelEventKind.TEXT_DELTA, ModelEventKind.REASONING_DELTA}
-                    and event.delta
-                ):
-                    # Capture the observation before yielding, but defer the
-                    # diagnostic write so it never delays the first token.
-                    first_token_at = utc_now()
-                if (
-                    first_text_at is None
-                    and (
-                        (event.kind == ModelEventKind.TEXT_DELTA and event.delta and event.delta.strip())
-                        or (event.kind == ModelEventKind.COMPLETED and event.response and event.response.text.strip())
-                    )
-                ):
-                    first_text_at = utc_now()
+                if first_token:
+                    # Defer persistence so it never delays delivery of the first token.
+                    first_token_at = observed_at
+                if first_text:
+                    assert observed_at is not None
+                    first_text_at = observed_at
                     self._log(
                         "model.first_text", "收到模型首段正文", level="debug",
                         session_id=session_id, request=request,
@@ -279,19 +263,19 @@ class RecordingModelProvider:
                                     "first_text_at": first_text_at.isoformat(),
                                     "first_text_ms": elapsed_ms(started_at, first_text_at)},
                     )
-                if event.kind == ModelEventKind.COMPLETED:
-                    assert event.response is not None
+                if completed:
+                    assert event.response is not None and observed_at is not None
                     await persist_first_output()
                     await self._diagnose(
                         "complete_model_request",
                         session_id=session_id,
                         request=request,
                         response=event.response,
+                        observed_at=observed_at,
                     )
                     _end_model_span(
-                        span, started_at, first_token_at, response=event.response
+                        span, started_at, first_token_at, finished=observed_at, response=event.response
                     )
-                    finished = utc_now()
                     self._log(
                         "model.request.completed",
                         "model request completed",
@@ -302,7 +286,7 @@ class RecordingModelProvider:
                             "purpose": purpose,
                             "agent_id": self.provider_metadata.get("agent_id"),
                             "finish_reason": event.response.finish_reason,
-                            "duration_ms": elapsed_ms(started_at, finished),
+                            "duration_ms": elapsed_ms(started_at, observed_at),
                             "ttfb_ms": elapsed_ms(started_at, first_token_at),
                             "first_text_at": first_text_at.isoformat() if first_text_at is not None else None,
                             "first_text_ms": elapsed_ms(started_at, first_text_at),
@@ -316,14 +300,17 @@ class RecordingModelProvider:
             # authoritative successful diagnostic and span.
             if finalized:
                 raise
+            observed_at = utc_now()
+            await begin()
             await persist_first_output()
             await self._diagnose(
                 "fail_model_request",
                 session_id=session_id,
                 request=request,
                 error=exc,
+                observed_at=observed_at,
             )
-            _end_model_span(span, started_at, first_token_at, error=exc)
+            _end_model_span(span, started_at, first_token_at, finished=observed_at, error=exc)
             self._log(
                 "model.request.failed",
                 "model request failed",
@@ -352,13 +339,16 @@ class RecordingModelProvider:
             finally:
                 if not finalized:
                     closed = RuntimeError("model stream closed before completion")
+                    observed_at = utc_now()
                     try:
+                        await begin()
                         await persist_first_output()
                         await self._diagnose(
                             "fail_model_request",
                             session_id=session_id,
                             request=request,
                             error=closed,
+                            observed_at=observed_at,
                         )
                         self._log(
                             "model.request.failed",
@@ -372,7 +362,7 @@ class RecordingModelProvider:
                             },
                         )
                     finally:
-                        _end_model_span(span, started_at, first_token_at, error=closed)
+                        _end_model_span(span, started_at, first_token_at, finished=observed_at, error=closed)
 
 
 def _end_model_span(
@@ -380,10 +370,10 @@ def _end_model_span(
     started_at: datetime,
     first_token_at: datetime | None,
     *,
+    finished: datetime,
     error: BaseException | None = None,
     response: ModelResponse | None = None,
 ) -> None:
-    finished = utc_now()
     attributes: dict[str, Any] = {
         "duration_ms": elapsed_ms(started_at, finished),
         "ttfb_ms": elapsed_ms(started_at, first_token_at),
@@ -423,16 +413,17 @@ def _end_model_span(
     )
 
 
-async def _captured_events(stream, capture):
+async def _observed_events(stream, capture, observe_request):
     iterator = stream.__aiter__()
     while True:
-        token = wire_capture.set(capture)
+        wire_token = wire_capture.set(capture)
+        request_token = wire_request_observer.set(observe_request)
         try:
             event = await anext(iterator)
         except StopAsyncIteration:
             return
         finally:
-            # Never keep a ContextVar token across yield: consumers may resume
-            # the generator from another control-polling task.
-            wire_capture.reset(token)
+            # An iterator can be resumed by a different task after a yield.
+            wire_request_observer.reset(request_token)
+            wire_capture.reset(wire_token)
         yield event

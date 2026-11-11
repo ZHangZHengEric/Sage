@@ -18,7 +18,7 @@ from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage, ModelRequest, ModelStreamEvent
 from sagents.v2.model.middleware.recording import RecordingModelProvider
-from sagents.v2.model.wire_diagnostics import record_wire_event
+from sagents.v2.model.wire_diagnostics import record_wire_event, record_wire_request
 
 
 def summary_request(previous=None):
@@ -65,9 +65,10 @@ async def test_concurrent_failed_streams_keep_separate_wire_and_partial_evidence
             self.streams[kwargs["request"].request_id] = kwargs["evidence"]
 
     class Provider:
-        async def diagnostic_request(self, request):
-            return {"model": request.request_id, "messages": []}
         async def stream(self, request):
+            await record_wire_request(
+                {"model": request.request_id, "messages": []}, model=request.request_id, provider="test",
+            )
             record_wire_event({"request": request.request_id, "arguments": '{"incomplete":'})
             await asyncio.sleep(0)
             yield ModelStreamEvent(kind=cast('ModelEventKind', "text_delta"), delta=request.request_id)

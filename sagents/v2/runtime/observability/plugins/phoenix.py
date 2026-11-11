@@ -64,8 +64,7 @@ class PhoenixTraceSink(OtlpTraceTransport):
         if not project_name.strip():
             raise ValueError("Phoenix project_name must be non-empty")
 
-    def _attributes(self, span: TraceSpan) -> dict[str, Any]:
-        values = super()._attributes(span)
+    def _project(self, span: TraceSpan, values: dict[str, Any], body: dict[str, Any]):
         values.update(
             {
                 "openinference.span.kind": {
@@ -77,10 +76,13 @@ class PhoenixTraceSink(OtlpTraceTransport):
                 "user.id": values.get("user_id"),
             }
         )
-        for direction in ("input", "output"):
-            if values.get(direction) is not None:
+        if span.name == "tool.call":
+            values["tool.name"] = values.get("tool_name")
+            values["tool.parameters"] = body.pop("input")
+        for direction, content in body.items():
+            if content is not None:
                 values[f"{direction}.value"] = json.dumps(
-                    values[direction], ensure_ascii=False
+                    content, ensure_ascii=False
                 )
                 values[f"{direction}.mime_type"] = "application/json"
         if span.name == "model.request":
@@ -108,10 +110,3 @@ class PhoenixTraceSink(OtlpTraceTransport):
                         ),
                     }
                 )
-        elif span.name == "tool.call":
-            values["tool.name"] = values.get("tool_name")
-            values["tool.parameters"] = values.get("input")
-        # Scalar keys shadow Phoenix's nested OpenInference input/output fields.
-        values.pop("input", None)
-        values.pop("output", None)
-        return values

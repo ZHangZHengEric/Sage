@@ -57,13 +57,6 @@ class CatalogPackageModel:
         finally:
             await scope.close()
 
-    async def diagnostic_request(self, request):
-        import inspect
-        async with self.provider(request.model_binding) as provider:
-            preview = getattr(provider, "diagnostic_request", None)
-            value = preview(request) if preview is not None else None
-            return await value if inspect.isawaitable(value) else value
-
     async def capabilities(self, binding):
         async with self.provider(binding) as provider:
             return await provider.capabilities(binding)

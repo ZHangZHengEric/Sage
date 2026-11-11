@@ -100,6 +100,7 @@ class DiagnosticSink(Protocol):
         request: ModelRequest,
         provider: Mapping[str, Any],
         wire_request: Mapping[str, Any] | None = None,
+        observed_at: datetime | None = None,
     ) -> None: ...
 
     async def complete_model_request(
@@ -108,6 +109,7 @@ class DiagnosticSink(Protocol):
         session_id: str,
         request: ModelRequest,
         response: ModelResponse,
+        observed_at: datetime | None = None,
     ) -> None: ...
 
     async def record_model_first_token(
@@ -119,7 +121,8 @@ class DiagnosticSink(Protocol):
     ) -> None: ...
 
     async def fail_model_request(
-        self, *, session_id: str, request: ModelRequest, error: Exception
+        self, *, session_id: str, request: ModelRequest, error: BaseException,
+        observed_at: datetime | None = None,
     ) -> None: ...
 
 

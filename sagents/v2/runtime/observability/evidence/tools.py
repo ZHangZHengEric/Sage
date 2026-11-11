@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from .models import _trace_body
+
 
 def _value(value):
     if isinstance(value, str):
@@ -45,7 +47,9 @@ def tool_evidence(spans, logs):
                 )
                 if exception not in errors:
                     errors.append(exception)
-        result = _value(attrs.get("execution_result"))
+        result = _value(attrs.get("execution_result", _trace_body(
+            attrs, "output", "gen_ai.tool.call.result",
+        )))
         error = (
             _value(attrs.get("error"))
             or (result.get("error") if isinstance(result, dict) else None)
@@ -66,7 +70,9 @@ def tool_evidence(spans, logs):
             tool_call_id=key[1],
             tool_name=attrs.get("tool_name"),
             operation_id=attrs.get("operation_id"),
-            arguments=_value(attrs.get("arguments")),
+            arguments=_value(attrs.get("arguments", _trace_body(
+                attrs, "input", "tool.parameters", "gen_ai.tool.call.arguments",
+            ))),
             result=result,
             error=error,
             outcome=outcome,

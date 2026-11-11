@@ -3,7 +3,7 @@
 from __future__ import annotations
 from sagents.v2.model.failures import annotate_stream_failure
 
-from sagents.v2.model.wire_diagnostics import record_wire_event
+from sagents.v2.model.wire_diagnostics import record_wire_event, record_wire_request
 
 from collections.abc import AsyncIterator
 from typing import Any
@@ -325,6 +325,9 @@ class OpenAIResponsesModelProvider:
 
         try:
             try:
+                await record_wire_request(
+                    payload, model=self.config.model, provider=self.config.provider_id,
+                )
                 record_wire_event(
                     {"diagnostic_event": "request_attempt", "payload": payload}
                 )
@@ -341,6 +344,9 @@ class OpenAIResponsesModelProvider:
                     raise
                 from sagents.v2.model.recovery_scope import reserve_additional_request
                 await reserve_additional_request("compatibility", purpose="responses_reasoning")
+                await record_wire_request(
+                    fallback_payload, model=self.config.model, provider=self.config.provider_id,
+                )
                 record_wire_event(
                     {"diagnostic_event": "request_attempt", "payload": fallback_payload}
                 )

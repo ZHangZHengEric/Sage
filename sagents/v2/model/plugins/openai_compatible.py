@@ -4,7 +4,7 @@ from __future__ import annotations
 from sagents.v2.model.failures import annotate_stream_failure
 
 import json
-from sagents.v2.model.wire_diagnostics import record_wire_event
+from sagents.v2.model.wire_diagnostics import record_wire_event, record_wire_request
 
 from collections.abc import AsyncIterator, Mapping
 from typing import cast, Any, Literal
@@ -554,6 +554,9 @@ class OpenAICompatibleModelProvider:
                 from sagents.v2.model.recovery_scope import reserve_additional_request
                 await reserve_additional_request("compatibility", purpose=f"compatibility:{fallbacks[-1]['kind']}")
             try:
+                await record_wire_request(
+                    current, model=self.config.model, provider=self.config.provider_id,
+                )
                 record_wire_event(
                     {"diagnostic_event": "request_attempt", "payload": current}
                 )

@@ -145,10 +145,8 @@ class OtlpTraceTransport:
                 if self._closed or len(self._spans) >= self.max_active_spans:
                     self._warn("active_span_limit", count=1)
                     return
-                attributes = self._encode_values(
-                    span.span_id, span.attributes, lambda: self._attributes(span)
-                )
-                if attributes is None:
+                reserved = self._reserve_bytes(span.span_id, span.attributes)
+                if not reserved:
                     self._warn("active_byte_limit", count=1)
                     return
                 # Explicit empty context produces a real root, independent of
@@ -178,8 +176,8 @@ class OtlpTraceTransport:
                 finally:
                     _IDENTITIES.reset(token)
                 if otel_span.is_recording():
-                    _set_attributes(otel_span, attributes)
-                    self._spans[span.span_id] = otel_span
+                    otel_span.set_attributes(_otel_attributes(self._identity(span)))
+                    self._spans[span.span_id] = (otel_span, reserved)
                 else:
                     self._release_bytes(span.span_id)
             # Never call host enrichment while holding the transport lock.
@@ -195,9 +193,10 @@ class OtlpTraceTransport:
             # End/export cannot release the reservation while an event is
             # still being encoded, or attach it to an already ended span.
             with self._lock:
-                otel_span = self._spans.get(span_id)
-                if otel_span is None:
+                active = self._spans.get(span_id)
+                if active is None:
                     return
+                otel_span, _ = active
                 values = self._encode_values(
                     span_id,
                     event.attributes,
@@ -231,16 +230,20 @@ class OtlpTraceTransport:
             from opentelemetry.trace import Status, StatusCode
 
             with self._lock:
-                otel_span = self._spans.pop(span.span_id, None)
-                if otel_span is None:
+                active = self._spans.pop(span.span_id, None)
+                if active is None:
                     return
+                otel_span, initial_bytes = active
+                # Replace the reservation for the initial attributes. The
+                # final attributes contain both input and output.
+                self._refund_bytes(span.span_id, initial_bytes)
                 attributes = self._encode_values(
                     span.span_id, span.attributes, lambda: self._attributes(span)
                 )
                 if attributes is None:
                     self._mark_incomplete(otel_span, "completion_byte_limit")
                 else:
-                    _set_attributes(otel_span, attributes)
+                    otel_span.set_attributes(attributes)
                 if span.status is TraceStatus.ERROR:
                     error = (
                         {
@@ -319,44 +322,58 @@ class OtlpTraceTransport:
         else:
             self._span_bytes.pop(span_id)
 
-    def _attributes(self, span: TraceSpan) -> dict[str, Any]:
-        values = {
-            key: getattr(span, key)
-            for key in (
-                "session_id",
-                "run_id",
-                "turn_id",
-                "step_id",
-                "tool_call_id",
-                "request_id",
-                "correlation_id",
-            )
+    def _identity(self, span):
+        return {
+            "session_id": span.session_id,
+            "run_id": span.run_id,
+            "turn_id": span.turn_id,
+            "step_id": span.step_id,
+            "tool_call_id": span.tool_call_id,
+            "request_id": span.request_id,
+            "correlation_id": span.correlation_id,
+            "sage.trace_id": span.trace_id,
+            "sage.span_id": span.span_id,
+            "deployment.environment.name": self.environment,
+            "sage.content.mode": self.content_mode,
         }
-        values.update(
-            {
-                "sage.trace_id": span.trace_id,
-                "sage.span_id": span.span_id,
-                "deployment.environment.name": self.environment,
-                "sage.content.mode": self.content_mode,
-                **span.attributes,
-            }
-        )
-        for key in ("input", "output", "user_input", "arguments", "result"):
-            if key in values:
-                values[key] = (
-                    raw_trace_value(values[key])
-                    if self.content_mode == "raw"
-                    else trace_content(self, values[key])
-                )
+
+    def _attributes(self, span: TraceSpan) -> dict[str, Any]:
+        values = {**self._identity(span), **span.attributes}
+        body = {key: values.pop(key, None) for key in ("input", "output")}
+        if span.name == "tool.call":
+            arguments = values.pop("arguments", None)
+            result = values.pop("execution_result", None)
+            values.pop("result", None)
+            if arguments is not None:
+                body["input"] = arguments
+            if result is not None:
+                body["output"] = result
+        if self.content_mode == "raw":
+            body = raw_trace_value(body)
+        else:
+            body = {key: trace_content(self, value) for key, value in body.items()}
+        projected = self._trace_value(values)
+        # Timing rows are control data. An OTLP string array preserves them
+        # across the SDK's per-attribute string length limit.
+        if span.name == "agent.run" and "sage.performance.data" in values:
+            payload = values["sage.performance.data"]
+            projected["sage.performance.data"] = tuple(
+                payload[offset : offset + self.max_content_chars]
+                for offset in range(0, len(payload), self.max_content_chars)
+            )
+        self._project(span, projected, body)
+        return projected
+
+    def _project(self, span: TraceSpan, values: dict[str, Any], body: dict[str, Any]):
         if span.name == "model.request":
             values.update(
                 {
                     "gen_ai.operation.name": "chat",
-                    "gen_ai.request.model": values.get("model"),
+                    "gen_ai.request.model": values.get("request_model") or values.get("model"),
                     "gen_ai.response.model": values.get("model"),
                     "gen_ai.provider.name": values.get("provider"),
-                    "gen_ai.input.messages": values.get("input"),
-                    "gen_ai.output.messages": values.get("output"),
+                    "gen_ai.input.messages": body["input"],
+                    "gen_ai.output.messages": body["output"],
                 }
             )
             for key, value in (values.get("usage") or {}).items():
@@ -371,22 +388,12 @@ class OtlpTraceTransport:
                     "gen_ai.operation.name": "execute_tool",
                     "gen_ai.tool.name": values.get("tool_name"),
                     "gen_ai.tool.call.id": span.tool_call_id,
-                    "gen_ai.tool.call.arguments": values.get("input"),
-                    "gen_ai.tool.call.result": values.get("output"),
+                    "gen_ai.tool.call.arguments": body["input"],
+                    "gen_ai.tool.call.result": body["output"],
                 }
             )
-        projected = self._trace_value(values)
-        # Content-free timing rows are control data. Truncating their JSON makes
-        # the performance projection unreadable, independently of content mode.
-        if span.name == "agent.run" and "sage.performance.data" in values:
-            payload = values["sage.performance.data"]
-            # Each string element respects the SDK's attribute length limit;
-            # an OTLP string array preserves the complete control payload.
-            projected["sage.performance.data"] = tuple(
-                payload[offset : offset + self.max_content_chars]
-                for offset in range(0, len(payload), self.max_content_chars)
-            )
-        return projected
+        else:
+            values.update(body)
 
     def _trace_value(self, value: Any) -> Any:
         if self.content_mode == "raw":
@@ -524,9 +531,8 @@ class OtlpTraceTransport:
                 return 0
             if self.content_mode == "raw":
                 # JSON strings may grow sixfold for control characters. The
-                # projections can keep three independent encoded aliases plus
-                # encoder temporaries; reserve their worst case before calling
-                # any raw normalizer, backend projection or JSON serializer.
+                # Reserve worst-case encoder temporaries before raw
+                # normalization, backend projection or JSON serialization.
                 temporary = json_working_size(values, (available - size) // 6)
                 size += temporary * 6
                 if size > available:
@@ -559,7 +565,7 @@ class OtlpTraceTransport:
             if self._closed:
                 return
             self._closed = True
-            unfinished = tuple(self._spans.values())
+            unfinished = tuple(span for span, _ in self._spans.values())
             self._spans.clear()
         for span in unfinished:
             span.set_attribute("sage.interrupted", True)
@@ -584,11 +590,6 @@ class OtlpTraceTransport:
 
     async def stop(self, reason=None) -> None:
         await asyncio.to_thread(self.close)
-
-
-def _set_attributes(span: Any, values: Mapping[str, Any]) -> None:
-    for key, value in _otel_attributes(values).items():
-        span.set_attribute(key, value)
 
 
 def _otel_attributes(values: Mapping[str, Any] | None) -> dict[str, Any]:

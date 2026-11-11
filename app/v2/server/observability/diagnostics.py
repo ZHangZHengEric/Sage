@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
-from concurrent.futures import Future
+from collections import defaultdict
 from contextlib import asynccontextmanager
-from contextvars import Context
+from hashlib import sha256
 import json
-from threading import Lock
 
-from sqlalchemy import case, delete, func, or_, select, text, update
+from sqlalchemy import case, cast, delete, func, or_, select, text, tuple_, update
+from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.v2.server.database.upsert import upsert
 from .orm import dropped, events, logs, models, timings
+from .writer import ObservationWriter
 from sagents.v2.runtime.observability.evidence.capture import DiagnosticCapture
 from sagents.v2.runtime.observability.evidence.tools import tool_evidence
-from sagents.v2.runtime.observability.performance.aggregation import build_run, timing_report
+from sagents.v2.runtime.observability.performance.aggregation import EVENTS, build_run, timestamp, timing_report
 from sagents.v2.runtime.observability.performance.projection import log_timings, model_timing
 
 
@@ -25,121 +25,221 @@ def _scope(table, session_id, run_id):
     return table.c.session_id == session_id, table.c.run_id == run_id
 
 
+MODEL_KEY = ("session_id", "run_id", "request_id")
+
+
+def _model_scope(key):
+    return dict(zip(MODEL_KEY, key))
+
+
+def _earlier(observed, existing):
+    return observed is not None and (existing is None or observed < existing)
+
+
+def _earlier_sql(observed, existing):
+    return observed.is_not(None) & (existing.is_(None) | (observed < existing))
+
+
+def _timing_changes(incoming):
+    current = timings.c
+    earlier_start = _earlier_sql(incoming.started_at, current.started_at)
+    earlier_token = _earlier_sql(incoming.first_token_at, current.first_token_at)
+    return {
+        "purpose": case((earlier_start, incoming.purpose), else_=current.purpose),
+        "turn_id": case((earlier_start, incoming.turn_id), else_=current.turn_id),
+        "started_at": case((earlier_start, incoming.started_at), else_=current.started_at),
+        "first_token_at": case((earlier_token, incoming.first_token_at), else_=current.first_token_at),
+        "ended_at": func.coalesce(current.ended_at, incoming.ended_at),
+    }
+
+
 class DatabaseDiagnostics(DiagnosticCapture):
+    max_pending_timings = 4096
+
     def __init__(self, database):
         self.database = database
         self.available = True
-        self.closed = False
-        self.capture_failures = 0
-        self._loop = asyncio.get_running_loop()
-        self._lock = Lock()
-        self._pending = deque()
-        self._last_write: Future | None = None
-        self._writer: asyncio.Task | None = None
-        self._writing = False
-        self._scheduled = False
+        self._timings = ObservationWriter(self._write_timings, batch_size=64)
+        self._evidence_writer = ObservationWriter(self._write_evidence, batch_size=16)
 
-    def _enqueue(self, operation, *args):
-        with self._lock:
-            if (self.closed or not self.available
-                    or len(self._pending) + self._writing >= self.max_pending_writes):
-                self.capture_failures += 1
-                return
-            self._last_write = Future()
-            self._pending.append((operation, args, self._last_write))
-            if not self._scheduled:
-                self._scheduled = True
-                # Log producers can be worker threads. The writer has no Run context.
-                self._loop.call_soon_threadsafe(self._start_writer, context=Context())
-
-    def _start_writer(self):
-        self._writer = self._loop.create_task(self._drain())
-
-    async def _drain(self):
-        while True:
-            with self._lock:
-                if not self._pending:
-                    self._scheduled = False
-                    return
-                operation, args, finished = self._pending.popleft()
-                self._writing = True
-            try:
-                await operation(*args)
-            except asyncio.CancelledError:
-                with self._lock:
-                    self.capture_failures += 1 + len(self._pending)
-                    while self._pending:
-                        _, _, pending = self._pending.popleft()
-                        pending.set_result(None)
-                    self._scheduled = False
-                raise
-            except Exception:
-                with self._lock:
-                    self.capture_failures += 1
-            finally:
-                with self._lock:
-                    self._writing = False
-                    finished.set_result(None)
+    @property
+    def capture_failures(self):
+        return self._timings.failures + self._evidence_writer.failures
 
     async def _flush(self):
-        with self._lock:
-            pending = self._last_write
-        if pending is not None:
-            try:
-                await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(pending)), timeout=3)
-            except TimeoutError:
-                with self._lock:
-                    self.capture_failures += 1
-                return False
-        return True
+        evidence, timing = await asyncio.gather(
+            self._evidence_writer.flush(), self._timings.flush(),
+        )
+        return evidence and timing
 
     async def close(self):
-        with self._lock:
-            if self.closed:
+        await asyncio.gather(self._evidence_writer.close(), self._timings.close())
+
+    def write(self, record):
+        if not record.session_id or not record.run_id:
+            return
+        if record.event in EVENTS:
+            try:
+                projections = tuple(log_timings({
+                    "event": record.event, "timestamp": record.timestamp,
+                    "session_id": record.session_id, "run_id": record.run_id,
+                    "turn_id": record.turn_id, "tool_call_id": record.tool_call_id,
+                    "request_id": record.request_id, "attributes": record.attributes,
+                }))
+            except (ValueError, TypeError, OverflowError):
+                self._timings.record_failure()
+            else:
+                self._timings.enqueue((None, projections), limit=self.max_pending_timings)
+        self._evidence_writer.enqueue((None, record), limit=self.max_pending_writes)
+
+    def _record_model_change(self, session_id, request, change):
+        key = session_id, request.run_id, request.request_id
+        if any(field in change for field in ("started_at", "completed_at", "first_token_at")):
+            self._timings.enqueue(
+                (key, model_timing({**_model_scope(key), **change})),
+                limit=self.max_pending_timings,
+            )
+        self._evidence_writer.enqueue((key, change), limit=self.max_pending_writes)
+
+    async def _write_timings(self, batch):
+        requests, stages = {}, {}
+        for key, value in batch:
+            if key is None:
+                stages.update((event["id"], event) for event in value)
+                continue
+            previous = requests.get(key)
+            if previous is None:
+                requests[key] = value
+                continue
+            if _earlier(value["started_at"], previous["started_at"]):
+                for field in ("started_at", "purpose", "turn_id"):
+                    previous[field] = value[field]
+            if _earlier(value["first_token_at"], previous["first_token_at"]):
+                previous["first_token_at"] = value["first_token_at"]
+            if previous["ended_at"] is None:
+                previous["ended_at"] = value["ended_at"]
+
+        async def write(db):
+            if requests:
+                await upsert(db, timings, [requests[key] for key in sorted(requests)],
+                             key=MODEL_KEY, merge=_timing_changes)
+            if stages:
+                await upsert(db, events, [stages[key] for key in sorted(stages)], key="id")
+
+        await self.database.run_transaction(write)
+
+    def _prepare_evidence(self, batch):
+        changes, log_rows = defaultdict(list), []
+        for key, value in batch:
+            if key is None:
+                try:
+                    payload = self._encode(value.model_dump(mode="json"))
+                except (ValueError, TypeError):
+                    self._evidence_writer.record_failure()
+                    continue
+                log_rows.append({
+                    "session_id": value.session_id, "run_id": value.run_id, "payload": payload,
+                })
+            else:
+                changes[key].append(value)
+        return changes, log_rows
+
+    def _merge_model_payloads(self, changes, previous, *, digest):
+        rows = {}
+        for key, patches in changes.items():
+            payload = previous.get(key, "{}")
+            record = json.loads(payload)
+            changed = False
+            for patch in patches:
+                terminal = record.get("status") in {"completed", "failed"}
+                if "started_at" in patch:
+                    if not _earlier(timestamp(patch["started_at"]), timestamp(record.get("started_at"))):
+                        continue
+                    if terminal:
+                        patch = {field: value for field, value in patch.items() if field != "status"}
+                elif "completed_at" in patch and terminal:
+                    continue
+                elif "first_token_at" in patch and not _earlier(
+                    timestamp(patch["first_token_at"]), timestamp(record.get("first_token_at")),
+                ):
+                    continue
+                record.update(patch)
+                changed = True
+            if changed:
+                token = sha256(payload.encode()).hexdigest() if digest else payload
+                rows[key] = self._encode({**record, **_model_scope(key)}), token
+        return rows
+
+    async def _write_evidence(self, batch):
+        changes, log_rows = await asyncio.to_thread(self._prepare_evidence, batch)
+        # A concurrent writer may commit between the read and the update. The
+        # original payload determines the CAS token, including for pre-existing rows.
+        for _ in range(3):
+            previous = {}
+            mysql = False
+            if changes:
+                async with self.database.session() as db:
+                    mysql = db.get_bind().dialect.name == "mysql"
+                    result = await db.execute(select(models).where(
+                        tuple_(*(models.c[name] for name in MODEL_KEY)).in_(list(changes)),
+                    ))
+                    previous = {
+                        (row.session_id, row.run_id, row.request_id): row.payload for row in result
+                    }
+            rows = await asyncio.to_thread(self._merge_model_payloads, changes, previous, digest=mysql)
+            if not rows and not log_rows:
                 return
-            self.closed = True
-        if not await self._flush() and self._writer is not None:
-            self._writer.cancel()
-            await asyncio.gather(self._writer, return_exceptions=True)
 
-    def _model_payload(self, previous, change, scope):
-        record = {**json.loads(previous), **change, **scope}
-        return self._encode(record), model_timing(record)
+            async def write(db):
+                missing = [_model_scope(key) | {"payload": "{}"}
+                           for key in sorted(rows) if key not in previous]
+                if missing:
+                    await upsert(db, models, missing, key=MODEL_KEY)
+                # MySQL sends a whole statement in one packet. Bind a digest
+                # to keep large updates within one payload's wire size.
+                version = models.c.payload
+                if mysql:
+                    version = func.sha2(cast(version, CHAR(charset="utf8mb4")), 256)
+                conflicts = {}
+                for key in sorted(rows):
+                    session_id, run_id, request_id = key
+                    payload, token = rows[key]
+                    result = await db.execute(update(models).where(
+                        *_scope(models, session_id, run_id), models.c.request_id == request_id,
+                        version == token,
+                    ).values(payload=payload))
+                    if not result.rowcount:
+                        conflicts[key] = changes[key]
+                if log_rows:
+                    await self._write_logs(db, log_rows)
+                return conflicts
 
-    async def _update(self, session_id, request, change):
-        scope = dict(session_id=session_id, run_id=request.run_id, request_id=request.request_id)
-        match = (*_scope(models, session_id, request.run_id), models.c.request_id == request.request_id)
-        async with self.database.transaction() as db:
-            await upsert(db, models, {**scope, "payload": "{}"}, key=tuple(scope))
-            previous = await db.scalar(select(models.c.payload).where(*match).with_for_update())
-            encoded, timing = await asyncio.to_thread(self._model_payload, previous, change, scope)
-            await db.execute(update(models).where(*match).values(payload=encoded))
+            changes = await self.database.run_transaction(write)
+            log_rows = []
+            if not changes:
+                return
+        raise RuntimeError("concurrent diagnostic updates did not settle")
 
-            await upsert(db, timings, timing, key=tuple(scope), replace=True)
-
-    def _log_payload(self, record):
-        data = record.model_dump(mode="json")
-        return self._encode(data), tuple(log_timings(data))
-
-    async def _write_log(self, record):
-        session_id, run_id = record.session_id, record.run_id
-        scope = dict(session_id=session_id, run_id=run_id)
-        payload, projections = await asyncio.to_thread(self._log_payload, record)
-        async with self.database.transaction() as db:
-            for timing in projections:
-                await upsert(db, events, timing, key="id")
-            await db.execute(logs.insert().values(**scope, payload=payload))
+    async def _write_logs(self, db, rows):
+        scopes = sorted({(row["session_id"], row["run_id"]) for row in rows})
+        await upsert(db, dropped, [
+            {"session_id": session, "run_id": run, "count": 0} for session, run in scopes
+        ], key=("session_id", "run_id"))
+        # Serialize retention across writers on the existing per-Run counter.
+        await db.execute(select(dropped.c.count).where(
+            tuple_(dropped.c.session_id, dropped.c.run_id).in_(scopes),
+        ).order_by(dropped.c.session_id, dropped.c.run_id).with_for_update())
+        await db.execute(logs.insert(), rows)
+        for session_id, run_id in scopes:
             match = _scope(logs, session_id, run_id)
             cutoff = await db.scalar(select(logs.c.id).where(*match).order_by(
                 logs.c.id.desc()
             ).offset(self.max_logs_per_run).limit(1))
             if cutoff is not None:
                 removed = await db.execute(delete(logs).where(*match, logs.c.id <= cutoff))
-                if removed.rowcount:
-                    await upsert(db, dropped, {**scope, "count": 0}, key=tuple(scope))
-                    await db.execute(update(dropped).where(*_scope(dropped, session_id, run_id)).values(
-                        count=dropped.c.count + removed.rowcount,
-                    ))
+                await db.execute(update(dropped).where(*_scope(dropped, session_id, run_id)).values(
+                    count=dropped.c.count + removed.rowcount,
+                ))
 
     @asynccontextmanager
     async def _read_snapshot(self):
@@ -187,7 +287,7 @@ class DatabaseDiagnostics(DiagnosticCapture):
         return result
 
     async def run_timing(self, *, session_id, run_id, start, end):
-        await self._flush()
+        await self._timings.flush()
         async with self._read_snapshot() as db:
             event_rows = (await db.execute(select(events).where(*_scope(events, session_id, run_id))
                                            .limit(10001))).mappings().all()
@@ -201,42 +301,42 @@ class DatabaseDiagnostics(DiagnosticCapture):
 
     async def report(self, *, start, end, agent_id="", bucket="hour", timezone_name="Asia/Shanghai",
                      max_runs=10000, max_timing_rows=100000):
-        await self._flush()
+        flushed = await self._timings.flush()
         event = events.c
         accepted = event.event == "server.run.performance.accepted"
         cohort = case((accepted, event.started_at), else_=event.at)
-        candidates = select(event.run_id).where(or_(
+        candidates = select(event.session_id, event.run_id).where(or_(
             (event.event == "agent.run.started") & (event.at >= start) & (event.at < end),
             accepted & (event.started_at >= start) & (event.started_at < end),
         ))
         if agent_id:
             candidates = candidates.where(event.agent_id == agent_id)
-        candidates = candidates.group_by(event.run_id).order_by(func.min(cohort).desc()).limit(max_runs + 1)
+        candidates = candidates.group_by(event.session_id, event.run_id).order_by(func.min(cohort).desc()).limit(max_runs + 1)
         by_event, by_model = defaultdict(list), defaultdict(list)
         async with self.database.session() as db:
-            ids = (await db.scalars(candidates)).all()
+            ids = (await db.execute(candidates)).all()
             truncated = len(ids) > max_runs
             remaining = max_timing_rows
             ids = ids[:max_runs]
             for offset in range(0, len(ids), 400):
                 batch = ids[offset:offset + 400]
-                event_rows = (await db.execute(select(events).where(events.c.run_id.in_(batch))
+                event_rows = (await db.execute(select(events).where(tuple_(events.c.session_id, events.c.run_id).in_(batch))
                                                .limit(remaining + 1))).mappings().all()
                 if len(event_rows) > remaining:
                     truncated = True
                     break
-                model_rows = (await db.execute(select(timings).where(timings.c.run_id.in_(batch))
+                model_rows = (await db.execute(select(timings).where(tuple_(timings.c.session_id, timings.c.run_id).in_(batch))
                                                .limit(remaining - len(event_rows) + 1))).mappings().all()
                 remaining -= len(event_rows) + len(model_rows)
                 if remaining < 0:
                     truncated = True
                     break
                 for row in event_rows:
-                    by_event[row["run_id"]].append(row)
+                    by_event[row["session_id"], row["run_id"]].append(row)
                 for row in model_rows:
-                    by_model[row["run_id"]].append(row)
+                    by_model[row["session_id"], row["run_id"]].append(row)
         result = await asyncio.to_thread(
             timing_report, by_event, by_model, start=start, end=end, agent_id=agent_id,
             bucket=bucket, timezone_name=timezone_name, truncated=truncated,
         )
-        return {**result, "source": "local", "capture_failures": self.capture_failures}
+        return {**result, "source": "local", "capture_failures": self._timings.failures + int(not flushed)}

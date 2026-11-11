@@ -675,7 +675,7 @@ async def test_binding_controls_completion_token_field_and_structured_output():
     ],
 )
 async def test_auto_token_field_negotiates_once_and_learns_route(
-    model, initial, alternate
+    model, initial, alternate, monkeypatch
 ):
     error = RuntimeError("Provider rejected the request")
     setattr(error, 'status_code', 422)
@@ -695,8 +695,32 @@ async def test_auto_token_field_negotiates_once_and_learns_route(
         client=FakeClient(completions),
     )
 
-    first_events = [event async for event in provider.stream(request())]
-    second_events = [event async for event in provider.stream(request())]
+    from sagents.v2.model.middleware.recording import RecordingModelProvider
+    from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
+
+    builds = 0
+    build = provider.diagnostic_request
+
+    def counted(request):
+        nonlocal builds
+        builds += 1
+        return build(request)
+
+    monkeypatch.setattr(provider, "diagnostic_request", counted)
+    sent = []
+
+    class Diagnostics(NoopDiagnosticSink):
+        async def begin_model_request(self, **kwargs):
+            sent.append(kwargs["wire_request"])
+
+    async def session_id(_):
+        return "session"
+
+    recording = RecordingModelProvider(provider, sink=Diagnostics(), session_id_resolver=session_id)
+    first_events = [event async for event in recording.stream(request())]
+    second_events = [event async for event in recording.stream(request())]
+    assert builds == 2
+    assert sent == [completions.calls[0], completions.calls[2]]
 
     assert completions.calls[0][initial] == 512
     assert alternate not in completions.calls[0]

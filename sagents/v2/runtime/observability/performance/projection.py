@@ -14,7 +14,7 @@ def log_timings(row):
                    and attrs.get("first_text_at") else row["timestamp"])
     identity = row.get("tool_call_id") if event.startswith("tool.") else row.get("request_id")
     yield {
-        "id": hashlib.sha256(f"{row['run_id']}\0{event}\0{at}\0{identity}".encode()).hexdigest(),
+        "id": hashlib.sha256(f"{row['session_id']}\0{row['run_id']}\0{event}\0{at}\0{identity}".encode()).hexdigest(),
         "session_id": row["session_id"],
         "run_id": row["run_id"],
         "event": event,

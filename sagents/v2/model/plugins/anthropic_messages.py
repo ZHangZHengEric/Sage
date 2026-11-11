@@ -45,7 +45,7 @@ from sagents.v2.model.plugins._shared.wire import (
     validate_extra_body,
     wire_json_value,
 )
-from sagents.v2.model.wire_diagnostics import record_wire_event
+from sagents.v2.model.wire_diagnostics import record_wire_event, record_wire_request
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 
 _HOST_OWNED_REQUEST_FIELDS = frozenset(
@@ -440,6 +440,9 @@ class AnthropicMessagesModelProvider:
             ))
 
         try:
+            await record_wire_request(
+                payload, model=self.config.model, provider=self.config.provider_id,
+            )
             record_wire_event(
                 {"diagnostic_event": "request_attempt", "payload": payload}
             )

@@ -111,17 +111,20 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
             ),
         )
     )
-    setattr(provider, 'diagnostic_request', lambda _request: {
-        "model": "model_1",
-        "messages": [
-            {
-                "role": "user",
-                "content": "hello",
-                "authorization": "Bearer secret",
-            }
-        ],
-        "extra_body": {"api_key": "sk-wire-secret"},
-    })
+    from sagents.v2.model.wire_diagnostics import record_wire_request
+
+    original_stream = provider.stream
+
+    async def stream(request):
+        await record_wire_request({
+            "model": "model_1",
+            "messages": [{"role": "user", "content": "hello", "authorization": "Bearer secret"}],
+            "extra_body": {"api_key": "sk-wire-secret"},
+        }, model="model_1", provider="test")
+        async for event in original_stream(request):
+            yield event
+
+    setattr(provider, "stream", stream)
 
     async def resolve_session(run_id: str) -> str:
         assert run_id == "run_1"
@@ -156,6 +159,7 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
     assert record["index"] == 0
     assert record["kind"] == "agent"
     assert record["metadata"]["api_key"] == "[REDACTED]"
+    assert record["metadata"]["provider_id"] == "test"
     assert record["request"]["messages"][0]["authorization"] == "[REDACTED]"
     assert record["request"]["extra_body"]["api_key"] == "[REDACTED]"
     assert record["started_at"] <= record["first_token_at"]

@@ -146,12 +146,27 @@ async def test_complete_generation_contains_content_usage_and_first_token(kind):
     )
     attrs = generation.attributes
     assert generation.parent.span_id == int(parent.span.span_id, 16)
-    assert attrs["gen_ai.request.model"] == "actual-model"
-    assert attrs["gen_ai.usage.input_tokens"] == 100
-    assert attrs["gen_ai.usage.cached_input_tokens"] == 40
-    content_suffix = ".value" if kind == "phoenix" else ""
-    assert json.loads(attrs[f"input{content_suffix}"])["messages"][0]["content"][0]["text"] == "hello"
-    assert json.loads(attrs[f"output{content_suffix}"])["text"] == "answer"
+    content_keys = {
+        "otlp": ("gen_ai.input.messages", "gen_ai.output.messages"),
+        "phoenix": ("input.value", "output.value"),
+        "langfuse": ("langfuse.observation.input", "langfuse.observation.output"),
+    }
+    input_key, output_key = content_keys[kind]
+    assert json.loads(attrs[input_key])["messages"][0]["content"][0]["text"] == "hello"
+    assert json.loads(attrs[output_key])["text"] == "answer"
+    assert "input" not in attrs and "output" not in attrs
+    for backend, keys in content_keys.items():
+        if backend != kind:
+            assert all(key not in attrs for key in keys)
+    if kind == "otlp":
+        assert attrs["gen_ai.request.model"] == "actual-model"
+        assert attrs["gen_ai.usage.input_tokens"] == 100
+        assert attrs["gen_ai.usage.cached_input_tokens"] == 40
+    elif kind == "phoenix":
+        assert attrs["llm.model_name"] == "actual-model"
+        assert attrs["llm.token_count.prompt"] == 100
+    else:
+        assert attrs["langfuse.observation.model.name"] == "actual-model"
     assert attrs["completion_start_time"]
     assert attrs["correlation_id"] == "req-http"
     if kind == "langfuse":

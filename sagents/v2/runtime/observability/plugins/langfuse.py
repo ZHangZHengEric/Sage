@@ -74,8 +74,7 @@ class LangfuseTraceSink(OtlpTraceTransport):
         if ingestion_version not in {3, 4}:
             raise ValueError("Langfuse ingestion_version must be 3 or 4")
 
-    def _attributes(self, span: TraceSpan) -> dict[str, Any]:
-        values = super()._attributes(span)
+    def _project(self, span: TraceSpan, values: dict[str, Any], body: dict[str, Any]):
         values.update(
             {
                 "langfuse.observation.type": {
@@ -86,8 +85,8 @@ class LangfuseTraceSink(OtlpTraceTransport):
                 "langfuse.session.id": values.get("root_session_id") or span.session_id,
                 "langfuse.user.id": values.get("user_id"),
                 "langfuse.environment": self.environment,
-                "langfuse.observation.input": values.get("input"),
-                "langfuse.observation.output": values.get("output"),
+                "langfuse.observation.input": body["input"],
+                "langfuse.observation.output": body["output"],
                 "langfuse.observation.level": "ERROR"
                 if span.status is TraceStatus.ERROR
                 else "WARNING"
@@ -152,4 +151,3 @@ class LangfuseTraceSink(OtlpTraceTransport):
                 values["langfuse.observation.cost_details"] = json.dumps(
                     {"total": values["cost"]}
                 )
-        return values

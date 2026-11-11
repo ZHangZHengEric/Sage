@@ -80,20 +80,20 @@ class ExternalEvidenceSink:
     # not capture per-log or per-delta diagnostic records.
     raw_capture = False
 
-    async def begin_model_request(self, *, session_id, request, **kwargs):
+    async def begin_model_request(self, *, session_id, request, observed_at=None, **kwargs):
         self._model(
             session_id,
             request,
-            started_at=utc_now().isoformat(),
+            started_at=(observed_at or utc_now()).isoformat(),
             purpose=request.metadata.get("purpose", "agent"),
             turn_id=request.metadata.get("turn_id"),
         )
 
-    async def complete_model_request(self, *, session_id, request, **kwargs):
-        self._model(session_id, request, completed_at=utc_now().isoformat())
+    async def complete_model_request(self, *, session_id, request, observed_at=None, **kwargs):
+        self._model(session_id, request, completed_at=(observed_at or utc_now()).isoformat())
 
-    async def fail_model_request(self, *, session_id, request, **kwargs):
-        self._model(session_id, request, completed_at=utc_now().isoformat())
+    async def fail_model_request(self, *, session_id, request, observed_at=None, **kwargs):
+        self._model(session_id, request, completed_at=(observed_at or utc_now()).isoformat())
 
     async def record_model_first_token(self, *, session_id, request, observed_at):
         self._model(session_id, request, first_token_at=observed_at.isoformat())
