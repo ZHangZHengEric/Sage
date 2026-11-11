@@ -5,31 +5,20 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import closing
-from datetime import datetime
 import json
 from pathlib import Path
 import sqlite3
 from threading import BoundedSemaphore, Lock
 
-from sagents.v2.contracts.common import utc_now
-from ...evidence.redaction import redact
-from ...evidence.requests import model_request_payload
+from ...evidence.capture import DiagnosticCapture
 
 
-class SessionDiagnostics:
+class SessionDiagnostics(DiagnosticCapture):
     """SQLite in a host-only directory, outside all Agent workspaces.
 
     Records are keyed by both Session and Run; export additionally checks the
     authoritative Run allowlist. No filesystem paths supplied by a caller are read.
     """
-
-    format_version = "sage.session-diagnostics/v1"
-    # A model record combines request/response with two independently bounded
-    # 8 MiB streams (provider wire and normalized events). The old 8 MiB row
-    # limit discarded otherwise complete captures from ordinary long outputs.
-    max_record_bytes = 32 * 1024 * 1024
-    max_logs_per_run = 10000
-    max_pending_writes = 64
 
     def __init__(self, root: Path):
         self.path = root / "evidence.sqlite3"
@@ -124,23 +113,6 @@ class SessionDiagnostics:
             raise sqlite3.OperationalError("diagnostic storage unavailable")
         return sqlite3.connect(self.path, timeout=1)
 
-    def _encode(self, value):
-        encoded = json.dumps(redact(value), ensure_ascii=False)
-        if len(encoded.encode()) > self.max_record_bytes:
-            return json.dumps(
-                {
-                    "truncated": True,
-                    "reason": "record_size_limit",
-                    "original_bytes": len(encoded.encode()),
-                    **{
-                        key: value[key]
-                        for key in ("session_id", "run_id", "request_id", "status")
-                        if key in value
-                    },
-                }
-            )
-        return encoded
-
     def _update(self, session_id, request, update):
         try:
             with closing(self._connect()) as db, db:
@@ -170,80 +142,6 @@ class SessionDiagnostics:
         except Exception:
             self.capture_failures += 1
             raise
-
-    async def begin_model_request(
-        self, *, session_id, request, provider, wire_request=None
-    ):
-        self._enqueue(
-            self._update,
-            session_id,
-            request,
-            {
-                "format_version": self.format_version,
-                "status": "started",
-                "started_at": utc_now().isoformat(),
-                "request_format": "provider_wire"
-                if wire_request is not None
-                else "normalized",
-                "request": model_request_payload(request, wire_request),
-                "metadata": dict(provider),
-                "request_metadata": dict(request.metadata),
-                "step_id": request.metadata.get("step_id"),
-                "turn_id": request.metadata.get("turn_id"),
-                "model_binding": getattr(request, "model_binding", None),
-                "purpose": request.metadata.get("purpose", "agent"),
-            },
-        )
-
-    async def complete_model_request(self, *, session_id, request, response):
-        self._enqueue(
-            self._update,
-            session_id,
-            request,
-            {
-                "status": "completed",
-                "completed_at": utc_now().isoformat(),
-                "response_format": "normalized",
-                "response": response.model_dump(mode="json"),
-            },
-        )
-
-    async def fail_model_request(self, *, session_id, request, error):
-        self._enqueue(
-            self._update,
-            session_id,
-            request,
-            {
-                "status": "failed",
-                "completed_at": utc_now().isoformat(),
-                "error": {
-                    "type": type(error).__name__,
-                    "message": str(error),
-                    "info": error.info.model_dump(mode="json")
-                    if hasattr(error, "info")
-                    else None,
-                },
-            },
-        )
-
-    async def record_model_stream(self, *, session_id, request, evidence):
-        self._enqueue(self._update, session_id, request, {"stream": evidence})
-
-    async def record_model_first_token(
-        self, *, session_id, request, observed_at: datetime
-    ):
-        self._enqueue(
-            self._update,
-            session_id,
-            request,
-            {"first_token_at": observed_at.isoformat()},
-        )
-
-    def write(self, record):
-        # Process-wide/HTTP records without a trusted Run association are excluded.
-        if not self.available or not record.session_id or not record.run_id:
-            return
-        self._enqueue(self._write_log, record)
 
     def _write_log(self, record):
         try:

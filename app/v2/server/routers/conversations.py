@@ -7,6 +7,7 @@ from tempfile import SpooledTemporaryFile
 from typing import Annotated, Literal
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 from ag_ui.core import RunAgentInput
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -187,7 +188,7 @@ async def get_thread_run_timing(
                     session_id=thread_id, run_id=run.run_id,
                     start=run.created_at.timestamp(), end=utc_now().timestamp(),
                 )
-        except (OSError, sqlite3.Error, httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError) as exc:
+        except (OSError, sqlite3.Error, SQLAlchemyError, httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError) as exc:
             raise HTTPException(503, "耗时记录暂不可用") from exc
         if timing is not None and timing["state"] != run.state.value:
             timing = None

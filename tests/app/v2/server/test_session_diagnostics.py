@@ -254,7 +254,8 @@ def test_direct_package_uses_server_model_diagnostics(client, service):
     state = settled(client, headers, "package-diagnostics")
     assert state["run"]["state"] == "completed", state
     run = state["run"]
-    evidence = service.diagnostics.snapshot(run["session_id"], {run["run_id"]})
+    assert not (service.paths.runtime_root / "diagnostics" / "evidence.sqlite3").exists()
+    evidence = client.portal.call(service.observability.export_evidence, run["session_id"], {run["run_id"]})
     records = evidence["models"]
     assert records, "Direct Package model calls must reach Server diagnostics"
     assert any(record["response"].get("text") == "hello" for record in records)
@@ -410,7 +411,7 @@ def test_download_is_admin_only_and_excludes_other_sessions(client, service):
 def test_owner_or_agent_mismatch_fails_before_reading_diagnostics(
     client, service, monkeypatch, mismatch
 ):
-    from unittest.mock import AsyncMock, Mock
+    from unittest.mock import AsyncMock
     from app.v2.server.conversations.bindings import SessionBinding
 
     alice, owner = identity(client, "alice")
@@ -430,15 +431,15 @@ def test_owner_or_agent_mismatch_fails_before_reading_diagnostics(
             )
         ),
     )
-    snapshot = Mock(side_effect=AssertionError("diagnostics must not be read"))
-    monkeypatch.setattr(service.diagnostics, "snapshot", snapshot)
+    export = AsyncMock(side_effect=AssertionError("diagnostics must not be read"))
+    monkeypatch.setattr(service.observability, "export_evidence", export)
     assert (
         client.get(
             "/api/threads/thread-1/download", headers=admin_headers(client)
         ).status_code
         == 404
     )
-    snapshot.assert_not_called()
+    export.assert_not_called()
 
 
 async def test_diagnostic_failure_does_not_stop_model_stream(tmp_path, monkeypatch):

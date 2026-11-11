@@ -43,6 +43,13 @@ def test_independent_react_package_runs_and_owns_its_files_without_catalog_agent
         assert cast('BlockingPortal', client.portal).call(state) == "completed", response.text
         assert '"RUN_FINISHED"' in response.text
         thread = client.get("/api/threads/package-workspace").json()["data"]
+
+        async def wait_for_workspace_release():
+            async with asyncio.timeout(3):
+                while host.execution.workspace_driving(thread["user_id"], thread["agent_id"]):
+                    await asyncio.sleep(0.01)
+
+        cast('BlockingPortal', client.portal).call(wait_for_workspace_release)
         workspace = host.paths.workspace_path(thread["user_id"], thread["agent_id"])
         (workspace / "owned.txt").write_text("owned")
         response = client.delete("/api/workspace/files", params={"thread_id": thread["thread_id"], "path": "owned.txt"})

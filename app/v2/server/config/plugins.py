@@ -15,6 +15,7 @@ from pathlib import Path
 from jsonschema import ValidationError, validate
 
 from app.v2.server.catalog.plugins import AGENT_DEFAULTS, configuration_schema
+from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
@@ -34,7 +35,7 @@ SERVER_DEFAULTS = {
     "memory.provider": "sage.memory.filesystem-bm25",
     "session-memory.provider": "sage.session-memory.sqlite-bm25",
     "context.summary-store": "sage.context.summary-store.session-derived",
-    "observability.provider": "sage.observability.local",
+    "observability.provider": SQL_OBSERVABILITY_PLUGIN,
     "workspace.initializer": "sage.workspace.initializer.claw",
     "package.registry": "sage.package-registry.ephemeral",
 }

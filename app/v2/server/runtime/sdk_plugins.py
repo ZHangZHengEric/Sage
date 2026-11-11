@@ -169,7 +169,8 @@ def server_registrations(host):
 
     async def self_configuration(context, deps):
         import json
-        from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
+        from app.v2.server.self_configuration.repository import DatabaseSelfConfigurationStore
+        from sagents.v2.agent.self_configuration import SelfConfigurationService
         from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
         from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
         from app.v2.server.storage.workspaces import workspace_user
@@ -192,7 +193,7 @@ def server_registrations(host):
             if current is None or current.shell == "deny":
                 raise PermissionError("The live execution grant does not permit capability changes")
         return SelfConfigurationService(
-            store=SqliteSelfConfigurationStore(host.paths.runtime_root / "self-configuration.sqlite3"),
+            store=DatabaseSelfConfigurationStore(host.database),
             owner=json.dumps(["server", user, frozen.agent.id]),
             workspace_root=host.paths.workspace_dir(workspace_user(command, user), frozen.agent.id),
             workspace_alias=run.workspace_root, authorize=authorize,

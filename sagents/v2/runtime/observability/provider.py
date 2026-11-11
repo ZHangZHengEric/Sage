@@ -190,12 +190,14 @@ class ObservabilityProvider:
             raise BaseExceptionGroup("observability shutdown failed", errors)
 
 
-def create_observability_provider(plugin_id: str, config=None) -> ObservabilityProvider:
+def create_observability_provider(
+    plugin_id: str, config=None, *, local_diagnostics_factory=None
+) -> ObservabilityProvider:
     if plugin_id == "sage.observability.noop":
         ObservabilityConfig.model_validate(config or {})
         return ObservabilityProvider(plugin_id=plugin_id)
     options = ObservabilityConfig.model_validate(config or {})
-    backend = plugin_id.removeprefix("sage.observability.")
+    backend = "local" if local_diagnostics_factory else plugin_id.removeprefix("sage.observability.")
     if backend not in {"local", "otlp", "langfuse", "phoenix"}:
         raise ValueError(f"unknown observability provider: {plugin_id}")
     traces, evidence, outputs = None, None, []
@@ -231,15 +233,17 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
 
                         trace_query = PhoenixTraceQuery(evidence)
         elif (
-            options.diagnostics_root
-            and options.diagnostics_storage != "none"
-            and options.diagnostic_content_mode != "off"
+            options.diagnostic_content_mode != "off"
+            and (local_diagnostics_factory or (options.diagnostics_root and options.diagnostics_storage != "none"))
         ):
             if options.diagnostic_content_mode == "raw":
                 raise ValueError(
                     "local diagnostics support redacted capture; use an external raw evidence backend"
                 )
-            if options.diagnostics_storage == "sqlite":
+            if local_diagnostics_factory:
+                evidence = local_diagnostics_factory()
+                performance_query = evidence
+            elif options.diagnostics_storage == "sqlite":
                 from .plugins.sqlite import SessionDiagnostics
 
                 evidence = SessionDiagnostics(Path(options.diagnostics_root))

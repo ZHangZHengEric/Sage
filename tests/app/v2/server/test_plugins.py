@@ -6,6 +6,7 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 from app.v2.server.catalog.plugins import AGENT_DEFAULTS, plugin_options
 from app.v2.server.config.manifest import server_v2_run_manifest
+from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
 from tests.app.v2.server.test_file_downloads import identity
 from tests.app.v2.server.test_session_diagnostics import admin_headers
 
@@ -16,9 +17,9 @@ def test_all_builtin_plugins_and_defaults_are_visible(client):
     response = client.get("/api/plugins", headers=user)
     assert response.status_code == 200
     data = response.json()["data"]
-    assert len(data["plugins"]) == len(plugin_options())
-    assert len(data["plugins"]) > 30
     by_id = {p["id"]: p for p in data["plugins"]}
+    assert set(by_id) == {plugin["id"] for plugin in plugin_options()} | {SQL_OBSERVABILITY_PLUGIN}
+    assert data["defaults"]["observability.provider"] == SQL_OBSERVABILITY_PLUGIN
     for cap, plugin in AGENT_DEFAULTS.items():
         assert cap in by_id[plugin]["capabilities"]
     assert data["defaults"]["context.summarizer"] == "sage.context.summarizer.model"
@@ -111,7 +112,9 @@ async def test_standard_run_uses_model_summary_and_honors_explicit_fallback(serv
     from tests.sagents.v2.sdk_fixture import build_registered_app
     from tests.sagents.v2.test_standard_execution_configuration import package, response, run, CONTEXT
     runtime = server_v2_manifest(service.settings).runtime
+    # The standalone SDK fixture has no Server database.
     runtime = runtime.model_copy(update={"capabilities": {**runtime.capabilities,
+        "observability.provider": CapabilitySelection(plugin="sage.observability.noop"),
         "tool.selection-policy": CapabilitySelection(plugin="sage.tool-selection.direct"),
         "agent.continuation-policy": CapabilitySelection(plugin="sage.agent.continuation.deterministic")}})
     app = await build_registered_app(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider((response(), response())), runtime=runtime)

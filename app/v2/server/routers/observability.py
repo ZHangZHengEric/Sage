@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import sqlite3
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Request, Query, Path, HTTPException
@@ -262,6 +263,7 @@ async def performance(
     except (
         OSError,
         sqlite3.Error,
+        SQLAlchemyError,
         httpx.HTTPError,
         ValueError,
         KeyError,

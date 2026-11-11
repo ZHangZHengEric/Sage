@@ -75,7 +75,9 @@ class ServerHost:
         self.observability = None
         self.contexts = RequestContexts(settings.language)
         self.package_authorizer = package_authorizer
-        self._registrations = tuple(extensions)
+        from app.v2.server.observability.sql_provider import sql_observability_registration
+
+        self._registrations = (sql_observability_registration(database), *extensions)
         from sagents.v2.runtime.extensions.official import builtin_extension_registry
         self.extensions = builtin_extension_registry()
         for registration in self._registrations:

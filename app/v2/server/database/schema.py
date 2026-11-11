@@ -15,7 +15,9 @@ from app.v2.server.observability.logging import get_logger
 from app.v2.server.catalog import orm as _catalog_orm  # noqa: F401
 from app.v2.server.conversations import orm as _conversations_orm  # noqa: F401
 from app.v2.server.skills import orm as _skills_orm  # noqa: F401
+from app.v2.server.observability import orm as _diagnostics_orm  # noqa: F401
 from app.v2.server.packages import orm as _packages_orm  # noqa: F401
+from app.v2.server.self_configuration import repository as _self_configuration  # noqa: F401
 
 logger = get_logger(__name__)
 

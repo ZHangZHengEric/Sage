@@ -25,6 +25,7 @@ const names = {
   'sage.memory.recall-query.direct': '直接使用用户输入', 'sage.memory.recall-query.llm': 'LLM 生成检索词',
   'sage.tool-selection.direct': '直接展示全部工具', 'sage.tool-selection.lexical': 'BM25 相关性选择', 'sage.tool-selection.llm': '大模型工具选择', 'sage.tool-selection.recent': '最近使用优先',
   'sage.session-memory.sqlite-bm25': 'SQLite BM25 会话记忆', 'sage.session-memory.noop': '关闭会话记忆',
+  'com.sage.server.observability-sql': 'Server SQL 观测',
   'sage.observability.local': '本地观测', 'sage.observability.noop': '关闭观测',
   'sage.observability.otlp': 'OTLP / Jaeger 观测', 'sage.observability.langfuse': 'Langfuse 观测', 'sage.observability.phoenix': 'Phoenix 观测',
   'sage.sandbox.local-workspace': '本地工作区沙箱', 'sage.sandbox.ephemeral': '临时内存沙箱', 'sage.sandbox.cube-volume': 'Cube Volume 沙箱',

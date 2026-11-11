@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from contextlib import closing
-import hashlib
 import sqlite3
 
-from ...performance.aggregation import EVENTS, build_run, model_first_text_at, timestamp, timing_report
+from ...performance.aggregation import EVENTS, build_run, timestamp, timing_report
+from ...performance.projection import log_timings, model_timing
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS performance_events (
@@ -26,54 +26,19 @@ CREATE INDEX IF NOT EXISTS performance_models_run ON performance_models(run_id,s
 
 
 def project_log(db, row):
-    event = row.get("event")
-    if event not in EVENTS or not row.get("run_id") or not row.get("session_id"):
-        return
-    attrs = row.get("attributes") or {}
-    # Deliberate allowlist: no messages, arguments, errors or model content.
-    at = timestamp(attrs.get("first_text_at") if event == "model.first_text"
-                   and attrs.get("first_text_at") else row["timestamp"])
-    identity = (
-        row.get("tool_call_id") if event.startswith("tool.") else row.get("request_id")
-    )
-    key = hashlib.sha256(
-        f"{row['run_id']}\0{event}\0{at}\0{identity}".encode()
-    ).hexdigest()
-    db.execute(
-        "INSERT OR IGNORE INTO performance_events VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            key,
-            row["session_id"],
-            row["run_id"],
-            event,
-            at,
-            attrs.get("agent_id"),
-            identity,
-            attrs.get("purpose"),
-            timestamp(attrs.get("started_at")),
-            row.get("turn_id"),
-            attrs.get("run_state"),
-        ),
-    )
-    # First text is also available from completion telemetry at info log level.
-    if event == "model.request.completed" and (first := model_first_text_at(attrs, at)) is not None:
-        projected = {**row, "event": "model.first_text", "timestamp": first}
-        project_log(db, projected)
+    for timing in log_timings(row):
+        db.execute(
+            """INSERT OR IGNORE INTO performance_events
+            VALUES(:id,:session_id,:run_id,:event,:at,:agent_id,:identity,:purpose,:started_at,:turn_id,:state)""",
+            timing,
+        )
 
 
 def project_model(db, row):
     db.execute(
-        "INSERT OR REPLACE INTO performance_models VALUES(?,?,?,?,?,?,?,?)",
-        (
-            row["run_id"],
-            row["request_id"],
-            row["session_id"],
-            timestamp(row.get("started_at")),
-            timestamp(row.get("completed_at")),
-            timestamp(row.get("first_token_at")),
-            row.get("purpose") or "agent",
-            row.get("turn_id"),
-        ),
+        """INSERT OR REPLACE INTO performance_models
+        VALUES(:run_id,:request_id,:session_id,:started_at,:ended_at,:first_token_at,:purpose,:turn_id)""",
+        model_timing(row),
     )
 
 

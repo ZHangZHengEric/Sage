@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.v2.server.config.manifest import server_v2_manifest
+from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.main import create_app
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
@@ -50,7 +51,7 @@ def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
     assert disabled.effective_trace_backend == "noop"
     assert (
         cast(CapabilitySelection, server_v2_manifest(disabled).runtime.capabilities["observability.provider"]).plugin
-        == "sage.observability.local"
+        == SQL_OBSERVABILITY_PLUGIN
     )
     assert not disabled.trace_console_url
 

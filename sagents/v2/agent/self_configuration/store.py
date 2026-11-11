@@ -9,6 +9,8 @@ from pathlib import Path
 
 from sagents.v2.concurrency import bounded_to_thread
 
+from .revision import apply_revision
+
 
 class SqliteSelfConfigurationStore:
     """Keep Agent defaults separate from frozen Run revisions. No credentials."""
@@ -107,13 +109,6 @@ class SqliteSelfConfigurationStore:
                     "SELECT data FROM runs WHERE owner=? AND run=?", (owner, run_id)
                 ).fetchone()
                 current = json.loads(row[0])
-                if current["revision"] != expected_revision:
-                    raise ValueError(
-                        "self configuration revision changed; read and submit again"
-                    )
-                current["skills"].update(skills)
-                current["mcp_servers"].update(servers)
-                current["revision"] += 1
                 defaults = db.execute(
                     "SELECT data FROM defaults WHERE owner=?", (owner,)
                 ).fetchone()
@@ -122,35 +117,9 @@ class SqliteSelfConfigurationStore:
                     if defaults
                     else {"revision": 0, "skills": {}, "mcp_servers": {}}
                 )
-                # Concurrent Runs may add disjoint capabilities, never erase them.
-                for key, additions in (("skills", skills), ("mcp_servers", servers)):
-                    for name, value in additions.items():
-                        if name in future[key] and future[key][name] != value:
-                            raise ValueError(
-                                f"capability {name!r} already has a different saved definition"
-                            )
-                    future[key].update(additions)
-                if system_prompt is not None:
-                    # A stale Run must not silently replace a newer Run's prompt.
-                    if (
-                        future.get("system_prompt", "")
-                        != current.get("system_prompt", "")
-                        and future.get("system_prompt", "") != system_prompt
-                    ):
-                        raise ValueError(
-                            "Agent instructions changed in another Run; start a fresh Run before replacing them"
-                        )
-                    current["system_prompt"] = system_prompt
-                    future["system_prompt"] = system_prompt
-                future["revision"] += 1
-                result = {
-                    "revision": current["revision"],
-                    "added_skills": sorted(skills),
-                    "added_mcp_servers": sorted(servers),
-                    "effective": "next_model_step",
-                    "persistent": True,
-                    "system_prompt_updated": system_prompt is not None,
-                }
+                result = apply_revision(
+                    current, future, expected_revision, skills, servers, system_prompt
+                )
                 encoded = json.dumps(current)
                 db.execute(
                     "UPDATE runs SET data=? WHERE owner=? AND run=?",

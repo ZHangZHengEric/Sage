@@ -16,6 +16,7 @@ from sagents.v2.runtime.observability import StructuredLogger, structured_log_co
 
 from app.v2.server.main import create_app
 from app.v2.server.config.manifest import server_v2_manifest
+from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
 from app.v2.server.observability.context import request_context
 from app.v2.server.observability.logging import get_logger
 from tests.app.v2.server.conftest import make_settings, make_test_service
@@ -51,7 +52,7 @@ def test_package_has_no_yaml_credentials_or_model_routes():
 
 def test_package_always_registers_stdout_log_sink(tmp_path: Path):
     log_sink = _stdout_log_sink(server_v2_manifest(make_settings(tmp_path)))
-    assert cast(CapabilitySelection, log_sink).plugin == "sage.observability.local"
+    assert cast(CapabilitySelection, log_sink).plugin == SQL_OBSERVABILITY_PLUGIN
     assert cast(CapabilitySelection, log_sink).config.get("log_stdout", True) is True
 
 
@@ -93,7 +94,7 @@ def test_package_skips_jaeger_when_endpoint_missing(tmp_path: Path):
             mysql_url="mysql://sage:sage@127.0.0.1:3306/sage",
         )
     )
-    assert cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).plugin == "sage.observability.local"
+    assert cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).plugin == SQL_OBSERVABILITY_PLUGIN
     assert cast(CapabilitySelection, manifest.runtime.capabilities["session.store"]).plugin == "sage.session.mysql"
     assert cast(CapabilitySelection, _stdout_log_sink(manifest)).plugin == cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).plugin
 

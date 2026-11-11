@@ -369,7 +369,7 @@ Web 工作目录树、单文件和目录 ZIP 下载按已授权的租户及 Agen
 
 这些查询均经 server 的管理员鉴权：`GET /api/observability/traces/summary`、`GET /api/observability/trace-spans`、`GET /api/observability/traces/{trace_id}/spans`、`GET /api/observability/trace-spans/{span_id}`。前两者接受统一时间范围和 `agent_id`、`session_id`；列表额外接受 `kind`、`status`、`cursor`。server 使用配置好的项目与凭据访问 Phoenix 的只读 GraphQL / REST API，不接受浏览器指定上游地址或查询语句，也不把上游凭据交给浏览器；不新增业务持久化。原有 console 链接在 Phoenix 模式下指向本地 `/performance`。
 
-未启用 trace 后端（noop）时，计时与诊断证据写入本地 `runtime/diagnostics/evidence.sqlite3`。选择任一外部 trace 后端后，不创建、不写入该库。Langfuse 和通用 OTLP 暂不提供诊断查询，下载接口返回 409，性能入口不显示；不会回退本地采集。Phoenix 或 Jaeger 模式下，轻量计时记录合并到每次执行段的原生 `agent.run` span 属性和事件（暂停后恢复属于新的执行段），关联到真实 Agent 调用链；过程计时放在事件和汇总属性中，执行段结束后可查询，性能页按 Run 合并各段并排除人工等待。页面按需查询外部 API，复用下述统计口径。Phoenix 默认使用 OTLP endpoint 去掉 `/v1/traces` 后的地址查询项目 spans；Jaeger 使用 Query v3 HTTP API，默认地址为 `SAGE_SERVER_JAEGER_PUBLIC_URL`。可用 `SAGE_SERVER_TRACE_QUERY_URL` 单独指定 server 可达的查询地址，用 `SAGE_SERVER_TRACE_QUERY_HEADERS_ENV` 指定查询凭据所在的环境变量名（默认 `OTEL_EXPORTER_OTLP_TRACES_HEADERS`，格式同 OTLP headers）。远程查询失败返回 503，不回退写入或混入旧本地历史。旧数据不自动迁移；部署本变更之前的 trace 不具有完整计时记录，统计受采样、导出失败和后端保留期影响。
+未启用外部 Trace 时，默认由 `com.sage.server.observability-sql` 将计时与诊断证据写入 Server 配置的 MySQL 或 PostgreSQL。Langfuse 和通用 OTLP 暂不提供诊断查询，下载接口返回 409，性能入口不显示；不会回退本地采集。Phoenix 或 Jaeger 模式下，轻量计时记录合并到每次执行段的原生 `agent.run` span 属性和事件（暂停后恢复属于新的执行段），关联到真实 Agent 调用链；过程计时放在事件和汇总属性中，执行段结束后可查询，性能页按 Run 合并各段并排除人工等待。页面按需查询外部 API，复用下述统计口径。Phoenix 默认使用 OTLP endpoint 去掉 `/v1/traces` 后的地址查询项目 spans；Jaeger 使用 Query v3 HTTP API，默认地址为 `SAGE_SERVER_JAEGER_PUBLIC_URL`。可用 `SAGE_SERVER_TRACE_QUERY_URL` 单独指定 server 可达的查询地址，用 `SAGE_SERVER_TRACE_QUERY_HEADERS_ENV` 指定查询凭据所在的环境变量名（默认 `OTEL_EXPORTER_OTLP_TRACES_HEADERS`，格式同 OTLP headers）。远程查询失败返回 503，不回退写入或混入旧本地历史。旧数据不自动迁移；部署本变更之前的 trace 不具有完整计时记录，统计受采样、导出失败和后端保留期影响。
 
 “下载诊断包”使用观测层的异步 `export_evidence(session_id, run_ids)` 能力，服务端仅鉴权、核对 Run 的 Agent/tenant 归属并临时打包，不再调用业务存储的全量导出。ZIP 格式为 `sage.session-diagnostic-bundle/v2`，保留 `manifest.json`、`models.json`、`requests/`、`logs.json`、`tools.json`、`failures.json`，外部查询还包含 `traces.json`。移除 `state.json`、`session.json`、`runs/`、`events/`；不复制业务快照。工具结果和失败由观测 span/日志生成，缺失的历史结果不从业务事件反查，manifest 明确记录可用性。外部查询只包含该 Session 和权威 Run 白名单内的 trace。完整原始模型流是否可用由当前采集模式决定，不会从本地旧库补齐。 若未采集专用原始诊断，下载仍从普通模型 span 导出已保存的规范化输入/输出，标记 `evidence_source=trace_projection`、`request_format=normalized_trace` 和截断情况，不冒充 provider 原始请求或流。清单 `evidence_availability` 区分可用、部分可用、未采集及未观察到失败；空日志和原始流不会从计时记录伪造。MySQL 的会话、事件和恢复数据不受影响。
 
@@ -386,13 +386,19 @@ Phoenix 性能查询按 SDK 入口时间和 Agent 在上游筛选，仅投影计
 
 趋势提供 P50、P95 和框架占比。占比按完整样本的总框架时间除以总有效时间计算，不平均每个请求的百分比。未完成、失败、取消的请求不进入完成请求分位数；缺少模型结束或恢复边界等记录时，框架耗时显示缺失，绝不填零。历史记录缺少最外层初始化边界时标记「初始化未记录」，不与新口径混合比较。列表最多展示最近 200 条，汇总最多 10000 个请求或 100000 条轻量时间记录；达到上限时明确标记，应缩小时间范围。
 
-诊断写入线程同时维护仅含身份、时间戳和分类的 SQLite 轻量投影；页面查询只读取这些索引表，不加载模型上下文、文件、工具参数或诊断导出。采集维持有界异步队列，失败与丢失数在页面提示，不阻塞首 token。已有诊断可由管理员显式执行一次时间字段回填，不在启动或页面请求中自动扫描大记录：
+诊断写入同时维护仅含身份、时间戳和分类的轻量计时表。页面查询只读这些表。诊断内容通过有界队列异步写入，失败与丢失数在页面提示。
+
+### 从 SQLite 迁移自配置和诊断
+
+Agent 自配置与默认诊断复用 Server 配置的 MySQL 或 PostgreSQL。旧部署升级时，停止使用旧库的 Server 实例，用目标 Server 的数据库环境执行导入。只传入需要导入的文件。导入保留 Run 修订和操作回执，重复执行会校验已有记录，遇到冲突会回滚该文件的导入。
 
 ```sh
-python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill /app/data/runtime/diagnostics/evidence.sqlite3
+python -m app.v2.server.database.import_sqlite \
+  --self-configuration /app/data/runtime/self-configuration.sqlite3 \
+  --diagnostics /app/data/runtime/diagnostics/evidence.sqlite3
 ```
 
-回填只提取时间字段，幂等写入；不能凭历史数据补造缺失的初始化边界。
+如果旧诊断库需要补齐计时字段，先在旧库上执行 `python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill /app/data/runtime/diagnostics/evidence.sqlite3`。已有显式观测插件选择的部署可在「配置 Server」里恢复观测默认值，重启后使用配置的 SQL 数据库。MySQL 部署应为最多 32 MiB 的单条诊断证据和协议开销预留足够的 `max_allowed_packet`。
 
 ## AstrBot 多平台接入
 

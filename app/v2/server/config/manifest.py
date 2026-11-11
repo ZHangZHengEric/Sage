@@ -240,8 +240,15 @@ def _runtime_capabilities(
         })
         observation = capabilities["observability.provider"]
         assert isinstance(observation, CapabilitySelection)
-        if observation.plugin in {f"sage.observability.{backend}" for backend in ("local", "noop", "otlp", "langfuse", "phoenix")}:
-            defaults = _observation_selection(settings, backend=observation.plugin.removeprefix("sage.observability."))
+        from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
+
+        backend = (
+            "sql" if observation.plugin == SQL_OBSERVABILITY_PLUGIN
+            else observation.plugin.removeprefix("sage.observability.")
+            if observation.plugin.startswith("sage.observability.") else None
+        )
+        if backend in {"sql", "local", "noop", "otlp", "langfuse", "phoenix"}:
+            defaults = _observation_selection(settings, backend=backend)
             capabilities["observability.provider"] = observation.model_copy(update={
                 "config": {**defaults.config, **observation.config},
             })
@@ -249,6 +256,8 @@ def _runtime_capabilities(
 
 
 def _observation_selection(settings, *, backend=None):
+    from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
+
     """One backend selection owns logs, diagnostics, query settings and traces."""
     config = {"log_level": settings.log_level if settings else "info",
               "log_format": settings.log_format if settings else "json",
@@ -256,7 +265,9 @@ def _observation_selection(settings, *, backend=None):
     if settings is None:
         return CapabilitySelection(plugin="sage.observability.local", config=config)
     config["log_root"] = settings.log_directory or None
-    backend = backend or ("local" if settings.effective_trace_backend == "noop" else settings.effective_trace_backend)
+    backend = backend or ("sql" if settings.effective_trace_backend == "noop" else settings.effective_trace_backend)
+    if backend == "sql":
+        return CapabilitySelection(plugin=SQL_OBSERVABILITY_PLUGIN, config=config)
     if backend == "noop":
         return CapabilitySelection(plugin="sage.observability.noop")
     if backend == "local":

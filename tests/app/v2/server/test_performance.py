@@ -290,8 +290,17 @@ def test_performance_api_requires_admin_and_bounds_queries(client, service):
     user, _ = identity(client, "alice")
     assert client.get("/api/observability/performance", headers=user).status_code == 403
     admin = {"Authorization": f"Bearer {admin_login(client)}"}
-    with sqlite3.connect(service.diagnostics.path) as db:
-        insert_sample(db)
+    from app.v2.server.observability.orm import events as event_table, timings as model_table
+
+    async def seed():
+        events, models = sample()
+        async with service.database.transaction() as db:
+            await db.execute(event_table.insert(), [
+                {**row, "id": f"perf-test-{index}"} for index, row in enumerate(events)
+            ])
+            await db.execute(model_table.insert(), models)
+
+    client.portal.call(seed)
     params = {"start": "2026-10-19T00:00:00Z", "end": "2026-10-20T00:00:00Z"}
     response = client.get(
         "/api/observability/performance", params=params, headers=admin
@@ -346,7 +355,7 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
                 await asyncio.sleep(0.01)
 
     client.portal.call(settle)
-    service.diagnostics._flush()
+    client.portal.call(service.diagnostics._flush)
     admin = {"Authorization": f"Bearer {admin_login(client)}"}
     metrics = client.get("/api/observability/performance", headers=admin).json()["data"]
     row = metrics["runs"][0]

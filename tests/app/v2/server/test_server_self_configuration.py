@@ -91,3 +91,4 @@ def test_catalog_agent_registers_then_uses_local_skill_in_same_agui_run(
     assert "Check actual deployed routes" in str(provider.requests[-1].messages)
 
     assert "Use concise Chinese." in str(provider.requests[-1].messages)
+    assert not (host.paths.runtime_root / "self-configuration.sqlite3").exists()
