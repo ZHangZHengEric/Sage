@@ -244,7 +244,7 @@ jobs:
 
   postgres-tests:
     if: github.event_name == 'workflow_dispatch'
-    name: MySQL and PostgreSQL storage parity
+    name: Server storage integration
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -283,7 +283,14 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      libsql:
+        image: ghcr.io/tursodatabase/libsql-server:v0.24.32
+        env:
+          SQLD_NODE: standalone
+        ports:
+          - 8080:8080
     env:
+      SAGE_V2_TEST_LIBSQL_URL: http://127.0.0.1:8080
       SAGE_V2_TEST_POSTGRES_DSN: postgresql://sage:sage-test-password@localhost:5432/sage_test
       SAGE_V2_TEST_MYSQL_DSN: mysql://sage:sage-test-password@localhost:3306/sage_test
       SAGE_V2_TEST_REDIS_URL: redis://localhost:6379/0
@@ -304,7 +311,9 @@ jobs:
           docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET appendonly yes
           docker exec ${{ job.services.redis.id }} redis-cli CONFIG SET maxmemory-policy noeviction
       - run: python -m pip install -e '.[server,postgres,test]'
-      - name: Verify PostgreSQL runtime and Server contracts
+      - name: Wait for libSQL
+        run: curl --fail --retry 20 --retry-all-errors --retry-delay 1 "$SAGE_V2_TEST_LIBSQL_URL/health"
+      - name: Verify database runtimes and Server contracts
         run: >-
           python -m pytest tests/sagents/v2/test_postgres_session_store.py
           tests/sagents/v2/test_postgres_connection_budget.py
@@ -316,6 +325,8 @@ jobs:
           tests/sagents/v2/test_mysql_incremental_archive.py
           tests/sagents/v2/test_sql_session_store_contract.py
           tests/app/v2/server/test_postgres_configuration.py
+          tests/app/v2/server/test_libsql_memory.py
+          tests/app/v2/server/test_external_memory_isolation.py
           tests/app/v2/server/test_mysql_image_run.py
           tests/app/v2/server/test_distributed_runtime_configuration.py
           -q --basetemp="${{ runner.temp }}/pytest"

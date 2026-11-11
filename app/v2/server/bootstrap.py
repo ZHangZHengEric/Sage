@@ -17,6 +17,7 @@ from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (
     SchedulerQuotaGroup,
 )
 
+from app.v2.server.memory.libsql_client import LibSQLClient, LibSQLError
 from app.v2.server.admin.service import AdminService
 from app.v2.server.conversations.admission import RunAdmission
 from app.v2.server.runtime.execution import ProcessExecution
@@ -75,9 +76,17 @@ class ServerHost:
         self.observability = None
         self.contexts = RequestContexts(settings.language)
         self.package_authorizer = package_authorizer
+        from app.v2.server.memory.libsql import libsql_memory_registrations
         from app.v2.server.observability.sql_provider import sql_observability_registration
 
-        self._registrations = (sql_observability_registration(database), *extensions)
+        self.memory_database = None
+        memory_registrations = ()
+        if settings.libsql_url:
+            self.memory_database = LibSQLClient(settings.libsql_url, settings.libsql_auth_token)
+            memory_registrations = tuple(libsql_memory_registrations(self.memory_database))
+        self._registrations = (
+            *memory_registrations, sql_observability_registration(database), *extensions,
+        )
         from sagents.v2.runtime.extensions.official import builtin_extension_registry
         self.extensions = builtin_extension_registry()
         for registration in self._registrations:
@@ -159,8 +168,11 @@ class ServerHost:
         if self._application is None or self.agent_management is None:
             return False
         try:
-            return await asyncio.wait_for(self.database.ready(), timeout=1.0)
-        except TimeoutError:
+            async with asyncio.timeout(1.0):
+                if self.memory_database is not None:
+                    await self.memory_database.execute("SELECT 1")
+                return await self.database.ready()
+        except (TimeoutError, LibSQLError):
             return False
 
     @property
@@ -191,6 +203,10 @@ class ServerHost:
             )
         from app.v2.server.database.schema import create_host_schema
 
+        if self.memory_database is not None:
+            from app.v2.server.memory.libsql import check_memory_schema
+
+            await check_memory_schema(self.memory_database)
         await create_host_schema(self.database)
         await self.identity.start()
         await self.identity.ensure_admin(
@@ -389,6 +405,8 @@ class ServerHost:
         if self._application is not None:
             await self._application.close()
         self._application = None
+        if self.memory_database is not None:
+            await self.memory_database.close()
         self.im = None
         self.observability = None
         self.log_sink = None

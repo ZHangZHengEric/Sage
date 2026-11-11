@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-import hashlib
 import json
 import os
-import re
 import sqlite3
 from pathlib import Path
 
@@ -28,6 +26,9 @@ from sagents.v2.memory.contracts import (
     MemoryScope,
     MemoryWriteResult,
 )
+
+from sagents.v2.memory.indexing import scope_key, search_text
+from sagents.v2.tokenization import tokenize_bm25
 
 
 class FilesystemBm25MemoryProvider:
@@ -57,7 +58,7 @@ class FilesystemBm25MemoryProvider:
         )
 
     async def recall(self, query: MemoryQuery) -> tuple[MemoryHit, ...]:
-        query_tokens = self._tokenize(query.text)
+        query_tokens = tokenize_bm25(query.text)
         if not query_tokens:
             return ()
         rows = await bounded_to_thread(
@@ -196,11 +197,11 @@ class FilesystemBm25MemoryProvider:
     def _upsert_with_connection(
         self, connection: sqlite3.Connection, record: MemoryRecord
     ) -> bool:
-        scope_key = self._scope_key(record.scope)
+        owner = scope_key(record.scope)
         exists = connection.execute(
             "SELECT payload_json FROM memory_records "
             "WHERE scope_key = ? AND memory_id = ?",
-            (scope_key, record.memory_id),
+            (owner, record.memory_id),
         ).fetchone()
         if exists is not None:
             previous = MemoryRecord.model_validate_json(exists["payload_json"])
@@ -209,7 +210,7 @@ class FilesystemBm25MemoryProvider:
         metadata_json = json.dumps(
             record.metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
-        search_text = " ".join(self._tokenize(self._search_text(record)))
+        indexed_text = " ".join(tokenize_bm25(search_text(record)))
         connection.execute(
             """
             INSERT INTO memory_records(
@@ -225,36 +226,36 @@ class FilesystemBm25MemoryProvider:
                 updated_at = excluded.updated_at
             """,
             (
-                scope_key,
+                owner,
                 record.memory_id,
                 record.kind,
                 metadata_json,
                 payload_json,
-                search_text,
+                indexed_text,
                 record.created_at.isoformat(),
                 record.updated_at.isoformat(),
             ),
         )
         connection.execute(
             "DELETE FROM memory_fts WHERE scope_key = ? AND memory_id = ?",
-            (scope_key, record.memory_id),
+            (owner, record.memory_id),
         )
         connection.execute(
             "INSERT INTO memory_fts(scope_key, memory_id, search_text) VALUES (?, ?, ?)",
-            (scope_key, record.memory_id, search_text),
+            (owner, record.memory_id, indexed_text),
         )
         return exists is None
 
     def _delete(self, memory_id: str, scope: MemoryScope) -> bool:
-        scope_key = self._scope_key(scope)
+        owner = scope_key(scope)
         with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 "DELETE FROM memory_records WHERE scope_key = ? AND memory_id = ?",
-                (scope_key, memory_id),
+                (owner, memory_id),
             )
             connection.execute(
                 "DELETE FROM memory_fts WHERE scope_key = ? AND memory_id = ?",
-                (scope_key, memory_id),
+                (owner, memory_id),
             )
             return cursor.rowcount > 0
 
@@ -263,7 +264,7 @@ class FilesystemBm25MemoryProvider:
             row = connection.execute(
                 "SELECT payload_json FROM memory_records "
                 "WHERE scope_key = ? AND memory_id = ?",
-                (self._scope_key(scope), memory_id),
+                (scope_key(scope), memory_id),
             ).fetchone()
         return (
             MemoryRecord.model_validate_json(row["payload_json"])
@@ -288,7 +289,7 @@ class FilesystemBm25MemoryProvider:
                 WHERE memory_fts MATCH ? AND memory_fts.scope_key = ?
                 ORDER BY raw_score ASC, records.updated_at DESC
                 """,
-                (match_query, self._scope_key(query.scope)),
+                (match_query, scope_key(query.scope)),
             )
 
             matches: list[tuple[MemoryRecord, float]] = []
@@ -314,35 +315,3 @@ class FilesystemBm25MemoryProvider:
                 "SELECT COUNT(*) AS count FROM memory_records"
             ).fetchone()
         return int(row["count"] if row is not None else 0)
-
-    @staticmethod
-    def _scope_key(scope: MemoryScope) -> str:
-        encoded = json.dumps(
-            scope.model_dump(mode="json", exclude={"workspace_id"} if scope.workspace_id is None else set()),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
-
-    @staticmethod
-    def _search_text(record: MemoryRecord) -> str:
-        return " ".join(
-            (
-                record.content,
-                record.kind,
-                json.dumps(record.metadata, ensure_ascii=False, sort_keys=True),
-            )
-        )
-
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        normalized = re.sub(r"[^\w\s\u4e00-\u9fff]", " ", text.lower())
-        tokens: list[str] = []
-        for word in normalized.split():
-            if re.search(r"[\u4e00-\u9fff]", word):
-                tokens.extend(re.findall(r"[\u4e00-\u9fff]", word))
-                tokens.extend(re.findall(r"[a-z]+", word))
-            elif len(word) > 1:
-                tokens.append(word)
-        return tokens

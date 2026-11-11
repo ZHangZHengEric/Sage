@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 import os
-import re
 import sqlite3
 from pathlib import Path
 
@@ -18,12 +17,15 @@ from sagents.v2.session_memory.contracts import (
     SessionMemoryRecord,
 )
 
+from sagents.v2.tokenization import tokenize_bm25
+
 
 class SqliteBm25SessionMemoryProvider:
     plugin_id = "sage.session-memory.sqlite-bm25"
     name = "SQLite BM25 Session Memory provider"
     description = "Durable per-session BM25 index over canonical Session history."
     api_version = "2"
+    _tokenize = staticmethod(tokenize_bm25)
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
@@ -211,15 +213,3 @@ class SqliteBm25SessionMemoryProvider:
                 "DELETE FROM session_memory_fts WHERE session_id = ?",
                 (session_id,),
             )
-
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        normalized = re.sub(r"[^\w\s\u4e00-\u9fff]", " ", text.lower())
-        tokens: list[str] = []
-        for word in normalized.split():
-            if re.search(r"[\u4e00-\u9fff]", word):
-                tokens.extend(re.findall(r"[\u4e00-\u9fff]", word))
-                tokens.extend(re.findall(r"[a-z]+", word))
-            elif len(word) > 1:
-                tokens.append(word)
-        return tokens

@@ -24,7 +24,7 @@ python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`. There is no default administrator password. For local HTTP development set `SAGE_SERVER_COOKIE_SECURE=false`; keep the default `true` for HTTPS deployments.
+Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`. There is no default administrator password. For local HTTP development set `SAGE_SERVER_COOKIE_SECURE=false`; keep the default `true` for HTTPS deployments. The server defaults to local SQLite memory. To use [remote libSQL](../../../app/v2/server/README.md#长期记忆与会话检索索引), configure and provision it before startup.
 
 ```bash
 cd app/v2/server/web

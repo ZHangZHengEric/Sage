@@ -37,6 +37,8 @@ class ServerSettings:
     log_directory: str = ""
     mysql_url: str | None = None
     postgres_url: str | None = field(default=None, repr=False)
+    libsql_url: str | None = None
+    libsql_auth_token: str | None = field(default=None, repr=False)
     redis_url: str | None = None
     session_store_plugin: str | None = None
     session_store_key_prefix: str | None = None
@@ -269,6 +271,8 @@ class ServerSettings:
             linux_execution_gid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_GID")) else None,
             mysql_url=mysql_url or None,
             postgres_url=postgres_url or None,
+            libsql_url=_env("SAGE_SERVER_LIBSQL_URL") or None,
+            libsql_auth_token=_env("SAGE_SERVER_LIBSQL_AUTH_TOKEN") or None,
             redis_url=_env("SAGE_SERVER_REDIS_URL") or None,
             session_store_plugin=_env("SAGE_SERVER_SESSION_STORE_PLUGIN") or None,
             session_store_key_prefix=_env("SAGE_SERVER_SESSION_STORE_KEY_PREFIX") or None,

@@ -22,9 +22,9 @@ from tests.app.v2.server.conftest import (
 from tests.app.v2.server.test_agui_chat import _parse_sse
 
 
-def make_host(path, steps=4):
+def make_host(path, steps=4, **settings_overrides):
     return ServerHost(
-        make_settings(path),
+        make_settings(path, **settings_overrides),
         model_provider=CompletingJudgeModel(scripted_hello(steps)),
         database=Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{path}/host.db")),
     )

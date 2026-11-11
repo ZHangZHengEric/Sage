@@ -24,7 +24,7 @@ python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号和密码（无默认密码）。本地 HTTP 开发还需设置 `SAGE_SERVER_COOKIE_SECURE=false`；HTTPS 部署保持默认 `true`。
+在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号和密码（无默认密码）。本地 HTTP 开发还需设置 `SAGE_SERVER_COOKIE_SECURE=false`；HTTPS 部署保持默认 `true`。记忆默认使用本地 SQLite。启用远端 libSQL 时，按[记忆存储说明](../../../app/v2/server/README.md#长期记忆与会话检索索引)配置并初始化。
 
 ```bash
 cd app/v2/server/web

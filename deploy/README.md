@@ -44,6 +44,15 @@ SAGE_SERVER_POSTGRES_URL=postgresql://sage:password@host.docker.internal:5432/sa
 
 MySQL 请准备独立的 `sage_v2` 数据库及账号权限，不与 v1 共用业务表。URL 中用户名和密码的特殊字符需要百分号编码，例如 `@` 写为 `%40`。同机 MySQL 使用 `host.docker.internal` 和宿主机映射端口；远程 MySQL 使用可访问的 IP 或域名。Compose 不启动 MySQL、Redis、RustFS 或观测服务，也不依赖外部共享网络。
 
+长期记忆和会话检索索引默认使用本地 SQLite。启用远端 libSQL 时，在 `.env` 设置 `SAGE_SERVER_LIBSQL_URL`，按需设置 `SAGE_SERVER_LIBSQL_AUTH_TOKEN`。连接宿主机服务可使用 `http://host.docker.internal:8080`。新库在启动前初始化。
+
+```bash
+deploy/compose_v2.sh build sage-server
+deploy/compose_v2.sh run --rm --no-deps --entrypoint python sage-server -m app.v2.server.database.import_sqlite --init-libsql
+```
+
+已有 SQLite 记忆的部署使用[数据导入命令](../app/v2/server/README.md#长期记忆与会话检索索引)。
+
 数据与日志分别持久化到 `${SAGE_ROOT}/sage-server/data`、`${SAGE_ROOT}/sage-server/logs`；相对路径以 `deploy/standalone/` 为基准。只运行单个后端进程，并发额度通过 `SAGE_SERVER_MAX_CONCURRENT_RUNS` 等变量设置。
 
 V2 镜像自动创建 `sage-sandbox` 用户（UID/GID `10001:10001`），服务主进程继续以 root 运行，沙箱命令降权后执行。镜像默认设置 `SAGE_SERVER_LINUX_EXECUTION_UID/GID`，已有 `.env` 无需补充即可生效。服务仅调整各用户 `workspace` 及子 Agent 工作目录的属主，不递归修改挂载目录、已有文件、数据库或日志；拒绝通过符号链接调整目录。宿主机无需创建同名账号。如需匹配已有非 root 目录，可在 `.env` 同时覆盖这两个数字 ID；已有文件的读写权限仍需与该身份匹配。NFS root-squash 等禁止 root 修改属主的挂载需由宿主机管理员预先设置工作目录权限。

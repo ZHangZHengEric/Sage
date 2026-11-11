@@ -29,7 +29,7 @@ web/            前端
 
 会话列表 `GET /api/threads` 与管理员列表返回 `{items, next_cursor}`，支持游标、搜索与 Agent 筛选，Web 按页加载；历史深链接通过单条元数据接口解析身份。接口参数与返回结构见 [Server HTTP API](../../../docs/zh/api/HTTP_API_REFERENCE.md)。
 
-生产启动选择 MySQL（`SAGE_SERVER_MYSQL_URL`）或 PostgreSQL（`SAGE_SERVER_POSTGRES_URL`），只设置其中一个。Python 安装 PostgreSQL 支持使用 `pip install '.[server,postgres]'`，v2 镜像已包含驱动。PostgreSQL 覆盖宿主用户、catalog、会话索引和 SDK 会话存储；未配置 Redis 时选择 `sage.session.postgres`，配置 Redis 时选择 `sage.session.redis-postgres`，支持与 Redis/MySQL 相同的归档、跨实例订阅和分布式执行。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
+生产启动选择 MySQL（`SAGE_SERVER_MYSQL_URL`）或 PostgreSQL（`SAGE_SERVER_POSTGRES_URL`），只设置其中一个。Python 安装 PostgreSQL 支持使用 `pip install '.[server,postgres]'`，v2 镜像已包含驱动。PostgreSQL 覆盖宿主用户、catalog、会话列表索引和 SDK 会话存储；未配置 Redis 时选择 `sage.session.postgres`，配置 Redis 时选择 `sage.session.redis-postgres`，支持与 Redis/MySQL 相同的归档、跨实例订阅和分布式执行。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
 单进程并发可用 `SAGE_SERVER_MAX_CONCURRENT_RUNS`（默认 8）、`SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER`（默认 2）和 `SAGE_SERVER_MAX_PENDING_RUNS`（默认 1024）配置。参数必须为正数，分别约束总执行、每用户执行及等待队列，见[单机并发说明](../../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)。
 
@@ -46,7 +46,7 @@ python -m pip install -e '.[server]'
 python -m app.v2.server --data-root /tmp/sage-server-v2
 ```
 
-Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端和 Web，连接外部 MySQL 或 PostgreSQL；配置与命令见 [部署指南](../../../deploy/README.md)。
+Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端和 Web，连接外部 MySQL 或 PostgreSQL，可选连接 libSQL；配置与命令见 [部署指南](../../../deploy/README.md)。
 
 Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
 
@@ -62,9 +62,10 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 
 | 数据 | 生产 | 测试 |
 |---|---|---|
-| 用户 / catalog / 会话索引 | MySQL / PostgreSQL `users` / `catalogs` / `threads` | Memory mock |
+| 用户 / catalog / 会话列表索引 | MySQL / PostgreSQL `users` / `catalogs` / `threads` | Memory mock |
 | Sage Session | `sage.session.mysql` / `sage.session.postgres`（无表前缀） | filesystem（`data_root/runtime/sessions`） |
 | AG-UI 回放 | Sage Session `run_events` | Sage Session `run_events` |
+| 长期记忆 / 会话检索索引 | 本地 SQLite FTS5，可配置远端 libSQL FTS5 | SQLite 和 libSQL 集成测试 |
 | 工作区 | `{data_root}/tenants/{user_id}/{agent_id}/workspace/` | 同左 |
 | Skill catalog | MySQL / PostgreSQL `skills` / `skill_versions` / `agent_skill_selections`；artifact 相对路径 `{data_root}/skills/...` | Memory mock + 同左磁盘 |
 | Agent / MCP / A2A peer | `agents.package_ref` 引用 `managed_agent_records` 中的标准包；`catalogs` 保存模型、MCP 和 A2A peer | 同左 |
@@ -83,6 +84,31 @@ A2A 任务列表与审批列表通过 `AuthorizedSessionAccess.read_session_view
 DEBUG 模式下，HTTP/OpenAI/MCP/A2A 客户端仅保留 WARNING 及以上日志，MySQL/Redis 客户端仅保留 INFO 及以上日志。状态提交、入口准备、Agent 准备和会话归档的成功 DEBUG 计时仅在耗时达到 100ms 时输出；失败、异常和缺少耗时的记录继续保留。该过滤同时用于 stdout、轮转文件和现有诊断日志，模型/工具/Run 生命周期及首段正文计时完整保留，不改变对话执行与会话持久化。
 
 模型客户端池使用 `SAGE_SERVER_MAX_MODEL_CLIENTS`（默认 64）限制容量。同一用户的相同配置跨 Run 复用连接，凭据变化使用新客户端；池满且所有客户端占用时返回可重试的限流错误。详见[模型池与增量持久化](../../../docs/zh/architecture/sagents-v2-model-pool-and-persistence.md)。
+
+## 长期记忆与会话检索索引
+
+Server V2 默认使用本地 SQLite，沿用 `runtime/memory/memory.sqlite3` 和 `runtime/session-memory/session-memory.sqlite3`。设置 `SAGE_SERVER_LIBSQL_URL` 后，默认改用远端 libSQL 存储这两类数据。长期记忆按原作用域隔离，模型仍生成默认检索词。会话检索在排序和取 Top‑K 前应用请求的历史记录范围。两类记忆沿用原分词、FTS5 BM25 和归一化分数。记录与索引在同一事务增量更新。会话列表的 `threads` 索引和原始 RuntimeEvent 继续走现有数据库。
+
+| 环境变量 | 用途 |
+|---|---|
+| `SAGE_SERVER_LIBSQL_URL` | 可选。支持 Hrana HTTP 和 FTS5 的远端 libSQL 地址，例如 `http://127.0.0.1:8080` 或 `libsql://your-db.turso.io` |
+| `SAGE_SERVER_LIBSQL_AUTH_TOKEN` | libSQL 访问令牌。初始化和导入需要建表及写入权限，运行需要读写权限 |
+
+启用远端模式时，每个部署使用专用 libSQL 数据库，FTS5 BM25 的统计量来自整个索引。首次启用前，用 Server 运行环境中的配置初始化两类记录表和 FTS5 索引。Server 启动时检查远端表和触发器。自建服务已通过 `ghcr.io/tursodatabase/libsql-server:v0.24.32` 验证。
+
+```bash
+python -m app.v2.server.database.import_sqlite --init-libsql
+```
+
+从本地 SQLite 切换到 libSQL 时，先停止旧 Server 写入并处理仍按旧插件选择恢复的排队或挂起 Run。然后从实际配置的存储目录读取 SQLite 文件。以下以 `/app/data` 为数据目录。
+
+```bash
+python -m app.v2.server.database.import_sqlite \
+  --memory /app/data/runtime/memory/memory.sqlite3 \
+  --session-memory /app/data/runtime/session-memory/session-memory.sqlite3
+```
+
+导入会创建远端 schema，只提供实际存在的文件即可。命令分批提交并可重跑，已有相同记录会跳过，冲突会回滚当前批次。切换前确认管理员保存的插件选择已恢复默认，显式使用本地记忆插件的 Agent 包也需切换。未导入的会话检索索引会在该会话后续运行时从原始会话记录增量建立。
 
 ## Server RSI
 
@@ -145,7 +171,6 @@ POST /api/agents/{agent_id}/rsi/runs/{run_id}/versions/{version_id}/apply
 
 `POST /api/agents` 和 `PUT /api/agents/{agent_id}` 接收 `agent_mode`（`simple` / `fibre` / `team`）及 `available_sub_agent_ids`（成员 ID 列表）；详情和列表返回相同字段。新建默认为 Simple、无成员；更新省略这两个字段时保留原配置，传空成员列表则清空。配置直接保存在现有 Package 的 `mode`、`subagents` 和依赖包中。新运行读取成员的最新配置，并通过既有 Run 配置快照冻结整个团队，排队及恢复不会重新读取成员业务配置；实时权限收紧仍然有效。
 
-本地 BM25 记忆使用 `sage.memory.filesystem-bm25`，必填 `root`，页面默认放在 `{data_root}/runtime/plugins/memory.provider`。这只启用存储提供者；自动召回、写入和 `search_memory` 授权仍属于 Agent 行为，需要单独配置。
 
 ## 完整 Agent 包平台与 Studio
 

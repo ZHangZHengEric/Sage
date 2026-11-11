@@ -28,6 +28,8 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_SESSION_STORE_KEY_PREFIX` | Optional explicit Redis Session namespace; all instances sharing sessions must use the same prefix. |
 | `SAGE_SERVER_MYSQL_URL` | Required MySQL connection URL |
 | `SAGE_SERVER_POSTGRES_URL` | PostgreSQL connection URL when using the PostgreSQL session backend |
+| `SAGE_SERVER_LIBSQL_URL` | Optional remote libSQL URL for both memory indexes. Defaults to local SQLite when unset. |
+| `SAGE_SERVER_LIBSQL_AUTH_TOKEN` | Remote libSQL access token |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |
 | `SAGE_SERVER_DATA` | `data/server_v2` |

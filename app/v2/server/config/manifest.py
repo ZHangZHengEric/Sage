@@ -15,6 +15,7 @@ from sagents.v2.package.manifest.runtime import CapabilityBinding, CapabilitySel
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.catalog.records import AgentRecord
 from app.v2.server.runtime.official import default_agent_tools
+from app.v2.server.memory.libsql import LIBSQL_MEMORY_PLUGIN, LIBSQL_SESSION_MEMORY_PLUGIN
 
 
 def distributed_runtime_prefix(settings, component):
@@ -189,19 +190,22 @@ def _runtime_capabilities(
 
     }
     if settings is not None:
-        capabilities.update({
-            "memory.provider": CapabilitySelection(
+        if settings.libsql_url:
+            capabilities["memory.provider"] = CapabilitySelection(plugin=LIBSQL_MEMORY_PLUGIN)
+            capabilities["session-memory.provider"] = CapabilitySelection(plugin=LIBSQL_SESSION_MEMORY_PLUGIN)
+        else:
+            memory_root = settings.data_root / "runtime"
+            capabilities["memory.provider"] = CapabilitySelection(
                 plugin="sage.memory.filesystem-bm25",
-                config={"root": str(settings.data_root / "runtime" / "memory")},
-            ),
-            "session-memory.provider": CapabilitySelection(
+                config={"root": str(memory_root / "memory")},
+            )
+            capabilities["session-memory.provider"] = CapabilitySelection(
                 plugin="sage.session-memory.sqlite-bm25",
-                config={"root": str(settings.data_root / "runtime" / "session-memory")},
-            ),
-            "workspace.initializer": CapabilitySelection(
-                plugin="sage.workspace.initializer.claw", config={"language": settings.language},
-            ),
-        })
+                config={"root": str(memory_root / "session-memory")},
+            )
+        capabilities["workspace.initializer"] = CapabilitySelection(
+            plugin="sage.workspace.initializer.claw", config={"language": settings.language},
+        )
         capabilities["execution.scheduler"] = CapabilitySelection(
             plugin="sage.scheduler.ephemeral",
             config={

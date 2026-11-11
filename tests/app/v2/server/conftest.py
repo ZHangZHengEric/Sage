@@ -54,6 +54,16 @@ class FixtureServerHost(ServerHost):
             self._started_test_database = False
 
 
+@pytest.fixture
+def libsql_url():
+    import os
+
+    url = os.environ.get("SAGE_V2_TEST_LIBSQL_URL")
+    if not url:
+        pytest.skip("set SAGE_V2_TEST_LIBSQL_URL to a dedicated test database")
+    return url
+
+
 def make_settings(tmp_path: Path, **overrides) -> ServerSettings:
     values: dict[str, Any] = {
         "host": "127.0.0.1",

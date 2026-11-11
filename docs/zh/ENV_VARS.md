@@ -28,6 +28,8 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_SESSION_STORE_KEY_PREFIX` | 可显式指定 Redis 会话命名空间；共享会话的实例须使用相同前缀。 |
 | `SAGE_SERVER_MYSQL_URL` | 必须配置的 MySQL 连接地址 |
 | `SAGE_SERVER_POSTGRES_URL` | 使用 PostgreSQL 会话后端时的连接 URL |
+| `SAGE_SERVER_LIBSQL_URL` | 可选。为两类记忆索引指定远端 libSQL，未设置时使用本地 SQLite |
+| `SAGE_SERVER_LIBSQL_AUTH_TOKEN` | 远端 libSQL 访问令牌 |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |
 | `SAGE_SERVER_DATA` | `data/server_v2` |
