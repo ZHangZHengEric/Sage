@@ -143,6 +143,48 @@ async def test_sql_timings_survive_a_saturated_evidence_queue(database):
         await sink.close()
 
 
+async def test_pending_model_updates_share_one_evidence_slot(database):
+    session, run = uuid4().hex, uuid4().hex
+    request = SimpleNamespace(run_id=run, request_id="model", metadata={})
+    sink = DatabaseDiagnostics(database)
+    sink.max_pending_writes = 1
+    args = dict(session_id=session, request=request)
+    try:
+        await sink.begin_model_request(**args, provider={}, wire_request={"model": "test"})
+        await sink.record_model_first_token(**args, observed_at=utc_now())
+        await sink.complete_model_request(
+            **args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}),
+        )
+        await sink.record_model_stream(**args, evidence={"wire_events": [{"delta": "done"}]})
+        record, = (await sink.export_evidence(session, {run}))["models"]
+        assert sink.capture_failures == 0
+        assert record["request"] == {"model": "test"}
+        assert record["first_token_at"]
+        assert record["response"]["text"] == "done"
+        assert record["stream"]["wire_events"] == [{"delta": "done"}]
+    finally:
+        await sink.close()
+
+
+async def test_coalesced_evidence_respects_memory_budget(database, monkeypatch):
+    monkeypatch.setattr(DatabaseDiagnostics, "max_pending_evidence_bytes", 16 * 1024)
+    session, run = uuid4().hex, uuid4().hex
+    request = SimpleNamespace(run_id=run, request_id="model", metadata={})
+    sink = DatabaseDiagnostics(database)
+    args = dict(session_id=session, request=request)
+    try:
+        await sink.begin_model_request(**args, provider={}, wire_request={"model": "test"})
+        await sink.record_model_stream(**args, evidence={"wire_events": [{"delta": "x" * (32 * 1024)}]})
+        await sink.complete_model_request(
+            **args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}),
+        )
+        record, = (await sink.export_evidence(session, {run}))["models"]
+        assert sink.capture_failures == 1
+        assert record["response"]["text"] == "done"
+        assert "stream" not in record
+    finally:
+        await sink.close()
+
 
 async def test_concurrent_model_patches_preserve_observed_times_and_terminal(database, monkeypatch):
     session, run = uuid4().hex, uuid4().hex

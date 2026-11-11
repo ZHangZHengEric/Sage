@@ -16,6 +16,7 @@ from app.v2.server.database.upsert import upsert
 from .orm import dropped, events, logs, models, timings
 from .writer import ObservationWriter
 from sagents.v2.runtime.observability.evidence.capture import DiagnosticCapture
+from sagents.v2.runtime.observability.evidence.raw import retained_size
 from sagents.v2.runtime.observability.evidence.tools import tool_evidence
 from sagents.v2.runtime.observability.performance.aggregation import EVENTS, build_run, timestamp, timing_report
 from sagents.v2.runtime.observability.performance.projection import log_timings, model_timing
@@ -55,12 +56,17 @@ def _timing_changes(incoming):
 
 class DatabaseDiagnostics(DiagnosticCapture):
     max_pending_timings = 4096
+    max_pending_writes = 4096
+    max_pending_evidence_bytes = 64 * 1024 * 1024
 
     def __init__(self, database):
         self.database = database
         self.available = True
         self._timings = ObservationWriter(self._write_timings, batch_size=64)
-        self._evidence_writer = ObservationWriter(self._write_evidence, batch_size=16)
+        self._evidence_writer = ObservationWriter(
+            self._write_evidence, batch_size=64, max_bytes=self.max_pending_evidence_bytes,
+            batch_bytes=8 * 1024 * 1024,
+        )
 
     @property
     def capture_failures(self):
@@ -90,7 +96,7 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 self._timings.record_failure()
             else:
                 self._timings.enqueue((None, projections), limit=self.max_pending_timings)
-        self._evidence_writer.enqueue((None, record), limit=self.max_pending_writes)
+        self._enqueue_evidence(None, record)
 
     def _record_model_change(self, session_id, request, change):
         key = session_id, request.run_id, request.request_id
@@ -99,7 +105,16 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 (key, model_timing({**_model_scope(key), **change})),
                 limit=self.max_pending_timings,
             )
-        self._evidence_writer.enqueue((key, change), limit=self.max_pending_writes)
+        self._enqueue_evidence(key, change)
+
+    def _enqueue_evidence(self, key, payload):
+        value = key, payload
+        try:
+            size = retained_size(value, self.max_pending_evidence_bytes) + 256
+        except RecursionError:
+            self._evidence_writer.record_failure()
+            return
+        self._evidence_writer.enqueue(value, limit=self.max_pending_writes, key=key, size=size)
 
     async def _write_timings(self, batch):
         requests, stages = {}, {}
@@ -230,13 +245,17 @@ class DatabaseDiagnostics(DiagnosticCapture):
             tuple_(dropped.c.session_id, dropped.c.run_id).in_(scopes),
         ).order_by(dropped.c.session_id, dropped.c.run_id).with_for_update())
         await db.execute(logs.insert(), rows)
-        for session_id, run_id in scopes:
-            match = _scope(logs, session_id, run_id)
-            cutoff = await db.scalar(select(logs.c.id).where(*match).order_by(
-                logs.c.id.desc()
-            ).offset(self.max_logs_per_run).limit(1))
+        cutoff_query = select(logs.c.id).where(
+            logs.c.session_id == dropped.c.session_id, logs.c.run_id == dropped.c.run_id,
+        ).order_by(logs.c.id.desc()).offset(self.max_logs_per_run).limit(1).scalar_subquery()
+        cutoffs = await db.execute(select(dropped.c.session_id, dropped.c.run_id, cutoff_query).where(
+            tuple_(dropped.c.session_id, dropped.c.run_id).in_(scopes),
+        ))
+        for session_id, run_id, cutoff in cutoffs:
             if cutoff is not None:
-                removed = await db.execute(delete(logs).where(*match, logs.c.id <= cutoff))
+                removed = await db.execute(delete(logs).where(
+                    *_scope(logs, session_id, run_id), logs.c.id <= cutoff,
+                ))
                 await db.execute(update(dropped).where(*_scope(dropped, session_id, run_id)).values(
                     count=dropped.c.count + removed.rowcount,
                 ))
