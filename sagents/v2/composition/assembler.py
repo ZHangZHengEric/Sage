@@ -1067,6 +1067,8 @@ class ApplicationAssembler:
                 if uses_binding_tools:
                     child_factory = compose_bound_child
 
+                from sagents.v2.skill.contracts import RunSkillProvider
+                provider_scoped_skills = active_skills is not None and isinstance(active_skills[0], RunSkillProvider)
                 mode_factory = ModeAwareAgentLoopFactory(
                     runtime=driver_runtime,
                     model_factory=lambda descriptor, _: run_models[
@@ -1096,6 +1098,7 @@ class ApplicationAssembler:
                             parent_config=parent_command.config,
                             tools=descriptor.tools,
                             skills=descriptor.skills,
+                            provider_scoped_skills=provider_scoped_skills,
                         )
                     ),
                     trace_sink=services["observability.provider"].traces,

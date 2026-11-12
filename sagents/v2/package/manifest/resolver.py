@@ -285,6 +285,7 @@ class CompositionResolver:
         parent_config: RunConfig,
         tools: tuple[str, ...] | None = None,
         skills: tuple[str, ...] | None = None,
+        provider_scoped_skills: bool = False,
     ) -> RunConfig:
         """Resolve a child's durable selection before allocating its Run.
 
@@ -311,6 +312,16 @@ class CompositionResolver:
             tools=tools,
             skills=skills,
         )
+        if provider_scoped_skills:
+            # The host's Run provider owns discovery. Keep the parent's
+            # unrestricted, empty, or named grant without substituting package names.
+            enabled_skills = parent_config.enabled_skills
+            metadata = dict(config.metadata)
+            if enabled_skills is None:
+                metadata.pop("enabled_skills", None)
+            else:
+                metadata["enabled_skills"] = list(enabled_skills)
+            config = config.model_copy(update={"enabled_skills": enabled_skills, "metadata": metadata})
         execution_policy = None
         if parent_config.execution_snapshot is not None and agent.sandbox.network == "none":
             execution_policy = {"network": {"mode": "none", "deny_private_networks": True}}

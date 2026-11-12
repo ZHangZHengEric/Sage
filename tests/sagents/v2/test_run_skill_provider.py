@@ -12,6 +12,7 @@ from sagents.v2.skill import (
     SkillReference,
 )
 from tests.sagents.v2.test_runtime_team_skills import no_skills, open_app, prompt, run
+from tests.sagents.v2.test_builder_nested_teams import delegate
 from tests.sagents.v2.test_skill_provider_matrix import bundle
 
 
@@ -117,6 +118,31 @@ async def test_explicit_empty_skill_grant_never_searches_run_provider(tmp_path):
         assert result.state.value == "completed", [event.data for event in events if "failed" in event.type]
         assert any(block.value == [] for message in models.seen[-1][1].messages
                    if message.role == "tool" for block in message.content if isinstance(block, JsonBlock))
+    finally:
+        await app.close()
+        await bindings.close()
+
+
+@pytest.mark.parametrize("enabled_skills", [None, (), ("other-skill",)])
+async def test_delegation_preserves_run_provider_scope(tmp_path, enabled_skills):
+    app, bindings, models = await open_app(tmp_path, {
+        "root": (delegate("maker"),),
+        "maker": (("search_skills", {"query": "weekly report"}),),
+    }, skill_provider=RunProvider())
+    worker_manifest = no_skills("maker").model_dump(mode="json")
+    worker_manifest["agents"]["assistant"]["tools"] = ["search_skills"]
+    try:
+        worker = await app.load_agent(worker_manifest)
+        agent = await app.load_agent(no_skills("root", ("maker",)), subagents={"maker": worker})
+        result, events = await run(app, agent, attachments=(), enabled_skills=enabled_skills)
+        assert result.state.value == "completed", [event.data for event in events if "failed" in event.type]
+        result_values = [block.value for role, request in models.seen if role == "maker"
+                         for message in request.messages if message.role == "tool"
+                         for block in message.content if isinstance(block, JsonBlock)]
+        assert result_values == ([[]] if enabled_skills is not None else [[{
+            "name": "weekly-report", "description": "weekly-report description",
+            "skill_id": "report", "version_id": "v1",
+        }]])
     finally:
         await app.close()
         await bindings.close()

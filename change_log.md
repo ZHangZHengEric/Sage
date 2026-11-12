@@ -3,6 +3,7 @@
 - 新增 `RunSkillProvider`。宿主选用该提供者时，`search_skills` 由提供者按当前 Run 确定搜索范围，Agent Package 的 Skill 名单为空也可搜索。默认提供者仍按包内声明与 Run 的名称授权搜索。
 - `load_skill` 支持按本 Run 搜索结果的 `skill_id` 和 `version_id` 加载，并校验制品摘要。同一 Run 固定选中的版本。恢复时重新鉴权并读取原版本，Skill 正文从制品重建。
 - `RunConfig.enabled_skills=[]` 显式禁用 Run Skill。SDK 在搜索、加载和恢复时执行该限制，提供者继续校验当前用户对制品的访问权限。
+- 委派的子 Run 继承上游 Run 的提供者授权，包括空授权和具名范围。子 Agent 的工具策略继续决定可调用的 Skill 工具。
 - 定向回归 165 项通过，覆盖包内搜索、空包名单下按引用加载、跨 Run 引用隔离和撤权后恢复失败。
 
 ## 2026-11-08 补齐 PostgreSQL 会话存储和 Server 接入
