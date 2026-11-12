@@ -18,6 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils poppler-data libreoffice-writer libreoffice-calc libreoffice-impress libreofficekit-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep the Debian registry and print defaults in the read-only sandbox runtime.
+RUN cp --remove-destination /etc/libreoffice/registry/main.xcd /usr/lib/libreoffice/share/registry/main.xcd \
+    && cp --remove-destination /etc/libreoffice/psprint.conf /usr/lib/libreoffice/share/psprint/psprint.conf
+
 # LibreOfficeKit converts files without the CLI's Unix IPC listener.
 COPY deploy/images/sage-office.c /tmp/sage-office.c
 RUN cc -O2 -Wall -Wextra -o /usr/local/bin/sage-office /tmp/sage-office.c -ldl \
