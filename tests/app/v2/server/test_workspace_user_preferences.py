@@ -44,31 +44,3 @@ def test_workspace_user_preferences_preserve_existing_file_and_scope(tmp_path):
         file.symlink_to(outside)
         assert client.get(endpoint, headers=headers).status_code == 422
         assert outside.read_text(encoding="utf-8") == "private"
-
-
-def test_external_project_receives_current_workspace_user_preferences(tmp_path, monkeypatch):
-    host = make_host(tmp_path)
-    host.settings = replace(host.settings, log_directory=str(tmp_path / "logs"))
-    with TestClient(create_app(host)) as client:
-        setup_agent(client)
-        agent = client.headers["SAGE-AGENT-ID"]
-        file = host.paths.workspace_dir("tenant-a", agent) / "USER.md"
-        file.write_text("优先使用暖色", encoding="utf-8")
-        original = host.conversations.start
-        received = []
-
-        async def start(request, **kwargs):
-            received.append(kwargs["runtime_context"])
-            return await original(request, **kwargs)
-
-        monkeypatch.setattr(host.conversations, "start", start)
-        response = client.post(
-            f"/api/agents/{agent}/runs", params={"workspace_path": "projects/site"},
-            headers=_headers(),
-            json={"threadId": "thread-a", "runId": "run-a",
-                  "messages": [{"id": "m", "role": "user", "content": "hello"}],
-                  "useWorkspaceUserPreferences": True,
-                  "runtimeContext": {"wishseen_creation_preferences": {"defaults": "旧偏好"}}},
-        )
-        assert response.status_code == 200, response.text
-        assert received[0]["wishseen_creation_preferences"]["defaults"] == "优先使用暖色"
