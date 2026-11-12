@@ -25,6 +25,11 @@ from app.v2.server.storage.external_workspaces import (
     decode_workspace_files,
     workspace_parts,
 )
+from app.v2.server.storage.user_preferences import (
+    MAX_USER_PREFERENCES_BYTES,
+    USER_PREFERENCES_FILE,
+    preferences_document,
+)
 
 
 class CubeWorkspaceStorage:
@@ -168,6 +173,38 @@ class CubeWorkspaceStorage:
         except BaseException:
             output.close()
             raise
+
+    def user_preferences(self, user, agent, *, text=None, revision=None):
+        path = USER_PREFERENCES_FILE
+        limit = MAX_USER_PREFERENCES_BYTES
+
+        def operation(sandbox):
+            try:
+                data = cube_file_call(sandbox, "read", path, max_bytes=limit)
+                current = base64.b64decode(data["data"], validate=True)
+            except FileNotFoundError:
+                current = None
+            document = preferences_document(current)
+            if text is None:
+                return document
+            content = text.encode("utf-8")
+            if len(content) > limit:
+                raise ValueError("USER.md exceeds size limit")
+            if current == content:
+                return document
+            if revision != document["revision"]:
+                raise FileExistsError("USER.md changed")
+            overwrite = current is not None
+            token = cube_file_call(sandbox, "write_begin", path, overwrite=overwrite)["token"]
+            try:
+                cube_file_call(sandbox, "write_chunk", path, token=token, offset=0,
+                               max_bytes=limit, data=base64.b64encode(content).decode("ascii"))
+                cube_file_call(sandbox, "write_commit", path, token=token, overwrite=overwrite)
+            finally:
+                cube_file_call(sandbox, "write_abort", path, token=token)
+            return preferences_document(content)
+
+        return self._operation(user, agent, operation)
 
     def import_file(self, user, agent, path, source):
         workspace_parts(path)
