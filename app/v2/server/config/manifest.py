@@ -275,8 +275,6 @@ def _observation_selection(settings, *, backend=None):
     if backend == "noop":
         return CapabilitySelection(plugin="sage.observability.noop")
     if backend == "local":
-        config.update(diagnostics_root=str(settings.data_root / "runtime" / "diagnostics"),
-                      diagnostics_storage="sqlite")
         return CapabilitySelection(plugin="sage.observability.local", config=config)
     mode = settings.trace_content_mode or ("raw" if backend == "phoenix" else "redacted")
     config.update(environment=settings.trace_environment, content_mode=mode,

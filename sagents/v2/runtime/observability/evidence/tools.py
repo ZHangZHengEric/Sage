@@ -82,31 +82,27 @@ def tool_evidence(spans, logs):
             result_available=isinstance(result, dict) and "tool_call_id" in result,
         )
         tools.append(tool)
-    # Local diagnostics and historical exports can only show captured log metadata.
+    # Tool payloads on local diagnostic logs are independent of Trace sampling.
     for log in logs:
-        key = log.get("run_id"), log.get("tool_call_id")
+        attrs = log.get("attributes", {})
+        call_key = log.get("run_id"), log.get("tool_call_id")
+        key = (*call_key, attrs.get("operation_id"))
         event = log.get("event", "")
         if (
-            key in observed
-            or not key[1]
-            or event
-            not in {"tool.call.completed", "tool.call.failed", "tool.call.interrupted"}
+            call_key in observed or key in observed or not call_key[1]
+            or event not in {"tool.call.completed", "tool.call.failed", "tool.call.interrupted"}
         ):
             continue
         observed.add(key)
-        attrs = log.get("attributes", {})
-        tools.append(
-            dict(
-                run_id=key[0],
-                tool_call_id=key[1],
-                tool_name=attrs.get("tool_name"),
-                operation_id=attrs.get("operation_id"),
-                error=log.get("error"),
-                outcome=event.rsplit(".", 1)[-1],
-                occurred_at=log.get("timestamp"),
-                result_available=False,
-            )
-        )
+        result = _value(attrs.get("execution_result"))
+        tools.append(dict(
+            run_id=call_key[0], tool_call_id=call_key[1],
+            tool_name=attrs.get("tool_name"), operation_id=attrs.get("operation_id"),
+            arguments=_value(attrs.get("arguments")), result=result,
+            error=log.get("error") or (result.get("error") if isinstance(result, dict) else None),
+            outcome=event.rsplit(".", 1)[-1], occurred_at=log.get("timestamp"),
+            result_available=isinstance(result, dict) and "tool_call_id" in result,
+        ))
     for tool in tools:
         if tool["outcome"] not in {"failed", "unknown", "interrupted"}:
             continue

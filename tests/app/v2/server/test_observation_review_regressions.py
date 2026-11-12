@@ -105,7 +105,7 @@ def test_terminal_http_replay_does_not_start_a_new_performance_segment(tmp_path,
             response = client.post('/api/agent', json=_run_input(), headers=headers)
             assert response.status_code == 200, response.text
             cast('BlockingPortal', client.portal).call(settle)
-            assert not cast('Any', host.diagnostics)._timings._performance
+            assert not host.observability.performance.trace_sink._timings._performance
         assert sum(span.name == 'agent.run' for span in exporter.get_finished_spans()) == 1
 
 

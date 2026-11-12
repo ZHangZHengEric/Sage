@@ -113,7 +113,8 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 changed = True
             if changed:
                 token = sha256(payload.encode()).hexdigest() if digest else payload
-                rows[key] = self._encode({**record, **_model_scope(key)}), token
+                record.setdefault("capture_mode", "raw" if payload == "{}" else "legacy")
+                rows[key] = self._encode({**record, **_model_scope(key)}, redact_content=False), token
         return rows
 
     async def _write_evidence(self, batch):
@@ -229,7 +230,8 @@ class DatabaseDiagnostics(DiagnosticCapture):
         model_rows.sort(key=lambda row: (row.get("started_at", ""), row.get("request_id", "")))
         for index, row in enumerate(model_rows, 1):
             row["sequence"] = index
-        result = {"models": model_rows, "logs": log_rows, "dropped_logs": dropped_count,
+        result = {"source": "local", "raw_model_evidence": True, "capture_modes": ["raw", "redacted"],
+                  "models": model_rows, "logs": log_rows, "dropped_logs": dropped_count,
                   "capture_failures_since_start": self.capture_failures,
                   **tool_evidence([], log_rows)}
         if not flushed:

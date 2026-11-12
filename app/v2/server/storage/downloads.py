@@ -235,9 +235,14 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
     """Package observation evidence; the Run allowlist contains no business state."""
     from sagents.v2.runtime.observability import redact_evidence as redact
 
-    redacted = redact(evidence or {"models": [], "logs": [], "unavailable": True})
-    assert isinstance(redacted, dict)
-    evidence = redacted
+    evidence = evidence or {"models": [], "logs": [], "unavailable": True}
+    raw_models = bool(evidence.get("raw_model_evidence"))
+    if raw_models:
+        models = evidence.get("models", [])
+        evidence = redact({key: value for key, value in evidence.items() if key != "models"})
+        evidence["models"] = models
+    else:
+        evidence = redact(evidence)
     pending_writes = bool(evidence.get("pending_writes"))
     name = quote(session_id, safe="")
     if name in {"", ".", ".."}:
@@ -281,7 +286,13 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
             projected = [row["request_id"] for row in models if row.get("evidence_source") in {"trace_projection", "mixed"}]
             missing_streams = [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")]
             logs = evidence.get("logs", [])
-            partial_models = projected or missing_requests or pending_writes or any(row.get("truncated") for row in models)
+            incomplete_requests = [
+                row.get("request_id") for row in models
+                if row.get("truncated") or row.get("request") is None
+                or (row.get("status") == "completed" and row.get("response") is None)
+                or row.get("status") == "started"
+            ]
+            partial_models = projected or missing_requests or pending_writes or incomplete_requests
             partial_logs = evidence.get("dropped_logs", 0) or evidence.get("logs_complete") is False or pending_writes or any(row.get("truncated") for row in logs)
             dropped_streams = sum(row.get("stream", {}).get("dropped_wire_events", 0) +
                                   row.get("stream", {}).get("dropped_normalized_events", 0) for row in models)
@@ -309,7 +320,8 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                     "format_version": "sage.session-diagnostic-bundle/v2",
                     "session_id": session_id,
                     "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "redacted": True,
+                    "redacted": not raw_models,
+                    "model_evidence_redacted_on_export": not raw_models,
                     "diagnostic_source": evidence.get("source", "local"),
                     "capture_modes": evidence.get("capture_modes", ["unknown"]),
                     "evidence_availability": availability,
@@ -324,7 +336,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                     "run_ids": sorted(run_ids),
                     "model_records": len(models),
                     "model_request_ids_missing": missing_requests,
-                    "model_request_coverage": "external_traces_only" if "traces" in evidence else ("incomplete" if missing_requests or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs"),
+                    "model_request_coverage": "external_traces_only" if "traces" in evidence else ("incomplete" if not models or partial_models or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs"),
                     "unfinished_model_request_ids": [row.get("request_id") for row in models if row.get("status") == "started"],
                     "stream_evidence_missing_for_requests": [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")],
                     "stream_evidence_incomplete_for_requests": incomplete_streams,
@@ -369,7 +381,8 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                         "Historical evidence not captured before diagnostics were enabled is unavailable.",
                         "Model responses are normalized; stream.wire_events contains SDK-decoded provider events when capture is available, not HTTP bytes. requests/index.json lists chronological attempts.",
                         "Only logs with an exact Session and Run association are included.",
-                        "Credential fields and recognizable inline secrets are redacted; review unlabelled prose before sharing.",
+                        "Model evidence is exported as stored and may contain credentials; legacy records may already have been redacted."
+                        if raw_models else "Credential fields and recognizable inline secrets are redacted.",
                         "Observation delivery is asynchronous and best effort; missing records are not reconstructed from business state.",
                     ],
                 },

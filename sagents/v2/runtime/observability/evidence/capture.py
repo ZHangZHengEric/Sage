@@ -17,8 +17,8 @@ class DiagnosticCapture:
     max_logs_per_run = 10000
     max_pending_writes = 64
 
-    def _encode(self, value):
-        encoded = json.dumps(redact(value), ensure_ascii=False)
+    def _encode(self, value, *, redact_content=True):
+        encoded = json.dumps(redact(value) if redact_content else value, ensure_ascii=False)
         size = len(encoded.encode())
         if size > self.max_record_bytes:
             return json.dumps(
@@ -30,7 +30,7 @@ class DiagnosticCapture:
                         key: value[key]
                         for key in (
                             "session_id", "run_id", "request_id", "status",
-                            "started_at", "completed_at", "first_token_at",
+                            "started_at", "completed_at", "first_token_at", "capture_mode",
                         )
                         if key in value
                     },

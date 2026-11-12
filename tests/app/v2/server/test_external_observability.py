@@ -166,7 +166,7 @@ async def test_external_failure_does_not_use_local_history(tmp_path):
         ("jaeger", {"jaeger_url": "http://jaeger:4317"}),
     ],
 )
-async def test_host_external_backend_does_not_create_diagnostic_database(
+async def test_host_external_backend_uses_sql_diagnostics(
     tmp_path, backend, options
 ):
     from tests.app.v2.server.conftest import make_test_service
@@ -174,8 +174,10 @@ async def test_host_external_backend_does_not_create_diagnostic_database(
     host = make_test_service(tmp_path, **options)
     await host.start()
     try:
-        assert isinstance(host.diagnostics, ExternalDiagnostics)
-        assert host.diagnostics.backend == backend
+        from app.v2.server.observability.diagnostics import DatabaseDiagnostics
+
+        assert isinstance(host.diagnostics, DatabaseDiagnostics)
+        assert host.observability.performance.trace_sink.backend == backend
         assert not (host.paths.runtime_root / "diagnostics").exists()
     finally:
         await host.close()
@@ -339,7 +341,7 @@ def test_external_performance_api_and_failure_do_not_read_local_db(
 
 
 @pytest.mark.parametrize("content_mode", ["redacted", "raw"])
-def test_real_run_exports_remote_performance_and_download_without_local_capture(
+def test_real_run_exports_remote_performance_and_local_diagnostics(
     tmp_path, monkeypatch, content_mode
 ):
     from fastapi.testclient import TestClient
@@ -402,7 +404,7 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
                 for s in spans
             ], False
 
-        monkeypatch.setattr(host.diagnostics, "_query", query)
+        monkeypatch.setattr(host.observability.performance.trace_sink, "_query", query)
         admin = {"Authorization": f"Bearer {admin_login(client)}"}
         response = client.get("/api/observability/performance", headers=admin)
         assert response.status_code == 200, response.text
@@ -415,13 +417,12 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
         assert response.status_code == 200, response.text
         with ZipFile(BytesIO(response.content)) as archive:
             manifest = json.loads(archive.read("thread-1/manifest.json"))
-            assert manifest["diagnostic_source"] == "phoenix"
-            assert manifest["model_request_coverage"] == "external_traces_only"
-            assert json.loads(archive.read("thread-1/traces.json"))
-            if content_mode == "raw":
-                models = json.loads(archive.read("thread-1/models.json"))
-                assert models and any(row.get("response", {}).get("text") == "hello" for row in models)
-                assert all("stream" not in row for row in models)
+            assert manifest["diagnostic_source"] == "local"
+            assert manifest["capture_modes"] == ["raw", "redacted"]
+            assert "thread-1/traces.json" not in archive.namelist()
+            models = json.loads(archive.read("thread-1/models.json"))
+            assert any(row.get("response", {}).get("text") == "hello" for row in models)
+            assert any("stream" in row for row in models)
         assert not (host.paths.runtime_root / "diagnostics").exists()
         assert (
             client.get("/api/threads/thread-1/download", headers=user).status_code
@@ -434,16 +435,17 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
     {"trace_backend": "langfuse", "langfuse_base_url": "https://lf.example"},
     {"trace_backend": "otlp", "trace_otlp_endpoint": "http://collector:4317"},
 ])
-async def test_export_only_backends_do_not_fallback_to_local_capture(tmp_path, monkeypatch, options):
+async def test_export_only_backends_keep_sql_diagnostics(tmp_path, monkeypatch, options):
     from tests.app.v2.server.conftest import make_test_service
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     host = make_test_service(tmp_path, **options)
     await host.start()
     try:
-        assert cast('Any', host.diagnostics).available is False
-        with pytest.raises(NotImplementedError):
-            await cast('Any', host.diagnostics).export_evidence("s", {"r"})
+        from app.v2.server.observability.diagnostics import DatabaseDiagnostics
+
+        assert isinstance(host.diagnostics, DatabaseDiagnostics)
+        assert (await host.diagnostics.export_evidence("s", {"r"}))["source"] == "local"
         assert not (host.paths.runtime_root / "diagnostics").exists()
     finally:
         await host.close()

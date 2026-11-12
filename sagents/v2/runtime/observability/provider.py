@@ -94,6 +94,7 @@ class ObservabilityProvider:
         self.diagnostics = (
             diagnostics if diagnostics is not None else UnavailableEvidence()
         )
+        self._replaced_diagnostics = None
         bind = getattr(self.diagnostics, "bind_trace_sink", None)
         if bind:
             bind(self.traces)
@@ -102,6 +103,23 @@ class ObservabilityProvider:
 
     async def export_evidence(self, session_id: str, run_ids: set[str]):
         return await self.diagnostics.export_evidence(session_id, run_ids)
+
+    def install_diagnostics(self, diagnostics):
+        """Select the host evidence store independently of its Trace backend."""
+        previous = self.diagnostics
+        if previous is diagnostics:
+            return
+        if self._replaced_diagnostics is not None:
+            raise RuntimeError("host diagnostics already installed")
+        self._replaced_diagnostics = previous
+        if previous is self._performance_query:
+            if callable(getattr(previous, "record_stage", None)):
+                self.performance.trace_sink = previous
+            else:
+                self._performance_query = None
+        self.diagnostics = diagnostics
+        self.logs.evidence = diagnostics
+        self._model_history = None
 
     def install_performance(self, sink):
         self._performance_query = sink
@@ -180,6 +198,7 @@ class ObservabilityProvider:
         # Evidence flush can enrich/export spans; the exporter must still be live.
         for resource in (
             self.diagnostics,
+            self._replaced_diagnostics,
             self.performance.sink,
             self.traces,
             self.logs,

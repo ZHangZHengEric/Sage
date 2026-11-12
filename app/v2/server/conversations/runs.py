@@ -45,7 +45,7 @@ class RunService:
     def _record_timing(self, event, session_id, run_id, segment, *, started_at=None,
                        agent_id=None, state=None):
         observation = getattr(self.host, "observability", None)
-        if observation is not None and observation.performance.sink is not None:
+        if observation is not None and observation.performance.enabled:
             observation.performance.record_stage(RunTimingStage(
                 session_id, run_id, event, segment, utc_now(), started_at=started_at,
                 agent_id=agent_id, state=state,

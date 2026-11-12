@@ -72,6 +72,7 @@ class StructuredLogger:
         *,
         error: BaseException | None = None,
         attributes: Mapping[str, Any] | None = None,
+        diagnostic_attributes: Mapping[str, Any] | None = None,
         **context: Any,
     ) -> None:
         values = {**(_LOG_CONTEXT.get() or {}), **self.context, **context}
@@ -88,20 +89,21 @@ class StructuredLogger:
             )
         }
         try:
-            self.sink.write(
-                LogRecord(
-                    level=LogLevel(level),
-                    event=event,
-                    message=message,
-                    component=self.component,
-                    process_id=os.getpid(),
-                    error=_log_error(
-                        error, raw=getattr(self.sink, "raw_capture", False)
-                    ),
-                    attributes={**values, **dict(attributes or {})},
-                    **known,
-                )
+            record = LogRecord(
+                level=LogLevel(level),
+                event=event,
+                message=message,
+                component=self.component,
+                process_id=os.getpid(),
+                error=_log_error(error, raw=getattr(self.sink, "raw_capture", False)),
+                attributes={**values, **dict(attributes or {})},
+                **known,
             )
+            write_diagnostic = getattr(self.sink, "write_with_diagnostics", None) if diagnostic_attributes else None
+            if callable(write_diagnostic):
+                write_diagnostic(record, diagnostic_attributes)
+            else:
+                self.sink.write(record)
         except Exception:
             # Observability is a projection and must never break the operation
             # it is observing.
@@ -159,6 +161,9 @@ class ObservationLogs:
         return getattr(self.evidence, "raw_capture", False)
 
     def write(self, record: LogRecord):
+        self.write_with_diagnostics(record)
+
+    def write_with_diagnostics(self, record: LogRecord, attributes: Mapping[str, Any] | None = None):
         if self.closed:
             return
         routine = (
@@ -173,7 +178,12 @@ class ObservationLogs:
             writer = getattr(self.evidence, "write", None)
             if writer:
                 try:
-                    writer(record)
+                    evidence = (
+                        record.model_copy(update={"attributes": {**record.attributes, **attributes}})
+                        if attributes and getattr(self.evidence, "available", True)
+                        else record
+                    )
+                    writer(evidence)
                 except Exception:
                     self.failures += 1
         if routine:

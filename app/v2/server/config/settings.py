@@ -46,6 +46,7 @@ class ServerSettings:
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
+    diagnostics_enabled: bool = True
     trace_backend: str | None = None
     trace_otlp_endpoint: str = ""
     trace_otlp_protocol: str = "grpc"
@@ -277,6 +278,7 @@ class ServerSettings:
             session_store_plugin=_env("SAGE_SERVER_SESSION_STORE_PLUGIN") or None,
             session_store_key_prefix=_env("SAGE_SERVER_SESSION_STORE_KEY_PREFIX") or None,
             scheduler_plugin=_env("SAGE_SERVER_SCHEDULER_PLUGIN", "sage.scheduler.ephemeral"),
+            diagnostics_enabled=_env("SAGE_SERVER_DIAGNOSTICS_ENABLED", "true").lower() == "true",
             trace_backend=_env("SAGE_SERVER_TRACE_BACKEND") or None,
             trace_otlp_endpoint=_env("SAGE_SERVER_TRACE_OTLP_ENDPOINT"),
             trace_otlp_protocol=_env("SAGE_SERVER_TRACE_OTLP_PROTOCOL", "grpc"),

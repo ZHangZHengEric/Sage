@@ -95,7 +95,8 @@ async def test_diagnostics_import_and_async_capture_keep_large_evidence_and_run_
         record = evidence["models"][0]
         assert record["status"] == "completed"
         assert record["request"]["messages"] == ["你好"]
-        assert record["request"]["api_key"] != "secret"
+        assert record["request"]["api_key"] == "secret"
+        assert record["capture_mode"] == "raw"
         assert record["stream"] == stream
         token = utc_now()
         await sink.record_model_first_token(session_id=session, request=request, observed_at=token)
@@ -239,3 +240,41 @@ async def test_concurrent_model_patches_preserve_observed_times_and_terminal(dat
         assert first.capture_failures == second.capture_failures == 0
     finally:
         await asyncio.gather(first.close(), second.close())
+
+
+async def test_tool_payload_is_available_in_sql_evidence_without_trace(database):
+    from sagents.v2.runtime.observability.logs import ObservationLogs
+    from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
+    from tests.sagents.v2.test_agent_loop_matrix import CONTEXT, READ_TOOL, completed, setup_loop, tool_call
+
+    evidence = DatabaseDiagnostics(database)
+    output = []
+
+    class LogOutput:
+        def write(self, record):
+            output.append(record)
+
+    logs = ObservationLogs((LogOutput(),), evidence)
+    tool_definition = READ_TOOL.model_copy(update={"input_schema": {
+        **READ_TOOL.input_schema,
+        "properties": {**READ_TOOL.input_schema["properties"], "api_key": {"type": "string"}},
+    }})
+    call = tool_call(arguments={"key": "answer", "api_key": "sk-private-tool-key"})
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(call,)),)),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
+    try:
+        _, handle, loop, _ = await setup_loop(model, tools=(tool_definition,), log_sink=logs)
+        assert (await loop.execute(handle.run_id, CONTEXT)).state.value == "completed"
+        exported = await evidence.export_evidence(handle.session_id, {handle.run_id})
+        tool, = exported["tools"]
+        assert tool["result_available"]
+        assert tool["result"]["tool_call_id"] == tool["tool_call_id"]
+        assert tool["arguments"]["api_key"] != "sk-private-tool-key"
+        assert tool["operation_id"]
+        log = next(record for record in output if record.event == "tool.call.completed")
+        assert "arguments" not in log.attributes
+        assert "execution_result" not in log.attributes
+    finally:
+        await evidence.close()

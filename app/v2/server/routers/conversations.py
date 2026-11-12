@@ -303,7 +303,7 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep, servi
             raise HTTPException(404, "thread not found")
     run_ids = {run.run_id for run in runs}
     source: DiagnosticEvidenceSource | None = host.observability
-    if source is None or host.diagnostics is None:
+    if source is None or not getattr(host.diagnostics, "available", False):
         raise HTTPException(409, "当前观测插件不支持诊断查询")
     try:
         async with asyncio.timeout(30):
@@ -312,6 +312,8 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep, servi
         raise HTTPException(409, "当前观测插件不支持诊断查询") from exc
     except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError, sqlite3.Error, TimeoutError) as exc:
         raise HTTPException(503, "诊断数据暂不可用") from exc
+    if evidence.get("unavailable"):
+        raise HTTPException(503, "诊断数据暂不可用")
     return download_response(
         await file_operation(prepare_session_export, thread_id, run_ids, evidence)
     )

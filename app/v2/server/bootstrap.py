@@ -269,6 +269,13 @@ class ServerHost:
             })
             self._application = await builder.build(runtime=runtime)
             self.observability = self._application.service("observability.provider")
+            from app.v2.server.observability.diagnostics import DatabaseDiagnostics
+            from sagents.v2.runtime.observability.plugins.diagnostic_noop import UnavailableEvidence
+
+            if not self.settings.diagnostics_enabled:
+                self.observability.install_diagnostics(UnavailableEvidence())
+            elif not isinstance(self.observability.diagnostics, DatabaseDiagnostics):
+                self.observability.install_diagnostics(DatabaseDiagnostics(self.database))
             store = self._application.service("session.store")
             self.observability.business_report_reader = getattr(store, "report_business_events", None)
             if not self.observability.performance_available:

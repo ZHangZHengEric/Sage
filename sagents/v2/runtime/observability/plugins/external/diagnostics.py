@@ -58,6 +58,31 @@ class ExternalDiagnostics(ExternalEvidenceSink):
             ),
         )
 
+    def record_stage(self, stage):
+        self._timings.emit("log", {
+            "session_id": stage.session_id, "run_id": stage.run_id, "event": stage.event,
+            "timestamp": stage.at.isoformat(), "tool_call_id": stage.identity, "turn_id": stage.turn_id,
+            "attributes": {"agent_id": stage.agent_id, "run_state": stage.state,
+                           "started_at": stage.started_at.isoformat() if stage.started_at else None},
+        }, at=stage.at)
+
+    def record_model(self, timing):
+        row = {
+            "session_id": timing.session_id, "run_id": timing.run_id, "request_id": timing.request_id,
+            "purpose": timing.purpose, "turn_id": timing.turn_id, "started_at": timing.started_at.isoformat(),
+            "first_token_at": timing.first_token_at.isoformat() if timing.first_token_at else None,
+            "completed_at": timing.ended_at.isoformat() if timing.ended_at else None,
+        }
+        self._timings.emit("model", {key: value for key, value in row.items() if value is not None},
+                           at=timing.ended_at or timing.started_at)
+        if timing.first_text_at is not None:
+            at = timing.first_text_at.isoformat()
+            self._timings.emit("log", {
+                "session_id": timing.session_id, "run_id": timing.run_id, "event": "model.first_text",
+                "timestamp": at, "request_id": timing.request_id, "turn_id": timing.turn_id,
+                "attributes": {"purpose": timing.purpose, "first_text_at": at},
+            }, at=timing.first_text_at)
+
     supports_business_report = True
 
     async def report(

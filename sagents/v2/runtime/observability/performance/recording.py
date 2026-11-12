@@ -45,18 +45,25 @@ class PerformanceRecorder:
 
     def __init__(self, sink: PerformanceSink | None = None) -> None:
         self.sink = sink
+        self.trace_sink: PerformanceSink | None = None
         self.failures = 0
 
+    @property
+    def enabled(self) -> bool:
+        return self.sink is not None or self.trace_sink is not None
+
     def record_stage(self, stage: RunTimingStage) -> None:
-        if self.sink is not None:
-            try:
-                self.sink.record_stage(stage)
-            except Exception:
-                self.failures += 1
+        for sink in (self.sink, self.trace_sink):
+            if sink is not None:
+                try:
+                    sink.record_stage(stage)
+                except Exception:
+                    self.failures += 1
 
     def record_model(self, timing: ModelTiming) -> None:
-        if self.sink is not None:
-            try:
-                self.sink.record_model(timing)
-            except Exception:
-                self.failures += 1
+        for sink in (self.sink, self.trace_sink):
+            if sink is not None:
+                try:
+                    sink.record_model(timing)
+                except Exception:
+                    self.failures += 1

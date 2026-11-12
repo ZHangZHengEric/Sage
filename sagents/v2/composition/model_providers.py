@@ -51,7 +51,7 @@ def observed_model_registry(
                         )
                     values[key] = RecordingModelProvider(
                         value,
-                        sink=observation.diagnostics,
+                        sink=lambda: observation.diagnostics,
                         trace_sink=observation.traces,
                         log_sink=observation.logs,
                         performance=observation.performance,

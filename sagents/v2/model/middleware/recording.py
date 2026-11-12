@@ -46,7 +46,7 @@ class RecordingModelProvider:
         self,
         provider: ModelProvider,
         *,
-        sink: DiagnosticSink,
+        sink: DiagnosticSink | Callable[[], DiagnosticSink],
         session_id_resolver: Callable[[str], Awaitable[str]],
         provider_metadata: Mapping[str, Any] | None = None,
         trace_sink: TraceSink | None = None,
@@ -54,7 +54,7 @@ class RecordingModelProvider:
         performance: PerformanceRecorder | None = None,
     ) -> None:
         self.provider = provider
-        self.sink = sink
+        self._sink = sink
         self.performance = performance
         self._timed_methods: dict[str, bool] = {}
         self.session_id_resolver = session_id_resolver
@@ -66,6 +66,10 @@ class RecordingModelProvider:
             if log_sink is not None
             else None
         )
+
+    @property
+    def sink(self) -> DiagnosticSink:
+        return self._sink() if callable(self._sink) else self._sink
 
     def _log(
         self,
@@ -129,7 +133,7 @@ class RecordingModelProvider:
             or "agent"
         )
         timing = None
-        if self.performance is not None and self.performance.sink is not None:
+        if self.performance is not None and self.performance.enabled:
             timing = ModelTiming(
                 session_id, request.run_id, request.request_id, purpose,
                 request.metadata.get("turn_id"), started_at,

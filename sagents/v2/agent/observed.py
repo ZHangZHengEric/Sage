@@ -121,7 +121,7 @@ class ObservedRunDriver(AgentLoopEngine):
         return StructuredLogger(self._observed_log_sink, "sagents.agent")
 
     def _record_stage(self, run, event, segment, **fields):
-        if self._performance is not None and self._performance.sink is not None:
+        if self._performance is not None and self._performance.enabled:
             self._performance.record_stage(RunTimingStage(
                 run.session_id, run.run_id, event, segment, utc_now(), **fields,
             ))
@@ -397,8 +397,10 @@ class ObservedRunDriver(AgentLoopEngine):
                     step_id=step_id,
                     tool_call_id=call.tool_call_id,
                     attributes={"tool_name": call.tool_name},
+                    diagnostic_attributes={"arguments": call.arguments, "operation_id": call.operation_id},
                 )
             raise
+        result_payload = result.model_dump(mode="json") if result is not None else None
         failed = result is not None and result.error is not None
         outcome = "interrupted" if result is None else "failed" if failed else "completed"
         self._record_stage(run, "tool.call." + outcome, call.operation_id, **timing_scope)
@@ -409,7 +411,7 @@ class ObservedRunDriver(AgentLoopEngine):
             attributes={
                 "execution_result": trace_content(
                     self._observed_trace_sink,
-                    result.model_dump(mode="json") if result is not None else None,
+                    result_payload,
                 ),
                 "error": trace_content(
                     self._observed_trace_sink,
@@ -428,6 +430,9 @@ class ObservedRunDriver(AgentLoopEngine):
                 "turn_id": turn_id,
                 "step_id": step_id,
                 "tool_call_id": call.tool_call_id,
+                "diagnostic_attributes": {
+                    "arguments": call.arguments, "execution_result": result_payload, "operation_id": call.operation_id,
+                },
                 "attributes": {
                     "tool_name": call.tool_name,
                     **(
