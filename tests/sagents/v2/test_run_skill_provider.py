@@ -99,3 +99,24 @@ async def test_reference_load_and_restore_require_the_run_candidate_and_current_
     provider.revoked = True
     with pytest.raises(SageV2Error, match="revoked"):
         await loader().restore_run("run-1", snapshot)
+
+
+async def test_explicit_empty_skill_grant_never_searches_run_provider(tmp_path):
+    class UnsearchableProvider(RunProvider):
+        async def search_skills(self, query, *, run_id, limit):
+            pytest.fail("an explicitly disabled Run reached the provider")
+
+    app, bindings, models = await open_app(tmp_path, {
+        "root": (("search_skills", {"query": "weekly report"}),),
+    }, skill_provider=UnsearchableProvider())
+    manifest = no_skills("root").model_dump(mode="json")
+    manifest["agents"]["assistant"]["tools"] = ["search_skills"]
+    try:
+        agent = await app.load_agent(manifest)
+        result, events = await run(app, agent, attachments=(), enabled_skills=())
+        assert result.state.value == "completed", [event.data for event in events if "failed" in event.type]
+        assert any(block.value == [] for message in models.seen[-1][1].messages
+                   if message.role == "tool" for block in message.content if isinstance(block, JsonBlock))
+    finally:
+        await app.close()
+        await bindings.close()

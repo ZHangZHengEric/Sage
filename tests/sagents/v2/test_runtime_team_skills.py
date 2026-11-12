@@ -80,10 +80,10 @@ async def load_tree(app):
     return await app.load_agent(no_skills("root", ("d1", "outsider")), subagents={"d1": d1, "outsider": outsider})
 
 
-async def run(app, agent, *, key="start", attachments=(ATTACHMENT,), session_id=None):
+async def run(app, agent, *, key="start", attachments=(ATTACHMENT,), session_id=None, enabled_skills=None):
     stream = await app.entrypoint().run_stream(StartRun(
         agent_id=agent.id, resolved_spec_hash=agent.composition_hash, input=(),
-        config=RunConfig(skill_attachments=attachments), idempotency_key=key,
+        config=RunConfig(skill_attachments=attachments, enabled_skills=enabled_skills), idempotency_key=key,
         session_id=session_id,
     ), CONTEXT, agent=agent)
     async with asyncio.timeout(60):

@@ -172,10 +172,11 @@ class AgentCompositionFactory:
 
             # Checkpoints persist exact references. Keep their hydrated contents in memory.
             activations = InMemorySkillActivationRepository()
-        filtered_catalog = InvocationGrantSkillCatalog(
+        invocation_catalog = InvocationGrantSkillCatalog(
             FilteredSkillCatalog(catalog, selected),
             self.runtime.session_store.get_start_command,
         )
+        filtered_catalog = invocation_catalog
         if runtime_skills:
             from sagents.v2.skill.runtime import RuntimeSkillProvider
             source = RuntimeSkillProvider(filtered_catalog, source, catalog, runtime_skills)
@@ -187,7 +188,8 @@ class AgentCompositionFactory:
             activations=activations,
             workspace_root=workspace_root,
             inherited_skills=inherited_skills,
-            **({"run_provider": run_provider} if run_provider is not None else {}),
+            **({"run_provider": run_provider, "run_skill_names": invocation_catalog.allowed_names}
+               if run_provider is not None else {}),
         )
 
     def create_engine(

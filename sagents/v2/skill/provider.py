@@ -102,26 +102,26 @@ class InvocationGrantSkillCatalog:
         self.inner = inner
         self.command_reader = command_reader
 
-    async def _allowed(self, run_id: str) -> frozenset[str] | None:
+    async def allowed_names(self, run_id: str) -> frozenset[str] | None:
         command = await self.command_reader(run_id)
         configured = getattr(getattr(command, "config", None), "enabled_skills", None)
         return None if configured is None else frozenset(configured)
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
         values = await self.inner.list_skills(run_id=run_id)
-        allowed = await self._allowed(run_id)
+        allowed = await self.allowed_names(run_id)
         if allowed is None:
             return values
         return tuple(value for value in values if value.name in allowed)
 
     async def search_skills(self, query, *, run_id, limit, excluded_names=frozenset()):
         return await self.inner.search_skills(
-            query, run_id=run_id, limit=limit, allowed_names=await self._allowed(run_id),
+            query, run_id=run_id, limit=limit, allowed_names=await self.allowed_names(run_id),
             excluded_names=excluded_names,
         )
 
     async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
-        allowed = await self._allowed(run_id)
+        allowed = await self.allowed_names(run_id)
         if allowed is not None and name not in allowed:
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -153,6 +153,7 @@ class SkillLoader:
         max_active_characters: int = 24_000,
         inherited_skills: Callable[[str], Awaitable[tuple[str, ...]]] | None = None,
         run_provider: RunSkillProvider | None = None,
+        run_skill_names: Callable[[str], Awaitable[frozenset[str] | None]] | None = None,
     ) -> None:
         if max_active_characters < 1:
             raise ValueError("max_active_characters must be positive")
@@ -163,6 +164,7 @@ class SkillLoader:
         self.catalog = catalog
         self.source = source
         self.run_provider = run_provider
+        self.run_skill_names = run_skill_names
         self.workspace = workspace
         self.activations = activations
         self.workspace_root = workspace_root.rstrip("/") or "/"
@@ -177,9 +179,11 @@ class SkillLoader:
             if not has_search_terms(query):
                 return ()
             return await self.catalog.search_skills(query, run_id=run_id, limit=limit)
-        if not query.strip():
+        allowed = await self.run_skill_names(run_id) if self.run_skill_names is not None else None
+        if not query.strip() or allowed == frozenset():
             return ()
-        matches = (await self.run_provider.search_skills(query, run_id=run_id, limit=limit))[:limit]
+        matches = await self.run_provider.search_skills(query, run_id=run_id, limit=limit)
+        matches = tuple(item for item in matches if allowed is None or item.name in allowed)[:limit]
         references = tuple(item.reference for item in matches if item.reference is not None)
         if len(references) != len(matches):
             raise self._error("skill.reference_missing", "Run Skill search results require exact references")
@@ -194,7 +198,12 @@ class SkillLoader:
     async def _fetch_reference(self, reference: SkillReference, run_id: str) -> SkillBundle:
         if self.run_provider is None:
             raise self._error("skill.reference_unsupported", "The selected Skill provider cannot resolve references")
+        allowed = await self.run_skill_names(run_id) if self.run_skill_names is not None else None
+        if allowed == frozenset():
+            raise self._error("skill.not_enabled", "Skills are disabled for this Run")
         bundle = await self.run_provider.fetch_reference(reference, run_id=run_id)
+        if allowed is not None and bundle.descriptor.name not in allowed:
+            raise self._error("skill.not_enabled", "The Skill is outside this Run's authorized names")
         if bundle.descriptor.reference != reference or files_digest(bundle.files) != bundle.content_hash:
             raise self._error("skill.identity_mismatch", "The fetched Skill does not match its reference or content hash")
         return bundle
