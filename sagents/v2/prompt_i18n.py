@@ -67,7 +67,7 @@ _TEXT = {
         "Continue because: {reason}\n"
         "Perform the next unfinished action. Do not repeat the last visible update "
         "or already reported artifacts.",
-        "skill_search": "Call search_skills to find relevant authorized Skills. Call load_skill with the exact Skill name before following it.",
+        "skill_search": "Call search_skills to find relevant authorized Skills. Call load_skill with the exact reference when provided, otherwise use the exact name.",
         "skills": "Call load_skill with the exact skill name before following a Skill.",
         "memory_heading": "Relevant long-term memory:",
         "leaf": "You are executing a delegated task as a leaf agent. Do not create, spawn, or "
@@ -170,7 +170,7 @@ _TEXT = {
         "continuation": "内部运行时通知，不是用户请求。不要提及此通知。\n"
         "继续执行的原因：{reason}\n"
         "执行下一个尚未完成的动作。不要重复上一条可见进度或已经报告的产物。",
-        "skill_search": "调用 search_skills 查找相关的已授权 Skill。使用准确名称调用 load_skill 后再遵循其说明。",
+        "skill_search": "调用 search_skills 查找相关的已授权 Skill。调用 load_skill 时传入结果中的精确版本引用，只有名称时使用准确名称。",
         "skills": "遵循 Skill 前，先使用准确的 Skill 名称调用 load_skill。",
         "memory_heading": "相关长期记忆：",
         "leaf": "你正在作为叶子 Agent 执行委派任务。不得创建、启动其他 Agent 或继续委派；使用已有的非委派工具直接完成分配的任务。",

@@ -14,11 +14,14 @@ from sagents.v2.skill.contracts import (
     SkillActivationRepository,
     SkillCatalog,
     SkillDescriptor,
+    SkillReference,
+    RunSkillProvider,
     SkillSource,
     SkillRunState,
     SkillWorkspace,
 )
 from sagents.v2.contracts.common import utc_now
+from sagents.v2.contracts.skill_payload import files_digest
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -149,6 +152,7 @@ class SkillLoader:
         workspace_root: str = "/workspace",
         max_active_characters: int = 24_000,
         inherited_skills: Callable[[str], Awaitable[tuple[str, ...]]] | None = None,
+        run_provider: RunSkillProvider | None = None,
     ) -> None:
         if max_active_characters < 1:
             raise ValueError("max_active_characters must be positive")
@@ -158,6 +162,7 @@ class SkillLoader:
         self._preload_states: dict[str, SkillRunState] = {}
         self.catalog = catalog
         self.source = source
+        self.run_provider = run_provider
         self.workspace = workspace
         self.activations = activations
         self.workspace_root = workspace_root.rstrip("/") or "/"
@@ -165,9 +170,41 @@ class SkillLoader:
         self._locks_guard = asyncio.Lock()
         self._load_locks: WeakValueDictionary = WeakValueDictionary()
 
-    def _destination(self, descriptor: SkillDescriptor) -> str:
+    async def search_skills(self, query: str, *, run_id: str, limit: int) -> tuple[SkillDescriptor, ...]:
+        if self.run_provider is None:
+            from sagents.v2.skill.search import has_search_terms
+
+            if not has_search_terms(query):
+                return ()
+            return await self.catalog.search_skills(query, run_id=run_id, limit=limit)
+        if not query.strip():
+            return ()
+        matches = (await self.run_provider.search_skills(query, run_id=run_id, limit=limit))[:limit]
+        references = tuple(item.reference for item in matches if item.reference is not None)
+        if len(references) != len(matches):
+            raise self._error("skill.reference_missing", "Run Skill search results require exact references")
+        lock = await self._load_lock(run_id, "")
+        async with lock:
+            state = self._preload_states.get(run_id, SkillRunState())
+            self._preload_states[run_id] = state.model_copy(update={
+                "discovered_references": tuple(dict.fromkeys((*state.discovered_references, *references))),
+            })
+        return matches
+
+    async def _fetch_reference(self, reference: SkillReference, run_id: str) -> SkillBundle:
+        if self.run_provider is None:
+            raise self._error("skill.reference_unsupported", "The selected Skill provider cannot resolve references")
+        bundle = await self.run_provider.fetch_reference(reference, run_id=run_id)
+        if bundle.descriptor.reference != reference or files_digest(bundle.files) != bundle.content_hash:
+            raise self._error("skill.identity_mismatch", "The fetched Skill does not match its reference or content hash")
+        return bundle
+
+    def _destination(self, descriptor: SkillDescriptor, *, run_id: str) -> str:
         root = self.workspace_root.rstrip("/")
         namespace = descriptor.metadata.get("workspace_namespace")
+        reference = descriptor.reference
+        if reference is not None:
+            namespace = f"{run_id}\0{reference.skill_id}\0{reference.version_id}"
         if isinstance(namespace, str) and namespace:
             scope = hashlib.sha256(namespace.encode("utf-8")).hexdigest()
             root = f"{root}/.sage-skill-scopes/{scope}"
@@ -202,11 +239,16 @@ class SkillLoader:
         lock = await self._load_lock(run_id, "")
         async with lock:
             state = self._preload_states.get(run_id, SkillRunState())
+            values = await self.activations.list_loaded(run_id=run_id)
+            active = tuple(value.model_copy(update={"instructions": ""})
+                           if value.descriptor.reference is not None else value for value in values)
             return state.model_copy(update={
-                "active": await self.activations.list_loaded(run_id=run_id),
+                "active": active,
                 "history_initialized": run_id in self._initialized_runs,
                 "requested_names": tuple(sorted(self._requested_names.get(run_id, ()))),
-            }).model_dump(mode="json")
+            }).model_dump(mode="json", exclude={
+                key for key in ("discovered_references", "selected_references") if not getattr(state, key)
+            })
 
     async def restore_run(self, run_id: str, snapshot: dict) -> None:
         lock = await self._load_lock(run_id, "")
@@ -217,21 +259,35 @@ class SkillLoader:
             if any(value.run_id != run_id for value in state.active):
                 raise self._error("skill.state_invalid", "skill state belongs to another Run")
             reattach = getattr(self.workspace, "reattach", None)
-            if reattach is not None:
-                restored = []
-                for value in state.active:
+            restored = []
+            for value in state.active:
+                reference = value.descriptor.reference
+                if reference is not None:
+                    if reference not in state.selected_references:
+                        raise self._error("skill.state_invalid", "Active Skill reference was not selected in this Run")
+                    bundle = await self._fetch_reference(reference, run_id)
+                    _check_skill_name(value.descriptor.name, bundle.descriptor.name)
+                    if bundle.content_hash != value.content_hash:
+                        raise self._error("skill.restore_version_changed", "The selected Skill contents changed")
+                    value = value.model_copy(update={"instructions": self._instructions(bundle)})
+                    destination = self._destination(value.descriptor, run_id=run_id)
+                    if reattach is None:
+                        path = await self.workspace.materialize(bundle, run_id=run_id, destination=destination)
+                        value = value.model_copy(update={"workspace_path": path})
+                    else:
+                        value = await reattach(value, bundle, run_id=run_id, destination=destination)
+                elif reattach is not None:
                     descriptor = await self.catalog.get_skill(value.descriptor.name, run_id=run_id)
                     _check_skill_name(value.descriptor.name, descriptor.name)
                     bundle = await self._fetch_restore_bundle(value, run_id)
-                    attached = await reattach(
+                    value = await reattach(
                         value, bundle, run_id=run_id,
-                        destination=self._destination(descriptor),
+                        destination=self._destination(descriptor, run_id=run_id),
                     )
-                    _check_skill_name(value.descriptor.name, attached.descriptor.name)
-                    restored.append(attached)
-                state = state.model_copy(update={"active": tuple(restored)})
-            await self.activations.replace_loaded(run_id=run_id, values=state.active)
-            self._preload_states[run_id] = state
+                    _check_skill_name(descriptor.name, value.descriptor.name)
+                restored.append(value)
+            await self.activations.replace_loaded(run_id=run_id, values=tuple(restored))
+            self._preload_states[run_id] = state.model_copy(update={"active": ()})
             if state.history_initialized:
                 self._initialized_runs.add(run_id)
             else:
@@ -276,6 +332,35 @@ class SkillLoader:
         async with lock:
             return await self._load_once(name, run_id=run_id)
 
+    async def load_reference(self, reference: SkillReference, *, run_id: str) -> LoadedSkill:
+        lock = await self._load_lock(run_id, "")
+        async with lock:
+            state = self._preload_states.get(run_id, SkillRunState())
+            if reference not in state.discovered_references:
+                raise self._error("skill.reference_not_found", "Select a Skill reference from this Run's search results")
+            if any(item.skill_id == reference.skill_id and item != reference for item in state.selected_references):
+                raise self._error("skill.version_conflict", "A different version of this Skill is already selected")
+            with errors_before_side_effect("skill.load_preflight_failed"):
+                bundle = await self._fetch_reference(reference, run_id)
+                name = bundle.descriptor.name
+                values = await self.activations.list_loaded(run_id=run_id)
+                existing = next((value for value in values if value.descriptor.name == name), None)
+                if existing is not None:
+                    if existing.descriptor.reference != reference or existing.content_hash != bundle.content_hash:
+                        raise self._error("skill.identity_conflict", f"Another Skill is already active as {name!r}")
+                    await self.activations.replace_loaded(run_id=run_id, values=(
+                        *(value for value in values if value is not existing), existing,
+                    ))
+                    return existing
+                prepared = self._prepare_loaded(bundle, run_id=run_id,
+                    destination=self._destination(bundle.descriptor, run_id=run_id),
+                    limit=self.max_active_characters)
+            loaded = await self._materialize(bundle, prepared, limit=self.max_active_characters)
+            self._preload_states[run_id] = state.model_copy(update={
+                "selected_references": tuple(dict.fromkeys((*state.selected_references, reference))),
+            })
+            return loaded
+
     async def begin_edit(self, name: str, *, run_id: str) -> LoadedSkill:
         """Prepare the visible editing directory without changing the source.
 
@@ -289,7 +374,7 @@ class SkillLoader:
                 raise self._error("skill.edit_unsupported", "Selected workspace does not support editing copies")
             loaded = await self._load_once(name, run_id=run_id)
             bundle = await self._fetch_bundle(name, run_id)
-            destination = self._destination(loaded.descriptor)
+            destination = self._destination(loaded.descriptor, run_id=run_id)
             await edit(bundle, run_id=run_id, destination=destination)
             values = await self.activations.list_loaded(run_id=run_id)
             await self.activations.replace_loaded(run_id=run_id, values=tuple(
@@ -347,36 +432,44 @@ class SkillLoader:
         with errors_before_side_effect("skill.load_preflight_failed"):
             # This is the first operation that is allowed to read the Level-2 bundle.
             bundle = await self._fetch_bundle(name, run_id)
-            destination = self._destination(descriptor)
+            if bundle.descriptor.reference is not None:
+                raise self._error("skill.reference_required", "Load this Skill by its exact reference")
+            destination = self._destination(descriptor, run_id=run_id)
             resolve_bundle = getattr(self.workspace, "resolve_bundle", None)
             if resolve_bundle is not None:
                 bundle = await resolve_bundle(bundle, run_id=run_id, destination=destination)
                 _check_skill_name(name, bundle.descriptor.name)
-            try:
-                instructions = bundle.files["SKILL.md"].decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise self._error(
-                    "skill.invalid_utf8", "SKILL.md must be UTF-8"
-                ) from exc
-            loaded = LoadedSkill(
-                run_id=run_id,
-                descriptor=bundle.descriptor,
-                workspace_path=destination,
-                content_hash=bundle.content_hash,
-                instructions=instructions,
-                file_list=tuple(sorted(bundle.files)),
-                loaded_at=utc_now(),
+            loaded = self._prepare_loaded(bundle, run_id=run_id, destination=destination, limit=limit)
+        return await self._materialize(bundle, loaded, limit=limit)
+
+    def _instructions(self, bundle: SkillBundle) -> str:
+        try:
+            return bundle.files["SKILL.md"].decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise self._error("skill.invalid_utf8", "SKILL.md must be UTF-8") from exc
+
+    def _prepare_loaded(self, bundle: SkillBundle, *, run_id: str, destination: str, limit: int) -> LoadedSkill:
+        loaded = LoadedSkill(
+            run_id=run_id,
+            descriptor=bundle.descriptor,
+            workspace_path=destination,
+            content_hash=bundle.content_hash,
+            instructions=self._instructions(bundle),
+            file_list=tuple(sorted(bundle.files)),
+            loaded_at=utc_now(),
+        )
+        characters = len(self._context_content(loaded))
+        if characters > limit:
+            raise self._error(
+                "skill.active_budget_exceeded",
+                f"skill {bundle.descriptor.name!r} instructions exceed the active context budget "
+                f"({characters} characters; limit {limit})",
             )
-            characters = len(self._context_content(loaded))
-            if characters > limit:
-                raise self._error(
-                    "skill.active_budget_exceeded",
-                    f"skill {name!r} instructions exceed the active context budget "
-                    f"({characters} characters; "
-                    f"limit {limit})",
-                )
+        return loaded
+
+    async def _materialize(self, bundle: SkillBundle, loaded: LoadedSkill, *, limit: int) -> LoadedSkill:
         workspace_path = await self.workspace.materialize(
-            bundle, run_id=run_id, destination=destination
+            bundle, run_id=loaded.run_id, destination=loaded.workspace_path
         )
         loaded = loaded.model_copy(update={"workspace_path": workspace_path})
         if len(self._context_content(loaded)) > limit:
@@ -385,7 +478,7 @@ class SkillLoader:
                 "materialized skill context exceeds the active budget",
             )
         await self.activations.put_loaded(loaded)
-        await self._enforce_active_budget(run_id)
+        await self._enforce_active_budget(loaded.run_id)
         return loaded
 
     async def loaded(self, *, run_id: str) -> tuple[LoadedSkill, ...]:
@@ -430,10 +523,13 @@ class SkillLoader:
                 values = await self.activations.list_loaded(run_id=run_id)
             # Recheck the current grant even for durable activations on resume.
             visible = await visible_skill_descriptors(
-                self.catalog, (value.descriptor.name for value in values), run_id=run_id
+                self.catalog,
+                (value.descriptor.name for value in values if value.descriptor.reference is None),
+                run_id=run_id,
             )
             allowed = {descriptor.name for descriptor in visible}
-            return tuple(v for v in values if v.descriptor.name in allowed)
+            return tuple(value for value in values
+                         if value.descriptor.reference is not None or value.descriptor.name in allowed)
 
     async def _load_lock(self, run_id: str, name: str) -> asyncio.Lock:
         # Loading is concurrent across Runs but serialized inside one Agent

@@ -14,6 +14,7 @@ from sagents.v2.tool import (
 )
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.contracts.skill_payload import SkillReference
 
 
 class SkillLoadTool:
@@ -74,6 +75,9 @@ class SkillLoadTool:
                 )
             )
         loaded = await self.loader.load(skill_name, run_id=invocation.call.owner_run_id)
+        return await self._result(loaded, invocation)
+
+    async def _result(self, loaded, invocation):
         active = await self.loader.loaded(run_id=invocation.call.owner_run_id)
         active_names = [value.descriptor.name for value in active]
         result = (
@@ -97,13 +101,35 @@ class SkillLoadTool:
         )
 
 
+class RunSkillLoadTool(SkillLoadTool):
+    @tool(
+        name="load_skill",
+        description="Load the exact Skill version selected from this Run's search results.",
+        input_schema=SkillReference.model_json_schema(),
+        strict=True,
+        side_effect_level=SideEffectLevel.WRITE,
+        idempotency_strategy=IdempotencyStrategy.FINGERPRINT,
+        cancel_semantics=CancelSemantics.NOT_STARTED_ONLY,
+        resume_strategy=ResumeStrategy.REPLAY_RESULT,
+        required_scopes=("skill.load",),
+    )
+    async def execute(
+        self, skill_id: str, version_id: str, invocation: ToolInvocation,
+    ) -> ToolExecutionResult:
+        loaded = await self.loader.load_reference(
+            SkillReference(skill_id=skill_id, version_id=version_id),
+            run_id=invocation.call.owner_run_id,
+        )
+        return await self._result(loaded, invocation)
+
+
 class SkillSearchTool:
     def __init__(self, loader: SkillLoader) -> None:
         self.loader = loader
 
     @tool(
         name="search_skills",
-        description="Find relevant authorized Skills. Pass a result's exact name to load_skill.",
+        description="Find authorized Skills. Pass a result's exact reference or name to load_skill.",
         input_schema={
             "type": "object",
             "properties": {
@@ -122,20 +148,17 @@ class SkillSearchTool:
         self, query: str, invocation: ToolInvocation, limit: int = 5,
         session_id: str | None = None,
     ) -> ToolExecutionResult:
-        from sagents.v2.skill.search import has_search_terms
-
         del session_id
-
-        values = ()
-        if has_search_terms(query):
-            values = await self.loader.catalog.search_skills(
-                query, run_id=invocation.call.owner_run_id, limit=limit
-            )
+        values = await self.loader.search_skills(query, run_id=invocation.call.owner_run_id, limit=limit)
         return ToolExecutionResult(
             tool_call_id=invocation.call.tool_call_id,
             operation_id=invocation.call.operation_id,
             content=(JsonBlock(value=[
-                {"name": value.name, "description": value.description} for value in values
+                {
+                    "name": value.name, "description": value.description,
+                    **(value.reference.model_dump() if value.reference is not None else {}),
+                }
+                for value in values
             ]),),
         )
 

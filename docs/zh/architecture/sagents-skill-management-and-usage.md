@@ -85,6 +85,17 @@ BM25 词频和排名均基于当前 Run 授权的版本。Server 在首次索引
 加载器按请求名称核对内容身份。提供 `skill.restore-version` 的来源可以按检查点版本恢复
 已加载的 Skill。共享工作区已经切换版本时，恢复会保留该工作区中的现有内容。
 
+### Run 级 Skill 提供者
+
+宿主可以为 `skill.provider` 选择实现 `RunSkillProvider` 的插件。插件的 `search_skills` 接收
+`query`、`run_id` 和 `limit`，由插件从受信 Run 上下文确定检索范围。搜索结果只包含元数据，
+每条结果携带 `SkillReference`。模型通过同名的 `load_skill` 工具传入结果中的 `skill_id` 和
+`version_id`。包内及本地目录仍通过现有名称许可搜索和按名称加载。
+
+`fetch_reference` 在每次精确版本读取时校验当前 Run 的访问权。Sage 检查引用来自本 Run 的
+搜索结果，并核对制品引用及内容摘要。同一 Run 固定已选版本。恢复时按检查点引用重新读取
+已激活版本，Skill 正文从制品重建。首次加载和恢复共用工作区物化及活跃指令预算。
+
 ## 三种工作区策略
 
 三种策略默认使用 `skills/<名称>/`。Server Team 的成员加载重名 Skill 时使用成员专属目录，

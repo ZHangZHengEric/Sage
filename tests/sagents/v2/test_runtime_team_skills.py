@@ -28,7 +28,7 @@ ATTACHMENT = RuntimeSkillAttachment.from_bundle(EXTRA)
 LOAD = ("load_skill", {"skill_name": EXTRA.descriptor.name})
 
 
-async def open_app(root, plans, *, authorized=True, approval=False, existing=(), real_workspace=False):
+async def open_app(root, plans, *, authorized=True, approval=False, existing=(), real_workspace=False, skill_provider=None):
     models = Models(plans)
     bindings = LocalWorkspaceExecutionBindingProvider(root / "workspace", process_enabled=False)
     config = default_runtime(root / "sessions")
@@ -46,15 +46,22 @@ async def open_app(root, plans, *, authorized=True, approval=False, existing=(),
                 return await DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK).decide(context)
             return await super().decide(context)
 
+    providers = {"execution.binding": bindings, "agent.tool-policy": Policy(
+        approval_strategy=ApprovalStrategy.AUTO_APPROVE)}
+    skills = None
+    if skill_provider is None:
+        skills = (InMemorySkillProvider(existing), InMemorySkillProvider(existing),
+                  None if real_workspace else InMemorySkillWorkspace())
+    else:
+        providers["skill.provider"] = skill_provider
+        if not real_workspace:
+            providers["skill.workspace"] = InMemorySkillWorkspace()
     app = await build_registered_app(
         root / "sessions", runtime=config,
         models={**TEST_MODELS, "models": {**TEST_MODELS["models"], **{
             role: TEST_MODELS["models"]["primary"] for role in ("root", "d1", "d2", "maker", "outsider")
         }}}, model_factory=models.factory,
-        skills=(InMemorySkillProvider(existing), InMemorySkillProvider(existing),
-                None if real_workspace else InMemorySkillWorkspace()),
-        providers={"execution.binding": bindings, "agent.tool-policy": Policy(
-            approval_strategy=ApprovalStrategy.AUTO_APPROVE)},
+        skills=skills, providers=providers,
     )
     return app, bindings, models
 

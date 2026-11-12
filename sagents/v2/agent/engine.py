@@ -264,6 +264,9 @@ class AgentLoopEngine:
             )
         self.skill_loader = skill_loader
         self.preload_skills = preload_skills
+        self._checkpoint_skills = skill_loader is not None and (
+            bool(preload_skills) or getattr(skill_loader, "run_provider", None) is not None
+        )
         self._last_skill_states: dict[str, dict] = {}
         self.runtime = runtime
         self.model = model
@@ -415,7 +418,7 @@ class AgentLoopEngine:
             return await self._drive(run, state, context)
 
     async def _restore_skill_state(self, run_id, *, checkpoint_state=None, legacy=False) -> None:
-        if not self.preload_skills or self.skill_loader is None:
+        if not self._checkpoint_skills or self.skill_loader is None:
             return
         snapshot = checkpoint_state
         if snapshot is None:
@@ -4707,7 +4710,7 @@ class AgentLoopEngine:
     async def _checkpoint_records(self, run, state, *, reason, interaction_id=None) -> tuple[Checkpoint, Suspension]:
         """Build matching Checkpoint/Suspension records for one atomic commit."""
 
-        if self.preload_skills and self.skill_loader is not None:
+        if self._checkpoint_skills and self.skill_loader is not None:
             state = state.model_copy(
                 update={
                     "skill_state": await self.skill_loader.snapshot_run(run.run_id),
@@ -5069,7 +5072,7 @@ class AgentLoopEngine:
         self, run, context, drafts, *, expected_states=None, recovery_state=None
     ) -> RunSnapshot:
         snapshot = None
-        if self.preload_skills and self.skill_loader is not None:
+        if self._checkpoint_skills and self.skill_loader is not None:
             from sagents.v2.contracts.events import SkillStateEventData
 
             snapshot = await self.skill_loader.snapshot_run(run.run_id)

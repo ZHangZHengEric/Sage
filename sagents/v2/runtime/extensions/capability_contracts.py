@@ -257,6 +257,7 @@ _SKILL_CALL_SHAPES = {
     "fetch": (("skill",), {"run_id": "run"}),
     "fetch_latest": (("skill",), {"run_id": "run"}),
     "fetch_for_restore": (("skill",), {"run_id": "run", "version": "accepted"}),
+    "fetch_reference": ((None,), {"run_id": "run"}),
     "search_skills": (
         ("query",),
         {"run_id": "run", "allowed_names": frozenset(), "limit": 1},
@@ -266,8 +267,10 @@ _SKILL_CALL_SHAPES = {
 }
 
 
-def _accepts_skill_call(member, method: str) -> bool:
+def _accepts_skill_call(member, method: str, *, run_scoped: bool = False) -> bool:
     args, kwargs = _SKILL_CALL_SHAPES[method]
+    if method == "search_skills" and run_scoped:
+        kwargs = {key: value for key, value in kwargs.items() if key != "allowed_names"}
     try:
         call_signature = signature(member)
     except (TypeError, ValueError):
@@ -301,6 +304,10 @@ def missing_provider_members(
         if feature.id in features
         for member in feature.members
     )
+    fetch_reference = getattr(provider, "fetch_reference", None)
+    run_scoped = capability == "skill.provider" and callable(fetch_reference)
+    if run_scoped:
+        required = tuple(dict.fromkeys((*required, "search_skills", "fetch_reference")))
     missing = []
     for member in required:
         value = _member(provider, member)
@@ -309,7 +316,7 @@ def missing_provider_members(
         elif capability in {
             "skill.provider",
             "skill.management",
-        } and not _accepts_skill_call(value, member):
+        } and not _accepts_skill_call(value, member, run_scoped=run_scoped):
             missing.append(f"{member} (incompatible signature)")
     missing.extend(member for member in attributes if not hasattr(provider, member))
     return tuple(missing)

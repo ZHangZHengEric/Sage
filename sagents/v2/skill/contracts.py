@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.contracts.skill_payload import (
     SkillBundle as SkillBundle,
     SkillDescriptor as SkillDescriptor,
+    SkillReference as SkillReference,
 )
 
 
@@ -32,6 +33,8 @@ class SkillRunState(StrictModel):
     history_initialized: bool = False
     requested_names: tuple[str, ...] = ()
     active: tuple[LoadedSkill, ...] = ()
+    discovered_references: tuple[SkillReference, ...] = ()
+    selected_references: tuple[SkillReference, ...] = ()
 
 
 class SkillCatalog(Protocol):
@@ -53,6 +56,22 @@ class SkillSearchProvider(Protocol):
     async def search_skills(
         self, query: str, *, run_id: str, allowed_names: frozenset[str], limit: int
     ) -> tuple[SkillDescriptor, ...]: ...
+
+
+@runtime_checkable
+class RunSkillProvider(SkillProvider, Protocol):
+    """A trusted provider that derives discovery and read access from the Run.
+
+    Return metadata with references from search and authorize every exact-version
+    fetch, including recovery. The SDK checks that a new selection came from the
+    same Run's search and that the returned bundle matches the reference.
+    """
+
+    async def search_skills(
+        self, query: str, *, run_id: str, limit: int
+    ) -> tuple[SkillDescriptor, ...]: ...
+
+    async def fetch_reference(self, reference: SkillReference, *, run_id: str) -> SkillBundle: ...
 
 
 class CurrentSkillSource(SkillSource, Protocol):

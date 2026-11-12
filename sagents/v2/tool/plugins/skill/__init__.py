@@ -9,7 +9,9 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
 )
 from sagents.v2.skill.provider import SkillLoader
-from sagents.v2.tool.plugins.skill.operations import SkillEditTool, SkillLoadTool, SkillSearchTool
+from sagents.v2.tool.plugins.skill.operations import (
+    RunSkillLoadTool, SkillEditTool, SkillLoadTool, SkillSearchTool,
+)
 from sagents.v2.tool.decorated import DecoratedToolProvider
 
 
@@ -52,7 +54,8 @@ class SkillToolPlugin:
         self, loader: SkillLoader, *, language: str | None = None,
         allow_editing: bool = False, allow_search: bool = False,
     ) -> None:
-        owners: list[SkillLoadTool | SkillEditTool | SkillSearchTool] = [SkillLoadTool(loader, language=language)]
+        load_tool = RunSkillLoadTool if getattr(loader, "run_provider", None) is not None else SkillLoadTool
+        owners: list[SkillLoadTool | SkillEditTool | SkillSearchTool] = [load_tool(loader, language=language)]
         if allow_search:
             owners.append(SkillSearchTool(loader))
         if allow_editing:

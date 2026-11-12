@@ -3,9 +3,16 @@ from __future__ import annotations
 
 import hashlib
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_serializer
 
 from sagents.v2.contracts.common import Identifier, SkillName, StrictModel
+
+
+class SkillReference(StrictModel):
+    """A provider-owned identity for one immutable version of a Skill."""
+
+    skill_id: Identifier
+    version_id: Identifier
 
 
 class SkillDescriptor(StrictModel):
@@ -16,6 +23,14 @@ class SkillDescriptor(StrictModel):
     source_id: Identifier
     version: str | None = None
     metadata: dict = Field(default_factory=dict)
+    reference: SkillReference | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_descriptor(self, handler):
+        data = handler(self)
+        if self.reference is None:
+            data.pop("reference", None)
+        return data
 
 
 class SkillBundle(StrictModel):
