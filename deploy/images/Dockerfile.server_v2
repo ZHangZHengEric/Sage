@@ -15,8 +15,13 @@ RUN sed -i 's@deb.debian.org@mirrors.tuna.tsinghua.edu.cn@g' \
 # Runtime tools for local sandbox execution and MCP subprocesses.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git bubblewrap util-linux build-essential fonts-dejavu-core fonts-liberation fonts-noto-cjk fontconfig \
-    poppler-utils poppler-data libreoffice-writer libreoffice-calc libreoffice-impress \
+    poppler-utils poppler-data libreoffice-writer libreoffice-calc libreoffice-impress libreofficekit-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# LibreOfficeKit converts files without the CLI's Unix IPC listener.
+COPY deploy/images/sage-office.c /tmp/sage-office.c
+RUN cc -O2 -Wall -Wextra -o /usr/local/bin/sage-office /tmp/sage-office.c -ldl \
+    && rm /tmp/sage-office.c
 
 # Pin Node (including its bundled npm), JS dependencies and the matching browser.
 # All runtime assets live in directories already mounted read-only by bubblewrap.
