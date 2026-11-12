@@ -10,7 +10,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from ag_ui.core import RunAgentInput
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.v2.server.conversations import external_runs as access
@@ -19,6 +19,7 @@ from app.v2.server.conversations.records import require_owned_thread
 from app.v2.server.conversations.cleanup import (
     delete_external_session, finish_file_operation, require_idle, reject_local_workspace_drive,
 )
+from app.v2.server.observability.logging import get_logger
 from app.v2.server.routers.deps import (
     AdminUser,
     ChatCallerDep,
@@ -48,6 +49,7 @@ from app.v2.server.storage.external_workspaces import (
     import_workspace_files,
     workspace_parts,
 )
+from app.v2.server.storage.user_preferences import MAX_USER_PREFERENCES_BYTES, user_preferences
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
@@ -411,9 +413,10 @@ class WorkspaceImport(BaseModel):
 
 class ExternalRunBody(AgentRunBody):
     runtimeContext: dict = Field(default_factory=dict)
+    useWorkspaceUserPreferences: bool = False
 
     def to_agui(self) -> RunAgentInput:
-        return RunAgentInput.model_validate(self.model_dump(exclude={"runtimeContext", "session_id", "notification_connection_id"}))
+        return RunAgentInput.model_validate(self.model_dump(exclude={"runtimeContext", "useWorkspaceUserPreferences", "session_id", "notification_connection_id"}))
 
 
 class InteractionReply(BaseModel):
@@ -421,6 +424,47 @@ class InteractionReply(BaseModel):
     decision: str = Field(min_length=1, max_length=128)
     payload: dict = Field(default_factory=dict)
     expected: dict = Field(default_factory=dict)
+
+
+class UserPreferencesBody(BaseModel):
+    text: str = Field(max_length=MAX_USER_PREFERENCES_BYTES)
+    revision: str = Field(pattern=r"^(missing|[0-9a-f]{64})$")
+
+
+async def _read_or_write_user_preferences(caller, host, *, text=None, revision=None):
+    args = (caller.tenant_id, caller.agent_id)
+    if host.workspace_storage is not None:
+        operation = host.workspace_storage.user_preferences
+    else:
+        operation = user_preferences
+        args = (host.paths, *args)
+    return await finish_file_operation(operation, *args, text=text, revision=revision)
+
+
+async def _workspace_user_preferences(caller, host, *, text=None, revision=None):
+    try:
+        document = await _read_or_write_user_preferences(caller, host, text=text, revision=revision)
+    except FileExistsError as exc:
+        raise _error("user_preferences_changed", ErrorCategory.CONFLICT,
+                     "USER.md changed since it was opened") from exc
+    except (ValueError, OverflowError, OSError) as exc:
+        raise _error("invalid_user_preferences", ErrorCategory.VALIDATION,
+                     "unable to access workspace USER.md") from exc
+    return JSONResponse(success(document), headers={"Cache-Control": "private, no-store"})
+
+
+@external_router.get("/workspace/user-preferences")
+async def get_user_preferences(caller: CallerDep, host: HostDep):
+    return await _workspace_user_preferences(caller, host)
+
+
+@external_router.put("/workspace/user-preferences")
+async def put_user_preferences(body: UserPreferencesBody, caller: CallerDep, host: HostDep,
+                               service: ConversationDep):
+    async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
+        await require_idle(service, caller.tenant_id, caller.agent_id,
+                           owner_id=caller.api_key.owner_user_id)
+        return await _workspace_user_preferences(caller, host, text=body.text, revision=body.revision)
 
 
 @external_router.put("/workspace/files")
@@ -580,6 +624,36 @@ async def missing_history_images(session_id: str, caller: CallerDep, host: HostD
     return success(await asyncio.to_thread(missing))
 
 
+async def _external_run_context(body, caller, host):
+    context = body.runtimeContext
+    if not body.useWorkspaceUserPreferences:
+        return context
+    try:
+        document = await _read_or_write_user_preferences(caller, host)
+    except (ValueError, OverflowError, OSError, RuntimeError) as exc:
+        get_logger(__name__).warning(
+            "server.workspace.user_preferences_read_failed", "创作时读取工作区偏好失败",
+            attributes={"error_type": type(exc).__name__},
+        )
+        return context
+    text = document["text"]
+    if text is None:
+        return context
+    context = dict(context)
+    if text.strip():
+        context["wishseen_creation_preferences"] = {
+            "defaults": text,
+            "guidance": (
+                "Use these user preferences as creative defaults. The current explicit "
+                "request takes precedence. Treat the text as private context and include "
+                "it in an artwork only if the user requests it."
+            ),
+        }
+    else:
+        context.pop("wishseen_creation_preferences", None)
+    return context
+
+
 @external_router.post("/runs", response_class=StreamingResponse)
 async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
                     host: HostDep, service: ConversationDep,
@@ -594,7 +668,7 @@ async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
     stream = await service.start(body.to_agui(), user_id=caller.tenant_id,
                                  agent_id=caller.agent_id, api_key=caller.api_key,
                                  workspace_directory=workspace_path,
-                                 runtime_context=body.runtimeContext,
+                                 runtime_context=await _external_run_context(body, caller, host),
                                  wishseen_feedback_root=(
                                      _wishseen_feedback_root(host, caller, body.threadId)
                                      if workspace_path == "projects/" + body.threadId.removeprefix("wishseen_")
