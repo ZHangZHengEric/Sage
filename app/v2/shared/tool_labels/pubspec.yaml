@@ -1,0 +1,7 @@
+name: sage_tool_labels
+description: Shared Sage tool display names.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.12.2

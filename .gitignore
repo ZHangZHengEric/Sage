@@ -46,6 +46,11 @@ lib/
 lib64/
 !app/v2/desktop/lib/
 !app/v2/desktop/lib/**
+!app/v2/voice/lib/
+!app/v2/voice/lib/**
+!app/v2/shared/tool_labels/lib/
+!app/v2/shared/tool_labels/lib/**
+/.venv-voice/
 parts/
 sdist/
 var/

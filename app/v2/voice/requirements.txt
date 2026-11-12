@@ -1,0 +1,6 @@
+# Public dependencies for the voice pipeline included in this checkout.
+numpy>=1.26.4,<3
+onnxruntime~=1.24.3
+sherpa-onnx==1.13.4
+sounddevice>=0.5.3,<0.6
+websockets>=15,<18

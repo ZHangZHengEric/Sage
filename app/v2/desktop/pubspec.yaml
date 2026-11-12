@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  sage_tool_labels:
+    path: ../shared/tool_labels
   flutter:
     sdk: flutter
   flutter_localizations:

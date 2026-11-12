@@ -468,6 +468,13 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "3.2.2"
+  sage_tool_labels:
+    dependency: "direct main"
+    description:
+      path: "../shared/tool_labels"
+      relative: true
+    source: path
+    version: "0.1.0"
   shared_preferences:
     dependency: "direct main"
     description:

@@ -17,6 +17,7 @@ app/
   v2/
     cli/              V2 command implementations and configuration
     desktop/          Flutter client and Python host
+    voice/            Sage Voice for macOS
     server/           Server API and web UI
   skills/             Packaged skill content
   wiki/               Legacy product manual used by v1 Desktop
@@ -36,3 +37,5 @@ Public launchers live in `app/clients`: `app/clients/cli` dispatches `sage` comm
 
 `app/skills` is the only built-in skill source. Former local root skills were
 archived intact under `.sage/organization-backup/root-skills`; they are not shipped.
+
+See the [Sage Voice setup guide](v2/voice/README.md) for the macOS voice app.
