@@ -28,6 +28,7 @@ from sagents.v2.contracts.items import JsonBlock
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.skill.contracts import SkillBundle
 from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+from sagents.v2.skill.search import SkillSearchIndex, merge_skill_matches, searchable_body
 from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
 from sagents.v2.tool.contracts import (
     ReconcileResult,
@@ -107,6 +108,7 @@ class _Tools:
 class _Skills:
     def __init__(self, service, catalog, source):
         self.service, self.catalog, self.source = service, catalog, source
+        self._search_index = SkillSearchIndex()
 
     async def list_skills(self, *, run_id):
         values = {
@@ -116,6 +118,22 @@ class _Skills:
             {name: bundle.descriptor for name, bundle in self.service.bundles.items()}
         )
         return tuple(values[name] for name in sorted(values))
+
+    async def search_skills(self, query, *, run_id, limit):
+        bundles = dict(self.service.bundles)
+        base = await self.catalog.search_skills(
+            query, run_id=run_id, limit=limit, excluded_names=bundles.keys()
+        )
+        documents = {
+            f"{name}/{bundle.content_hash}": lambda bundle=bundle: (
+                bundle.descriptor, searchable_body(bundle.files["SKILL.md"])
+            )
+            for name, bundle in bundles.items()
+        }
+        overlay = await bounded_to_thread(
+            "skill-io", lambda: self._search_index.search(query, documents, limit, replace=True)
+        )
+        return merge_skill_matches(query, base, overlay, limit)
 
     async def get_skill(self, name, *, run_id):
         bundle = self.service.bundles.get(name)
@@ -338,7 +356,10 @@ class SelfConfigurationService:
 
         assert self._base_catalog is not None and self._loader is not None
         definitions = await self._base_catalog.list_tools(run_id=run_id)
-        skill_tool = SkillToolPlugin(self._loader)
+        skill_tool = SkillToolPlugin(
+            self._loader,
+            allow_search=any(value.name == "search_skills" for value in definitions),
+        )
         # Override execution with the private overlay loader even when the
         # host already advertises load_skill through its original loader.
         executors += (skill_tool.executor,)

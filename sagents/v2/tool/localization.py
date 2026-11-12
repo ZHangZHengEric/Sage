@@ -121,6 +121,11 @@ _TOOL_DESCRIPTIONS: dict[str, ToolText] = {
         "Validate and start a Markdown-style questionnaire, returning a pending-user-input status.",
         "Validar e iniciar um questionário em Markdown, retornando estado de espera pelo usuário.",
     ),
+    "search_skills": _text(
+        "搜索相关且已授权的 Skill。使用结果中的准确名称调用 load_skill。",
+        "Find relevant authorized Skills. Pass a result's exact name to load_skill.",
+        "Encontre Skills autorizadas e relevantes. Use o nome exato do resultado em load_skill.",
+    ),
     "load_skill": _text(
         "加载一个已启用 Skill 的说明与工作区资源，并在当前 Run 中激活。",
         "Load an enabled Skill's instructions and workspace resources into the current Run.",

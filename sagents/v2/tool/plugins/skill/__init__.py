@@ -9,7 +9,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
 )
 from sagents.v2.skill.provider import SkillLoader
-from sagents.v2.tool.plugins.skill.operations import SkillEditTool, SkillLoadTool
+from sagents.v2.tool.plugins.skill.operations import SkillEditTool, SkillLoadTool, SkillSearchTool
 from sagents.v2.tool.decorated import DecoratedToolProvider
 
 
@@ -25,21 +25,36 @@ class SkillToolPlugin:
         name=name,
         description=description,
         provides=(
-            CapabilityOffer(capability="tool.provider", api_version="2", name="skill"),
+            CapabilityOffer(
+                capability="tool.provider",
+                api_version="2",
+                name="skill",
+                features=("tool.cancel", "tool.release-run"),
+            ),
         ),
-        supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),
+        supported_scopes=frozenset({ExtensionScope.RUN}),
         dependencies=(ExtensionDependency(capability="skill.loader"),),
         config_schema={
             "type": "object",
-            "properties": {"language": {"type": "string"}, "allow_editing": {"type": "boolean"}},
+            "properties": {
+                "language": {"type": "string"},
+                "allow_editing": {"type": "boolean"},
+                "allow_search": {"type": "boolean"},
+            },
             "additionalProperties": False,
         },
         capabilities={"decorated_tools": True},
         built_in=True,
+        sdk_managed=True,
     )
 
-    def __init__(self, loader: SkillLoader, *, language: str | None = None, allow_editing: bool = False) -> None:
-        owners: list[SkillLoadTool | SkillEditTool] = [SkillLoadTool(loader, language=language)]
+    def __init__(
+        self, loader: SkillLoader, *, language: str | None = None,
+        allow_editing: bool = False, allow_search: bool = False,
+    ) -> None:
+        owners: list[SkillLoadTool | SkillEditTool | SkillSearchTool] = [SkillLoadTool(loader, language=language)]
+        if allow_search:
+            owners.append(SkillSearchTool(loader))
         if allow_editing:
             if not callable(getattr(loader.workspace, "begin_edit", None)):
                 raise ValueError("Selected Skill workspace does not support editing")

@@ -10,12 +10,15 @@ import hashlib
 import json
 import sqlite3
 import threading
+from collections import OrderedDict
+from copy import deepcopy
 from pathlib import Path
 
 from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.errors import ErrorCategory
 from sagents.v2.skill.bundles import files_digest, skill_error
 from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
+from sagents.v2.skill.search import ScopedSkillRanker, create_index, has_search_terms, put_document, searchable_body
 
 
 class SqliteSkillRepository:
@@ -41,6 +44,8 @@ class SqliteSkillRepository:
         self.max_files = max_files
         self.max_total_bytes = max_total_bytes
         self._lock = threading.RLock()
+        self._ranker = ScopedSkillRanker()
+        self._pin_cache: OrderedDict[str, dict[str, dict]] = OrderedDict()
         self._db = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._db.execute("PRAGMA busy_timeout=30000")
         self._db.executescript("""
@@ -126,6 +131,8 @@ class SqliteSkillRepository:
                             for path, content in bundle.files.items()
                         ),
                     )
+                    if self._has_search_index():
+                        put_document(self._db, self._search_key(descriptor), descriptor, searchable_body(bundle.files["SKILL.md"]))
                 self._db.execute(
                     "INSERT OR REPLACE INTO skill_heads(name,version) VALUES(?,?)",
                     (descriptor.name, version),
@@ -136,7 +143,7 @@ class SqliteSkillRepository:
                 raise
         return descriptor
 
-    def _pinned_catalog(self, run_id):
+    def _pinned_catalog_json(self, run_id):
         # Caller holds the instance lock. BEGIN IMMEDIATE serializes first-pin
         # creation and publication across independent repository processes too.
         self._db.execute("BEGIN IMMEDIATE")
@@ -149,36 +156,93 @@ class SqliteSkillRepository:
                     SELECT v.descriptor FROM skill_heads h JOIN skill_versions v
                     ON h.name=v.name AND h.version=v.version ORDER BY h.name
                 """).fetchall()
-                catalog = [json.loads(value[0]) for value in values]
+                catalog = "[" + ",".join(value[0] for value in values) + "]"
                 self._db.execute(
                     "INSERT INTO skill_run_pins(run_id,catalog) VALUES(?,?)",
-                    (run_id, json.dumps(catalog)),
+                    (run_id, catalog),
                 )
             else:
-                catalog = json.loads(row[0])
+                catalog = row[0]
             self._db.commit()
         except BaseException:
             self._db.rollback()
             raise
-        return tuple(SkillDescriptor.model_validate(value) for value in catalog)
+        return catalog
+
+    def _pinned_catalog(self, run_id: str) -> dict[str, dict]:
+        if run_id not in self._pin_cache:
+            self._pin_cache[run_id] = {
+                item["name"]: item for item in json.loads(self._pinned_catalog_json(run_id))
+            }
+            if len(self._pin_cache) > 8:
+                self._pin_cache.popitem(last=False)
+        self._pin_cache.move_to_end(run_id)
+        return self._pin_cache[run_id]
 
     async def list_skills(self, *, run_id):
         def read():
             with self._lock:
-                return self._pinned_catalog(run_id)
+                catalog = self._pinned_catalog(run_id)
+                return tuple(SkillDescriptor.model_validate(deepcopy(value)) for value in catalog.values())
 
         return await bounded_to_thread("skill-io", read)
 
     async def get_skill(self, name, *, run_id):
-        values = await self.list_skills(run_id=run_id)
-        for descriptor in values:
-            if descriptor.name == name:
-                return descriptor
+        def read():
+            with self._lock:
+                value = self._pinned_catalog(run_id).get(name)
+                return SkillDescriptor.model_validate(deepcopy(value)) if value is not None else None
+
+        descriptor = await bounded_to_thread("skill-io", read)
+        if descriptor is not None:
+            return descriptor
         raise skill_error(
             "skill.not_found",
             f"Skill {name!r} is not in this Run's catalog",
             ErrorCategory.VALIDATION,
         )
+
+    @staticmethod
+    def _search_key(descriptor: SkillDescriptor) -> str:
+        return f"{descriptor.name}/{descriptor.version}"
+
+    def _has_search_index(self) -> bool:
+        return self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'skill_search_fts'"
+        ).fetchone() is not None
+
+    def _ensure_search_index(self) -> None:
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            if not self._has_search_index():
+                create_index(self._db)
+                rows = self._db.execute("""
+                    SELECT v.descriptor, f.content
+                    FROM skill_versions v JOIN skill_version_files f
+                    ON f.name = v.name AND f.version = v.version
+                    WHERE f.path = 'SKILL.md'
+                    """)
+                for descriptor_json, body in rows:
+                    descriptor = SkillDescriptor.model_validate_json(descriptor_json)
+                    put_document(self._db, self._search_key(descriptor), descriptor, searchable_body(body))
+            self._db.commit()
+        except BaseException:
+            self._db.rollback()
+            raise
+
+    async def search_skills(self, query, *, run_id, allowed_names, limit):
+        if not allowed_names or not has_search_terms(query):
+            return ()
+
+        def read():
+            with self._lock:
+                if not self._has_search_index():
+                    self._ensure_search_index()
+                catalog = self._pinned_catalog(run_id)
+                keys = (f"{name}/{catalog[name]['version']}" for name in catalog.keys() & allowed_names)
+                return self._ranker.rank(self._db, query, keys, limit)
+
+        return await bounded_to_thread("skill-io", read)
 
     async def fetch(self, name, *, run_id):
         descriptor = await self.get_skill(name, run_id=run_id)
@@ -203,6 +267,10 @@ class SqliteSkillRepository:
             return row[0]
 
         version = await bounded_to_thread("skill-io", read)
+        return await self.fetch_version(name, version)
+
+    async def fetch_for_restore(self, name: str, *, run_id: str, version: str) -> SkillBundle:
+        await self.get_skill(name, run_id=run_id)
         return await self.fetch_version(name, version)
 
     async def fetch_version(self, name: str, version: str) -> SkillBundle:

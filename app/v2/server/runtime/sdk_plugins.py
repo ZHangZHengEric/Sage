@@ -38,7 +38,10 @@ def run_registration(capability, factory, *, dependencies=()):
         descriptor=ExtensionDescriptor(
             plugin_id="com.sage.server.run." + capability.replace(".", "-"),
             name="Server " + capability, version="2.0.0",
-            provides=(CapabilityOffer(capability=capability, api_version="2"),),
+            provides=(CapabilityOffer(
+                capability=capability, api_version="2",
+                features=("skill.search", "skill.latest", "skill.restore-version") if capability == "skill.provider" else (),
+            ),),
             dependencies=(ExtensionDependency(capability="execution.environment"), *dependencies),
             supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
             config_schema={"type": "object", "properties": {
@@ -87,12 +90,47 @@ def server_registrations(host):
             authorize=authorize if "server_v2.im" in command.config.metadata else None)
 
     async def skills(context, deps):
-        from app.v2.server.skills.runtime import CatalogSkillProvider
-        _, _, frozen, user = await run_inputs(host, context, deps)
+        from app.v2.server.skills.runtime import CatalogSkillProvider, package_files_for_agent
+        from sagents.v2.skill.search import SkillSearchIndex
+        run, _, frozen, user = await run_inputs(host, context, deps)
+
         async def latest_record(record):
             return await host.skill_catalog.get(record.skill_id, user_id=user, role="user")
-        return CatalogSkillProvider(frozen.skills, host.paths.data_root, latest_record=latest_record,
-            package_files=(frozen.package or frozen.agent.package_bundle).files)
+        async def version_record(version):
+            versions = await host.skills.get_versions([version])
+            return next(iter(versions), None)
+
+        index = host.skill_search_indexes.get(user)
+        if index is None:
+            index = host.skill_search_indexes[user] = SkillSearchIndex()
+        bundle = frozen.package or frozen.agent.package_bundle
+        agent_id = context.agent_id
+        files = bundle.files if frozen.member_skills is None else package_files_for_agent(bundle, agent_id)
+        command = run.command
+        while files is None and command.parent_run_id:
+            command = await deps.require("session.store").get_start_command(command.parent_run_id)
+            agent_id = command.agent_id
+            files = package_files_for_agent(bundle, agent_id)
+        records = frozen.skills
+        scoped_names = frozenset()
+        if frozen.member_skills is not None and agent_id != frozen.agent.id:
+            from sagents.v2.agent.management.loading import bundle_agent_definitions
+
+            records = frozen.member_skills.get(agent_id, ())
+            definitions = bundle_agent_definitions(bundle)
+            member = definitions.get(agent_id)
+            if member is not None and member is not definitions[frozen.agent.id]:
+                other_names = {
+                    name for definition in definitions.values()
+                    if definition is not member for name in definition.skills
+                }
+                scoped_names = frozenset(member.skills) & other_names
+        return CatalogSkillProvider(
+            records, host.paths.data_root, latest_record=latest_record,
+            version_record=version_record, package_files=files, search_index=index,
+            workspace_namespace=agent_id, scoped_names=scoped_names,
+        )
+
 
     async def tools(context, deps):
         import hashlib

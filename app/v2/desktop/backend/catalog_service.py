@@ -38,6 +38,7 @@ from sagents.v2.tool.plugins.official import (
 )
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.package.manifest.agents import DEFAULT_VISIBLE_SKILLS_LIMIT, validate_default_visible_skills
 from sagents.v2.package.manifest.models import (
     ModelLimits,
     ModelRequestDefaults,
@@ -51,6 +52,7 @@ from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.skill import (
     SkillLoadTool,
 )
+from sagents.v2.tool.plugins.skill.operations import SkillSearchTool
 from sagents.v2.tool import decorated_tool_definition
 from sagents.v2.tool import (
     McpServerConfig,
@@ -256,6 +258,10 @@ class DesktopCatalogServiceMixin:
             await asyncio.to_thread(shutil.rmtree, target)
             for agent in affected:
                 config = {**agent.config, "availableSkills": [name for name in agent.config.get("availableSkills") or [] if name != skill_name]}
+                if "defaultVisibleSkills" in config:
+                    config["defaultVisibleSkills"] = [
+                        name for name in config["defaultVisibleSkills"] if name != skill_name
+                    ]
                 updated = agent.model_copy(update={"config": config, "updated_at": utc_now()})
                 await self._record_agent_version(updated)
                 await self.catalog.save_agent(updated)
@@ -268,6 +274,7 @@ class DesktopCatalogServiceMixin:
         categories = {
             **official_tool_categories(),
             "load_skill": "system",
+            "search_skills": "system",
         }
         definitions = []
         for value in self._native_tool_definitions():
@@ -299,8 +306,10 @@ class DesktopCatalogServiceMixin:
 
     def _native_tool_definitions(self) -> tuple[ToolDefinition, ...]:
         definitions = official_tool_definitions()
-        load_skill = decorated_tool_definition(SkillLoadTool.execute)
-        return (*definitions, *((load_skill,) if load_skill is not None else ()))
+        skill_tools = (
+            decorated_tool_definition(owner.execute) for owner in (SkillLoadTool, SkillSearchTool)
+        )
+        return (*definitions, *(tool for tool in skill_tools if tool is not None))
 
     async def _mcp_plugin(self, user_id: str) -> McpToolPlugin:
         self = cast("DesktopV2Service", self)
@@ -729,6 +738,8 @@ class DesktopCatalogServiceMixin:
             "memory": _agent_memory_behavior(agent).model_dump(mode="json"),
             "available_tools": list(config.get("availableTools") or []),
             "available_skills": list(config.get("availableSkills") or []),
+            "default_visible_skills": config.get("defaultVisibleSkills"),
+            "default_visible_skills_limit": config.get("defaultVisibleSkillsLimit", DEFAULT_VISIBLE_SKILLS_LIMIT),
             "approved_shell_commands": list(config.get("approvedShellCommands") or []),
             "shell_policy": shell_policy_summary(
                 config.get("approvedShellCommands") or ()
@@ -827,6 +838,27 @@ class DesktopCatalogServiceMixin:
             if unknown:
                 raise ValueError(f"unknown skills: {', '.join(sorted(unknown))}")
             config["availableSkills"] = selected_skills
+        if fields & {"available_skills", "default_visible_skills", "default_visible_skills_limit"}:
+            visible = config.get("defaultVisibleSkills")
+            allowed = set(config.get("availableSkills") or ())
+            if "default_visible_skills" in fields:
+                visible = patch.default_visible_skills
+                if visible is not None:
+                    visible = _normalized_assignment_names(visible, label="skill")
+            elif visible is not None:
+                visible = [name for name in visible if name in allowed]
+            limit = config.get("defaultVisibleSkillsLimit", DEFAULT_VISIBLE_SKILLS_LIMIT)
+            if "default_visible_skills_limit" in fields:
+                limit = patch.default_visible_skills_limit or DEFAULT_VISIBLE_SKILLS_LIMIT
+            validate_default_visible_skills(visible, allowed, limit)
+            if visible is None:
+                config.pop("defaultVisibleSkills", None)
+            else:
+                config["defaultVisibleSkills"] = visible
+            if limit == DEFAULT_VISIBLE_SKILLS_LIMIT:
+                config.pop("defaultVisibleSkillsLimit", None)
+            else:
+                config["defaultVisibleSkillsLimit"] = limit
         if "approved_shell_commands" in fields:
             config["approvedShellCommands"] = sorted(
                 {
@@ -1028,6 +1060,16 @@ class DesktopCatalogServiceMixin:
             "observability.provider": self.observability_plugin_id,
             "session.store": self.session_plugin_id,
         }
+        from sagents.v2.runtime.extensions.capability_contracts import (
+            module_contract_inventory,
+            module_contracts_for,
+        )
+
+        from .sdk_plugins import desktop_registrations
+
+        inventory = module_contract_inventory(
+            self.extensions, host_registrations=desktop_registrations(self)
+        )
         for capability, component_spec in _DESKTOP_COMPONENTS.items():
             default_plugin_id = str(component_spec["default"])
             plugins = []
@@ -1084,6 +1126,7 @@ class DesktopCatalogServiceMixin:
                         "scope": component_spec["scope"],
                     },
                     "plugins": plugins,
+                    "contracts": module_contracts_for(capability, inventory),
                     "selected_config": dict(settings.component_configs.get(capability, {})),
                     "active": {
                         "plugin_id": active_plugin_id,

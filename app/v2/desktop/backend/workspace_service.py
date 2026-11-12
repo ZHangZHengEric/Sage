@@ -382,8 +382,8 @@ class DesktopWorkspaceServiceMixin:
                 if not target.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(base64.b64decode(content, validate=True))
-            roots = (overlay / "skills", *roots)
-        return FilesystemSkillProvider(roots)
+            return FilesystemSkillProvider((overlay / "skills", *roots))
+        return FilesystemSkillProvider(roots, search_index=self._skill_search_index)
 
     def _imported_skill_root(self, skill_name: str) -> Path | None:
         self = cast("DesktopV2Service", self)

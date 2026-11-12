@@ -24,9 +24,13 @@ function canonical(value) {
 }
 export function sameConfiguration(a, b) { return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b)) }
 export function cloneConfiguration(value) { return JSON.parse(JSON.stringify(value)) }
+export const DEFAULT_SKILL_VISIBILITY_LIMIT = 20
+
 export function sectionChanges(form, saved, skills, savedSkills) {
   return { ...Object.fromEntries(Object.entries(sectionKeys).map(([section, keys]) => [section, keys.some(key => !sameConfiguration(form?.[key], saved?.[key]))])),
-    skills: !sameConfiguration([...(skills || [])].sort(), [...(savedSkills || [])].sort()) }
+    skills: !sameConfiguration([...(skills || [])].sort(), [...(savedSkills || [])].sort()) ||
+      !sameConfiguration(form?.default_visible_skills ?? null, saved?.default_visible_skills ?? null) ||
+      (form?.default_visible_skills_limit ?? DEFAULT_SKILL_VISIBILITY_LIMIT) !== (saved?.default_visible_skills_limit ?? DEFAULT_SKILL_VISIBILITY_LIMIT) }
 }
 export const budgetFields = [
   { key: 'max_steps', label: '最大运行步数', unit: '步', min: 1, max: 10000, help: '限制每阶段可执行的步骤。留空继承入口和全局预算；均未设置时，普通智能体默认 24 步，工作流默认 100 次节点访问。开启自动续阶段后可能继续下一阶段，整次运行仍受时间和总 Token 预算限制。' },

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.v2.server.database import Database
 from app.v2.server.runtime.policy import ExecutionPolicy
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 
 from app.v2.server.catalog.orm import AgentRow, CatalogRow
 from app.v2.server.catalog.packages import is_external_tool, package_owner
@@ -28,6 +28,14 @@ from app.v2.server.catalog.records import (
     catalog_payload,
     empty_catalog,
 )
+
+def require_current_package(actual: str | None, expected: str | None) -> None:
+    if expected is not None and actual != expected:
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.catalog.package_conflict", category=ErrorCategory.CONFLICT,
+            message="Agent configuration changed. Reload before saving.",
+        ))
+
 
 class CatalogStore(Protocol):
     async def get_for_run(self, user_id: str, agent_id: str | None = None) -> UserCatalog: ...
@@ -263,13 +271,18 @@ class DatabaseCatalogStore:
             await self._catalog(session, user_id)
             session.add(await self._new_agent_row(session, user_id, record))
 
-    async def update_agent(self, user_id: str, record: AgentRecord) -> None:
+    async def update_agent(
+        self, user_id: str, record: AgentRecord, *, expected_package_ref: str | None = None,
+    ) -> None:
         record = AgentRecord.model_validate(record.model_dump(mode="json"))
         async with self.database.transaction() as session:
+            if expected_package_ref is not None and session.get_bind().dialect.name == "sqlite":
+                await session.execute(text("BEGIN IMMEDIATE"))
             await self._catalog(session, user_id)
             row = await session.get(AgentRow, record.id, with_for_update=True)
             if row is None or row.owner_user_id != user_id:
                 raise _not_found("agent not found")
+            require_current_package(row.package_ref, expected_package_ref)
             row.package_ref = await self.packages.save_in_transaction(session, package_owner(user_id), record.package)
             for key, value in _agent_values(record).items():
                 setattr(row, key, value)
@@ -277,6 +290,8 @@ class DatabaseCatalogStore:
     async def compare_and_swap_package(self, user_id, agent_id, package, expected_ref):
         """Apply a candidate and its Skill selection changes in one transaction."""
         async with self.database.transaction() as session:
+            if session.get_bind().dialect.name == "sqlite":
+                await session.execute(text("BEGIN IMMEDIATE"))
             row = await session.get(AgentRow, agent_id, with_for_update=True)
             if row is None or row.owner_user_id != user_id:
                 raise _not_found("agent not found")

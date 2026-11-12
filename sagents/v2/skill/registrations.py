@@ -1,5 +1,8 @@
 """Official repository and workspace choices, through public plugin contracts."""
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from pydantic import Field
 
 from sagents.v2.concurrency import bounded_to_thread
@@ -24,6 +27,25 @@ from sagents.v2.skill.plugins.workspace import (
     FixedCopySkillWorkspace,
     ReadonlyMountSkillWorkspace,
 )
+
+
+_active_loader = ContextVar("sage_run_skill_loader", default=None)
+
+
+@contextmanager
+def bind_skill_loader(run_id, loader):
+    token = _active_loader.set((run_id, loader))
+    try:
+        yield
+    finally:
+        _active_loader.reset(token)
+
+
+def _skill_loader(context, dependencies):
+    value = _active_loader.get()
+    if value is None or value[0] != context.run_id:
+        raise RuntimeError("skill.loader requires the authorized SDK Run loader")
+    return value[1]
 
 
 class RepositoryConfig(StrictModel):
@@ -61,7 +83,10 @@ def skill_registrations():
                     description=implementation.description,
                     version="2.0.0",
                     provides=tuple(
-                        CapabilityOffer(capability=name, api_version="2")
+                        CapabilityOffer(
+                            capability=name, api_version="2",
+                            features=("skill.search", "skill.latest", "skill.restore-version") if name == "skill.provider" else ("skill.publish",),
+                        )
                         for name in (
                             "skill.management",
                             "skill.provider",
@@ -113,7 +138,11 @@ def skill_registrations():
                     description=implementation.description,
                     version="2.0.0",
                     provides=(
-                        CapabilityOffer(capability="skill.workspace", api_version="2"),
+                        CapabilityOffer(
+                            capability="skill.workspace", api_version="2",
+                            features=("skill.reattach",) if implementation is ReadonlyMountSkillWorkspace
+                            else ("skill.edit", "skill.reattach"),
+                        ),
                     ),
                     dependencies=(
                         ExtensionDependency(capability="execution.environment"),
@@ -137,6 +166,21 @@ def skill_registrations():
 
 
 def register_skill_plugins(registry: ExtensionRegistry) -> None:
+    registry.register(ExtensionRegistration(
+        descriptor=ExtensionDescriptor(
+            plugin_id="sage.skill.loader",
+            name="Run Skill loader",
+            description="Authorized Skill loader for the current Run.",
+            version="2.0.0",
+            provides=(CapabilityOffer(capability="skill.loader", api_version="2"),),
+            supported_scopes=frozenset({ExtensionScope.RUN}),
+            built_in=True,
+            sdk_managed=True,
+            config_schema={"type": "object", "additionalProperties": False},
+        ),
+        factory=_skill_loader,
+        ownership="borrowed",
+    ))
     for registration in skill_registrations():
         registry.register(registration)
 
@@ -156,7 +200,8 @@ def register_skill_plugins(registry: ExtensionRegistry) -> None:
                 version="2.0.0",
                 provides=(
                     CapabilityOffer(
-                        capability="skill.provider", api_version="2", name="filesystem"
+                        capability="skill.provider", api_version="2", name="filesystem",
+                        features=("skill.search", "skill.latest"),
                     ),
                     CapabilityOffer(
                         capability="skill.management",
@@ -182,6 +227,7 @@ def register_skill_plugins(registry: ExtensionRegistry) -> None:
                     "additionalProperties": False,
                 },
                 built_in=True,
+                capabilities={"writable": False, "versioned": False},
             ),
             factory=lambda context, dependencies: FilesystemSkillProvider(
                 tuple(context.config["roots"]),

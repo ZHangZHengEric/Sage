@@ -419,8 +419,8 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   await state.save(false)
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
-  assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['agent_mode', 'available_sub_agent_ids', 'budgets', 'description', 'execution_policy', 'external_tools', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
+  assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].skill_bindings, { names: ['research'] })
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['agent_mode', 'available_sub_agent_ids', 'budgets', 'description', 'execution_policy', 'external_tools', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'skill_bindings', 'tool_approval', 'tools'])
   assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)
@@ -1070,27 +1070,26 @@ test('agent A editor protects unsaved edits and returns to basic when scrolled a
   assert.equal(state.activeSection, 'basic')
 })
 
-test('agent A saved baseline advances after both configuration and skills persist and retries the same created agent', async t => {
+test('agent editor retains a failed combined save as a draft and retries the create', async t => {
   const { api, mount } = await setup(t, 'Agents')
   t.mock.method(api, 'agentSummaries', async () => [])
   t.mock.method(api, 'agentEditorResources', async () => editorResources())
-  t.mock.method(api, 'createAgent', async body => ({ ...body, id: 'created' }))
+  t.mock.method(api, 'createAgent', async () => { throw new Error('Skills unavailable') })
   t.mock.method(api, 'updateAgent', async (id, body) => ({ ...body, id }))
-  t.mock.method(api, 'bindAgentSkills', async () => { throw new Error('Skills unavailable') })
   const state = await mount()
   await state.startNew()
   state.form.name = 'Draft'
   state.form.plugins = { 'context.summarizer': { plugin: 'summary' } }
   state.selectedSkills = ['research']
   await state.save(false)
-  assert.equal(state.editing, 'created')
+  assert.equal(state.editing, '')
   assert.equal(state.drawerOpen, true)
   assert.deepEqual(state.savedPlugins, {})
   assert.notEqual(state.savedForm?.name, 'Draft')
-  api.bindAgentSkills.mock.mockImplementation(async () => [])
+  api.createAgent.mock.mockImplementation(async body => ({ ...body, id: 'created' }))
   await state.save(false)
-  assert.equal(api.createAgent.mock.calls.length, 1)
-  assert.equal(api.updateAgent.mock.calls.length, 1)
+  assert.equal(api.createAgent.mock.calls.length, 2)
+  assert.equal(api.updateAgent.mock.calls.length, 0)
   assert.equal(state.savedForm.name, 'Draft')
   assert.deepEqual(state.savedSkills, ['research'])
   assert.deepEqual(state.savedPlugins, state.form.plugins)
@@ -1351,4 +1350,67 @@ test('chat IM notification selector uses only personal ready connections and cle
   await state.load()
   assert.deepEqual(selected, [''])
   assert.equal(api.imConnections.mock.calls[0].arguments.length, 0)
+})
+
+test('agent editor saves default visibility with the Skill binding', async t => {
+  const { api, mount } = await setup(t, 'Agents')
+  t.mock.method(api, 'agentEditorResources', async () => editorResources())
+  t.mock.method(api, 'agentSummaries', async () => [])
+  t.mock.method(api, 'createAgent', async body => ({ ...body, id: 'new-agent' }))
+  t.mock.method(api, 'bindAgentSkills', async () => [])
+  const state = await mount()
+  await state.startNew()
+  state.form.name = 'Research'
+  state.form.tools = ['search_skills']
+  state.form.default_visible_skills = ['research']
+  state.form.default_visible_skills_limit = 30
+  state.selectedSkills = ['research', 'analysis']
+  await state.save(false)
+  assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].skill_bindings, { names: ['research', 'analysis'], default_visible_skills: ['research'], default_visible_skills_limit: 30 })
+  assert.equal('default_visible_skills' in api.createAgent.mock.calls[0].arguments[0], false)
+  assert.deepEqual(state.savedForm.default_visible_skills, ['research'])
+})
+
+test('default Skill visibility remains editable with search disabled', async t => {
+  const { Component } = await setup(t, 'AgentEditor', 'components')
+  const html = await renderToString(createSSRApp(Component, {
+    form: { name: 'Research', tools: [], default_visible_skills: ['research'], default_visible_skills_limit: 30 },
+    skills: [{ name: 'research', description: 'Research guide' }],
+    selectedSkills: ['research'],
+  }))
+  assert.match(html, /自定义默认展示/)
+  assert.match(html, /默认展示上限/)
+  assert.match(html, /1 \/ 30/)
+})
+
+test('plugin contract help shows required ports, feature conditions and declarations from the same module', async t => {
+  const { Component } = await setup(t, 'CapabilityContractHelp', 'components')
+  const inventory = {
+    'skill.loading': {
+      module: 'skill', api_version: '2', required_members: ['create_loader'],
+      features: [], implementations: [],
+    },
+    'skill.provider': {
+      module: 'skill', api_version: '2', required_members: ['list_skills', 'get_skill', 'fetch'],
+      features: [{ id: 'skill.search', members: ['search_skills'], required_when: 'search_skills' }],
+      implementations: [{
+        id: 'sage.skill.filesystem', api_version: '2', provider_name: 'filesystem',
+        available: true, features: [{ id: 'skill.search', status: 'declared' }],
+      }],
+    },
+    'model.provider': {
+      module: 'model', api_version: '2', required_members: ['stream'],
+      features: [], implementations: [],
+    },
+  }
+  const context = {}
+  const html = await renderToString(createSSRApp(Component, { capability: 'skill.loading', inventory }), context)
+  assert.match(html, /aria-label="查看插件契约"/)
+  const drawer = context.teleports.body
+  assert.match(drawer, /list_skills · get_skill · fetch/)
+  assert.match(drawer, /skill\.search/)
+  assert.match(drawer, /search_skills 启用时必需/)
+  assert.match(drawer, /sage\.skill\.filesystem/)
+  assert.match(drawer, /已声明/)
+  assert.doesNotMatch(drawer, /model\.provider/)
 })

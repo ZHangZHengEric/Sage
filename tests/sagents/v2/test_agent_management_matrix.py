@@ -424,6 +424,10 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path):
     data["manifest"]["runtime"]["capabilities"] = {
         "flow.node": {"plugin": "test.flow-node", "name": "calculate"}
     }
+    class WrongNode:
+        async def run(self, context):
+            raise AssertionError("the unselected Flow node ran")
+
     registration = ExtensionRegistration(
         descriptor=ExtensionDescriptor(
             plugin_id="test.flow-node",
@@ -441,7 +445,7 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path):
         ),
         factory=lambda ctx, deps: Node(),
         start=lambda node, ctx, deps: {
-            "flow.node:wrong-first": object(),
+            "flow.node:wrong-first": WrongNode(),
             "flow.node:calculate": node,
         },
     )
@@ -525,7 +529,7 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
         ),
         factory=lambda ctx, deps: DecoratedToolProvider(Scale(ctx.config["factor"])),
         start=lambda provider, ctx, deps: {
-            "tool.provider:wrong": object(),
+            "tool.provider:wrong": DecoratedToolProvider(Scale(-1)),
             "tool.provider:scale": ToolProvider(provider.catalog, provider.executor),
         },
     )

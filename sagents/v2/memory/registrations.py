@@ -94,7 +94,7 @@ def register_memory_plugins(registry: ExtensionRegistry) -> None:
                     }
                 ),
                 config_schema=empty_config_schema(),
-                capabilities={"durable": False},
+                capabilities={"durable": False, "supports_filtering": False, "supports_delete": False},
                 built_in=True,
             ),
             factory=lambda context, dependencies: NoopMemoryProvider(),
@@ -124,6 +124,8 @@ def register_memory_plugins(registry: ExtensionRegistry) -> None:
                 },
                 capabilities={
                     "durable": True,
+                    "supports_filtering": True,
+                    "supports_delete": True,
                     "retrieval": "bm25",
                     "storage": "sqlite-fts5",
                     "incremental_index": True,

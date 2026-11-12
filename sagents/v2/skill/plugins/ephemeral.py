@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
+from sagents.v2.concurrency import bounded_to_thread
+from sagents.v2.skill.search import SkillSearchIndex, searchable_body
+
 from sagents.v2.skill.contracts import (
     LoadedSkill,
     SkillBundle,
@@ -26,6 +29,7 @@ class InMemorySkillProvider:
 
     def __init__(self, bundles: tuple[SkillBundle, ...]) -> None:
         self._bundles = {value.descriptor.name: value for value in bundles}
+        self._search_index = SkillSearchIndex()
         self.fetches: list[tuple[str, str]] = []
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
@@ -36,6 +40,16 @@ class InMemorySkillProvider:
             return self._bundles[name].descriptor
         except KeyError as exc:
             raise _not_found(name) from exc
+
+    async def search_skills(self, query, *, run_id, allowed_names, limit):
+        documents = {
+            name: lambda bundle=bundle: (bundle.descriptor, searchable_body(bundle.files["SKILL.md"]))
+            for name in allowed_names
+            if (bundle := self._bundles.get(name)) is not None
+        }
+        return await bounded_to_thread(
+            "skill-io", lambda: self._search_index.search(query, documents, limit)
+        )
 
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle:
         try:

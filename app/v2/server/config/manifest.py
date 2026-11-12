@@ -55,14 +55,20 @@ def server_v2_run_manifest(
     host = server_v2_manifest(settings)
     base = agent.package_bundle.resolved_manifest() if agent is not None else host
     source = base.agents.get(agent_id) or next(iter(base.agents.values()))
+    selected_skills = (
+        tuple(name for name in skills if name in source.skills)
+        if agent is not None and agent.package_bundle.dependencies else tuple(skills)
+    )
     composed = source.model_copy(
         update={
             "name": name or source.name,
             "description": agent.description
             if agent is not None
             else source.description,
-            "skills": tuple(name for name in skills if name in source.skills)
-            if agent is not None and agent.package_bundle.dependencies else tuple(skills),
+            "skills": selected_skills,
+            "default_visible_skills": None if source.default_visible_skills is None else tuple(
+                name for name in source.default_visible_skills if name in selected_skills
+            ),
             "tools": tuple(selected_tools),
             "tool_approval": agent.tool_approval
             if agent is not None

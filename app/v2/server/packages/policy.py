@@ -68,7 +68,7 @@ class ServerPackagePolicy:
         known.update(
             item.name for item in AgentManagementToolPlugin(management).definitions
         )
-        known.add("load_skill")
+        known.update(("load_skill", "search_skills"))
         known.update(
             name for server in enabled_mcp_servers(catalog) for name in server.tools
         )

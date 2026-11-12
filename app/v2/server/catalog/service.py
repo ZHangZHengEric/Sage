@@ -104,12 +104,73 @@ class CatalogService:
             )
 
     async def create_agent(self, user_id: str, payload: dict) -> AgentRecord:
+        return await self._save_agent(user_id, new_id("agent"), payload, create=True)
+
+    async def _save_agent(self, user_id, agent_id, payload, *, create=False):
         self._validate_agent_options(payload)
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
-            record, catalog = upsert_agent(catalog, {**payload, "id": new_id("agent")}, registry=self.extensions)
-            await self.store.create_agent(user_id, record)
+            current = None if create else require_agent(catalog, agent_id)
+            record, _ = upsert_agent(catalog, {**payload, "id": agent_id}, registry=self.extensions)
+            settings = payload.get("skill_bindings")
+            if settings is None:
+                if current is None:
+                    await self.store.create_agent(user_id, record)
+                else:
+                    await self._update_agent_revision(user_id, record, current)
+                return record
+
+            names = settings["names"]
+            _, _, visible, limit = self._skill_visibility(record, names, settings)
+            names, bindings = await self._prepare_skill_bindings(user_id, record, names)
+            record = record.with_configuration(
+                skills=names,
+                skill_visibility={"default_visible_skills": visible, "default_visible_skills_limit": limit},
+            )
+            await self._save_agent_and_bindings(user_id, record, current, bindings)
             return record
+
+    async def _update_agent_revision(self, user_id, record, current):
+        from app.v2.server.catalog.repository import DatabaseCatalogStore
+
+        if isinstance(self.store, DatabaseCatalogStore):
+            await self.store.update_agent(
+                user_id, record, expected_package_ref=current.package_bundle.content_hash,
+            )
+        else:
+            await self.store.update_agent(user_id, record)
+
+    async def _save_agent_and_bindings(self, user_id, record, current, bindings):
+        from app.v2.server.catalog.repository import DatabaseCatalogStore
+        from app.v2.server.skills.repository import DatabaseSkillStore, MemorySkillStore
+
+        skill_store = self.skills.store
+        args = {"owner_user_id": user_id, "agent_id": record.id, "bindings": bindings}
+        if (isinstance(skill_store, DatabaseSkillStore)
+                and isinstance(self.store, DatabaseCatalogStore)
+                and skill_store.database is self.store.database):
+            await skill_store.replace_bindings(
+                **args, agent_record=record,
+                expected_package_ref=current.package_bundle.content_hash if current else None,
+            )
+            return
+
+        async def save():
+            if current is None:
+                await self.store.create_agent(user_id, record)
+            else:
+                await self._update_agent_revision(user_id, record, current)
+
+        if isinstance(skill_store, MemorySkillStore):
+            await skill_store.replace_bindings(**args, before_commit=save)
+        else:
+            previous = await skill_store.list_bindings(owner_user_id=user_id, agent_id=record.id)
+            await skill_store.replace_bindings(**args)
+            try:
+                await save()
+            except BaseException:
+                await skill_store.replace_bindings(owner_user_id=user_id, agent_id=record.id, bindings=previous)
+                raise
 
     async def get_agent(self, user_id: str, agent_id: str) -> dict:
         record = await self.store.get_agent(user_id, agent_id)
@@ -144,14 +205,7 @@ class CatalogService:
     async def update_agent(
         self, user_id: str, agent_id: str, payload: dict
     ) -> AgentRecord:
-        self._validate_agent_options(payload)
-        async with self._lock(user_id, "agents"):
-            catalog = await self.store.get(user_id)
-            require_agent(catalog, agent_id)
-            payload = {**payload, "id": agent_id}
-            record, catalog = upsert_agent(catalog, payload, registry=self.extensions)
-            await self.store.update_agent(user_id, record)
-            return record
+        return await self._save_agent(user_id, agent_id, payload)
 
     async def update_agent_instructions(self, user_id: str, agent_id: str, instructions: str) -> AgentRecord:
         """Update one field while preserving current Agent configuration."""
@@ -161,7 +215,7 @@ class CatalogService:
             if current.instructions == instructions:
                 return current
             updated = current.with_configuration(instructions=instructions)
-            await self.store.update_agent(user_id, updated)
+            await self._update_agent_revision(user_id, updated, current)
             return updated
 
     async def apply_rsi_package(self, user_id, agent_id, package, expected_ref):
@@ -256,21 +310,98 @@ class CatalogService:
         self.a2a_plugins.invalidate(user_id)
         return record
 
-    async def bind_agent_skills(self, user_id: str, agent_id: str, names: list[str]):
+    async def _prepare_skill_bindings(self, user_id, record, names):
+        from app.v2.server.skills.records import normalize_skill_names
+
+        ordered = normalize_skill_names(names)
+        files = record.package_bundle.files
+        packaged_names = frozenset(name for name in ordered if f"skills/{name}/SKILL.md" in files)
+        bindings = await self.skills.prepare_agent_skill_bindings(
+            user_id, record.id, ordered, packaged_names=packaged_names,
+        )
+        return ordered, bindings
+
+    @staticmethod
+    def _skill_visibility(current, names, skill_visibility):
+        from app.v2.server.skills.records import normalize_skill_names
+        from sagents.v2.package.manifest.agents import (
+            DEFAULT_VISIBLE_SKILLS_LIMIT, validate_default_visible_skills,
+        )
+
+        definition = current.package_bundle.manifest.agents[current.id]
+        visibility = dict(skill_visibility or {})
+        bound_names = set(normalize_skill_names(names))
+        visible = definition.default_visible_skills
+        if "default_visible_skills" in visibility:
+            visible = visibility["default_visible_skills"]
+            if visible is not None:
+                visible = tuple(normalize_skill_names(visible))
+        elif visible is not None:
+            visible = tuple(name for name in visible if name in bound_names)
+        limit = visibility.get("default_visible_skills_limit", definition.default_visible_skills_limit)
+        if limit is None:
+            limit = DEFAULT_VISIBLE_SKILLS_LIMIT
+        try:
+            validate_default_visible_skills(visible, bound_names, limit)
+        except ValueError as exc:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="server.catalog.validation", category=ErrorCategory.VALIDATION,
+                message=str(exc),
+            )) from exc
+        return definition, visibility, visible, limit
+
+    async def bind_agent_skills(
+        self, user_id: str, agent_id: str, names: list[str], *,
+        skill_visibility: dict | None = None,
+    ):
         async with self._lock(user_id, "agents"):
-            catalog = await self.store.get(user_id)
-            require_agent(catalog, agent_id)
-            skills = await self.skills.bind_agent_skills(
-                owner_user_id=user_id,
-                agent_id=agent_id,
-                names=names,
-                catalog=catalog,
-            )
             current = require_agent(await self.store.get(user_id), agent_id)
-            bound = [item.name for item in skills]
-            if current.skills != bound:
-                await self.store.update_agent(user_id, current.with_configuration(skills=bound))
-            return skills
+            definition, visibility, visible, limit = self._skill_visibility(current, names, skill_visibility)
+            from app.v2.server.catalog.repository import DatabaseCatalogStore
+            from app.v2.server.skills.repository import DatabaseSkillStore, MemorySkillStore
+
+            names, bindings = await self._prepare_skill_bindings(user_id, current, names)
+            skill_store = self.skills.store
+            binding_args = {"owner_user_id": user_id, "agent_id": agent_id, "bindings": bindings}
+
+            if (isinstance(skill_store, DatabaseSkillStore)
+                    and isinstance(self.store, DatabaseCatalogStore)
+                    and skill_store.database is self.store.database):
+                # Resolve omitted fields against the package held under the row lock.
+                explicit_visibility = {}
+                if "default_visible_skills" in visibility:
+                    explicit_visibility["default_visible_skills"] = visible
+                if "default_visible_skills_limit" in visibility:
+                    explicit_visibility["default_visible_skills_limit"] = limit
+                await skill_store.replace_bindings(
+                    **binding_args, skill_visibility=explicit_visibility, configured_names=names,
+                    expected_package_ref=current.package_bundle.content_hash,
+                )
+            else:
+                async def save_package():
+                    if (current.skills != names or visible != definition.default_visible_skills
+                            or limit != definition.default_visible_skills_limit):
+                        record = current.with_configuration(
+                            skills=names, skill_visibility={
+                                "default_visible_skills": visible,
+                                "default_visible_skills_limit": limit,
+                            },
+                        )
+                        await self._update_agent_revision(user_id, record, current)
+
+                if isinstance(skill_store, MemorySkillStore):
+                    await skill_store.replace_bindings(**binding_args, before_commit=save_package)
+                else:
+                    previous = await skill_store.list_bindings(owner_user_id=user_id, agent_id=agent_id)
+                    await skill_store.replace_bindings(**binding_args)
+                    try:
+                        await save_package()
+                    except BaseException:
+                        await skill_store.replace_bindings(
+                            owner_user_id=user_id, agent_id=agent_id, bindings=previous,
+                        )
+                        raise
+            return await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent_id)
 
     async def bind_agent_skill_version(self, user_id: str, agent_id: str, skill_id: str, version_id: str | None):
         from app.v2.server.skills.versions import SkillVersionService

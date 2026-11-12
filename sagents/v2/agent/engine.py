@@ -237,6 +237,11 @@ class AgentLoopEngine:
 
             # Existing providers captured the pre-bind catalog. Replace those
             # references so a freshly registered Skill is discoverable immediately.
+            skill_context = next(
+                (provider for provider in context_assembler.providers
+                 if isinstance(provider, AvailableSkillsContextProvider)),
+                None,
+            )
             providers = tuple(
                 provider
                 for provider in context_assembler.providers
@@ -248,7 +253,12 @@ class AgentLoopEngine:
             assert skill_loader is not None
             context_assembler.providers = (
                 *providers,
-                AvailableSkillsContextProvider(skill_loader.catalog),
+                AvailableSkillsContextProvider(
+                    skill_loader.catalog,
+                    default_visible_skills=skill_context.default_visible_skills
+                    if skill_context is not None else None,
+                    search_enabled=skill_context is not None and skill_context.search_enabled,
+                ),
                 ActiveSkillsContextProvider(skill_loader),
                 self_configuration,
             )

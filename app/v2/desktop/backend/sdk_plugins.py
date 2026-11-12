@@ -77,7 +77,10 @@ def desktop_registrations(service):
             descriptor=ExtensionDescriptor(
                 plugin_id="com.sage.desktop.run." + capability.replace(".", "-"),
                 name="Desktop " + capability, version="2.0.0",
-                provides=(CapabilityOffer(capability=capability, api_version="2"),),
+                provides=(CapabilityOffer(
+                capability=capability, api_version="2",
+                features=("skill.search", "skill.latest") if capability == "skill.provider" else (),
+            ),),
                 dependencies=(ExtensionDependency(capability="execution.environment"),),
                 supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
                 config_schema={"type": "object", "additionalProperties": False},

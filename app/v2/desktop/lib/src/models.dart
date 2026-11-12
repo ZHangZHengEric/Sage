@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+const _defaultSkillVisibilityLimit = 20;
+
 enum RunStatus {
   idle,
   starting,
@@ -255,6 +257,8 @@ class AgentConfiguration {
     this.memory = const {'recall': true, 'auto_write': true, 'scope': 'agent'},
     this.availableTools = const [],
     this.availableSkills = const [],
+    this.defaultVisibleSkills,
+    this.defaultVisibleSkillsLimit = _defaultSkillVisibilityLimit,
     this.shellPolicy = const ShellPolicySummary(),
     this.isDefault = false,
   });
@@ -276,6 +280,8 @@ class AgentConfiguration {
   final Map<String, Object?> memory;
   final List<String> availableTools;
   final List<String> availableSkills;
+  final List<String>? defaultVisibleSkills;
+  final int defaultVisibleSkillsLimit;
   final ShellPolicySummary shellPolicy;
   final bool isDefault;
 
@@ -304,6 +310,12 @@ class AgentConfiguration {
           : const {'recall': true, 'auto_write': true, 'scope': 'agent'},
       availableTools: _stringList(json['available_tools']),
       availableSkills: _stringList(json['available_skills']),
+      defaultVisibleSkills: json['default_visible_skills'] == null
+          ? null
+          : _stringList(json['default_visible_skills']),
+      defaultVisibleSkillsLimit:
+          (json['default_visible_skills_limit'] as num?)?.toInt() ??
+          _defaultSkillVisibilityLimit,
       shellPolicy: shellPolicy is Map
           ? ShellPolicySummary.fromJson(shellPolicy.cast<String, Object?>())
           : ShellPolicySummary(
@@ -321,6 +333,10 @@ class AgentConfiguration {
     final context = hasRuntimeVariables
         ? patch['runtime_variables']
         : patch['system_context'];
+    final nextSkills = patch.containsKey('available_skills')
+        ? _stringList(patch['available_skills'])
+        : availableSkills;
+    final allowed = nextSkills.toSet();
     return AgentConfiguration(
       id: id,
       name: patch.containsKey('name') ? patch['name']?.toString() ?? '' : name,
@@ -365,9 +381,17 @@ class AgentConfiguration {
       availableTools: patch.containsKey('available_tools')
           ? _stringList(patch['available_tools'])
           : availableTools,
-      availableSkills: patch.containsKey('available_skills')
-          ? _stringList(patch['available_skills'])
-          : availableSkills,
+      availableSkills: nextSkills,
+      defaultVisibleSkills: patch.containsKey('default_visible_skills')
+          ? (patch['default_visible_skills'] == null
+                ? null
+                : _stringList(patch['default_visible_skills']))
+          : defaultVisibleSkills?.where(allowed.contains).toList(),
+      defaultVisibleSkillsLimit:
+          patch.containsKey('default_visible_skills_limit')
+          ? (patch['default_visible_skills_limit'] as num?)?.toInt() ??
+                _defaultSkillVisibilityLimit
+          : defaultVisibleSkillsLimit,
       shellPolicy: patch.containsKey('approved_shell_commands')
           ? ShellPolicySummary(
               autoExecuteKeywords: shellPolicy.autoExecuteKeywords,
@@ -471,6 +495,7 @@ class ComponentSummary {
     this.applyMode = 'locked',
     this.scope = '',
     this.plugins = const [],
+    this.contracts = const {},
     this.activePluginId,
     this.selectedPluginId,
     this.activeSource = '',
@@ -486,6 +511,7 @@ class ComponentSummary {
   final String applyMode;
   final String scope;
   final List<ComponentPluginSummary> plugins;
+  final Map<String, Object?> contracts;
   final String? activePluginId;
   final String? selectedPluginId;
   final String activeSource;
@@ -522,6 +548,9 @@ class ComponentSummary {
       selectionMode: component['selection_mode']?.toString() ?? 'host',
       applyMode: component['apply_mode']?.toString() ?? 'locked',
       scope: component['scope']?.toString() ?? '',
+      contracts: json['contracts'] is Map
+          ? (json['contracts'] as Map).cast<String, Object?>()
+          : const {},
       plugins: rawPlugins is List
           ? [
               for (final plugin in rawPlugins)

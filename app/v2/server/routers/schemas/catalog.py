@@ -4,12 +4,13 @@ from typing import Literal
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
-from sagents.v2.package.manifest.agents import AgentSandboxConfig, AgentBudgets, AgentMemoryBehavior
+from sagents.v2.package.manifest.agents import DEFAULT_VISIBLE_SKILLS_LIMIT, AgentSandboxConfig, AgentBudgets, AgentMemoryBehavior
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 from app.v2.server.catalog.records import ModelConfiguration
 from app.v2.server.runtime.official import default_agent_tools
+from app.v2.server.routers.schemas.skills import SkillBindBody
 
 class ModelBody(ModelConfiguration):
     id: str | None = None
@@ -36,6 +37,7 @@ class AgentBody(BaseModel):
     budgets: AgentBudgets | None = None
     memory: AgentMemoryBehavior | None = None
     plugins: dict[str, CapabilitySelection] | None = None
+    skill_bindings: SkillBindBody | None = None
 
 class AgentPublic(BaseModel):
     id: str
@@ -49,6 +51,8 @@ class AgentPublic(BaseModel):
     tools: list[str] = Field(default_factory=list)
     external_tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    default_visible_skills: list[str] | None = None
+    default_visible_skills_limit: int = DEFAULT_VISIBLE_SKILLS_LIMIT
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
     sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)

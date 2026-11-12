@@ -17,6 +17,7 @@ DEFAULT_ALWAYS_VISIBLE_TOOLS = (
     "questionnaire_async",
     "turn_status",
     "load_skill",
+    "search_skills",
     "plan_submit",
     "goal_submit",
     "goal_create",

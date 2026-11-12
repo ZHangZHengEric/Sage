@@ -34,6 +34,7 @@ from app.v2.server.config.manifest import server_v2_manifest
 from app.v2.server.runtime.official import install_sandbox
 from app.v2.server.conversations.runs import RunService
 from app.v2.server.skills.service import SkillCatalogService
+from sagents.v2.skill.search import SkillSearchIndex
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.observability.logging import get_logger
 from app.v2.server.runtime.integrations.a2a import A2APluginCache
@@ -115,6 +116,7 @@ class ServerHost:
             jwt_secret=settings.jwt_secret,
             jwt_expire_hours=settings.jwt_expire_hours,
         )
+        self.skill_search_indexes: dict[str, SkillSearchIndex] = {}
         self.skill_catalog = SkillCatalogService(self.skills, self.paths.data_root)
         self.mcp_plugins = McpPluginCache()
         self.a2a_plugins = A2APluginCache()
@@ -420,6 +422,9 @@ class ServerHost:
         self._application = None
         if self.memory_database is not None:
             await self.memory_database.close()
+        for index in self.skill_search_indexes.values():
+            await asyncio.to_thread(index.close)
+        self.skill_search_indexes.clear()
         self.im = None
         self.observability = None
         self.log_sink = None

@@ -32,6 +32,8 @@ class ExtensionRegistry:
         return snapshot
 
     def register(self, registration: ExtensionRegistration) -> None:
+        from sagents.v2.runtime.extensions.capability_contracts import unknown_provider_features
+
         plugin_id = registration.descriptor.plugin_id
         if plugin_id in self._registrations:
             raise SageV2Error(
@@ -42,6 +44,12 @@ class ExtensionRegistry:
                     safe_to_resume=True,
                 )
             )
+        for offer in registration.descriptor.provides:
+            if unknown := unknown_provider_features(offer):
+                raise SageV2Error(RuntimeErrorInfo(
+                    code="extension.unknown_feature", category=ErrorCategory.VALIDATION,
+                    message=f"extension {plugin_id!r} declares unknown {offer.capability} features: {', '.join(unknown)}",
+                ))
         if registration.config_model is None:
             model_name = (
                 "".join(
@@ -208,6 +216,14 @@ class ExtensionRegistry:
             raise ValueError(
                 f"trusted built-ins must be registered and declared built-in: {invalid}"
             )
+        from pydantic import TypeAdapter
+        from sagents.v2.runtime.extensions.contracts import CapabilityName
+
+        validate_name = TypeAdapter(CapabilityName).validate_python
+        for plugin_id in resolved:
+            descriptor = self._registrations[plugin_id].descriptor
+            for port in (*descriptor.provides, *descriptor.dependencies):
+                validate_name(port.capability)
         self._trusted_builtin_ids.update(resolved)
 
     def is_trusted_builtin(self, plugin_id: str) -> bool:

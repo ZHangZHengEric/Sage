@@ -13,7 +13,7 @@ export const labels = {
   agents: '智能体', models: '模型路由', credentials: '凭据绑定', runtime: '运行时', policies: '全局策略',
   plugins: '插件', flows: '工作流', entrypoint: '入口', interfaces: '接口', tests: '测试', environments: '环境', files: '资源文件',
   instructions: '系统提示词', inline: '提示词内容', path: '文件路径', mode: '模式', subagents: '子智能体',
-  tools: '工具', skills: '技能', budgets: '预算', memory: '记忆', sandbox: '沙箱', network: '网络',
+  tools: '工具', skills: '技能', default_visible_skills: '默认展示技能', default_visible_skills_limit: '默认展示上限', budgets: '预算', memory: '记忆', sandbox: '沙箱', network: '网络',
   tool_approval: '工具审批', default: '默认', recall: '自动召回', auto_write: '自动写入', scope: '作用域',
   max_steps: '最大步数', input_tokens: '输入 Token',
   output_tokens: '输出 Token', total_tokens: '总 Token', wall_time_seconds: '运行时间（秒）',

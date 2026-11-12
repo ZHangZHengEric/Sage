@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from sagents.v2.contracts.common import (
     Identifier,
@@ -60,6 +60,18 @@ class AgentSandboxConfig(StrictModel):
     network: Literal["none", "unrestricted"] = "none"
 
 
+DEFAULT_VISIBLE_SKILLS_LIMIT = 20
+
+
+def validate_default_visible_skills(visible, skills, limit: int) -> None:
+    if visible is None:
+        return
+    if set(visible) - set(skills):
+        raise ValueError("default_visible_skills must be a subset of skills")
+    if len(visible) > limit:
+        raise ValueError(f"default_visible_skills must contain at most {limit} items")
+
+
 class AgentDefinition(StrictModel):
     name: str
     description: str | None = None
@@ -79,16 +91,28 @@ class AgentDefinition(StrictModel):
     tool_approval: ToolApprovalConfig | None = None
     skills: tuple[SkillName, ...] = ()
     preload_skills: tuple[SkillName, ...] = ()
+    default_visible_skills: tuple[SkillName, ...] | None = None
+    default_visible_skills_limit: int = Field(default=DEFAULT_VISIBLE_SKILLS_LIMIT, gt=0, strict=True)
     subagents: tuple[Identifier, ...] = ()
     budgets: AgentBudgets = Field(default_factory=AgentBudgets)
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
     sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)
+
+    @model_serializer(mode="wrap")
+    def serialize_agent(self, handler):
+        data = handler(self)
+        if self.default_visible_skills is None:
+            data.pop("default_visible_skills", None)
+        if self.default_visible_skills_limit == DEFAULT_VISIBLE_SKILLS_LIMIT:
+            data.pop("default_visible_skills_limit", None)
+        return data
 
     @model_validator(mode="after")
     def validate_preload_skills(self) -> "AgentDefinition":
         outside = set(self.preload_skills) - set(self.skills)
         if outside:
             raise ValueError(f"preload_skills must be a subset of skills: {sorted(outside)}")
+        validate_default_visible_skills(self.default_visible_skills, self.skills, self.default_visible_skills_limit)
         return self
 
 

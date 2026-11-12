@@ -156,11 +156,14 @@ class AgentRecord(BaseModel):
     def with_configuration(self, **updates):
         from app.v2.server.catalog.packages import build_package
         sandbox = updates.pop("sandbox", None)
+        skill_visibility = updates.pop("skill_visibility", None)
         projection = self.model_copy(update=updates)
         projection.execution_policy = ExecutionPolicy.model_validate(projection.execution_policy)
         if projection.tool_approval is not None:
             projection.tool_approval = ToolApprovalConfig.model_validate(projection.tool_approval)
-        projection.package = build_package(projection, sandbox=sandbox, previous=self.package)
+        projection.package = build_package(
+            projection, sandbox=sandbox, previous=self.package, skill_visibility=skill_visibility,
+        )
         return AgentRecord.model_validate(projection.model_dump(mode="json"))
 
     def public_dict(self) -> dict[str, object]:
@@ -179,6 +182,8 @@ class AgentRecord(BaseModel):
             "tools": list(self.tools),
             "external_tools": self.external_tools,
             "skills": list(self.skills),
+            "default_visible_skills": self.package_bundle.manifest.agents[self.id].default_visible_skills,
+            "default_visible_skills_limit": self.package_bundle.manifest.agents[self.id].default_visible_skills_limit,
             "tool_approval": self.tool_approval.model_dump() if self.tool_approval else None,
             "execution_policy": self.execution_policy.model_dump(),
         }

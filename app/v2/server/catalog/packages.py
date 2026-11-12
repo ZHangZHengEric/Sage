@@ -9,6 +9,7 @@ from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.agent.management.service import owner_key
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.package.manifest import SageManifest
+from sagents.v2.package.manifest.agents import DEFAULT_VISIBLE_SKILLS_LIMIT
 
 
 def is_external_tool(name: str) -> bool:
@@ -28,7 +29,7 @@ def package_owner(user_id: str) -> str:
     )
 
 
-def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
+def build_package(record, *, sandbox=None, previous=None, skill_visibility=None) -> AgentPackageBundle:
     if previous is None:
         data = {
             "metadata": {"id": record.id, "name": record.name, "version": "initial"},
@@ -62,6 +63,16 @@ def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
         if record.tool_approval
         else None,
     )
+    if skill_visibility:
+        definition.update(skill_visibility)
+    if definition.get("default_visible_skills") is not None:
+        definition["default_visible_skills"] = [
+            name for name in definition["default_visible_skills"] if name in record.skills
+        ]
+    else:
+        definition.pop("default_visible_skills", None)
+    if definition.get("default_visible_skills_limit") == DEFAULT_VISIBLE_SKILLS_LIMIT:
+        definition.pop("default_visible_skills_limit")
     if sandbox is not None:
         definition["sandbox"] = sandbox
     definition["models"]["primary"] = record.model_id or "default"

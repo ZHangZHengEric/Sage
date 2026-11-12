@@ -163,9 +163,20 @@ async def agent_tool_options(user: ReadUser, packages: PackageDep, service: Cata
     return await list_tools(user, packages, service)
 
 
+def _agent_payload(body: AgentBody) -> dict:
+    payload = body.model_dump(exclude={
+        key for key in ("tool_approval", "fast_model_id", "tools", "external_tools", "agent_mode",
+                        "available_sub_agent_ids", "skill_bindings") if key not in body.model_fields_set
+    })
+    if body.skill_bindings is not None:
+        payload["skill_bindings"] = body.skill_bindings.model_dump(exclude_unset=True)
+        payload["skill_bindings"].setdefault("names", [])
+    return payload
+
+
 @agent_router.post("/api/agents", response_model=ApiResponse[AgentPublic])
 async def create_agent(body: AgentBody, user: CurrentUser, service: CatalogDep):
-    record = await service.create_agent(user.user_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools", "agent_mode", "available_sub_agent_ids") if key not in body.model_fields_set}))
+    record = await service.create_agent(user.user_id, _agent_payload(body))
     return success(record.public_dict())
 
 
@@ -184,7 +195,7 @@ async def update_agent(
     agent_id: str, body: AgentBody, user: CurrentUser, service: CatalogDep
 ):
     record = await service.update_agent(
-        user.user_id, agent_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools", "agent_mode", "available_sub_agent_ids") if key not in body.model_fields_set})
+        user.user_id, agent_id, _agent_payload(body)
     )
     return success(record.public_dict())
 
@@ -258,7 +269,10 @@ async def list_agent_skills(agent_id: str, user: ReadUser, service: SkillDep):
 async def bind_agent_skills(
     agent_id: str, body: SkillBindBody, user: CurrentUser, service: CatalogDep
 ):
-    skills = await service.bind_agent_skills(user.user_id, agent_id, body.names)
+    skills = await service.bind_agent_skills(
+        user.user_id, agent_id, body.names,
+        skill_visibility=body.model_dump(exclude={"names"}, exclude_unset=True),
+    )
     return success([item.public_dict() for item in skills])
 
 

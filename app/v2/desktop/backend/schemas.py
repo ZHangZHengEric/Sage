@@ -65,6 +65,8 @@ class AgentSettingsPatch(BaseModel):
     memory: AgentMemoryBehavior | None = None
     available_tools: list[str] | None = None
     available_skills: list[str] | None = None
+    default_visible_skills: list[str] | None = None
+    default_visible_skills_limit: int | None = Field(default=None, gt=0, strict=True)
     approved_shell_commands: list[str] | None = None
 
     model_config = {"extra": "forbid"}

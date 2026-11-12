@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from dataclasses import replace
 from typing import Protocol, cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from app.v2.server.database import Database
@@ -188,8 +189,33 @@ class DatabaseSkillStore:
         owner_user_id: str,
         agent_id: str,
         bindings: list[AgentSkillBinding],
+        skill_visibility: dict | None = None,
+        configured_names: list[str] | None = None,
+        agent_record=None,
+        expected_package_ref: str | None = None,
     ) -> None:
+        from app.v2.server.catalog.orm import AgentRow
+        from app.v2.server.catalog.repository import DatabaseCatalogStore, _agent_record, _agent_values, require_current_package
+        from app.v2.server.catalog.packages import package_owner
+        from sagents.v2.agent.management import AgentPackageBundle
+
         async with self.database.transaction() as session:
+            if session.get_bind().dialect.name == "sqlite":
+                await session.execute(text("BEGIN IMMEDIATE"))
+            agent = await session.get(AgentRow, agent_id, with_for_update=True)
+            if agent is not None and agent.owner_user_id != owner_user_id:
+                raise ValueError("Skill binding owner does not match Agent")
+            store = DatabaseCatalogStore(self.database)
+            creating = agent_record is not None and expected_package_ref is None
+            if creating:
+                if agent is not None:
+                    raise ValueError("catalog Agent already exists")
+                await store._catalog(session, owner_user_id)
+                session.add(await store._new_agent_row(session, owner_user_id, agent_record))
+            elif agent is None and (skill_visibility is not None or agent_record is not None):
+                raise ValueError("catalog Agent is missing")
+            if agent is not None:
+                require_current_package(agent.package_ref, expected_package_ref)
             current = (
                 (
                     await session.execute(
@@ -202,9 +228,15 @@ class DatabaseSkillStore:
                 .scalars()
                 .all()
             )
+            pins = {(row.skill_name, row.source_skill_id): row.source_version_id for row in current}
             for row in current:
                 await session.delete(row)
             for binding in bindings:
+                source_version = (
+                    pins.get((binding.skill_name, binding.source_skill_id or ""))
+                    if skill_visibility is not None or agent_record is not None
+                    else binding.source_version_id
+                )
                 session.add(
                     AgentSkillSelectionRow(
                         owner_user_id=owner_user_id,
@@ -212,19 +244,18 @@ class DatabaseSkillStore:
                         skill_name=normalize_skill_name(binding.skill_name),
                         source_skill_id=binding.source_skill_id or "",
                         position=binding.position,
-                        source_version_id=binding.source_version_id,
+                        source_version_id=source_version,
                     )
                 )
             # Binding index and canonical package must commit or roll back together.
-            from app.v2.server.catalog.repository import DatabaseCatalogStore, _agent_record, _agent_values
-            from app.v2.server.catalog.orm import AgentRow
-            from app.v2.server.catalog.packages import package_owner
-            from sagents.v2.agent.management import AgentPackageBundle
-            agent = await session.get(AgentRow, agent_id, with_for_update=True)
             if agent is not None:
-                if agent.owner_user_id != owner_user_id:
-                    raise ValueError("Skill binding owner does not match Agent")
-                store = DatabaseCatalogStore(self.database)
+                if agent_record is not None:
+                    agent.package_ref = await store.packages.save_in_transaction(
+                        session, package_owner(owner_user_id), agent_record.package,
+                    )
+                    for field, value in _agent_values(agent_record).items():
+                        setattr(agent, field, value)
+                    return
                 package_row = await store.packages._get(session, package_owner(owner_user_id), "bundle", agent.package_ref) if agent.package_ref else None
                 if package_row is None:
                     raise ValueError("catalog Agent package is missing")
@@ -232,11 +263,32 @@ class DatabaseSkillStore:
                 if package.content_hash != agent.package_ref:
                     raise ValueError("catalog Agent package hash mismatch")
                 record = _agent_record(agent, package=package)
-                record = record.with_configuration(skills=[binding.skill_name for binding in bindings])
+                record = record.with_configuration(
+                    skills=(configured_names if configured_names is not None else
+                            [normalize_skill_name(binding.skill_name) for binding in bindings]),
+                    skill_visibility=skill_visibility,
+                )
                 agent.package_ref = await store.packages.save_in_transaction(session, package_owner(owner_user_id), record.package)
                 for field, value in _agent_values(record).items():
                     setattr(agent, field, value)
 
+
+    async def set_binding_version(self, *, owner_user_id: str, agent_id: str, skill_id: str,
+                                  version_id: str | None) -> bool:
+        from app.v2.server.catalog.orm import AgentRow
+
+        async with self.database.transaction() as session:
+            if session.get_bind().dialect.name == "sqlite":
+                await session.execute(text("BEGIN IMMEDIATE"))
+            agent = await session.get(AgentRow, agent_id, with_for_update=True)
+            if agent is not None and agent.owner_user_id != owner_user_id:
+                return False
+            result = await session.execute(update(AgentSkillSelectionRow).where(
+                AgentSkillSelectionRow.owner_user_id == owner_user_id,
+                AgentSkillSelectionRow.agent_id == agent_id,
+                AgentSkillSelectionRow.source_skill_id == skill_id,
+            ).values(source_version_id=version_id))
+            return cast(CursorResult, result).rowcount > 0
 
     async def list_bindings(
         self, *, owner_user_id: str, agent_id: str
@@ -374,8 +426,9 @@ class MemorySkillStore:
         owner_user_id: str,
         agent_id: str,
         bindings: list[AgentSkillBinding],
+        before_commit: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
-        self._bindings[(owner_user_id, agent_id)] = [
+        validated = [
             AgentSkillBinding(
                 owner_user_id=owner_user_id,
                 agent_id=agent_id,
@@ -386,6 +439,28 @@ class MemorySkillStore:
             )
             for item in bindings
         ]
+        key = (owner_user_id, agent_id)
+        if before_commit is not None:
+            await before_commit()
+            pins = {(item.skill_name, item.source_skill_id): item.source_version_id
+                    for item in self._bindings.get(key, ())}
+            validated = [
+                replace(item, source_version_id=pins.get((item.skill_name, item.source_skill_id)))
+                for item in validated
+            ]
+        self._bindings[key] = validated
+
+    async def set_binding_version(self, *, owner_user_id: str, agent_id: str, skill_id: str,
+                                  version_id: str | None) -> bool:
+        key = (owner_user_id, agent_id)
+        current = self._bindings.get(key, ())
+        if not any(item.source_skill_id == skill_id for item in current):
+            return False
+        self._bindings[key] = [
+            replace(item, source_version_id=version_id) if item.source_skill_id == skill_id else item
+            for item in current
+        ]
+        return True
 
     async def list_bindings(
         self, *, owner_user_id: str, agent_id: str

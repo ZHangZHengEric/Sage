@@ -70,10 +70,7 @@ from sagents.v2.agent.policy.tool_policy import (
 )
 from sagents.v2.tool.generated import generated_tools, generated_tool_provider
 from sagents.v2.tool import SideEffectLevel
-from sagents.v2.tool.plugins.official import (
-    OfficialToolPlugin,
-    official_tool_definitions,
-)
+from sagents.v2.tool.plugins.official import OfficialToolPlugin
 from app.v2.desktop.backend.runtime_config import _TOOL_NAME, _SKILL_NAME
 
 
@@ -701,6 +698,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             configured_tools = tuple(
                 definition.name
                 for definition in (*self._native_tool_definitions(), *mcp_definitions)
+                if definition.name != "search_skills"
             )
         # Match normal Desktop composition: stale internal operation names are
         # not callable tools. Preserve the raw configuration in version records,
@@ -1098,9 +1096,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             if agent.config.get("agentMode", "simple") != "simple":
                 raise ValueError("Desktop RSI currently requires a simple Agent")
             package, assets = await self._agent_snapshot(agent)
-            native_tools = {d.name for d in official_tool_definitions()} | {
-                "load_skill"
-            }
+            native_tools = {d.name for d in self._native_tool_definitions()}
             native_tools.update(generated_tools(package.files))
             environment = await self._rsi_case_environment(request, user_id)
             if environment is not None:
@@ -1464,7 +1460,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
                 )
                 role_provider[manifest.metadata.id] = internal_provider
             allowed_ids = {package.manifest.metadata.id, *role_provider}
-            definitions = official_tool_definitions()
+            definitions = self._native_tool_definitions()
             environment = await self._rsi_case_environment(request, user)
             if (environment.fingerprint if environment else None) != value.get('environment_fingerprint'):
                 raise ValueError('RSI case environment changed since experiment admission')
@@ -1491,7 +1487,7 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             }
             tool_scopes.update(scope for definition in definitions if definition.name in {"file_read", "file_write", "file_update"}
                                for scope in definition.required_scopes)
-            if "load_skill" in allowed_tools:
+            if {"load_skill", "search_skills"} & allowed_tools:
                 tool_scopes.add("skill.load")
 
             async def authorize(action, bundle, context):
@@ -2084,6 +2080,8 @@ class DesktopRsiMixin(DesktopUserSimulatorMixin):
             await self._record_agent_version(agent)
             config = dict(version["config"])
             if version["source"] == "rsi":
+                from app.v2.desktop.backend.rsi_save import apply_candidate_skill_visibility
+                apply_candidate_skill_visibility(config, definition)
                 config.update(
                     systemPrefix=definition.instructions.inline,
                     availableTools=list(definition.tools),

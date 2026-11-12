@@ -45,6 +45,7 @@ class RunComposition:
     a2a_agents: tuple[str, ...] = ()
     call_depth: int = 0
     package: AgentPackageBundle | None = None
+    member_skills: dict[str, tuple[SkillRecord, ...]] | None = None
 
 
 def composition_metadata(
@@ -55,6 +56,7 @@ def composition_metadata(
     a2a_agents: tuple[str, ...] = (),
     call_depth: int = 0,
     package: AgentPackageBundle | None = None,
+    member_skills: dict[str, tuple[SkillRecord, ...]] | None = None,
 ) -> dict[str, object]:
     """Serialize the composition admitted with a Run into Run metadata."""
 
@@ -63,6 +65,10 @@ def composition_metadata(
             "agent": agent.model_dump(mode="json"),
             **({"package": package.model_dump(mode="json")} if package is not None else {}),
             "skills": [asdict(record) for record in skills],
+            **({"member_skills": {
+                name: [asdict(record) for record in records]
+                for name, records in member_skills.items()
+            }} if member_skills is not None else {}),
             "mcp_servers": list(mcp_servers),
             "a2a_agents": list(a2a_agents),
             # How many agents deep this Run already is. It belongs to the
@@ -85,6 +91,23 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
     try:
         agent = AgentRecord.model_validate(raw.get("agent"))
         skills = _skills(raw.get("skills"), user_id=user_id)
+        package = AgentPackageBundle.model_validate(raw["package"]) if raw.get("package") else None
+        member_skills = None
+        if "member_skills" in raw:
+            from sagents.v2.agent.management.loading import bundle_agent_definitions
+
+            raw_members = raw["member_skills"]
+            definitions = bundle_agent_definitions(package or agent.package_bundle)
+            if not isinstance(raw_members, dict) or set(raw_members) - definitions.keys():
+                raise ValueError("invalid member Skill snapshots")
+            member_skills = {
+                name: _skills(records, user_id=user_id) for name, records in raw_members.items()
+            }
+            if any(
+                record.name not in definitions[name].skills
+                for name, records in member_skills.items() for record in records
+            ):
+                raise ValueError("member Skill snapshot exceeds its Package grant")
         mcp_servers = _names(raw.get("mcp_servers"), field="mcp server")
         a2a_agents = _names(raw.get("a2a_agents"), field="a2a agent")
         call_depth = _depth(raw.get("call_depth"))
@@ -97,16 +120,17 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
         raise _invalid("run composition does not match the Run agent")
     enabled = command.config.enabled_skills
     from app.v2.server.skills.runtime import enabled_skill_names
-    bundle = AgentPackageBundle.model_validate(raw["package"]) if raw.get("package") else agent.package_bundle
+    bundle = package or agent.package_bundle
     if enabled is None or enabled_skill_names(skills, bundle) != tuple(enabled):
         raise _invalid("run composition does not match the Run Skill grant")
     return RunComposition(
         agent=agent,
         skills=skills,
+        member_skills=member_skills,
         mcp_servers=mcp_servers,
         a2a_agents=a2a_agents,
         call_depth=call_depth,
-        package=AgentPackageBundle.model_validate(raw["package"]) if raw.get("package") else None,
+        package=package,
     )
 
 

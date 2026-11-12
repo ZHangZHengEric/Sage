@@ -2,6 +2,7 @@
 
 from sagents.v2.runtime.extensions.contracts import (
     CapabilityKey,
+    CapabilityName,
     CapabilityOffer,
     CapabilityRequirement,
     ExtensionDependency,
@@ -15,6 +16,7 @@ from sagents.v2.runtime.extensions.contracts import (
     StopReason,
     plugin_identity,
 )
+from sagents.v2.runtime.extensions.capability_contracts import capability_contract_inventory
 from sagents.v2.runtime.extensions.host import (
     ExtensionCompositionPlan,
     ExtensionHost,
@@ -37,6 +39,8 @@ from sagents.v2.runtime.extensions.scope import ExtensionScopeHandle
 __all__ = [
     "CapabilityOffer",
     "CapabilityKey",
+    "CapabilityName",
+    "capability_contract_inventory",
     "CapabilityRequirement",
     "ExtensionDependency",
     "ExtensionDescriptor",

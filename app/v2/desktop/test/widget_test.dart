@@ -111,6 +111,27 @@ class _SkillComponentApi extends _FakeApi {
           lastSelectedComponentPlugin ?? 'sage.skill.loading.lazy',
       selectedConfig: lastSelectedComponentConfig ?? const {},
       activePluginId: 'sage.skill.loading.lazy',
+      contracts: const {
+        'skill.provider': {
+          'api_version': '2',
+          'required_members': ['list_skills', 'get_skill', 'fetch'],
+          'features': [
+            {
+              'id': 'skill.search',
+              'members': ['search_skills'],
+              'required_when': 'search_skills',
+            },
+          ],
+          'implementations': [
+            {
+              'id': 'sage.skill.provider.filesystem',
+              'features': [
+                {'id': 'skill.search', 'status': 'declared'},
+              ],
+            },
+          ],
+        },
+      },
       plugins: [
         ComponentPluginSummary(
           id: 'sage.skill.loading.lazy',
@@ -5538,6 +5559,62 @@ void main() {
     });
   }
 
+  for (final themeMode in ['light', 'dark']) {
+    testWidgets('default Skill visibility and limit save in $themeMode', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _TeamAgentApi(mode: 'simple');
+      api.desktopSettings = api.desktopSettings.copyWith(themeMode: themeMode);
+      api.configuration = api.configuration.applyPatch({
+        'available_skills': ['code-review'],
+      });
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('智能体').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+      await tester.pumpAndSettle();
+
+      final toggle = find.byKey(
+        const ValueKey('agent-custom-skill-visibility'),
+      );
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(api.agentPatches.last, {'default_visible_skills': <String>[]});
+
+      final limit = find.byKey(const ValueKey('agent-default-skill-limit'));
+      await tester.ensureVisible(limit);
+      await tester.enterText(
+        find.descendant(of: limit, matching: find.byType(EditableText)),
+        '25',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(api.agentPatches.last, {'default_visible_skills_limit': 25});
+
+      final skill = find.byKey(const ValueKey('assignment-默认展示技能-code-review'));
+      await tester.ensureVisible(skill);
+      await tester.pumpAndSettle();
+      await tester.tap(skill);
+      await tester.pumpAndSettle();
+      expect(api.agentPatches.last, {
+        'default_visible_skills': ['code-review'],
+      });
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('agent tool assignments save and update immediately', (
     tester,
   ) async {
@@ -8699,6 +8776,16 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('settings-button')));
         await tester.pumpAndSettle();
         await tester.tap(find.text('运行组件'));
+        await tester.pumpAndSettle();
+        final help = find.byKey(
+          const ValueKey('settings-contract-skill.loading'),
+        );
+        await tester.ensureVisible(help);
+        await tester.tap(help);
+        await tester.pumpAndSettle();
+        expect(find.text('插件契约'), findsOneWidget);
+        expect(find.text('skill.search · 已声明'), findsOneWidget);
+        await tester.tap(find.byTooltip('关闭').last);
         await tester.pumpAndSettle();
         final field = find.byKey(
           const ValueKey('settings-plugin-skill.loading-max_active_characters'),

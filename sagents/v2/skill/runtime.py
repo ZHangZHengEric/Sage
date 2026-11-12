@@ -1,11 +1,14 @@
 """Explicit, content-pinned Skill grants for one Run and its delegation tree."""
 from __future__ import annotations
 
+import base64
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from sagents.v2.contracts.runtime_skills import RuntimeSkillAttachment, RuntimeSkillAuthorization
-from sagents.v2.contracts.errors import ErrorCategory
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+from sagents.v2.concurrency import bounded_to_thread
+from sagents.v2.skill.search import SkillSearchIndex, merge_skill_matches, searchable_body
 from sagents.v2.skill.bundles import skill_error
 from sagents.v2.skill.contracts import SkillBundle, SkillCatalog, SkillDescriptor, SkillSource
 
@@ -89,12 +92,34 @@ class RuntimeSkillProvider:
         self.source = source
         self.raw_catalog = raw_catalog
         self.attachments = {value.descriptor.name: value for value in attachments}
+        self._search_index = SkillSearchIndex()
 
     async def _check_conflicts(self, run_id: str) -> None:
-        if self.attachments:
-            existing = await self.raw_catalog.list_skills(run_id=run_id)
-            if any(value.name in self.attachments for value in existing):
+        for name in self.attachments:
+            try:
+                await self.raw_catalog.get_skill(name, run_id=run_id)
+            except SageV2Error as exc:
+                if exc.info.code != "skill.not_found":
+                    raise
+            else:
                 raise skill_error("skill.runtime_conflict", "runtime Skill name conflicts with an existing source")
+
+    async def search_skills(self, query, *, run_id, limit, excluded_names=frozenset()):
+        await self._check_conflicts(run_id)
+        base = await self.catalog.search_skills(
+            query, run_id=run_id, limit=limit, excluded_names=excluded_names
+        )
+        documents = {
+            name: lambda attachment=attachment: (
+                attachment.descriptor,
+                searchable_body(base64.b64decode(attachment.files_base64["SKILL.md"], validate=True)),
+            )
+            for name, attachment in self.attachments.items() if name not in excluded_names
+        }
+        overlay = await bounded_to_thread(
+            "skill-io", lambda: self._search_index.search(query, documents, limit)
+        )
+        return merge_skill_matches(query, base, overlay, limit)
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
         await self._check_conflicts(run_id)
@@ -118,3 +143,16 @@ class RuntimeSkillProvider:
             return await self.fetch(name, run_id=run_id)
         fetch = getattr(self.source, "fetch_latest", self.source.fetch)
         return await fetch(name, run_id=run_id)
+
+
+    async def fetch_for_restore(self, name: str, *, run_id: str, version: str) -> SkillBundle:
+        await self._check_conflicts(run_id)
+        if name in self.attachments:
+            return self.attachments[name].bundle()
+        fetch_version = getattr(self.source, "fetch_for_restore", None)
+        if callable(fetch_version):
+            return await fetch_version(name, run_id=run_id, version=version)
+        bundle = await self.source.fetch(name, run_id=run_id)
+        if bundle.descriptor.version != version:
+            bundle = await self.fetch_latest(name, run_id=run_id)
+        return bundle

@@ -36,6 +36,7 @@ from sagents.v2.contracts.commands import (
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.package.manifest.agents import (
+    DEFAULT_VISIBLE_SKILLS_LIMIT,
     AgentBudgets,
     AgentDefinition,
     AgentMemoryBehavior,
@@ -91,6 +92,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         skills = tuple(
             name for name in skills if isinstance(name, str) and _SKILL_NAME.fullmatch(name)
         )
+        default_visible_skills = agent.config.get("defaultVisibleSkills")
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 10_000))
         memory_enabled = (
             self.memory_plugin_id != "sage.memory.noop" and "search_memory" in tools
@@ -116,6 +118,10 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     models={"primary": provider.id},
                     tools=tools if provider.supports_tool_calling else (),
                     skills=skills,
+                    default_visible_skills=None if default_visible_skills is None else tuple(
+                        name for name in default_visible_skills if name in skills
+                    ),
+                    default_visible_skills_limit=agent.config.get("defaultVisibleSkillsLimit", DEFAULT_VISIBLE_SKILLS_LIMIT),
                     budgets=AgentBudgets(max_steps=max_steps),
                     memory=AgentMemoryBehavior(
                         recall=memory_enabled and memory_behavior.recall,

@@ -126,6 +126,7 @@ def register_tool_plugins(registry: ExtensionRegistry) -> None:
                 dependencies.require_unique("skill.loader"),
                 language=context.config.get("language"),
                 allow_editing=context.config.get("allow_editing", False),
+                allow_search=context.config.get("allow_search", False),
             ),
             start=lambda plugin, context, dependencies: {
                 "tool.provider:skill": ToolProvider(plugin.catalog, plugin.executor),

@@ -6,7 +6,7 @@ import inspect
 from typing import Literal
 
 from sagents.v2.agent.multi_agent.contracts import AgentMode
-from sagents.v2.tool.plugins.skill.operations import SkillLoadTool
+from sagents.v2.tool.plugins.skill.operations import SkillLoadTool, SkillSearchTool
 from sagents.v2.tool.contracts import ToolDefinition
 from sagents.v2.tool.decorators import decorated_tool_definition
 from sagents.v2.tool.localization import localize_tool_definition
@@ -21,7 +21,7 @@ def builtin_tool_definitions(
 ) -> tuple[ToolDefinition, ...]:
     """Return detached, name-sorted metadata without creating execution objects.
 
-    Every mode includes official base tools and ``load_skill``. Team adds its
+    Every mode includes official base tools and Skill discovery and loading. Team adds its
     declared-member delegation tool; Fibre adds spawn and delegation tools.
     ``all`` returns their union for a host's settings catalog. Simple and Flow
     do not add delegation tools. Unknown modes raise ``ValueError``.
@@ -32,11 +32,11 @@ def builtin_tool_definitions(
     External and custom provider metadata belongs to those providers.
     """
     owners = {
-        "simple": (SkillLoadTool,),
-        "flow": (SkillLoadTool,),
-        "team": (SkillLoadTool, _TeamToolMethods),
-        "fibre": (SkillLoadTool, _FibreToolMethods),
-        "all": (SkillLoadTool, _TeamToolMethods, _FibreToolMethods),
+        "simple": (SkillLoadTool, SkillSearchTool,),
+        "flow": (SkillLoadTool, SkillSearchTool,),
+        "team": (SkillLoadTool, SkillSearchTool, _TeamToolMethods),
+        "fibre": (SkillLoadTool, SkillSearchTool, _FibreToolMethods),
+        "all": (SkillLoadTool, SkillSearchTool, _TeamToolMethods, _FibreToolMethods),
     }
     if not isinstance(agent_mode, str) or agent_mode not in owners:
         raise ValueError("agent_mode must be simple, fibre, team, flow, or all")

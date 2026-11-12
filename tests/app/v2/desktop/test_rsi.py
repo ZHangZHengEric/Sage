@@ -751,7 +751,7 @@ async def test_snapshot_matches_default_and_explicit_empty_tool_selection(
         agent = agent.model_copy(update={"config": config})
         package = await service._agent_bundle(agent)
         expected = (
-            tuple(d.name for d in service._native_tool_definitions())
+            tuple(d.name for d in service._native_tool_definitions() if d.name != "search_skills")
             if selection is None
             else ()
         )

@@ -78,3 +78,64 @@ async def test_desktop_run_plugin_rejects_a_mismatched_tenant(tmp_path, user_id,
             await desktop_run_inputs(service, None, dependencies)
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_skill_visibility_reaches_the_model_request(tmp_path):
+    from app.v2.desktop.backend.schemas import AgentSettingsPatch
+    from sagents.v2.contracts.items import TextBlock
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+
+    service, model, _ = desktop(tmp_path)
+    try:
+        inventory = await service.component_inventory("user_1")
+        skill = next(item for item in inventory if item["component"]["component_id"] == "skill.loading")
+        assert skill["contracts"]["skill.provider"]["module"] == "skill"
+        provider = next(
+            item for item in skill["contracts"]["skill.provider"]["implementations"]
+            if item["id"] == "com.sage.desktop.run.skill-provider"
+        )
+        assert {"id": "skill.search", "status": "declared"} in provider["features"]
+        for name in ("visible-guide", "searchable-guide"):
+            folder = service.skill_root / name
+            folder.mkdir()
+            (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: Guide\n---\nGuide body", encoding="utf-8")
+        await service.list_agents("user_1")
+        settings = await service.patch_agent_settings("sage", AgentSettingsPatch(
+            available_tools=["search_skills"],
+            available_skills=["visible-guide", "searchable-guide"],
+            default_visible_skills=["visible-guide"],
+            default_visible_skills_limit=25,
+        ), "user_1")
+        assert settings["default_visible_skills"] == ["visible-guide"]
+        assert settings["default_visible_skills_limit"] == 25
+        async def model_prompt():
+            run, _, _ = await execute(service)
+            assert run.state.value == "completed"
+            request = model.requests[-1]
+            prompt = "\n".join(
+                block.text for message in request.messages if message.role == "system"
+                for block in message.content if isinstance(block, TextBlock)
+            )
+            return {tool.name for tool in request.tools}, prompt
+
+        tools, prompt = await model_prompt()
+        assert {"search_skills", "load_skill"} <= tools
+        assert "<skill_name>visible-guide</skill_name>" in prompt
+        assert "<skill_name>searchable-guide</skill_name>" not in prompt
+
+        await service.patch_agent_settings("sage", AgentSettingsPatch(available_tools=[]), "user_1")
+        tools, prompt = await model_prompt()
+        assert "search_skills" not in tools
+        assert "<skill_name>visible-guide</skill_name>" in prompt
+        assert "<skill_name>searchable-guide</skill_name>" not in prompt
+        settings = await service.patch_agent_settings("sage", AgentSettingsPatch(
+            available_skills=["searchable-guide"],
+        ), "user_1")
+        assert settings["default_visible_skills"] == []
+        settings = await service.patch_agent_settings("sage", AgentSettingsPatch(
+            default_visible_skills=None,
+        ), "user_1")
+        assert settings["default_visible_skills"] is None
+    finally:
+        await service.close()

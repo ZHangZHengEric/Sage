@@ -79,6 +79,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.tool.official",
         "sage.tool.result-processor.file",
         "sage.tool.skill",
+        "sage.skill.loader",
         "sage.tool-selection.direct",
         "sage.tool-selection.lexical",
         "sage.tool-selection.llm",

@@ -69,11 +69,13 @@ from sagents.v2.runtime.execution.dispatcher import DEFAULT_LEASE_SECONDS
 from sagents.v2.runtime.execution.environment import RunExecutionEnvironment, _bind_execution_environment
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
+from sagents.v2.runtime.extensions.capability_contracts import missing_provider_members
 from sagents.v2.runtime.extensions import (
     ExtensionHost,
     ExtensionRegistry,
     ExtensionScope,
     ExtensionScopeContext,
+    CapabilityRequirement,
     validate_extension_version,
 )
 from sagents.v2.runtime.observability import StructuredLogger
@@ -826,6 +828,9 @@ class ApplicationAssembler:
                                 "tools": descriptor.tools,
                                 "skills": descriptor.skills,
                                 "preload_skills": descriptor.preload_skills,
+                                "default_visible_skills": None if base.default_visible_skills is None else tuple(
+                                    name for name in base.default_visible_skills if name in descriptor.skills
+                                ),
                                 "subagents": (),
                             }
                         )
@@ -851,10 +856,21 @@ class ApplicationAssembler:
                     self_configuration = (
                         active_self_configuration
                     )
+                    run_tools = active_command.config.enabled_tools
+                    search_enabled = "search_skills" in definition.tools and (
+                        run_tools is None or "search_skills" in run_tools
+                    )
+                    if search_enabled and (
+                        active_skills is None or missing_provider_members(
+                            "skill.provider", active_skills[0], features=("skill.search",)
+                        )
+                    ):
+                        raise ValueError("search_skills requires a searchable skill.provider")
                     if (active_skills is not None) and (
                         definition.skills
                         or runtime_skills
                         or "load_skill" in definition.tools
+                        or search_enabled
                         or self_configuration is not None
                     ):
                         from sagents.v2.skill.plugins.session import (
@@ -864,7 +880,7 @@ class ApplicationAssembler:
                             CompositeToolCatalog,
                             CompositeToolExecutor,
                         )
-                        from sagents.v2.tool.plugins.skill import SkillToolPlugin
+                        from sagents.v2.skill.registrations import bind_skill_loader
 
                         if active_skills is not None:
                             skill_catalog, skill_source, skill_workspace = active_skills
@@ -889,7 +905,25 @@ class ApplicationAssembler:
                             workspace_root=(active_runtime.sandbox.filesystem.normalize_path(".")
                                 if active_skills is not None and active_runtime is not None else "/workspace"),
                         )
-                        skill_tools = SkillToolPlugin(skill_loader, allow_editing="edit_skill" in definition.tools)
+                        skill_tool_plan = extension_host.plan(
+                            (CapabilityRequirement(capability="tool.provider", name="skill", api_version="2"),),
+                            selections={"tool.provider:skill": "sage.tool.skill", "skill.loader": "sage.skill.loader"},
+                            configs={"sage.tool.skill": {
+                                "allow_editing": "edit_skill" in definition.tools,
+                                "allow_search": search_enabled,
+                            }},
+                            scope_overrides={"sage.tool.skill": ExtensionScope.RUN},
+                        )
+                        with bind_skill_loader(run_id, skill_loader):
+                            skill_tool_scope = extension_host.open_scope_sync(
+                                ExtensionScopeContext(
+                                    scope=ExtensionScope.RUN, scope_id=run_id,
+                                    run_id=run_id, tenant_id=active_tenant, agent_id=descriptor.agent_id,
+                                ),
+                                skill_tool_plan,
+                            )
+                        owned.append(skill_tool_scope)
+                        skill_tools = skill_tool_scope.providers.require("tool.provider", "skill")
                         catalog = CompositeToolCatalog((catalog, skill_tools.catalog))
                         executor = CompositeToolExecutor((executor, skill_tools.executor))
                         runtime_tools = (*runtime_tools, "load_skill")

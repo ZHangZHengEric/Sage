@@ -27,6 +27,9 @@ def fixture_configuration(root, *, model=None, models=None, runtime=None, regist
         values["tool.provider"] = SimpleNamespace(catalog=tools[0], executor=tools[1])
     if skills is not None:
         values["skill.provider"] = SimpleNamespace(list_skills=skills[0].list_skills, get_skill=skills[0].get_skill, fetch=skills[1].fetch, fetch_latest=getattr(skills[1], "fetch_latest", skills[1].fetch))
+        search_skills = getattr(skills[0], "search_skills", None)
+        if callable(search_skills):
+            values["skill.provider"].search_skills = search_skills
         if len(skills) > 2 and skills[2] is not None:
             values["skill.workspace"] = skills[2]
     registered = list(registrations)

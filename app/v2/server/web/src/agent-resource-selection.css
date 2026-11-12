@@ -1,3 +1,6 @@
+.agent-default-skill-selection { display: grid; gap: 14px; margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--border); }
+.agent-default-skill-limit { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+.agent-default-skill-limit input { width: 100px; }
 .agent-resource-heading { flex-wrap: wrap; gap: 9px; }
 .agent-resource-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .agent-resource-summary { margin: -2px 0 15px; font-size: 11px; color: var(--muted-foreground); overflow-wrap: anywhere; }

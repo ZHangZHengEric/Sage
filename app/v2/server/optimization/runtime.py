@@ -121,6 +121,6 @@ def validate_target(package):
         raise ValueError("RSI does not execute custom plugins or environment bindings")
     from app.v2.server.catalog.plugins import validate_agent_plugins
     validate_agent_plugins(package.manifest.runtime.capabilities)
-    known = {item.name for item in official_tool_definitions()} | {"load_skill"}
+    known = {item.name for item in official_tool_definitions()} | {"load_skill", "search_skills"}
     if set(target.tools) - known:
         raise ValueError("RSI requires local official tools; MCP/A2A and custom tools need a test environment")

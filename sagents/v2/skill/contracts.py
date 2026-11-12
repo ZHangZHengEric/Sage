@@ -47,10 +47,24 @@ class SkillProvider(SkillCatalog, SkillSource, Protocol):
     """One selected source owns discovery and bundle retrieval."""
 
 
+class SkillSearchProvider(Protocol):
+    """Optional, metadata-only search within the caller's authorized names."""
+
+    async def search_skills(
+        self, query: str, *, run_id: str, allowed_names: frozenset[str], limit: int
+    ) -> tuple[SkillDescriptor, ...]: ...
+
+
 class CurrentSkillSource(SkillSource, Protocol):
     """Current manager contents for an already admitted Skill name."""
 
     async def fetch_latest(self, name: str, *, run_id: str) -> SkillBundle: ...
+
+
+class VersionedSkillSource(SkillSource, Protocol):
+    """Retrieve an admitted name at the exact version recorded in a checkpoint."""
+
+    async def fetch_for_restore(self, name: str, *, run_id: str, version: str) -> SkillBundle: ...
 
 
 class SkillManagement(SkillProvider, Protocol):

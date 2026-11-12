@@ -10,6 +10,8 @@ from sagents.v2.tool.plugins.official import (
     official_tool_definitions,
 )
 from sagents.v2.tool.contracts import ToolDefinition
+from sagents.v2.tool.decorators import decorated_tool_definition
+from sagents.v2.tool.plugins.skill.operations import SkillSearchTool
 
 DEFAULT_OFFICIAL_TOOLS = (
     "file_read",
@@ -72,10 +74,14 @@ def default_agent_tools() -> list[str]:
 def official_tool_catalog() -> list[dict[str, object]]:
     defaults = set(DEFAULT_OFFICIAL_TOOLS)
     categories = official_tool_categories()
-    return [
+    tools = [
         tool_catalog_item(item, category=categories.get(item.name, ""), default=item.name in defaults)
         for item in official_tool_definitions()
     ]
+    search = decorated_tool_definition(SkillSearchTool.execute)
+    if search is not None:
+        tools.append(tool_catalog_item(search, category="system"))
+    return tools
 
 
 def tool_catalog_item(

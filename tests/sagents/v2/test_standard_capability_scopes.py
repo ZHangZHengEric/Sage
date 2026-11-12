@@ -118,6 +118,9 @@ async def test_run_factory_failure_rolls_back_prior_owned_capabilities(tmp_path)
         async def close(self):
             closed.append("model")
     class Summarizer:
+        async def summarize(self, *args, **kwargs):
+            raise AssertionError("the Run must fail before summarizing")
+
         async def close(self):
             closed.append("summarizer")
     def registration(capability, factory, dependencies=()):

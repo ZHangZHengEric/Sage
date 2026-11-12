@@ -1,6 +1,7 @@
 """Public definitions used by Agent editors, cached for a running host."""
 
 from sagents.v2.package.manifest.runtime import CapabilitySelection
+from sagents.v2.runtime.extensions.capability_contracts import module_contract_inventory
 
 def build_plugin_catalog(host):
     from app.v2.server.catalog.plugins import (
@@ -8,6 +9,8 @@ def build_plugin_catalog(host):
         AGENT_DEFAULTS,
         DEFAULT_CONFIG,
     )
+
+    from app.v2.server.runtime.sdk_plugins import server_registrations
 
     defaults = {
         provider.capability: provider.plugin_id
@@ -36,6 +39,9 @@ def build_plugin_catalog(host):
             default_config[key] = selection.config
     return {
         "plugins": options,
+        "contracts": module_contract_inventory(
+            host.extensions, host_registrations=server_registrations(host)
+        ),
         "defaults": defaults,
         "configurable": list(AGENT_DEFAULTS),
         "default_config": default_config,

@@ -51,6 +51,7 @@ def register_model_plugins(registry: ExtensionRegistry) -> None:
                             capability="model.provider",
                             api_version="2",
                             name=descriptor.protocol.value,
+                            features=("model.capability-probe",),
                         ),
                     ),
                     supported_scopes=frozenset(

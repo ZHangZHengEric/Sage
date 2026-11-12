@@ -608,12 +608,11 @@ async def test_skill_restore_normalizes_instructions_but_preserves_bundle_hash(t
         assert await restored.snapshot_run("run1") == checkpoint
         assert await target._read("/workspace/skills/demo/SKILL.md", "run1") == original.files["SKILL.md"]
 
-        # Whitespace-only source changes still invalidate the exact hash.
         if kind is AutoSyncSkillWorkspace:
             await manager.publish(bundle("\n  Read references/guide.md\n\n"))
-            with pytest.raises(SageV2Error) as caught:
-                await restored.restore_run("run1", checkpoint)
-            assert caught.value.info.code == "skill.restore_version_changed"
+            await restored.restore_run("run1", checkpoint)
+            assert await restored.snapshot_run("run1") == checkpoint
+            assert await target._read("/workspace/skills/demo/SKILL.md", "run1") == original.files["SKILL.md"]
     finally:
         await manager.close()
 
@@ -650,3 +649,24 @@ async def test_manager_pushed_current_contents_are_not_misarchived_as_agent_edit
     assert set((await target._tree("/workspace/skills/.catalog", "run1"))[0]) == {
         "demo/state.json"
     }
+
+
+
+@pytest.mark.asyncio
+async def test_auto_sync_restores_the_loaded_version_after_newer_publication(targets):
+    manager = MemorySkillRepository()
+    try:
+        await manager.publish(bundle("admitted"))
+        await manager.get_skill("demo", run_id="run1")
+        await manager.publish(bundle("loaded"))
+        target = await targets()
+        active = loader(manager, target)
+        loaded = await active.load("demo", run_id="run1")
+        assert loaded.instructions == "loaded"
+        checkpoint = await active.snapshot_run("run1")
+        await manager.publish(bundle("latest"))
+        restored = loader(manager, target)
+        await restored.restore_run("run1", checkpoint)
+        assert await restored.snapshot_run("run1") == checkpoint
+    finally:
+        await manager.close()

@@ -93,11 +93,21 @@ class SkillVersionService:
         current = await self.catalog.get(skill_id, user_id=user_id, role="user")
         if version_id is not None:
             await self.get(skill_id, version_id, user_id=user_id, role="user")
-        bindings = await self.catalog.store.list_bindings(owner_user_id=user_id, agent_id=agent_id)
-        if not any(item.source_skill_id == skill_id for item in bindings):
-            raise _missing("bind this skill to the Agent before selecting a version")
-        await self.catalog.store.replace_bindings(owner_user_id=user_id, agent_id=agent_id,
-            bindings=[replace(item, source_version_id=version_id)
-                      if item.source_skill_id == skill_id else item for item in bindings])
+        set_version = getattr(self.catalog.store, "set_binding_version", None)
+        if set_version is not None:
+            if not await set_version(
+                owner_user_id=user_id, agent_id=agent_id, skill_id=skill_id, version_id=version_id,
+            ):
+                raise _missing("bind this skill to the Agent before selecting a version")
+        else:
+            bindings = await self.catalog.store.list_bindings(owner_user_id=user_id, agent_id=agent_id)
+            if not any(item.source_skill_id == skill_id for item in bindings):
+                raise _missing("bind this skill to the Agent before selecting a version")
+            await self.catalog.store.replace_bindings(owner_user_id=user_id, agent_id=agent_id,
+                bindings=[replace(item, source_version_id=version_id)
+                          if item.source_skill_id == skill_id else item for item in bindings])
         bound = await self.catalog.bound_skills(owner_user_id=user_id, agent_id=agent_id)
-        return next(item for item in bound if item.skill_id == current.skill_id)
+        result = next((item for item in bound if item.skill_id == current.skill_id), None)
+        if result is None:
+            raise _missing("Skill binding changed while selecting a version")
+        return result

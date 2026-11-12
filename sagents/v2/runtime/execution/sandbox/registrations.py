@@ -55,6 +55,9 @@ def register_sandbox_plugins(registry: ExtensionRegistry) -> None:
         version="3.0.0",
         config_schema=_sandbox_config_schema(in_memory=True),
         capabilities={
+            "supports_snapshot": True,
+            "supports_reconnect": True,
+            "supports_secret_injection": False,
             "supports_terminal_purge": True,
             "supports_automatic_terminal_retention": True,
         },
@@ -90,6 +93,9 @@ def register_sandbox_plugins(registry: ExtensionRegistry) -> None:
         version="3.0.0",
         config_schema=_sandbox_config_schema(in_memory=False),
         capabilities={
+            "supports_snapshot": False,
+            "supports_reconnect": True,
+            "supports_secret_injection": False,
             "supports_terminal_purge": True,
             "supports_automatic_terminal_retention": True,
         },
@@ -131,7 +137,12 @@ def register_sandbox_plugins(registry: ExtensionRegistry) -> None:
             "required": ["verification_key", "api_url", "template_id", "proxy_node_ip"],
             "additionalProperties": False,
         },
-        capabilities={"supports_terminal_purge": True},
+        capabilities={
+            "supports_snapshot": False,
+            "supports_reconnect": False,
+            "supports_secret_injection": False,
+            "supports_terminal_purge": True,
+        },
     )
 
 

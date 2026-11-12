@@ -1,4 +1,5 @@
 <script setup>
+import CapabilityContractHelp from './CapabilityContractHelp.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 import { api } from '../api.js'
 import SchemaField from './SchemaField.vue'
@@ -83,9 +84,9 @@ onUnmounted(() => { disposed = true })
     <div v-else class="capability-workbench">
       <CapabilityCanvas :nodes="nodes" :links="links" :active="active" @select="active = $event" />
       <aside ref="inspector" class="capability-inspector" :aria-label="`${currentNode?.name || '能力'}配置`">
-        <template v-if="active === 'model.provider'"><header class="inspector-head"><h2>模型配置</h2></header><slot name="model"><p>{{ modelLabel }}</p></slot></template>
+        <template v-if="active === 'model.provider'"><header class="inspector-head"><h2>模型配置</h2><CapabilityContractHelp :capability="active" :inventory="catalog.contracts" /></header><slot name="model"><p>{{ modelLabel }}</p></slot></template>
         <template v-else-if="currentNode">
-          <header class="inspector-head"><h2>{{ currentNode.name }}</h2><span class="tag">{{ options.length }} 个可选方案</span></header>
+          <header class="inspector-head"><h2>{{ currentNode.name }}</h2><CapabilityContractHelp :capability="active" :inventory="catalog.contracts" /><span class="tag">{{ options.length }} 个可选方案</span></header>
           <div class="selection-source"><span>{{ modelValue[active] ? '智能体自定义' : '跟随 Server 默认' }}</span><button type="button" :disabled="disabled || !modelValue[active]" @click="update(active, '')">恢复默认</button></div>
           <p v-if="!current.available" class="unavailable-warning" role="alert">当前实现未注册或不可用，请选择可用方案或恢复默认。</p>
           <div role="group" :aria-label="`${currentNode.name}可选方案`" class="plugin-options">

@@ -17,7 +17,7 @@ import json
 import posixpath
 from weakref import WeakValueDictionary
 
-from sagents.v2.contracts.errors import ErrorCategory
+from sagents.v2.contracts.errors import ErrorCategory, errors_before_side_effect
 from sagents.v2.runtime.execution.sandbox import FileOperation, OperationIntent
 from sagents.v2.skill.bundles import files_digest, skill_error
 from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor, LoadedSkill
@@ -69,10 +69,11 @@ class _StableSkillWorkspace(SandboxSkillWorkspaceBase, ABC):
             owner is not self._identity and (changing or value != content_hash)
             for owner, value in owners.items()
         ):
-            raise skill_error(
-                "skill.workspace_in_use",
-                "Another active Run is using this Skill; synchronize after it releases the workspace",
-            )
+            with errors_before_side_effect("skill.workspace_in_use"):
+                raise skill_error(
+                    "skill.workspace_in_use",
+                    "Another active Run is using this Skill; synchronize after it releases the workspace",
+                )
         _users.setdefault(self._key(destination), {})[self._identity] = content_hash
         self._leased.add(self._key(destination))
         return any(owner is not self._identity for owner in owners)

@@ -68,6 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _systemPrefix = TextEditingController();
   final _systemContext = TextEditingController();
   final _maxLoopCount = TextEditingController();
+  final _defaultSkillLimit = TextEditingController();
   late final TextEditingController _previewBytes = TextEditingController(
     text: _draft.maxPreviewBytes.toString(),
   );
@@ -105,6 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _systemPrefix.dispose();
     _systemContext.dispose();
     _maxLoopCount.dispose();
+    _defaultSkillLimit.dispose();
     _previewBytes.dispose();
     _treeEntries.dispose();
     _workspacePath.dispose();
@@ -122,6 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       '  ',
     ).convert(value.runtimeVariables);
     _maxLoopCount.text = value.maxLoopCount.toString();
+    _defaultSkillLimit.text = value.defaultVisibleSkillsLimit.toString();
   }
 
   Future<void> _saveDesktopSettings(DesktopSettings next) async {
@@ -1680,11 +1683,125 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _saveAgent({'available_skills': next.toList()..sort()});
                       },
                     ),
+                    const SizedBox(height: 22),
+                    GlassCard(
+                      padding: const EdgeInsets.all(14),
+                      shape: const LiquidRoundedSuperellipse(borderRadius: 16),
+                      settings: _glass(context),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SettingsRow(
+                            label: context.l10n.text(
+                              'settings.customSkillVisibility',
+                            ),
+                            control: Semantics(
+                              enabled: _editingAgent,
+                              label: context.l10n.text(
+                                'settings.customSkillVisibility',
+                              ),
+                              child: AbsorbPointer(
+                                absorbing: !_editingAgent,
+                                child: GlassSwitch(
+                                  key: const ValueKey(
+                                    'agent-custom-skill-visibility',
+                                  ),
+                                  value: agent.defaultVisibleSkills != null,
+                                  activeColor: Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
+                                  settings: _glass(context),
+                                  useOwnLayer: true,
+                                  onChanged: (value) => _saveAgent({
+                                    'default_visible_skills': value
+                                        ? <String>[]
+                                        : null,
+                                  }),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (agent.defaultVisibleSkills
+                              case final visible?) ...[
+                            _SettingsRow(
+                              label: context.l10n.text(
+                                'settings.defaultSkillLimit',
+                              ),
+                              control: _editingAgent
+                                  ? SizedBox(
+                                      width: 100,
+                                      child: GlassTextField(
+                                        key: const ValueKey(
+                                          'agent-default-skill-limit',
+                                        ),
+                                        controller: _defaultSkillLimit,
+                                        height: 36,
+                                        settings: _glass(context),
+                                        keyboardType: TextInputType.number,
+                                        onSubmitted: (_) =>
+                                            _commitDefaultSkillLimit(agent),
+                                        onTapOutside: (_) {
+                                          _commitDefaultSkillLimit(agent);
+                                          FocusManager.instance.primaryFocus
+                                              ?.unfocus();
+                                        },
+                                      ),
+                                    )
+                                  : Text('${agent.defaultVisibleSkillsLimit}'),
+                            ),
+                            const SizedBox(height: 14),
+                            _AssignmentSection(
+                              title: context.l10n.text(
+                                'settings.defaultVisibleSkills',
+                              ),
+                              values: agent.availableSkills,
+                              selected: visible.toSet(),
+                              editing: _editingAgent,
+                              showSelectedCount: true,
+                              selectionLimit: agent.defaultVisibleSkillsLimit,
+                              onToggle: (name) {
+                                final current =
+                                    widget.controller.agentConfiguration ??
+                                    agent;
+                                final next = current.defaultVisibleSkills
+                                    ?.toSet();
+                                if (next == null) return;
+                                if (!next.remove(name)) {
+                                  if (next.length >=
+                                      current.defaultVisibleSkillsLimit) {
+                                    return;
+                                  }
+                                  next.add(name);
+                                }
+                                _saveAgent({
+                                  'default_visible_skills': next.toList()
+                                    ..sort(),
+                                });
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
         ),
       ],
     );
+  }
+
+  void _commitDefaultSkillLimit(AgentConfiguration agent) {
+    final current = widget.controller.agentConfiguration ?? agent;
+    final limit = int.tryParse(_defaultSkillLimit.text.trim());
+    if (limit == null ||
+        limit < 1 ||
+        limit < (current.defaultVisibleSkills?.length ?? 0)) {
+      _defaultSkillLimit.text = current.defaultVisibleSkillsLimit.toString();
+      return;
+    }
+    if (limit != current.defaultVisibleSkillsLimit) {
+      _saveAgent({'default_visible_skills_limit': limit});
+    }
   }
 
   Widget _models() => _ModelSettings(controller: widget.controller);
@@ -2385,6 +2502,7 @@ class _ComponentSettingsCardState extends State<_ComponentSettingsCard> {
       activeSource: saved.activeSource,
       activeConfig: saved.activeConfig,
       selectedConfig: const {},
+      contracts: saved.contracts,
       pendingRestart: saved.pendingRestart,
     );
   }
@@ -2436,11 +2554,41 @@ class _ComponentSettingsCardState extends State<_ComponentSettingsCard> {
                 final title = Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      componentName,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            componentName,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        if (component.contracts.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Tooltip(
+                            message: _contractLabel(
+                              context,
+                              '查看插件契约',
+                              'View plugin contracts',
+                            ),
+                            child: GlassIconButton(
+                              key: ValueKey(
+                                'settings-contract-${component.id}',
+                              ),
+                              size: 34,
+                              iconSize: 17,
+                              onPressed: () => _showComponentContracts(
+                                context,
+                                component.contracts,
+                              ),
+                              icon: Icon(
+                                CupertinoIcons.question_circle,
+                                color: colors.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 5),
                     Text(
@@ -5734,8 +5882,10 @@ class _AssignmentSection extends StatelessWidget {
     this.labels = const {},
     this.description,
     this.showSelectedCount = false,
+    this.selectionLimit,
   });
   final String title;
+  final int? selectionLimit;
   final bool showSelectedCount;
   final String? description;
   final Iterable<String> values;
@@ -5774,7 +5924,9 @@ class _AssignmentSection extends StatelessWidget {
             if (showSelectedCount) ...[
               const SizedBox(width: 8),
               Text(
-                '${selected.length}',
+                selectionLimit == null
+                    ? '${selected.length}'
+                    : '${selected.length} / $selectionLimit',
                 key: ValueKey('assignment-count-$title'),
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -5823,7 +5975,11 @@ class _AssignmentSection extends StatelessWidget {
                         key: ValueKey('assignment-$title-$value'),
                         value: labels[value] ?? value,
                         selected: selected.contains(value),
-                        enabled: editing,
+                        enabled:
+                            editing &&
+                            (selectionLimit == null ||
+                                selected.length < selectionLimit! ||
+                                selected.contains(value)),
                         onTap: () => onToggle(value),
                       ),
                   ],
@@ -8399,3 +8555,159 @@ LiquidGlassSettings _glass(BuildContext context) {
     shadowElevation: 0.04,
   );
 }
+
+String _contractLabel(BuildContext context, String zh, String en) =>
+    context.l10n.languageCode.startsWith('zh') ? zh : en;
+
+Iterable<Map> _contractRows(Object? value) =>
+    value is List ? value.whereType<Map>() : const [];
+
+Future<void> _showComponentContracts(
+  BuildContext context,
+  Map<String, Object?> contracts,
+) => showDialog<void>(
+  context: context,
+  builder: (context) {
+    String label(String zh, String en) => _contractLabel(context, zh, en);
+    final theme = Theme.of(context);
+    final body = theme.textTheme.bodyMedium;
+    final secondary = body?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+
+    return Dialog(
+      backgroundColor: theme.colorScheme.surface,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640, maxHeight: 660),
+        child: GlassCard(
+          settings: _glass(context),
+          shape: const LiquidRoundedSuperellipse(borderRadius: 20),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label('插件契约', 'Plugin contracts'),
+                      style: theme.textTheme.titleLarge,
+                    ),
+                  ),
+                  Tooltip(
+                    message: label('关闭', 'Close'),
+                    child: GlassIconButton(
+                      size: 34,
+                      iconSize: 16,
+                      icon: Icon(
+                        CupertinoIcons.xmark,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final entry in contracts.entries)
+                      if (entry.value case final Map contract) ...[
+                        Text(
+                          '${entry.key} · API ${contract['api_version']}',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        if (contract['sdk_managed'] == true)
+                          Text(
+                            label('SDK 管理', 'Managed by SDK'),
+                            style: secondary,
+                          ),
+                        if (contract['nullable_provider'] == true)
+                          Text(
+                            label('按 Run 授权启用', 'Enabled by Run authorization'),
+                            style: secondary,
+                          ),
+                        if (contract['required_members'] case final List members
+                            when members.isNotEmpty)
+                          Text(
+                            '${label('必需接口', 'Required interfaces')}  '
+                            '${members.join(' · ')}',
+                            style: body,
+                          ),
+                        for (final feature in _contractRows(
+                          contract['features'],
+                        ))
+                          Text(
+                            [
+                              feature['id'],
+                              if (feature['required_when']
+                                  case final String condition
+                                  when condition.isNotEmpty)
+                                label(
+                                  '$condition 启用时必需',
+                                  'Required when $condition is enabled',
+                                )
+                              else
+                                label('可选', 'Optional'),
+                              if (feature['members'] case final List members
+                                  when members.isNotEmpty)
+                                ...members,
+                            ].join(' · '),
+                            style: body,
+                          ),
+                        if (contract['conformance'] case final String probe)
+                          Text(
+                            '${label('契约检查', 'Conformance check')}  sagents.v2.testing.$probe',
+                            style: secondary,
+                          ),
+                        if (_contractRows(
+                          contract['implementations'],
+                        ).isNotEmpty)
+                          Text(
+                            label('已注册实现', 'Registered implementations'),
+                            style: theme.textTheme.titleSmall,
+                          ),
+                        for (final plugin in _contractRows(
+                          contract['implementations'],
+                        )) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            [
+                              plugin['id'],
+                              if (plugin['provider_name'] case final String name
+                                  when name != 'default')
+                                name,
+                              if (plugin['api_version']
+                                  case final String version
+                                  when version != contract['api_version'])
+                                'API $version',
+                              if (plugin['available'] == false)
+                                label('当前不可用', 'Unavailable'),
+                              if (plugin['sdk_managed'] == true)
+                                label('SDK 管理', 'Managed by SDK'),
+                            ].join(' · '),
+                            style: body,
+                          ),
+                          for (final feature in _contractRows(
+                            plugin['features'],
+                          ))
+                            Text(
+                              '${feature['id']} · ${switch (feature['status']) {
+                                'declared' => label('已声明', 'Declared'),
+                                'unsupported' => label('不支持', 'Unsupported'),
+                                _ => label('未声明', 'Not declared'),
+                              }}',
+                              style: secondary,
+                            ),
+                        ],
+                        const Divider(height: 24),
+                      ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  },
+);

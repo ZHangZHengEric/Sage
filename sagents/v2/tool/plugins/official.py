@@ -93,7 +93,8 @@ class OfficialToolPlugin:
         description=description,
         provides=(
             CapabilityOffer(
-                capability="tool.provider", api_version="2", name="official"
+                capability="tool.provider", api_version="2", name="official",
+                features=("tool.cancel", "tool.release-run"),
             ),
         ),
         supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,

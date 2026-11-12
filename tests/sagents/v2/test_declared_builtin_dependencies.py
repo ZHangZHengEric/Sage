@@ -18,6 +18,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScopeContext,
 )
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
+from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
 def context_registry():
@@ -30,7 +31,7 @@ def context_registry():
         "sage.derived-state.ephemeral",
     ):
         registry.register(builtin.get(plugin))
-    model = object()
+    model = ScriptedModelProvider(())
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(

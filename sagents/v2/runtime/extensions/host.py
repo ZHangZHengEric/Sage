@@ -226,18 +226,7 @@ class ExtensionHost:
                 produced = await _start_extension(
                     starting, plugin_context, dependencies
                 )
-                expected = {
-                    CapabilityKey(capability=offer.capability, name=offer.name)
-                    for offer in descriptor.provides
-                }
-                if set(produced) != expected:
-                    raise _error(
-                        "extension.provider_contract_mismatch",
-                        ErrorCategory.PROVIDER_PERMANENT,
-                        f"extension {plugin_id!r} produced "
-                        f"{sorted(map(str, produced))}; expected "
-                        f"{sorted(map(str, expected))}",
-                    )
+                _validate_exports(descriptor, produced)
                 starting.providers = produced
                 for key, provider in produced.items():
                     if not _provider_selected(plan.graph, plugin_id, key):
@@ -478,16 +467,7 @@ class ExtensionHost:
                         f"extension {plugin_id!r} requires open_scope()",
                     )
                 produced = _normalize_providers(produced)
-                expected = {
-                    CapabilityKey(capability=offer.capability, name=offer.name)
-                    for offer in descriptor.provides
-                }
-                if set(produced) != expected:
-                    raise _error(
-                        "extension.provider_contract_mismatch",
-                        ErrorCategory.PROVIDER_PERMANENT,
-                        f"extension {plugin_id!r} produced an invalid provider set",
-                    )
+                _validate_exports(descriptor, produced)
                 starting.providers = produced
                 for key, provider in produced.items():
                     if not _provider_selected(plan.graph, plugin_id, key):
@@ -623,6 +603,30 @@ async def _start_extension(
     if inspect.isawaitable(produced):
         produced = await produced
     return _normalize_providers(produced)
+
+
+def _validate_exports(descriptor, produced: dict[CapabilityKey, Any]) -> None:
+    from sagents.v2.runtime.extensions.capability_contracts import missing_provider_members
+
+    expected = {
+        CapabilityKey(capability=offer.capability, name=offer.name): offer
+        for offer in descriptor.provides
+    }
+    if set(produced) != set(expected):
+        raise _error(
+            "extension.provider_contract_mismatch", ErrorCategory.PROVIDER_PERMANENT,
+            f"extension {descriptor.plugin_id!r} produced {sorted(map(str, produced))}; "
+            f"expected {sorted(map(str, expected))}",
+        )
+    for key, offer in expected.items():
+        missing = missing_provider_members(
+            key.capability, produced[key], api_version=offer.api_version, features=offer.features
+        )
+        if missing:
+            raise _error(
+                "extension.provider_contract_mismatch", ErrorCategory.PROVIDER_PERMANENT,
+                f"extension {descriptor.plugin_id!r} does not implement {key}: {', '.join(missing)}",
+            )
 
 
 def _normalize_providers(produced):

@@ -200,10 +200,10 @@ export const api = {
     request(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSkill: (id) => request(`/api/skills/${id}`, { method: 'DELETE' }),
   listAgentSkills: (agentId, owner) => read(`/api/agents/${agentId}/skills`, owner),
-  bindAgentSkills: (agentId, names) =>
+  bindAgentSkills: (agentId, names, visibility) =>
     request(`/api/agents/${agentId}/skills`, {
       method: 'PUT',
-      body: JSON.stringify({ names }),
+      body: JSON.stringify({ names, ...visibility }),
     }),
   writeWorkspaceSkill: (name, content, agentId) =>
     request(`/api/workspace/skills/${name}?agent_id=${encodeURIComponent(agentId)}`, {

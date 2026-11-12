@@ -57,11 +57,38 @@ filesystem 不承诺历史版本恢复。管理器的历史保留策略与 Agent
 
 Server 的 MySQL 技能库另有版本历史、文件差异和回滚 API。Agent 可按技能选择跟随最新版或固定 `version_id`；绑定策略在 Run 受理时冻结。固定版本不会被 `fetch_latest` 或同名包内技能替换，跟随最新版继续遵守下述 auto-sync 规则。页面入口、API 与数据库增量升级见 [Server 技能版本管理](../../../app/v2/server/README.md#技能版本管理)。
 
+## 默认展示与搜索
+
+在 Agent Package 的 `agents.<id>` 下声明可用 Skill 和默认展示名单。
+
+```yaml
+agents:
+  researcher:
+    skills: [web-research, pdf-analysis, fact-check]
+    default_visible_skills: [web-research]
+    default_visible_skills_limit: 30
+    tools: [search_skills]
+```
+
+`default_visible_skills_limit` 默认 20，可为每个 Agent 设置正整数。默认展示名单
+必须属于该 Agent 的 `skills`，并受该上限约束。当前 Run 的授权过滤仍然生效。
+显式设置空名单会展示零项。省略名单时，有搜索工具的 Run 只收到搜索指引，
+没有搜索工具的 Run 沿用完整的授权目录。
+
+搜索覆盖当前 Run 授权的 Package Skill 及宿主为该 Run 授权的附件。模型使用搜索结果中的
+准确名称调用 `load_skill`，用户也可用 `<skill>pdf-analysis</skill>` 直接点名。
+
+搜索插件实现可选的 `SkillSearchProvider` 协议。内置实现使用 SQLite FTS5，
+按名称、描述和 `SKILL.md` 正文进行 BM25 排序，并优先返回精确名称匹配。
+BM25 词频和排名均基于当前 Run 授权的版本。Server 在首次索引制品时校验冻结的
+`SKILL.md` 哈希。Server 按 Team 成员保存各自的版本快照。搜索结果只返回名称和描述，
+加载器按请求名称核对内容身份。提供 `skill.restore-version` 的来源可以按检查点版本恢复
+已加载的 Skill。共享工作区已经切换版本时，恢复会保留该工作区中的现有内容。
+
 ## 三种工作区策略
 
-三种策略的实际路径都是 `skills/<名称>/`。例如 reference 的地址始终是
-`/workspace/skills/demo/references/guide.md`，加载结果和模型上下文都提供这个根目录。
-不向 Agent 提供按哈希排列的多份 Skill。
+三种策略默认使用 `skills/<名称>/`。Server Team 的成员加载重名 Skill 时使用成员专属目录，
+避免覆盖共享工作区中的同名版本。加载结果和模型上下文提供实际目录，引用文件按该目录解析。
 
 | 插件 | 行为 |
 | --- | --- |

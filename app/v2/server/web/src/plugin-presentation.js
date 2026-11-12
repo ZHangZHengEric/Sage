@@ -11,6 +11,8 @@ export const componentNames = {
   'session.store': '会话存储', 'workspace.initializer': '工作区初始化', 'model.provider': '模型接口',
   'artifact.store': '产物存储', 'credentials.provider': '凭据管理', 'package.registry': 'Agent 包管理',
   'interface.protocol-adapter': '协议适配器', 'skill.provider': 'Skill 提供者',
+  'skill.management': 'Skill 版本管理', 'skill.workspace': 'Skill 工作区',
+  'skill.loader': 'Run Skill 加载器',
   'tool.provider': '工具提供者', 'flow.node': '工作流节点',
 }
 const names = {

@@ -12,7 +12,10 @@ from pydantic import Field, PrivateAttr, model_validator, model_serializer
 from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.common import Identifier, StrictModel, VerbatimText
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.package.manifest.agents import AgentEntrypoint, AgentMemoryBehavior, AgentSandboxConfig
+from sagents.v2.package.manifest.agents import (
+    DEFAULT_VISIBLE_SKILLS_LIMIT, AgentEntrypoint, AgentMemoryBehavior, AgentSandboxConfig,
+    validate_default_visible_skills,
+)
 from sagents.v2.package.manifest.flows import FlowDefinition
 from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.package.manifest.root import (
@@ -39,15 +42,27 @@ class ResolvedAgent(StrictModel):
     tool_approval: ToolApprovalConfig | None = None
     skills: tuple[str, ...] = ()
     preload_skills: tuple[str, ...] = ()
+    default_visible_skills: tuple[str, ...] | None = None
+    default_visible_skills_limit: int = Field(default=DEFAULT_VISIBLE_SKILLS_LIMIT, gt=0, strict=True)
     subagents: tuple[str, ...] = ()
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
     sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)
+
+    @model_serializer(mode="wrap")
+    def serialize_agent(self, handler):
+        data = handler(self)
+        if self.default_visible_skills is None:
+            data.pop("default_visible_skills", None)
+        if self.default_visible_skills_limit == DEFAULT_VISIBLE_SKILLS_LIMIT:
+            data.pop("default_visible_skills_limit", None)
+        return data
 
     @model_validator(mode="after")
     def validate_preload_skills(self) -> "ResolvedAgent":
         outside = set(self.preload_skills) - set(self.skills)
         if outside:
             raise ValueError(f"preload_skills must be a subset of skills: {sorted(outside)}")
+        validate_default_visible_skills(self.default_visible_skills, self.skills, self.default_visible_skills_limit)
         return self
 
 
@@ -207,6 +222,8 @@ class CompositionResolver:
                 tool_approval=agent.tool_approval,
                 skills=agent.skills,
                 preload_skills=agent.preload_skills,
+                default_visible_skills=agent.default_visible_skills,
+                default_visible_skills_limit=agent.default_visible_skills_limit,
                 subagents=agent.subagents,
                 memory=agent.memory, sandbox=agent.sandbox,
             )

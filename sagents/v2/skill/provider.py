@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from weakref import WeakValueDictionary
 from xml.sax.saxutils import escape
 from collections.abc import Awaitable, Callable, Iterable
@@ -26,6 +27,31 @@ from sagents.v2.contracts.errors import (
 )
 
 
+def _check_skill_name(requested: str, returned: str) -> None:
+    if returned != requested:
+        raise SageV2Error(RuntimeErrorInfo(
+            code="skill.identity_mismatch",
+            category=ErrorCategory.PROVIDER_PERMANENT,
+            message=f"Skill provider returned a different identity for {requested!r}",
+            safe_to_resume=True,
+        ))
+
+
+async def visible_skill_descriptors(
+    catalog: SkillCatalog, names: Iterable[str], *, run_id: str
+) -> tuple[SkillDescriptor, ...]:
+    descriptors = []
+    for name in names:
+        try:
+            descriptor = await catalog.get_skill(name, run_id=run_id)
+            _check_skill_name(name, descriptor.name)
+            descriptors.append(descriptor)
+        except SageV2Error as exc:
+            if exc.info.code not in {"skill.not_enabled", "skill.not_found"}:
+                raise
+    return tuple(descriptors)
+
+
 class FilteredSkillCatalog:
     """Run-scoped allowlist. Metadata access does not fetch or materialize files."""
 
@@ -37,6 +63,16 @@ class FilteredSkillCatalog:
         values = await self.inner.list_skills(run_id=run_id)
         return tuple(value for value in values if value.name in self.allowed)
 
+    async def search_skills(self, query, *, run_id, limit, allowed_names=None, excluded_names=frozenset()):
+        allowed = self.allowed if allowed_names is None else self.allowed & allowed_names
+        allowed = allowed - excluded_names
+        if not allowed:
+            return ()
+        values = await self.inner.search_skills(
+            query, run_id=run_id, allowed_names=allowed, limit=limit
+        )
+        return tuple(item for item in values if item.name in allowed)[:limit]
+
     async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
         if name not in self.allowed:
             raise SageV2Error(
@@ -47,7 +83,9 @@ class FilteredSkillCatalog:
                     safe_to_resume=True,
                 )
             )
-        return await self.inner.get_skill(name, run_id=run_id)
+        descriptor = await self.inner.get_skill(name, run_id=run_id)
+        _check_skill_name(name, descriptor.name)
+        return descriptor
 
 
 class InvocationGrantSkillCatalog:
@@ -72,6 +110,12 @@ class InvocationGrantSkillCatalog:
         if allowed is None:
             return values
         return tuple(value for value in values if value.name in allowed)
+
+    async def search_skills(self, query, *, run_id, limit, excluded_names=frozenset()):
+        return await self.inner.search_skills(
+            query, run_id=run_id, limit=limit, allowed_names=await self._allowed(run_id),
+            excluded_names=excluded_names,
+        )
 
     async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
         allowed = await self._allowed(run_id)
@@ -121,11 +165,38 @@ class SkillLoader:
         self._locks_guard = asyncio.Lock()
         self._load_locks: WeakValueDictionary = WeakValueDictionary()
 
+    def _destination(self, descriptor: SkillDescriptor) -> str:
+        root = self.workspace_root.rstrip("/")
+        namespace = descriptor.metadata.get("workspace_namespace")
+        if isinstance(namespace, str) and namespace:
+            scope = hashlib.sha256(namespace.encode("utf-8")).hexdigest()
+            root = f"{root}/.sage-skill-scopes/{scope}"
+        return f"{root}/skills/{descriptor.name}"
+
     async def _fetch_bundle(self, name: str, run_id: str) -> SkillBundle:
         fetch = self.source.fetch
         if getattr(self.workspace, "manager_authoritative", False):
             fetch = getattr(self.source, "fetch_latest", fetch)
-        return await fetch(name, run_id=run_id)
+        bundle = await fetch(name, run_id=run_id)
+        _check_skill_name(name, bundle.descriptor.name)
+        return bundle
+
+    async def _fetch_restore_bundle(self, value: LoadedSkill, run_id: str) -> SkillBundle:
+        name = value.descriptor.name
+        fetch_version = getattr(self.source, "fetch_for_restore", None)
+        if (getattr(self.workspace, "manager_authoritative", False)
+                and value.descriptor.version is not None and callable(fetch_version)):
+            bundle = await fetch_version(name, run_id=run_id, version=value.descriptor.version)
+            if bundle.descriptor.version != value.descriptor.version:
+                raise self._error("skill.restore_version_changed", "Skill source returned a different checkpoint version")
+        else:
+            bundle = await self.source.fetch(name, run_id=run_id)
+            if (getattr(self.workspace, "manager_authoritative", False)
+                    and bundle.content_hash != value.content_hash):
+                # Older sources may expose the accepted content only as their current version.
+                bundle = await self._fetch_bundle(name, run_id)
+        _check_skill_name(name, bundle.descriptor.name)
+        return bundle
 
     async def snapshot_run(self, run_id: str) -> dict:
         lock = await self._load_lock(run_id, "")
@@ -149,12 +220,15 @@ class SkillLoader:
             if reattach is not None:
                 restored = []
                 for value in state.active:
-                    await self.catalog.get_skill(value.descriptor.name, run_id=run_id)
-                    bundle = await self._fetch_bundle(value.descriptor.name, run_id)
-                    restored.append(await reattach(
+                    descriptor = await self.catalog.get_skill(value.descriptor.name, run_id=run_id)
+                    _check_skill_name(value.descriptor.name, descriptor.name)
+                    bundle = await self._fetch_restore_bundle(value, run_id)
+                    attached = await reattach(
                         value, bundle, run_id=run_id,
-                        destination=f"{self.workspace_root}/skills/{value.descriptor.name}",
-                    ))
+                        destination=self._destination(descriptor),
+                    )
+                    _check_skill_name(value.descriptor.name, attached.descriptor.name)
+                    restored.append(attached)
                 state = state.model_copy(update={"active": tuple(restored)})
             await self.activations.replace_loaded(run_id=run_id, values=state.active)
             self._preload_states[run_id] = state
@@ -213,9 +287,9 @@ class SkillLoader:
             edit = getattr(self.workspace, "begin_edit", None)
             if edit is None:
                 raise self._error("skill.edit_unsupported", "Selected workspace does not support editing copies")
-            await self._load_once(name, run_id=run_id)
+            loaded = await self._load_once(name, run_id=run_id)
             bundle = await self._fetch_bundle(name, run_id)
-            destination = f"{self.workspace_root}/skills/{name}"
+            destination = self._destination(loaded.descriptor)
             await edit(bundle, run_id=run_id, destination=destination)
             values = await self.activations.list_loaded(run_id=run_id)
             await self.activations.replace_loaded(run_id=run_id, values=tuple(
@@ -255,6 +329,7 @@ class SkillLoader:
         )
         with errors_before_side_effect("skill.lookup_failed"):
             descriptor = await self.catalog.get_skill(name, run_id=run_id)
+            _check_skill_name(name, descriptor.name)
         existing = {
             value.descriptor.name: value
             for value in await self.activations.list_loaded(run_id=run_id)
@@ -272,14 +347,11 @@ class SkillLoader:
         with errors_before_side_effect("skill.load_preflight_failed"):
             # This is the first operation that is allowed to read the Level-2 bundle.
             bundle = await self._fetch_bundle(name, run_id)
-            if bundle.descriptor.name != descriptor.name:
-                raise self._error(
-                    "skill.identity_mismatch", "skill source identity changed"
-                )
-            destination = f"{self.workspace_root}/skills/{name}"
+            destination = self._destination(descriptor)
             resolve_bundle = getattr(self.workspace, "resolve_bundle", None)
             if resolve_bundle is not None:
                 bundle = await resolve_bundle(bundle, run_id=run_id, destination=destination)
+                _check_skill_name(name, bundle.descriptor.name)
             try:
                 instructions = bundle.files["SKILL.md"].decode("utf-8")
             except UnicodeDecodeError as exc:
@@ -328,15 +400,12 @@ class SkillLoader:
                     len(self._context_content(value)) for value in values
                 )
                 if remaining > 0:
-                    allowed = {
-                        v.name for v in await self.catalog.list_skills(run_id=run_id)
-                    }
                     current_names = {value.descriptor.name for value in values}
                     inherited = []
                     for name in dict.fromkeys(await self.inherited_skills(run_id)):
                         if remaining <= 0:
                             break
-                        if name in current_names or name not in allowed:
+                        if name in current_names:
                             continue
                         try:
                             value = await self._load_once(
@@ -360,7 +429,10 @@ class SkillLoader:
                 self._initialized_runs.add(run_id)
                 values = await self.activations.list_loaded(run_id=run_id)
             # Recheck the current grant even for durable activations on resume.
-            allowed = {v.name for v in await self.catalog.list_skills(run_id=run_id)}
+            visible = await visible_skill_descriptors(
+                self.catalog, (value.descriptor.name for value in values), run_id=run_id
+            )
+            allowed = {descriptor.name for descriptor in visible}
             return tuple(v for v in values if v.descriptor.name in allowed)
 
     async def _load_lock(self, run_id: str, name: str) -> asyncio.Lock:

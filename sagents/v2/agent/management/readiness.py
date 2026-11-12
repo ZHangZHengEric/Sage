@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.runtime.extensions.capability_contracts import missing_provider_members
+
 
 async def resource_readiness(
     definition, catalog, *, skill_provider=None, management=None, deferred_tools=False
@@ -17,6 +19,10 @@ async def resource_readiness(
         }
     if definition.skills and skill_provider is not None:
         tools.discard("load_skill")
+    if "search_skills" in tools and skill_provider is not None and not missing_provider_members(
+        "skill.provider", skill_provider[0], features=("skill.search",),
+    ):
+        tools.discard("search_skills")
     if tools:
         if deferred_tools:
             unverified.append("tools require an actual Run binding")

@@ -378,7 +378,11 @@ class AgentCompositionFactory:
             if skill_loader is not None:
                 context_providers = (
                     *context_providers,
-                    AvailableSkillsContextProvider(skill_loader.catalog),
+                    AvailableSkillsContextProvider(
+                        skill_loader.catalog,
+                        default_visible_skills=agent.default_visible_skills,
+                        search_enabled="search_skills" in selected_tools,
+                    ),
                     ActiveSkillsContextProvider(skill_loader),
                 )
         if automatic_memory_recall is None:

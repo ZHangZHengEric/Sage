@@ -1,4 +1,5 @@
 <script setup>
+import CapabilityContractHelp from '../components/CapabilityContractHelp.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../api.js'
 import { isAdmin } from '../auth.js'
@@ -196,7 +197,7 @@ onMounted(load)
       <nav class="system-navigation" aria-label="系统插件分类"><div v-for="category in categoryGroups" :key="category.name" class="system-category"><div class="system-category-title">{{ category.name }}</div><button v-for="node in category.items" :key="node.id" type="button" :class="{ active: active === node.id }" :aria-current="active === node.id ? 'true' : undefined" :disabled="saving" @click="selectNode(node.id)"><span class="navigation-title">{{ node.name }}<small :class="{ 'is-dirty': node.changed, 'is-pending': node.sourceText === '待重启' }">{{ ['不可修改', '未保存', '待重启'].includes(node.sourceText) ? node.sourceText : '' }}</small></span><span class="navigation-choice">{{ node.choice }}</span></button></div></nav>
       <article v-if="currentGroup" class="system-inspector" :aria-label="`${currentGroup.name}${isProtocolGroup ? '状态' : '系统默认配置'}`">
         <div class="system-inspector-content">
-        <header class="inspector-head"><div><AppIcon name="settings" /><h1>{{ currentGroup.name }}</h1></div><span v-if="!canConfigure(active)" class="system-readonly-mark">不可修改</span></header>
+        <header class="inspector-head"><div><AppIcon name="settings" /><h1>{{ currentGroup.name }}</h1><CapabilityContractHelp :capability="active" :inventory="catalog?.contracts" /></div><span v-if="!canConfigure(active)" class="system-readonly-mark">不可修改</span></header>
         <div v-if="pendingGroups.length" class="system-pending-notice"><span><AppIcon name="clock" />{{ pendingGroups.length }} 项系统默认配置待重启生效</span><button type="button" @click="pendingOpen = true">查看变更</button></div>
         <dl class="configuration-status"><div><dt><i></i>{{ isProtocolGroup ? '已启用协议' : '当前运行' }}</dt><dd>{{ currentNames(currentGroup) }}</dd></div><div v-if="server && !isProtocolGroup"><dt>已保存默认<FieldHelp label="已保存默认" :text="policyHelp.saved" /></dt><dd>{{ savedName(currentGroup) }}<span v-if="server.pending?.includes(active)" class="system-badge amber">待重启</span><span v-else class="system-badge neutral">与运行一致</span></dd></div></dl>
         <form id="system-plugin-form" class="plugin-configuration" @submit.prevent="saveServer">

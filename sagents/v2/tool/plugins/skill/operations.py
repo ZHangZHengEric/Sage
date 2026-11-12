@@ -13,7 +13,7 @@ from sagents.v2.tool import (
     tool,
 )
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import JsonBlock, TextBlock
 
 
 class SkillLoadTool:
@@ -33,7 +33,7 @@ class SkillLoadTool:
         description=(
             "Load one enabled skill into the active context. Recent session skills are "
             "restored within the skill context budget. Use the exact skill name "
-            "listed in the available-skills context."
+            "from the available-skills context or search results."
         ),
         input_schema={
             "type": "object",
@@ -94,6 +94,49 @@ class SkillLoadTool:
                 "content_hash": loaded.content_hash,
                 "active_skills": active_names,
             },
+        )
+
+
+class SkillSearchTool:
+    def __init__(self, loader: SkillLoader) -> None:
+        self.loader = loader
+
+    @tool(
+        name="search_skills",
+        description="Find relevant authorized Skills. Pass a result's exact name to load_skill.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "maxLength": 256},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                "session_id": {"type": ["string", "null"]},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        side_effect_level=SideEffectLevel.READ,
+        plan_safe=True,
+        required_scopes=("skill.load",),
+    )
+    async def execute(
+        self, query: str, invocation: ToolInvocation, limit: int = 5,
+        session_id: str | None = None,
+    ) -> ToolExecutionResult:
+        from sagents.v2.skill.search import has_search_terms
+
+        del session_id
+
+        values = ()
+        if has_search_terms(query):
+            values = await self.loader.catalog.search_skills(
+                query, run_id=invocation.call.owner_run_id, limit=limit
+            )
+        return ToolExecutionResult(
+            tool_call_id=invocation.call.tool_call_id,
+            operation_id=invocation.call.operation_id,
+            content=(JsonBlock(value=[
+                {"name": value.name, "description": value.description} for value in values
+            ]),),
         )
 
 

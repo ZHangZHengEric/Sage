@@ -73,6 +73,10 @@ def register_job_plugins(registry: ExtensionRegistry) -> None:
             "additionalProperties": False,
         },
         capabilities={
+            "durable_across_process_restart": False,
+            "supports_reconnect": False,
+            "supports_adoption": True,
+            "supports_remote_cancel": False,
             "supports_terminal_purge": True,
             "supports_automatic_terminal_retention": True,
         },

@@ -6,7 +6,7 @@ import { api, isForeign } from '../api.js'
 import AgentEditor from '../components/AgentEditor.vue'
 import AppIcon from '../components/AppIcon.vue'
 import FormDrawer from '../components/FormDrawer.vue'
-import { cloneConfiguration, sameConfiguration } from '../agent-presentation.js'
+import { cloneConfiguration, DEFAULT_SKILL_VISIBILITY_LIMIT, sameConfiguration } from '../agent-presentation.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -70,7 +70,7 @@ function emptyForm() {
     memory: { recall: true, auto_write: true, scope: 'agent' },
     plugins: {},
     tools: officialTools.value.filter(tool => tool.default).map(tool => tool.name),
-    external_tools: [],
+    external_tools: [], default_visible_skills: null, default_visible_skills_limit: DEFAULT_SKILL_VISIBILITY_LIMIT,
     sandbox: { network: 'none' },
     tool_approval: { default: 'auto_approve', tools: {} },
     execution_policy: { shell: 'sandboxed', on_approval_required: 'suspend', approval_timeout_seconds: 86400 },
@@ -160,15 +160,24 @@ async function save(exit = true) {
   clearSavedMessage()
   pending.value = true
   try {
-    const payload = cloneConfiguration(form.value)
+    const { default_visible_skills, default_visible_skills_limit, ...payload } = cloneConfiguration(form.value)
     const skillNames = [...selectedSkills.value]
+    const visibility = {}
+    if (JSON.stringify(default_visible_skills) !== JSON.stringify(savedForm.value?.default_visible_skills ?? null)) {
+      visibility.default_visible_skills = default_visible_skills
+    }
+    if (default_visible_skills_limit !== (savedForm.value?.default_visible_skills_limit ?? DEFAULT_SKILL_VISIBILITY_LIMIT)) {
+      visibility.default_visible_skills_limit = default_visible_skills_limit
+    }
+    if (Object.keys(visibility).length || JSON.stringify(skillNames) !== JSON.stringify(savedSkills.value)) {
+      payload.skill_bindings = { names: skillNames, ...visibility }
+    }
     const saved = editing.value
       ? await api.updateAgent(editing.value, payload)
       : await api.createAgent(payload)
     editing.value = saved.id
     selectedAgent.value = saved
-    await api.bindAgentSkills(saved.id, skillNames)
-    savedForm.value = cloneConfiguration(payload)
+    savedForm.value = cloneConfiguration(form.value)
     savedSkills.value = skillNames
     savedPlugins.value = cloneConfiguration(payload.plugins || {})
     if (exit) closeEditor()
@@ -203,6 +212,8 @@ async function openAgent(item, readonly = true) {
       model_id: detail.model_id || '', fast_model_id: detail.fast_model_id || '', tools: [...(detail.tools || [])],
       agent_mode: detail.agent_mode || 'simple', available_sub_agent_ids: [...(detail.available_sub_agent_ids || [])],
       external_tools: [...(detail.external_tools || [])],
+      default_visible_skills: detail.default_visible_skills ?? null,
+      default_visible_skills_limit: detail.default_visible_skills_limit ?? DEFAULT_SKILL_VISIBILITY_LIMIT,
       tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,
       execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
       sandbox: { ...(detail.sandbox || emptyForm().sandbox) },

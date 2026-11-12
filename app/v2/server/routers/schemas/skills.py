@@ -43,6 +43,8 @@ class SkillDiffPublic(BaseModel):
 
 class SkillBindBody(BaseModel):
     names: list[str] = Field(default_factory=list)
+    default_visible_skills: list[str] | None = None
+    default_visible_skills_limit: int | None = Field(default=None, gt=0, strict=True)
 
 
 class WorkspaceSkillBody(BaseModel):

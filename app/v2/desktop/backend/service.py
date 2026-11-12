@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from sagents.v2 import SAgentApplication
+from sagents.v2.skill.search import SkillSearchIndex
 from sagents.v2.runtime.session.access import AuthorizedSessionAccess
 from sagents.v2.memory import MemoryProvider
 
@@ -219,6 +220,7 @@ class DesktopV2Service(
         self.catalog = catalog or JsonDesktopCatalogStore(
             self.runtime_root / "desktop-catalog.json"
         )
+        self._skill_search_index = SkillSearchIndex()
         self.skill_root = self.root / "skills"
         self.skill_root.mkdir(parents=True, exist_ok=True)
         self._settings_lock = asyncio.Lock()
@@ -388,6 +390,7 @@ class DesktopV2Service(
         self._run_environments.clear()
         self.model_providers.clear()
         self._workspace_initializations.clear()
+        await asyncio.to_thread(self._skill_search_index.close)
         self.logger.info("service.closed", "Desktop v2 service closed")
         if self._owned_observability is not None:
             await self._owned_observability.close()

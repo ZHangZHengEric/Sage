@@ -11,11 +11,24 @@ from pydantic import Field, field_validator
 
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.common import StrictModel
+from sagents.v2.package.manifest.agents import DEFAULT_VISIBLE_SKILLS_LIMIT
 
 from .catalog import DesktopAgentRecord
 
 if TYPE_CHECKING:
     from .service import DesktopV2Service
+
+
+def apply_candidate_skill_visibility(config, definition) -> None:
+    """Project the candidate's Skill visibility settings onto the Desktop Agent."""
+    if definition.default_visible_skills is None:
+        config.pop("defaultVisibleSkills", None)
+    else:
+        config["defaultVisibleSkills"] = list(definition.default_visible_skills)
+    if definition.default_visible_skills_limit != DEFAULT_VISIBLE_SKILLS_LIMIT:
+        config["defaultVisibleSkillsLimit"] = definition.default_visible_skills_limit
+    else:
+        config.pop("defaultVisibleSkillsLimit", None)
 
 
 class RsiSaveAs(StrictModel):
@@ -94,6 +107,7 @@ async def save_rsi_version_as_agent(
         definition = package.resolved_manifest().agents[new_agent_id]
         config = deepcopy(version["config"])
         if version["source"] == "rsi":
+            apply_candidate_skill_visibility(config, definition)
             config.update(
                 systemPrefix=definition.instructions.inline,
                 availableTools=list(definition.tools),

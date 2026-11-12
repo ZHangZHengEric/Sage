@@ -146,6 +146,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                             *self._native_tool_definitions(),
                             *mcp_definitions,
                         )
+                        if value.name != "search_skills"
                     )
                 )
                 if isinstance(value, str)

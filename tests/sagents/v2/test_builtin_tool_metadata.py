@@ -38,7 +38,7 @@ def test_public_builtin_inventory_by_mode_matches_runtime_providers(mode, extra)
     definitions = builtin_tool_definitions(agent_mode=mode)
     expected = {value.name: value for value in official_tool_definitions()}
     expected.update(
-        {value.name: value for value in SkillToolPlugin(cast('SkillLoader', SimpleNamespace())).definitions}
+        {value.name: value for value in SkillToolPlugin(cast('SkillLoader', SimpleNamespace()), allow_search=True).definitions}
     )
     for runtime_mode in (AgentMode.TEAM, AgentMode.FIBRE):
         if mode in {runtime_mode.value, "all"}:
@@ -47,7 +47,7 @@ def test_public_builtin_inventory_by_mode_matches_runtime_providers(mode, extra)
             )
             expected.update({value.name: value for value in plugin.definitions})
     assert definitions == tuple(expected[name] for name in sorted(expected))
-    base = {value.name for value in official_tool_definitions()} | {"load_skill"}
+    base = {value.name for value in official_tool_definitions()} | {"load_skill", "search_skills"}
     assert {value.name for value in definitions} == base | extra
     for value in definitions:
         assert value.description.strip()
@@ -80,7 +80,9 @@ def test_metadata_snapshots_cannot_mutate_runtime_or_later_queries():
         coordinator=cast('MultiAgentCoordinator', SimpleNamespace(mode=AgentMode.TEAM)), runtime=cast('RuntimePort', None)
     )
     assert runtime_team.definitions == (originals["sys_team_delegate_task"],)
-    assert SkillToolPlugin(cast('SkillLoader', SimpleNamespace())).definitions == (originals["load_skill"],)
+    assert SkillToolPlugin(cast('SkillLoader', SimpleNamespace()), allow_search=True).definitions == (
+        originals["load_skill"], originals["search_skills"],
+    )
 
 
 def test_localized_settings_metadata_keeps_names_and_schema_contract():

@@ -159,24 +159,49 @@ class RunAdmission:
             # Freeze the effective package budget with the admitted Agent. The
             # resolver intersects Agent budgets with the package policy ceiling.
             from app.v2.server.config.manifest import server_v2_run_manifest
-            effective = package.resolved_manifest() if package else server_v2_run_manifest(self.settings, agent=agent, registry=getattr(self.catalog, "extensions", None))
+            effective = package.resolved_manifest() if package else server_v2_run_manifest(
+                self.settings, agent=agent, skills=tuple(agent.skills),
+                registry=getattr(self.catalog, "extensions", None),
+            )
             bundle = package or agent.package_bundle.model_copy(update={"manifest": effective})
             from sagents.v2.agent.management.loading import resolve_bundle, bundle_agent_definitions
             resolved = resolve_bundle(bundle, effective.runtime, models=model_config)
-        if package is None and not bundle.dependencies:
-            skill_read = self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id)
+        member_grants = None
+        if package is None:
+            if bundle.dependencies:
+                from app.v2.server.catalog.packages import catalog_execution_grants
+                member_grants = catalog_execution_grants(bundle, catalog)
+
+            async def catalog_skills():
+                if member_grants is None:
+                    return tuple(await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id)), None
+                ids = tuple(dict.fromkeys(grant["agent_id"] for grant in member_grants.values()))
+                records = await asyncio.gather(*(
+                    self.skills.bound_skills(owner_user_id=user_id, agent_id=member_id)
+                    for member_id in ids
+                ))
+                by_id = {member_id: tuple(skills) for member_id, skills in zip(ids, records, strict=True)}
+                return by_id[agent.id], {
+                    alias: by_id[grant["agent_id"]] for alias, grant in member_grants.items()
+                }
+
+            skill_read = catalog_skills()
         else:
-            skill_read = self.skills.list_visible(user_id=user_id, role="user")
+            async def package_skills():
+                records = await self.skills.list_visible(user_id=user_id, role="user")
+                definitions = bundle_agent_definitions(bundle)
+                snapshots = {
+                    alias: tuple(item for item in records if item.name in definition.skills)
+                    for alias, definition in definitions.items()
+                }
+                return snapshots[agent.id], snapshots
+
+            skill_read = package_skills()
         reads = [self._read("skills_read", skill_read, session_id)]
         if self.users is not None:
             reads.append(self._read("user_read", self.users.get_by_id(user_id), session_id))
-        skill_records, *users = await asyncio.gather(*reads)
+        (skills, member_skills), *users = await asyncio.gather(*reads)
         user = users[0] if users else None
-        if package is None and not bundle.dependencies:
-            skills = tuple(skill_records)
-        else:
-            selected = {name for definition in bundle_agent_definitions(bundle).values() for name in definition.skills}
-            skills = tuple(item for item in skill_records if item.name in selected)
         if self.users is not None and user is None:
             raise SageV2Error(RuntimeErrorInfo(code="server.admission.forbidden",
                 category=ErrorCategory.AUTHORIZATION, message="User no longer exists"))
@@ -186,10 +211,9 @@ class RunAdmission:
             server_ceiling(self.settings) if self.settings else ExecutionPolicy(shell="sandboxed"),
         )
         grant_metadata = execution_metadata(policy, user_id=user_id, agent_id=agent.id, key_id=key_id)
-        if package is None and bundle.dependencies:
-            from app.v2.server.catalog.packages import catalog_execution_grants
+        if member_grants is not None:
             from app.v2.server.runtime.policy import EXECUTION_METADATA_KEY
-            grant_metadata[EXECUTION_METADATA_KEY]["agents"] = catalog_execution_grants(bundle, catalog)
+            grant_metadata[EXECUTION_METADATA_KEY]["agents"] = member_grants
         with log_duration(LOGGER, "server.admission.phase", "运行配置快照构建结束",
                           session_id=session_id, attributes={"phase": "metadata_build"}):
             metadata = {"server_v2.models": model_config.model_dump(mode="json"), **composition_metadata(
@@ -197,7 +221,7 @@ class RunAdmission:
                 skills=skills,
                 mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
                 a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
-                call_depth=call_depth, package=package,
+                call_depth=call_depth, package=package, member_skills=member_skills,
             ), **grant_metadata}
         return AdmittedRun(
             session_id=session_id,

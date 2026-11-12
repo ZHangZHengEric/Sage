@@ -140,7 +140,7 @@ async def test_legacy_skill_schema_upgrade_preserves_history_and_bindings(tmp_pa
         await database.stop()
 
 
-async def test_sql_pin_survives_catalog_edits_and_store_recreation(tmp_path):
+async def test_sql_pin_survives_catalog_edits_and_store_recreation(tmp_path, monkeypatch):
     import asyncio
     from types import SimpleNamespace
     from app.v2.server.skills.agent_guidance import _lock
@@ -165,10 +165,140 @@ async def test_sql_pin_survives_catalog_edits_and_store_recreation(tmp_path):
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(pending), timeout=0.05)
         await asyncio.wait_for(pending, timeout=2)
-        await publish(catalog, "Second")
-        await service.bind_agent_skills("alice", agent.id, ["demo"])
+        second = await publish(catalog, "Second")
+        other_catalog = SkillCatalogService(DatabaseSkillStore(database), tmp_path)
+        other_service = CatalogService(store, skills=other_catalog, mcp_plugins=None, a2a_plugins=None)
+        replace_bindings = catalog.store.replace_bindings
+
+        async def interleave(**kwargs):
+            await other_service.bind_agent_skill_version("alice", agent.id, second.skill_id, second.version_id)
+            return await replace_bindings(**kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(catalog.store, "replace_bindings", interleave)
+            await service.bind_agent_skills(
+                "alice", agent.id, ["demo"], skill_visibility={"default_visible_skills": ["demo"]},
+            )
         restored = SkillCatalogService(DatabaseSkillStore(database), tmp_path)
-        assert (await restored.bound_skills(owner_user_id="alice", agent_id=agent.id))[0].version_id == first.version_id
+        assert (await restored.bound_skills(owner_user_id="alice", agent_id=agent.id))[0].version_id == second.version_id
         assert (await DatabaseCatalogStore(database).get_agent("alice", agent.id)).skills == ["demo"]
+    finally:
+        await database.stop()
+
+
+async def test_sql_skill_bindings_and_visibility_roll_back_together(tmp_path, monkeypatch):
+    from app.v2.server.catalog.repository import DatabaseCatalogStore
+    from app.v2.server.catalog.service import CatalogService
+    from app.v2.server.identity.orm import UserRow
+    from app.v2.server.packages.repository import DatabasePackageStore
+
+    database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/catalog.db"))
+    await database.start()
+    await create_host_schema(database)
+    try:
+        async with database.transaction() as session:
+            session.add(UserRow(user_id="alice", username="alice", password_hash="test", role="user"))
+        store = DatabaseCatalogStore(database)
+        agent = (await store.get("alice")).agents[0]
+        catalog = SkillCatalogService(DatabaseSkillStore(database), tmp_path)
+        service = CatalogService(store, skills=catalog, mcp_plugins=None, a2a_plugins=None)
+        await publish(catalog, "First")
+        await service.bind_agent_skills(
+            "alice", agent.id, ["demo"],
+            skill_visibility={"default_visible_skills": ["demo"], "default_visible_skills_limit": 30},
+        )
+        before = await store.get_agent("alice", agent.id)
+        assert before.package_bundle.manifest.agents[agent.id].default_visible_skills_limit == 30
+
+        async def fail_save(self, session, owner, bundle):
+            await session.flush()
+            raise RuntimeError("injected package write failure")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(DatabasePackageStore, "save_in_transaction", fail_save)
+            with pytest.raises(RuntimeError, match="injected package write failure"):
+                await service.bind_agent_skills(
+                    "alice", agent.id, [], skill_visibility={"default_visible_skills": []},
+                )
+
+        after = await store.get_agent("alice", agent.id)
+        assert after.package_bundle.content_hash == before.package_bundle.content_hash
+        assert [item.name for item in await catalog.bound_skills(owner_user_id="alice", agent_id=agent.id)] == ["demo"]
+    finally:
+        await database.stop()
+
+
+
+async def test_sql_combined_editor_save_is_atomic(tmp_path, monkeypatch):
+    from app.v2.server.catalog.repository import DatabaseCatalogStore
+    from app.v2.server.catalog.service import CatalogService
+    from app.v2.server.identity.orm import UserRow
+    from app.v2.server.packages.repository import DatabasePackageStore
+
+    database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/editor.db"))
+    await database.start()
+    await create_host_schema(database)
+    try:
+        async with database.transaction() as session:
+            session.add(UserRow(user_id="alice", username="alice", password_hash="test", role="user"))
+        store = DatabaseCatalogStore(database)
+        catalog = SkillCatalogService(DatabaseSkillStore(database), tmp_path)
+        service = CatalogService(store, skills=catalog, mcp_plugins=None, a2a_plugins=None)
+        await publish(catalog, "Guide")
+        agent = await service.create_agent("alice", {
+            "name": "Before", "skill_bindings": {"names": ["demo"], "default_visible_skills": ["demo"]},
+        })
+
+        async def fail_save(self, session, owner, bundle):
+            await session.flush()
+            raise RuntimeError("package write failed")
+
+        change = {"name": "After", "skill_bindings": {"names": [], "default_visible_skills": []}}
+        with monkeypatch.context() as patch:
+            patch.setattr(DatabasePackageStore, "save_in_transaction", fail_save)
+            with pytest.raises(RuntimeError, match="package write failed"):
+                await service.update_agent("alice", agent.id, change)
+
+        assert (await store.get_agent("alice", agent.id)).package_bundle.content_hash == agent.package_bundle.content_hash
+        assert [item.name for item in await catalog.bound_skills(owner_user_id="alice", agent_id=agent.id)] == ["demo"]
+        other = CatalogService(
+            DatabaseCatalogStore(database), skills=catalog, mcp_plugins=None, a2a_plugins=None,
+        )
+        update_agent = store.update_agent
+
+        async def save_after_skill_change(user_id, record, **kwargs):
+            await other.update_agent(user_id, record.id, change)
+            await update_agent(user_id, record, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "update_agent", save_after_skill_change)
+            with pytest.raises(SageV2Error) as caught:
+                await service.update_agent("alice", agent.id, {"name": "Stale"})
+            assert caught.value.info.code == "server.catalog.package_conflict"
+
+        saved = await store.get_agent("alice", agent.id)
+        assert saved.name == "After" and saved.skills == []
+        assert await catalog.bound_skills(owner_user_id="alice", agent_id=agent.id) == []
+
+        manifest = saved.package_bundle.manifest
+        embedded = saved.package_bundle.model_copy(update={
+            "manifest": manifest.model_copy(update={
+                "metadata": manifest.metadata.model_copy(update={"version": "embedded-test"}),
+            }),
+            "files": {"skills/local/SKILL.md": "---\nname: local\ndescription: Local guide\n---\nGuide"},
+        })
+        await service.apply_rsi_package("alice", agent.id, embedded, saved.package_bundle.content_hash)
+        updated = await service.update_agent("alice", agent.id, {
+            "name": "Embedded",
+            "skill_bindings": {"names": ["local"], "default_visible_skills": ["local"]},
+        })
+        assert updated.skills == ["local"]
+        assert await catalog.bound_skills(owner_user_id="alice", agent_id=agent.id) == []
+        await service.bind_agent_skills(
+            "alice", agent.id, ["local"], skill_visibility={"default_visible_skills_limit": 1},
+        )
+        detail = await service.get_agent("alice", agent.id)
+        assert detail["default_visible_skills"] == ("local",)
+        assert detail["default_visible_skills_limit"] == 1
     finally:
         await database.stop()

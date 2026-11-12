@@ -56,6 +56,8 @@ async def candidate(service, user_id="alice"):
         instructions={"path": "prompts/system.md"},
         tools=["rsi_multiply"],
         skills=["verification"],
+        default_visible_skills=["verification"],
+        default_visible_skills_limit=25,
         budgets={"max_steps": 17},
     )
     data["files"].update(
@@ -121,6 +123,8 @@ async def test_save_candidate_preserves_source_resources_and_survives_restart(
         assert saved.config["maxLoopCount"] == 17
         assert saved.config["availableTools"] == ["rsi_multiply"]
         assert saved.config["availableSkills"] == ["verification"]
+        assert result["default_visible_skills"] == ["verification"]
+        assert result["default_visible_skills_limit"] == 25
         assert saved.config["llm_provider_id"] == original.config["llm_provider_id"]
         assert saved.config["rsiAssets"] == version["assets"]
         package = AgentPackageBundle.model_validate(saved.config["rsiPackage"])
@@ -286,3 +290,20 @@ async def test_save_http_auth_validation_and_retry(tmp_path):
 def test_save_name_validation():
     with pytest.raises(ValidationError):
         RsiSaveAs(name=" ", request_id="save")
+
+
+@pytest.mark.asyncio
+async def test_applying_candidate_projects_skill_visibility(tmp_path):
+    from app.v2.desktop.backend.rsi import RsiApply, fingerprint
+
+    service = DesktopV2Service(tmp_path)
+    try:
+        agent, version = await candidate(service)
+        result = await service.apply_rsi_version(
+            agent.agent_id, version["id"],
+            RsiApply(confirmed=True, expected_fingerprint=fingerprint(agent)), "alice",
+        )
+        assert result["default_visible_skills"] == ["verification"]
+        assert result["default_visible_skills_limit"] == 25
+    finally:
+        await service.close()

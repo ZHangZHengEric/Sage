@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar, cast
+from typing import Annotated, Any, ClassVar, Generic, Literal, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 
@@ -64,11 +64,21 @@ class StopReason(str, Enum):
     RELOAD = "reload"
 
 
+CapabilityName = Annotated[
+    str,
+    StringConstraints(
+        max_length=192,
+        pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$",
+    ),
+]
+
+
 class CapabilityOffer(StrictModel):
     capability: Identifier
     api_version: str
     name: Identifier = "default"
     multi_provider: bool = False
+    features: tuple[CapabilityName, ...] = ()
 
 
 class CapabilityKey(StrictModel):
@@ -165,6 +175,7 @@ class ExtensionDescriptor(StrictModel):
     config_schema: dict[str, Any] = Field(default_factory=dict)
     capabilities: dict[str, Any] = Field(default_factory=dict)
     built_in: bool = False
+    sdk_managed: bool = False
     availability: ExtensionAvailability = Field(default_factory=ExtensionAvailability)
 
     @model_validator(mode="after")

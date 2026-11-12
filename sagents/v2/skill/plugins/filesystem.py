@@ -7,6 +7,7 @@ import os
 import threading
 import yaml
 from collections import OrderedDict
+from sagents.v2.skill.search import SkillSearchIndex, read_searchable_body
 from sagents.v2.concurrency import bounded_to_thread
 from pathlib import Path
 
@@ -33,6 +34,7 @@ class FilesystemSkillProvider:
         source_id: str = "filesystem",
         max_files: int = 2_000,
         max_total_bytes: int = 64 * 1024 * 1024,
+        search_index: SkillSearchIndex | None = None,
     ) -> None:
         if max_files <= 0:
             raise ValueError("max_files must be positive")
@@ -44,6 +46,7 @@ class FilesystemSkillProvider:
         self.max_total_bytes = max_total_bytes
         self._description_cache = OrderedDict()
         self._cache_lock = threading.Lock()
+        self._search_index = search_index if search_index is not None else SkillSearchIndex()
 
     def descriptors(self) -> dict[str, SkillDescriptor]:
         values: dict[str, SkillDescriptor] = {}
@@ -82,13 +85,38 @@ class FilesystemSkillProvider:
         return await bounded_to_thread("skill-io", lambda: self._descriptor(name))
 
     def _descriptor(self, name: str) -> SkillDescriptor:
-        root = self._skill_root(name)
+        return self._descriptor_at(name, self._skill_root(name))
+
+    def _descriptor_at(self, name: str, root: Path) -> SkillDescriptor:
         return SkillDescriptor(
             name=name,
             description=self._cached_description(root / "SKILL.md"),
             source_id=self.source_id,
             metadata={"source_directory": str(root)},
         )
+
+    async def search_skills(self, query, *, run_id, allowed_names, limit):
+        def search():
+            documents = {}
+            for name in allowed_names:
+                try:
+                    root = self._skill_root(name)
+                    path = root / "SKILL.md"
+                    stat = path.stat()
+                except SageV2Error as exc:
+                    if exc.info.code != "skill.not_found":
+                        raise
+                    continue
+                except FileNotFoundError:
+                    continue
+                key = repr((name, path, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+                documents[key] = lambda name=name, root=root, path=path: (
+                    self._descriptor_at(name, root),
+                    self._read_search_body(path),
+                )
+            return self._search_index.search(query, documents, limit, refresh_names=allowed_names)
+
+        return await bounded_to_thread("skill-io", search)
 
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle:
         return await bounded_to_thread("skill-io", lambda: self._fetch(name))
@@ -211,12 +239,12 @@ class FilesystemSkillProvider:
             return ""
         return ""
 
+    def _read_search_body(self, path: Path) -> bytes:
+        with self._open_skill_file(path) as stream:
+            return read_searchable_body(stream, limit=self.max_total_bytes)
+
     @staticmethod
-    def _read_bounded(path: Path, *, remaining: int, truncate: bool = False) -> bytes:
-        if remaining < 0:
-            raise FilesystemSkillProvider._error(
-                "skill.bundle_too_large", "skill exceeds configured file limits"
-            )
+    def _open_skill_file(path: Path):
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             descriptor = os.open(path, flags)
@@ -224,11 +252,17 @@ class FilesystemSkillProvider:
             raise FilesystemSkillProvider._error(
                 "skill.file_unreadable", f"skill file cannot be opened safely: {path}"
             ) from exc
-        with os.fdopen(descriptor, "rb") as stream:
+        return os.fdopen(descriptor, "rb")
+
+    @staticmethod
+    def _read_bounded(path: Path, *, remaining: int) -> bytes:
+        if remaining < 0:
+            raise FilesystemSkillProvider._error(
+                "skill.bundle_too_large", "skill exceeds configured file limits"
+            )
+        with FilesystemSkillProvider._open_skill_file(path) as stream:
             content = stream.read(remaining + 1)
         if len(content) > remaining:
-            if truncate:
-                return content[:remaining]
             raise FilesystemSkillProvider._error(
                 "skill.bundle_too_large", "skill exceeds configured file limits"
             )

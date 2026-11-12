@@ -1,7 +1,8 @@
 import { labels } from './config-schema.js'
 
 export function systemCategory(id) {
-  if (/^(agent\.|tool\.|model\.|skill\.)/.test(id)) return '模型、工具与智能体'
+  if (id.startsWith('skill.')) return 'Skill'
+  if (/^(agent\.|tool\.|model\.)/.test(id)) return '模型、工具与智能体'
   if (/^(context\.|memory\.|session-memory\.)/.test(id)) return '记忆与上下文'
   if (/^(execution\.|workspace\.|artifact\.|credentials\.)/.test(id)) return '执行与资源'
   return '运行基础'

@@ -219,6 +219,18 @@ class SkillCatalogService:
         names: list[str],
         catalog: UserCatalog | None = None,
     ) -> list[SkillRecord]:
+        bindings = await self.prepare_agent_skill_bindings(owner_user_id, agent_id, names)
+        await self.store.replace_bindings(
+            owner_user_id=owner_user_id, agent_id=agent_id, bindings=bindings
+        )
+        if catalog is not None:
+            _sync_agent_skills(catalog, agent_id, [binding.skill_name for binding in bindings])
+        return await self.bound_skills(owner_user_id=owner_user_id, agent_id=agent_id)
+
+    async def prepare_agent_skill_bindings(
+        self, owner_user_id: str, agent_id: str, names: list[str], *,
+        packaged_names: frozenset[str] = frozenset(),
+    ) -> list[AgentSkillBinding]:
         ordered = normalize_skill_names(names)
         visible = await self.store.list_visible(user_id=owner_user_id, role="user")
         previous = {item.skill_name: item for item in await self.store.list_bindings(
@@ -227,6 +239,8 @@ class SkillCatalogService:
         for position, name in enumerate(ordered):
             match = pick_visible_skill(visible, name=name, user_id=owner_user_id)
             if match is None:
+                if name in packaged_names:
+                    continue
                 raise SageV2Error(
                     RuntimeErrorInfo(
                         code="server.skills.service.validation",
@@ -245,12 +259,8 @@ class SkillCatalogService:
                         if name in previous and previous[name].source_skill_id == match.skill_id else None),
                 )
             )
-        await self.store.replace_bindings(
-            owner_user_id=owner_user_id, agent_id=agent_id, bindings=bindings
-        )
-        if catalog is not None:
-            _sync_agent_skills(catalog, agent_id, ordered)
-        return await self.bound_skills(owner_user_id=owner_user_id, agent_id=agent_id)
+        return bindings
+
 
     async def bound_skills(
         self, *, owner_user_id: str, agent_id: str
