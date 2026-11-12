@@ -16,6 +16,7 @@ has_children: true
 | Offline RSI demo | Python 3.12+ and repository dependencies; no model key, scripted grades | [First RSI run](FIRST_RSI_RUN.md) |
 | Desktop installer | Installer for your OS, bundled Python and backend; Linux also needs GTK and bubblewrap | [Desktop](DESKTOP.md) |
 | Desktop from source | Python 3.12+, Flutter, native desktop toolchain | [Source setup](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) |
+| Sage Voice from source | Apple Silicon, macOS 15+, Python 3.12, Flutter with Dart 3.12.2+, Xcode, and model and speech service credentials | [Sage Voice setup (中文)](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/voice/README.md) |
 | Server from source | Python 3.12+, MySQL, Node.js 22.12+ | [Server](WEB.md) |
 | Embedded runtime | Python 3.12+ and a model provider | [Python quick start](GETTING_STARTED.md) |
 

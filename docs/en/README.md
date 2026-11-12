@@ -20,6 +20,7 @@ Sage is an **RSI Agent Harness**, bringing task execution, independent evaluatio
 | Understand how RSI improves a Package | [RSI workflow](applications/RSI.md) |
 | Inspect an iteration without a model key | [First RSI run](applications/FIRST_RSI_RUN.md) |
 | Install Desktop and use RSI | [Desktop](applications/DESKTOP.md) |
+| Talk with an agent on macOS | [Sage Voice setup (中文)](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/voice/README.md) |
 | Embed Sage in a Python application | [Quick start](applications/GETTING_STARTED.md) · [Host development](architecture/sagents-host-development.md) |
 | Provide a multi-user web service | [Server](applications/WEB.md) |
 | Configure models, tools, and Skills | [Configuration](CONFIGURATION.md) · [Tools and MCP](MCP_SERVERS.md) |

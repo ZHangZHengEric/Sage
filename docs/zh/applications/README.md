@@ -16,6 +16,7 @@ has_children: true
 | RSI 离线演示 | Python 3.12+ 与仓库依赖；无需模型密钥，评分为脚本预设 | [首次 RSI 运行](FIRST_RSI_RUN.md) |
 | Desktop 安装包 | 对应系统的安装包，自带 Python 与后端；Linux 另需 GTK 和 bubblewrap | [桌面端](DESKTOP.md) |
 | Desktop 源码 | Python 3.12+、Flutter、原生桌面构建工具链 | [源码启动](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) |
+| Sage Voice 源码 | Apple Silicon Mac、macOS 15+、Python 3.12、附带 Dart 3.12.2+ 的 Flutter SDK、Xcode，以及模型与语音服务凭据 | [Sage Voice 启动与配置](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/voice/README.md) |
 | Server 源码 | Python 3.12+、MySQL、Node.js 22.12+ | [服务端](WEB.md) |
 | 嵌入式运行时 | Python 3.12+ 和模型服务 | [Python 快速开始](GETTING_STARTED.md) |
 

@@ -20,6 +20,7 @@ Sage 是一个 **RSI Agent Harness**，整合任务执行、独立评测与递�
 | 理解 RSI 如何改进 Package | [RSI 流程](applications/RSI.md) |
 | 无需模型密钥体验一次迭代 | [首次 RSI 运行](applications/FIRST_RSI_RUN.md) |
 | 安装桌面端并使用 RSI | [Desktop](applications/DESKTOP.md) |
+| 在 macOS 上与智能体语音对话 | [Sage Voice 启动与配置](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/voice/README.md) |
 | 嵌入自己的 Python 应用 | [快速开始](applications/GETTING_STARTED.md) · [宿主开发](architecture/sagents-host-development.md) |
 | 提供多用户 Web 服务 | [Server](applications/WEB.md) |
 | 配置模型、工具和 Skills | [配置](CONFIGURATION.md) · [工具与 MCP](MCP_SERVERS.md) |

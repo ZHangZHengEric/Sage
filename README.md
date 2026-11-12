@@ -38,6 +38,7 @@ Sage, Desktop, Server, and SAgents refer to the current v2 implementation by def
 | --- | --- |
 | 🧬 **First RSI run** — Inspect a scripted loop without an API key | [Offline walkthrough](docs/en/applications/FIRST_RSI_RUN.md) |
 | 💻 **Desktop** — Configure agents, run RSI, and choose versions | [Desktop guide](app/v2/desktop/README.md) |
+| 🎙️ **Sage Voice** — Talk with an agent, interrupt replies, and configure spoken tool updates. Run from source on Apple Silicon (macOS 15+). | [Sage Voice setup (中文)](app/v2/voice/README.md) |
 | 🌐 **Server** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
 | 🧠 **SAgents** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md) |
 | 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
