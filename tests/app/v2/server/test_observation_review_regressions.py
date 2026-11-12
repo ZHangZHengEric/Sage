@@ -199,7 +199,7 @@ async def test_resume_preparation_failure_closes_its_performance_segment(monkeyp
             events.append((event, fields))
             source._timings.emit('log', {'event':event, **fields})
     monkeypatch.setattr(module, 'LOGGER', Logger())
-    application = SimpleNamespace(runtime=SimpleNamespace(get_run=AsyncMock(return_value=SimpleNamespace(state=RunState.RESUMING))),
+    application = SimpleNamespace(runtime=SimpleNamespace(get_run=AsyncMock(return_value=SimpleNamespace(state=RunState.RESUMING, revision=3))),
                                   agent_for_run=AsyncMock(side_effect=failure))
     command = StartRun(agent_id='agent', session_id='s', input=(),
                        resolved_spec_hash='sha256:test', idempotency_key='resume')

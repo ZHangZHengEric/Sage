@@ -18,6 +18,7 @@ from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
 from sagents.v2.contracts.common import utc_now
 from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
+from sagents.v2.runtime.observability.performance.recording import RunTimingStage
 from sagents.v2.runtime.observability.timing import log_duration
 
 LOGGER = get_logger(__name__)
@@ -40,6 +41,20 @@ class RunService:
         self._approval_scan_end = None
         self._approval_scan_remaining = 0
         self.approval_scan_seconds = 5.0
+
+    def _record_timing(self, event, session_id, run_id, segment, *, started_at=None,
+                       agent_id=None, state=None):
+        observation = getattr(self.host, "observability", None)
+        if observation is not None and observation.performance.sink is not None:
+            observation.performance.record_stage(RunTimingStage(
+                session_id, run_id, event, segment, utc_now(), started_at=started_at,
+                agent_id=agent_id, state=state,
+            ))
+            return
+        # SDK backends that query their own evidence still use the log projection.
+        LOGGER.info(event, "运行性能计时", session_id=session_id, run_id=run_id,
+                    attributes={"started_at": started_at.isoformat() if started_at else None,
+                                "agent_id": agent_id, "run_state": state})
 
     def workspace_lock(self, tenant_id: str, agent_id: str) -> asyncio.Lock:
         return self._workspace_locks.setdefault((tenant_id, agent_id), asyncio.Lock())
@@ -362,19 +377,18 @@ class RunService:
             run = await self.application.runtime.get_run(run_id)
             if run.state != RunState.RESUMING or self.execution.driving(run_id):
                 return
-            LOGGER.info("server.run.performance.resuming", "恢复运行性能计时起点",
-                session_id=session_id, run_id=run_id,
-                attributes={"started_at": resume_started_at.isoformat()})
+            segment = str(run.revision)
+            self._record_timing("server.run.performance.resuming", session_id, run_id, segment,
+                                started_at=resume_started_at)
             try:
                 loaded = await self.application.agent_for_run(run_id, context)
                 execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
             except BaseException as exc:
-                LOGGER.info("server.run.performance.finished", "运行性能计时结束",
-                    session_id=session_id, run_id=run_id,
-                    attributes={"run_state": "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"})
+                self._record_timing("server.run.performance.finished", session_id, run_id, segment,
+                                    state="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed")
                 raise
             task = asyncio.create_task(
-                self._continue_drive(execution, run_id=run_id, session_id=session_id, label=label),
+                self._continue_drive(execution, run_id=run_id, session_id=session_id, label=label, segment=segment),
                 name=f"server-v2-{label}-resume-{run_id}",
             )
             self.execution.adopt(run_id, task, workspace=workspace)
@@ -443,9 +457,8 @@ class RunService:
             ):
                 await stream.detach()
                 return run_id
-            LOGGER.info("server.run.performance.accepted", "运行性能计时起点",
-                session_id=session_id, run_id=run_id,
-                attributes={"agent_id": command.agent_id, "started_at": request_started_at.isoformat()})
+            self._record_timing("server.run.performance.accepted", session_id, run_id, "initial",
+                                agent_id=command.agent_id, started_at=request_started_at)
             task = asyncio.create_task(
                 self._drive(
                     stream,
@@ -462,9 +475,8 @@ class RunService:
         run_id = stream.handle.run_id
         try:
             snapshot = await stream.wait()
-            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
-                session_id=session_id, run_id=run_id,
-                attributes={"run_state": snapshot.state.value})
+            self._record_timing("server.run.performance.finished", session_id, run_id, "initial",
+                                state=snapshot.state.value)
             if on_finished is not None:
                 await on_finished(snapshot)
         except Exception as exc:
@@ -476,8 +488,7 @@ class RunService:
                 run_id=run_id,
                 label=label,
             )
-            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
-                session_id=session_id, run_id=run_id, attributes={"run_state": "failed"})
+            self._record_timing("server.run.performance.finished", session_id, run_id, "initial", state="failed")
         finally:
             try:
                 await stream.detach()
@@ -485,13 +496,12 @@ class RunService:
                 self.execution.release(run_id)
 
     async def _continue_drive(
-        self, execution, *, run_id: str, session_id: str, label: str
+        self, execution, *, run_id: str, session_id: str, label: str, segment: str
     ) -> None:
         try:
             snapshot = await execution
-            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
-                session_id=session_id, run_id=run_id,
-                attributes={"run_state": snapshot.state.value})
+            self._record_timing("server.run.performance.finished", session_id, run_id, segment,
+                                state=snapshot.state.value)
         except Exception as exc:
             LOGGER.exception(
                 "run.background_resume.failed",
@@ -501,8 +511,7 @@ class RunService:
                 run_id=run_id,
                 label=label,
             )
-            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
-                session_id=session_id, run_id=run_id, attributes={"run_state": "failed"})
+            self._record_timing("server.run.performance.finished", session_id, run_id, segment, state="failed")
         finally:
             self.execution.release(run_id)
 

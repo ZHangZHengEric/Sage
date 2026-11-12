@@ -15,6 +15,7 @@ from urllib.parse import unquote
 from pydantic import Field
 
 from sagents.v2.contracts.common import StrictModel
+from .performance.recording import PerformanceRecorder, PerformanceSink
 from .contracts import (
     ModelHistoryQuery,
     PerformanceQuery,
@@ -76,11 +77,14 @@ class ObservabilityProvider:
         diagnostics=None,
         config=None,
         performance_query: PerformanceQuery | None = None,
+        performance_sink: PerformanceSink | None = None,
         trace_query: TraceQuery | None = None,
         model_history: ModelHistoryQuery | None = None,
     ):
         self.plugin_id = plugin_id
         self._performance_query = performance_query
+        self.business_report_reader = None
+        self.performance = PerformanceRecorder(performance_sink)
         self.trace_query = trace_query
         self._model_history = model_history
         self.config = ObservabilityConfig.model_validate(config or {}).model_dump(
@@ -98,6 +102,10 @@ class ObservabilityProvider:
 
     async def export_evidence(self, session_id: str, run_ids: set[str]):
         return await self.diagnostics.export_evidence(session_id, run_ids)
+
+    def install_performance(self, sink):
+        self._performance_query = sink
+        self.performance.sink = sink
 
     @property
     def performance_available(self) -> bool:
@@ -121,13 +129,10 @@ class ObservabilityProvider:
             raise NotImplementedError(
                 "this observation provider cannot query performance"
             )
-        return await query.report(
-            start=start,
-            end=end,
-            agent_id=agent_id,
-            bucket=bucket,
-            timezone_name=timezone_name,
-        )
+        options = dict(start=start, end=end, agent_id=agent_id, bucket=bucket, timezone_name=timezone_name)
+        if self.business_report_reader is not None and getattr(query, "supports_business_report", False):
+            options["business"] = await self.business_report_reader(start=start, end=end, agent_id=agent_id)
+        return await query.report(**options)
 
     async def run_timing(self, *, session_id: str, run_id: str, start: float, end: float):
         query = self._performance_query
@@ -175,6 +180,7 @@ class ObservabilityProvider:
         # Evidence flush can enrich/export spans; the exporter must still be live.
         for resource in (
             self.diagnostics,
+            self.performance.sink,
             self.traces,
             self.logs,
         ):
@@ -191,7 +197,7 @@ class ObservabilityProvider:
 
 
 def create_observability_provider(
-    plugin_id: str, config=None, *, local_diagnostics_factory=None
+    plugin_id: str, config=None, *, local_diagnostics_factory=None, local_performance_factory=None
 ) -> ObservabilityProvider:
     if plugin_id == "sage.observability.noop":
         ObservabilityConfig.model_validate(config or {})
@@ -202,6 +208,7 @@ def create_observability_provider(
         raise ValueError(f"unknown observability provider: {plugin_id}")
     traces, evidence, outputs = None, None, []
     performance_query, trace_query, model_history = None, None, None
+    performance_sink = None
     try:
         if options.log_stdout:
             outputs.append(
@@ -242,7 +249,6 @@ def create_observability_provider(
                 )
             if local_diagnostics_factory:
                 evidence = local_diagnostics_factory()
-                performance_query = evidence
             elif options.diagnostics_storage == "sqlite":
                 from .plugins.sqlite import SessionDiagnostics
 
@@ -254,6 +260,8 @@ def create_observability_provider(
 
                 evidence = FilesystemDiagnosticSink(options.diagnostics_root)
                 model_history = evidence
+        if local_performance_factory is not None:
+            performance_sink = performance_query = local_performance_factory()
         return ObservabilityProvider(
             plugin_id=plugin_id,
             outputs=outputs,
@@ -261,6 +269,7 @@ def create_observability_provider(
             diagnostics=evidence,
             config=config,
             performance_query=performance_query,
+            performance_sink=performance_sink,
             trace_query=trace_query,
             model_history=model_history,
         )

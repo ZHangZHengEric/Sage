@@ -10,6 +10,7 @@ SQL_OBSERVABILITY_PLUGIN = "com.sage.server.observability-sql"
 
 def sql_observability_registration(database):
     from .diagnostics import DatabaseDiagnostics
+    from .performance import DatabasePerformance
 
     schema = ObservabilityConfig.model_json_schema()
     schema["properties"] = {
@@ -30,5 +31,6 @@ def sql_observability_registration(database):
         factory=lambda context, deps: create_observability_provider(
             SQL_OBSERVABILITY_PLUGIN, context.config,
             local_diagnostics_factory=lambda: DatabaseDiagnostics(database),
+            local_performance_factory=lambda: DatabasePerformance(database),
         ),
     )

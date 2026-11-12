@@ -286,7 +286,7 @@ def test_backfill_is_idempotent_and_preserves_partial_history(tmp_path):
     assert result["runs"][0]["scope"] == "execution_only"
 
 
-def test_performance_api_requires_admin_and_bounds_queries(client, service):
+def test_performance_api_requires_admin_and_bounds_queries(client, service, monkeypatch):
     user, _ = identity(client, "alice")
     assert client.get("/api/observability/performance", headers=user).status_code == 403
     admin = {"Authorization": f"Bearer {admin_login(client)}"}
@@ -300,6 +300,8 @@ def test_performance_api_requires_admin_and_bounds_queries(client, service):
             ])
             await db.execute(model_table.insert(), models)
 
+    # These deliberately synthetic timings have no committed Run.
+    monkeypatch.setattr(service.observability, "business_report_reader", None)
     client.portal.call(seed)
     params = {"start": "2026-10-19T00:00:00Z", "end": "2026-10-20T00:00:00Z"}
     response = client.get(
@@ -355,9 +357,12 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
                 await asyncio.sleep(0.01)
 
     client.portal.call(settle)
-    client.portal.call(service.diagnostics._flush)
+    client.portal.call(service.observability.performance.sink._timings.flush)
     admin = {"Authorization": f"Bearer {admin_login(client)}"}
     metrics = client.get("/api/observability/performance", headers=admin).json()["data"]
+    assert metrics["summary"]["requests"] == metrics["summary"]["completed"] == 1
+    assert metrics["summary"]["coverage_rate"] == 1
+    assert metrics["summary"]["timing_samples"]["first_text_ms"] == 1
     row = metrics["runs"][0]
     assert row["scope"] == "sdk_entry"
     assert (
@@ -378,6 +383,25 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
     other, _ = identity(client, "unrelated-timing-user")
     assert client.get(path, headers=other).status_code == 404
     assert client.get(path, headers={**admin, "X-Sage-View-User": user_id}).status_code == 200
+
+    from sqlalchemy import delete
+    from app.v2.server.observability.orm import events as event_table, timings as model_table
+
+    async def drop_observations():
+        async with service.database.transaction() as db:
+            for table in (event_table, model_table):
+                await db.execute(delete(table).where(table.c.run_id == row["run_id"]))
+
+    client.portal.call(drop_observations)
+    replayed = client.get("/api/observability/performance", headers=admin).json()["data"]
+    summary = replayed["summary"]
+    assert summary["requests"] == summary["completed"] == summary["incomplete"] == 1
+    assert summary["coverage_rate"] == 0
+    assert summary["timing_samples"]["first_text_ms"] == 0
+    assert summary["first_text_ms"]["p50"] is None
+    assert summary["run_states"] == {"completed": 1}
+    assert summary["usage"]["records"] > 0
+    assert replayed["runs"][0]["scope"] == "unavailable"
 
 
 def test_run_timeline_keeps_parallel_calls_and_splits_framework_boundaries():
@@ -414,3 +438,26 @@ def test_timeline_caps_entries_and_keeps_run_query_scoped(tmp_path):
     timeline = build_run(events, calls, include_timeline=True)["timeline"]
     assert len(timeline["entries"]) == 300
     assert timeline["truncated"] is True
+
+
+def test_business_replay_detects_a_whole_missing_tool_timing():
+    from sagents.v2.runtime.observability.performance.aggregation import timing_report
+    from sagents.v2.contracts.run_state import RunState
+    from sagents.v2.runtime.session.reporting import BusinessReplay, RunBusinessFacts
+    from sagents.v2.runtime.session.run_metadata import RunMetadata
+
+    events, models = sample()
+    facts = RunBusinessFacts(RunMetadata(
+        "s", "r", datetime.fromtimestamp(BASE + 1, timezone.utc), RunState.COMPLETED, "agent",
+    ))
+    facts.record(1, "tool.call.started", "tool", operation_id="one")
+    facts.record(2, "tool.call.succeeded", "tool", operation_id="one")
+    facts.record(3, "tool.call.started", "tool", operation_id="two")
+    facts.record(4, "tool.call.failed", "tool", operation_id="two")
+    result = timing_report(
+        {"r": events}, {"r": models}, start=BASE, end=BASE + 60,
+        business=BusinessReplay({("s", "r"): facts}),
+    )
+    assert result["summary"]["tool_outcomes"] == {"succeeded": 1, "failed": 1}
+    assert result["summary"]["coverage_rate"] == 0
+    assert result["summary"]["framework_ms"]["p50"] is None

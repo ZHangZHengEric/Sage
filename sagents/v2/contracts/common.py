@@ -76,9 +76,12 @@ def new_id(prefix: str) -> str:
 def new_sortable_id(prefix: str, *, created_at: datetime | None = None) -> str:
     """Return a unique ID whose lexical order starts with its creation time."""
 
-    timestamp = created_at or utc_now()
-    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+    return sortable_id_prefix(prefix, created_at or utc_now()) + uuid.uuid4().hex
+
+
+def sortable_id_prefix(prefix: str, created_at: datetime) -> str:
+    """Return the inclusive lower bound for IDs created at the given instant."""
+    if created_at.tzinfo is None or created_at.utcoffset() is None:
         raise ValueError("created_at must be timezone-aware")
-    utc_timestamp = timestamp.astimezone(timezone.utc)
-    sortable_timestamp = utc_timestamp.strftime("%Y%m%dT%H%M%S%fZ")
-    return f"{prefix}_{sortable_timestamp}_{uuid.uuid4().hex}"
+    timestamp = created_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return f"{prefix}_{timestamp}_"

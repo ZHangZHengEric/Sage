@@ -951,6 +951,7 @@ class ApplicationAssembler:
                         ),
                         trace_sink=services["observability.provider"].traces,
                         log_sink=services["observability.provider"].logs,
+                        performance=services["observability.provider"].performance,
                     )
 
                 def compose(descriptor, child_run_id, catalog, executor):
@@ -1065,6 +1066,7 @@ class ApplicationAssembler:
                     ),
                     trace_sink=services["observability.provider"].traces,
                     log_sink=services["observability.provider"].logs,
+                    performance=services["observability.provider"].performance,
                 )
                 if uses_flow and entry_descriptor.agent_id == selected_agent:
                     from sagents.v2.flow import FlowRuntime

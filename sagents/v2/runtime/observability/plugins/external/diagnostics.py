@@ -58,6 +58,8 @@ class ExternalDiagnostics(ExternalEvidenceSink):
             ),
         )
 
+    supports_business_report = True
+
     async def report(
         self,
         *,
@@ -67,6 +69,7 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         bucket="hour",
         timezone_name="Asia/Shanghai",
         client=None,
+        business=None,
     ):
         async def build():
             if client is None:
@@ -77,7 +80,7 @@ class ExternalDiagnostics(ExternalEvidenceSink):
                         end=end,
                         agent_id=agent_id,
                         bucket=bucket,
-                        timezone_name=timezone_name,
+                        timezone_name=timezone_name, business=business,
                     )
             return await self._report(
                 client,
@@ -85,17 +88,26 @@ class ExternalDiagnostics(ExternalEvidenceSink):
                 end=end,
                 agent_id=agent_id,
                 bucket=bucket,
-                timezone_name=timezone_name,
+                timezone_name=timezone_name, business=business,
             )
 
+        if business is not None:
+            return await build()
         return await self._query_cache.get(
             (start, end, agent_id, bucket, timezone_name), build
         )
 
-    async def _report(self, client, *, start, end, agent_id, bucket, timezone_name):
-        spans, truncated = await self._query(
-            client, start=start, end=end, agent_id=agent_id
-        )
+    async def _report(self, client, *, start, end, agent_id, bucket, timezone_name, business=None):
+        unavailable = False
+        try:
+            spans, truncated = await self._query(
+                client, start=start, end=end, agent_id=agent_id
+            )
+        except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError):
+            if business is None:
+                raise
+            spans, truncated = [], True
+            unavailable = True
 
         def aggregate():
             events, models = timing_rows(spans)
@@ -106,12 +118,14 @@ class ExternalDiagnostics(ExternalEvidenceSink):
                 end=end,
                 agent_id=agent_id,
                 bucket=bucket,
-                timezone_name=timezone_name,
+                timezone_name=timezone_name, business=business,
                 truncated=truncated,
             )
 
         result = await asyncio.to_thread(aggregate)
         result.update(source=self.backend, capture_failures=self.capture_failures)
+        if unavailable:
+            result["timing_unavailable"] = True
         return result
 
     async def run_timing(self, *, session_id, run_id, start, end):

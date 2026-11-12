@@ -183,11 +183,14 @@ class SessionDiagnostics(DiagnosticCapture):
     async def export_evidence(self, session_id: str, run_ids: set[str]):
         return await asyncio.to_thread(self.snapshot, session_id, run_ids)
 
+    supports_business_report = True
+
     async def report(self, **options):
         from .performance import report
 
         def read():
-            self._flush()
+            if options.get("business") is None:
+                self._flush()
             result = report(self.path, **options)
             result.update(source="local", capture_failures=self.capture_failures)
             return result

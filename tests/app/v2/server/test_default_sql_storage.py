@@ -14,7 +14,7 @@ from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.import_sqlite import import_diagnostics, import_self_configuration
 from app.v2.server.database.schema import create_host_schema
 from app.v2.server.observability.diagnostics import DatabaseDiagnostics
-from app.v2.server.observability.orm import timings
+from app.v2.server.observability.orm import events, timings
 from app.v2.server.self_configuration.repository import DatabaseSelfConfigurationStore
 from sagents.v2.agent.self_configuration.store import SqliteSelfConfigurationStore
 from sagents.v2.contracts.common import utc_now
@@ -103,9 +103,6 @@ async def test_diagnostics_import_and_async_capture_keep_large_evidence_and_run_
         assert updated["first_token_at"] == token.isoformat()
         assert updated["stream"] == stream
         assert (await sink.export_evidence("other-session", {run}))["models"] == []
-        now = utc_now().timestamp()
-        report = await sink.report(start=now - 60, end=now + 60)
-        assert run in {row["run_id"] for row in report["runs"]}
         sink.max_logs_per_run = 2
         sink.write(LogRecord(level=LogLevel.INFO, event="third", message="latest", component="test",
                              session_id=session, run_id=run))
@@ -118,29 +115,41 @@ async def test_diagnostics_import_and_async_capture_keep_large_evidence_and_run_
 
 
 async def test_sql_timings_survive_a_saturated_evidence_queue(database):
+    from app.v2.server.observability.performance import DatabasePerformance
+    from sagents.v2.runtime.observability.performance.recording import ModelTiming, RunTimingStage
+
     session, run = uuid4().hex, uuid4().hex
-    sink = DatabaseDiagnostics(database)
-    sink.max_pending_writes = 1
-    request = SimpleNamespace(run_id=run, request_id="model", metadata={})
-    args = dict(session_id=session, request=request)
+    evidence = DatabaseDiagnostics(database)
+    performance = DatabasePerformance(database)
+    evidence.max_pending_writes = 1
+    now = utc_now()
     try:
-        sink.write(LogRecord(level=LogLevel.INFO, event="ordinary", message="fills evidence queue",
-                             component="test", session_id=session, run_id=run))
-        sink.write(LogRecord(level=LogLevel.INFO, event="agent.run.started", message="run",
-                             component="test", session_id=session, run_id=run))
-        await sink.begin_model_request(**args, provider={}, wire_request={})
-        await sink.complete_model_request(
-            **args, response=SimpleNamespace(model_dump=lambda **_: {"text": "ok"}),
-        )
-        now = utc_now().timestamp()
-        report = await sink.report(start=now - 60, end=now + 60)
+        for _ in range(2):
+            evidence.write(LogRecord(level=LogLevel.INFO, event="agent.run.started",
+                                     message="log only", component="test", session_id=session, run_id=run))
+        performance.record_stage(RunTimingStage(session, run, "agent.run.started", "1", now))
+        model = ModelTiming(session, run, "model", "agent", None, now)
+        performance.record_model(model)
+        for _ in range(2):
+            performance.record_model(ModelTiming(
+                session, run, "model", "agent", None, now,
+                first_token_at=now + timedelta(seconds=1),
+                first_text_at=now + timedelta(seconds=2),
+                ended_at=now + timedelta(seconds=3),
+            ))
+        report = await performance.report(start=now.timestamp() - 60, end=now.timestamp() + 60)
         assert run in {row["run_id"] for row in report["runs"]}
         async with database.session() as db:
             timing = (await db.execute(select(timings).where(timings.c.run_id == run))).mappings().one()
-        assert timing["started_at"] <= timing["ended_at"]
-        assert sink.capture_failures > 0
+            rows = (await db.execute(select(events.c.event).where(events.c.run_id == run))).scalars().all()
+        assert sorted(rows) == ["agent.run.started", "model.first_text", "model.request.started"]
+        assert timing["first_token_at"] == now.timestamp() + 1
+        assert timing["ended_at"] == now.timestamp() + 3
+        assert evidence.capture_failures > 0
+        assert performance.capture_failures == 0
     finally:
-        await sink.close()
+        await performance.close()
+        await evidence.close()
 
 
 async def test_pending_model_updates_share_one_evidence_slot(database):
@@ -228,10 +237,5 @@ async def test_concurrent_model_patches_preserve_observed_times_and_terminal(dat
         assert record["first_token_at"] == token.isoformat()
         assert record["completed_at"] == end.isoformat()
         assert first.capture_failures == second.capture_failures == 0
-        async with database.session() as db:
-            timing = (await db.execute(select(timings).where(timings.c.run_id == run))).mappings().one()
-        assert timing["started_at"] == start.timestamp()
-        assert timing["first_token_at"] == token.timestamp()
-        assert timing["ended_at"] == end.timestamp()
     finally:
         await asyncio.gather(first.close(), second.close())

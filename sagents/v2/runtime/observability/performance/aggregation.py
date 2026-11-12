@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 import math
 from zoneinfo import ZoneInfo
+
+from sagents.v2.runtime.session.reporting import BusinessReplay, TOKEN_FIELDS
 
 EVENTS = frozenset(
     {
@@ -132,29 +134,36 @@ def percentile(values, quantile):
     return ordered[low] + (ordered[math.ceil(index)] - ordered[low]) * (index - low)
 
 
-def summarize(rows):
+def summarize(rows, *, business=None, coverage_exact=True):
     finished = [r for r in rows if r["state"] == "completed"]
     complete = [r for r in finished if r["scope"] == "sdk_entry"]
     measured = [r for r in complete if r["coverage"] == "complete"]
-    result: dict[str, int | float | dict[str, float | None] | None] = {
+    result = {
         "requests": len(rows),
         "completed": len(finished),
         "measured": len(measured),
         "incomplete": len(finished) - len(measured),
     }
+    samples = {}
     for field in (
-        "total_ms",
-        "first_token_ms",
-        "first_text_ms",
-        "model_ttft_ms",
-        "framework_ms",
+        "total_ms", "first_token_ms", "first_text_ms", "model_ttft_ms", "framework_ms",
     ):
-        result[field] = {
-            q: percentile(
-                [r[field] for r in measured],
-                p,
-            )
-            for q, p in (("p50", 0.5), ("p95", 0.95))
+        values = [r[field] for r in measured if r[field] is not None]
+        samples[field] = len(values)
+        result[field] = {q: percentile(values, p) for q, p in (("p50", 0.5), ("p95", 0.95))}
+    result["timing_samples"] = samples
+    result["coverage_rate"] = len(measured) / len(finished) if finished and coverage_exact else None
+    if business is not None:
+        states = Counter(facts.metadata.state.value for facts in business)
+        tools = Counter(state for facts in business if facts.events_complete for state in facts.tools.values())
+        available = [facts for facts in business if facts.events_complete]
+        result["run_states"] = dict(states)
+        result["tool_outcomes"] = dict(tools)
+        result["usage"] = {
+            "records": sum(facts.usage_records for facts in available),
+            "reported_records": sum(facts.reported_usage_records for facts in available),
+            "runs_with_event_data": len(available),
+            **{field: sum(facts.tokens[field] for facts in available) for field in TOKEN_FIELDS},
         }
     elapsed = sum(r["total_ms"] for r in measured)
     result["framework_ratio"] = (
@@ -437,6 +446,36 @@ def build_run(events, models, *, include_timeline=False):
     return result
 
 
+def _business_timing_rows(events, models, business):
+    for key, facts in business.runs.items():
+        metadata = facts.metadata
+        scoped_events = events.get(key)
+        if scoped_events is None:
+            scoped_events = [row for row in events.get(metadata.run_id, ()) if row["session_id"] == metadata.session_id]
+        scoped_models = models.get(key)
+        if scoped_models is None:
+            scoped_models = [row for row in models.get(metadata.run_id, ()) if row["session_id"] == metadata.session_id]
+        row = build_run(scoped_events, scoped_models) if scoped_events else None
+        state = metadata.state.value
+        cohort_at = metadata.created_at.timestamp()
+        if row is None or row["state"] != state:
+            row = {
+                "run_id": metadata.run_id, "session_id": metadata.session_id,
+                "started_at": metadata.created_at.isoformat(), "state": state,
+                "scope": "unavailable", "coverage": "incomplete",
+                "model_calls": len(scoped_models), "tool_calls": len(facts.tools), "purposes": {},
+                **dict.fromkeys(("total_ms", "first_token_ms", "first_text_ms", "model_ttft_ms",
+                                 "framework_ms", "model_ms", "tool_ms", "overlap_ms", "waiting_ms")),
+            }
+        if row["coverage"] == "complete":
+            observed_tools = Counter(event["identity"] for event in scoped_events if event["event"] == "tool.call.started")
+            if not facts.events_complete or not Counter(facts.started_tools.values()) <= observed_tools:
+                row["coverage"] = "incomplete"
+                row["framework_ms"] = None
+        row["agent_id"] = metadata.agent_id
+        yield row, cohort_at, facts
+
+
 def timing_report(
     events,
     models,
@@ -447,19 +486,24 @@ def timing_report(
     bucket="hour",
     timezone_name="Asia/Shanghai",
     truncated=False,
+    business: BusinessReplay | None = None,
 ):
     """Use the same timing and coverage rules for local and external records."""
     zone = ZoneInfo(timezone_name)
-    rows = []
-    for rid, values in events.items():
-        row = build_run(values, models[rid])
-        if (
-            row
-            and start <= timestamp(row["started_at"]) < end
-            and (not agent_id or row["agent_id"] == agent_id)
-        ):
-            rows.append(row)
-    rows.sort(key=lambda r: r["started_at"], reverse=True)
+    if business is None:
+        entries = []
+        for rid, values in events.items():
+            row = build_run(values, models[rid])
+            if row and start <= (at := timestamp(row["started_at"])) < end and (
+                not agent_id or row["agent_id"] == agent_id
+            ):
+                entries.append((row, at, None))
+    else:
+        entries = list(_business_timing_rows(events, models, business))
+    entries.sort(key=lambda entry: (entry[1], entry[0]["run_id"]), reverse=True)
+    coverage_exact = not truncated and not (
+        business and (business.cohort_truncated or business.events_truncated or business.archive_pending)
+    )
     buckets = defaultdict(list)
     cursor = datetime.fromtimestamp(start, zone).replace(
         minute=0, second=0, microsecond=0
@@ -469,22 +513,31 @@ def timing_report(
     while cursor.timestamp() < end:
         buckets[cursor.isoformat()]
         cursor += timedelta(days=1) if bucket == "day" else timedelta(hours=1)
-    for row in rows:
-        time = (
-            datetime.fromisoformat(row["started_at"])
-            .astimezone(zone)
-            .replace(minute=0, second=0, microsecond=0)
-        )
+    for entry in entries:
+        time = datetime.fromtimestamp(entry[1], zone).replace(minute=0, second=0, microsecond=0)
         if bucket == "day":
             time = time.replace(hour=0)
-        buckets[time.isoformat()].append(row)
+        buckets[time.isoformat()].append(entry)
+
+    def summarize_entries(group):
+        return summarize(
+            [row for row, _, _ in group],
+            business=[facts for _, _, facts in group] if business is not None else None,
+            coverage_exact=coverage_exact,
+        )
+
     return {
-        "summary": summarize(rows),
-        "buckets": [{"time": k, **summarize(v)} for k, v in sorted(buckets.items())],
-        "runs": rows[:200],
-        "total_runs": len(rows),
-        "truncated": truncated,
-        "run_list_truncated": len(rows) > 200,
+        "summary": summarize_entries(entries),
+        "buckets": [{"time": k, **summarize_entries(v)} for k, v in sorted(buckets.items())],
+        "runs": [row for row, _, _ in entries[:200]],
+        "total_runs": len(entries),
+        "truncated": truncated or bool(business and (business.cohort_truncated or business.events_truncated)),
+        "run_list_truncated": len(entries) > 200,
+        **({"business": {
+            "cohort_truncated": business.cohort_truncated,
+            "events_truncated": business.events_truncated,
+            "archive_pending": business.archive_pending,
+        }} if business is not None else {}),
         "timezone": timezone_name,
         "start": start,
         "end": end,

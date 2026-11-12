@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from inspect import Parameter, signature
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -28,6 +29,7 @@ from sagents.v2.runtime.observability.contracts import (
     TraceStatus,
 )
 from sagents.v2.runtime.observability.logs import StructuredLogger
+from sagents.v2.runtime.observability.performance.recording import ModelTiming, PerformanceRecorder
 from sagents.v2.runtime.observability.timing import elapsed_ms
 from sagents.v2.runtime.observability.traces import (
     SpanHandle,
@@ -49,9 +51,11 @@ class RecordingModelProvider:
         provider_metadata: Mapping[str, Any] | None = None,
         trace_sink: TraceSink | None = None,
         log_sink: LogSink | None = None,
+        performance: PerformanceRecorder | None = None,
     ) -> None:
         self.provider = provider
         self.sink = sink
+        self.performance = performance
         self._timed_methods: dict[str, bool] = {}
         self.session_id_resolver = session_id_resolver
         self.provider_metadata = dict(provider_metadata or {})
@@ -124,6 +128,20 @@ class RecordingModelProvider:
             or self.provider_metadata.get("purpose")
             or "agent"
         )
+        timing = None
+        if self.performance is not None and self.performance.sink is not None:
+            timing = ModelTiming(
+                session_id, request.run_id, request.request_id, purpose,
+                request.metadata.get("turn_id"), started_at,
+            )
+            self.performance.record_model(timing)
+
+        def finish_timing(ended_at):
+            if timing is not None and self.performance is not None:
+                self.performance.record_model(replace(
+                    timing, ended_at=ended_at, first_token_at=first_token_at, first_text_at=first_text_at,
+                ))
+
         self._log(
             "model.request.started",
             "model request started",
@@ -256,13 +274,14 @@ class RecordingModelProvider:
                 if first_text:
                     assert observed_at is not None
                     first_text_at = observed_at
-                    self._log(
-                        "model.first_text", "收到模型首段正文", level="debug",
-                        session_id=session_id, request=request,
-                        attributes={"model_binding": request.model_binding, "purpose": purpose,
-                                    "first_text_at": first_text_at.isoformat(),
-                                    "first_text_ms": elapsed_ms(started_at, first_text_at)},
-                    )
+                    if timing is None:
+                        self._log(
+                            "model.first_text", "收到模型首段正文", level="debug",
+                            session_id=session_id, request=request,
+                            attributes={"model_binding": request.model_binding, "purpose": purpose,
+                                        "first_text_at": first_text_at.isoformat(),
+                                        "first_text_ms": elapsed_ms(started_at, first_text_at)},
+                        )
                 if completed:
                     assert event.response is not None and observed_at is not None
                     await persist_first_output()
@@ -292,6 +311,7 @@ class RecordingModelProvider:
                             "first_text_ms": elapsed_ms(started_at, first_text_at),
                         },
                     )
+                    finish_timing(observed_at)
                     finalized = True
                 yield event
         except BaseException as exc:
@@ -319,6 +339,7 @@ class RecordingModelProvider:
                 error=exc,
                 attributes={"model_binding": request.model_binding, "purpose": purpose},
             )
+            finish_timing(observed_at)
             finalized = True
             raise
         finally:
@@ -362,6 +383,7 @@ class RecordingModelProvider:
                             },
                         )
                     finally:
+                        finish_timing(observed_at)
                         _end_model_span(span, started_at, first_token_at, finished=observed_at, error=closed)
 
 

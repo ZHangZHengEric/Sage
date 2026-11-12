@@ -205,15 +205,16 @@ class AgentCompositionFactory:
         preload_skills: tuple[str, ...] = (),
         trace_sink=None,
         log_sink=None,
+        performance=None,
     ) -> AgentLoopEngine:
         """Build the pure Loop, adding the host observability adapter when selected."""
 
         engine_type = (
             ObservedRunDriver
-            if trace_sink is not None or log_sink is not None
+            if trace_sink is not None or log_sink is not None or performance is not None
             else AgentLoopEngine
         )
-        observation: dict[str, Any] = ({"trace_sink": trace_sink, "log_sink": log_sink}
+        observation: dict[str, Any] = ({"trace_sink": trace_sink, "log_sink": log_sink, "performance": performance}
             if engine_type is ObservedRunDriver else {})
         return engine_type(
             runtime=self.runtime,
@@ -333,6 +334,7 @@ class AgentCompositionFactory:
         tool_result_runtime=None,
         trace_sink=None,
         log_sink=None,
+        performance=None,
     ) -> AgentLoopEngine:
         """Compose a loop through the same policy/context boundary for every host.
 
@@ -437,6 +439,7 @@ class AgentCompositionFactory:
             or resolved.manifest_hash,
             trace_sink=trace_sink,
             log_sink=log_sink,
+            performance=performance,
         )
 
 

@@ -19,6 +19,16 @@ from .commit import SqlSessionCommit
 class SqlSessionPersistence(SqlSessionCommit):
     _decode_derived_value = staticmethod(_decode_json)
 
+    async def report_business_events(
+        self, *, start, end, agent_id="", max_runs=10000, max_events=100000, exclude_sessions=(),
+    ):
+        from .reporting import replay_sql
+
+        return await replay_sql(
+            self, start=start, end=end, agent_id=agent_id, max_runs=max_runs, max_events=max_events,
+            exclude_sessions=exclude_sessions,
+        )
+
     async def _read_attachment_bytes(self, session_id, artifact_id):
         if (session_id, artifact_id) in self._attachment_payloads:
             return self._attachment_payloads[(session_id, artifact_id)]

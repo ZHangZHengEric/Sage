@@ -26,6 +26,7 @@ function name(row) { return agentNames.value[row.agent_id] || row.agent_id || '�
 function status(row) {
   const state = { completed:'已完成', cancelled:'已取消', failed:'失败', suspended:'等待输入', running:'执行中' }[row.state] || row.state
   if (row.state !== 'completed') return state
+  if (row.scope === 'unavailable') return `${state} · 无计时记录`
   if (row.scope !== 'sdk_entry') return `${state} · 初始化未记录`
   if (row.coverage !== 'complete') return `${state} · 采集不完整`
   return state
@@ -64,7 +65,7 @@ onMounted(async () => {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="loading" role="status">加载中…</p>
     <template v-if="summary">
-      <div class="performance-counts"><span>{{ summary.requests }} 次请求</span><span>{{ summary.measured }} 次完整采样</span><span v-if="summary.incomplete" class="quality-warning">{{ summary.incomplete }} 次缺少完整计时</span><span v-if="result.capture_failures" class="quality-warning">采集丢失 {{ result.capture_failures }}</span><span v-if="result.truncated" class="quality-warning">达到采样上限，请缩小时间范围</span></div>
+      <div class="performance-counts"><span>{{ summary.requests }} 次请求</span><span>{{ summary.measured }} 次完整采样</span><span v-if="summary.coverage_rate != null">已完成 Run 的计时覆盖率 {{ percentage(summary.coverage_rate) }}</span><span v-if="result.business?.archive_pending" class="quality-warning">活跃会话过多，当前只统计已归档数据</span><span v-if="summary.incomplete" class="quality-warning">{{ summary.incomplete }} 次缺少完整计时</span><span v-if="result.capture_failures" class="quality-warning">采集丢失 {{ result.capture_failures }}</span><span v-if="result.timing_unavailable" class="quality-warning">远程计时暂不可用</span><span v-else-if="result.truncated" class="quality-warning">部分数据未纳入汇总</span></div>
       <div class="performance-cards"><GlassPanel v-for="item in metrics" :key="item.id" class="performance-card"><h2>{{ item.name }}</h2><strong>{{ duration(summary[item.id]?.p50) }}</strong><div class="quantiles"><span>P50</span><span>P95 {{ duration(summary[item.id]?.p95) }}</span></div><span v-if="item.id === 'framework_ms'" class="ratio">占比 {{ percentage(summary.framework_ratio) }}</span></GlassPanel></div>
       <GlassPanel class="performance-chart">
         <div class="chart-controls"><h2>耗时趋势</h2><select v-model="metric" aria-label="趋势指标"><option v-for="item in metrics" :key="item.id" :value="item.id">{{ item.name }}</option></select><select v-model="quantile" aria-label="分位数"><option value="p50">P50</option><option value="p95">P95</option></select></div>

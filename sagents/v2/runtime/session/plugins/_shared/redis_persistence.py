@@ -607,6 +607,38 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             result.update(await self._archive.read_session_views(absent, **options))
         return {sid: result[sid] for sid in ids if sid in result}
 
+    async def report_business_events(self, *, start, end, agent_id="", max_runs=10000, max_events=100000):
+        from sagents.v2.runtime.session.reporting import replay_session_views
+
+        await self._ensure_ready()
+        keys = self._key("resident"), self._key("pending")
+        # Session views accept up to 200 IDs. Report archive-only coverage
+        # explicitly when the live cohort exceeds that budget.
+        counts = await asyncio.gather(*(self._redis.scard(key) for key in keys))
+        hot = tuple(sorted(await self._redis.sunion(*keys))) if max(counts) <= 200 else ()
+        options = dict(start=start, end=end, agent_id=agent_id, max_runs=max_runs, max_events=max_events)
+        if max(counts) > 200 or len(hot) > 200:
+            report = await self._archive.report_business_events(**options)
+            report.archive_pending = True
+            return report
+        report = await self._archive.report_business_events(**options, exclude_sessions=hot)
+        if not hot:
+            return report
+        metadata, _ = await self._run_metadata_batch(hot)
+        candidates = sorted(
+            ((row.session_id, row.run_id) for row in metadata
+             if start <= row.created_at.timestamp() < end and (not agent_id or row.agent_id == agent_id)),
+            key=lambda item: item[1], reverse=True,
+        )
+        remaining = 0 if report.events_truncated else max_events - sum(run.event_count for run in report.runs.values())
+        live = await replay_session_views(self, candidates, **{**options, "max_events": remaining})
+        report.runs.update(live.runs)
+        report.cohort_truncated |= live.cohort_truncated or len(report.runs) > max_runs
+        if len(report.runs) > max_runs:
+            newest = sorted(report.runs, key=lambda key: key[1], reverse=True)[:max_runs]
+            report.runs = {key: report.runs[key] for key in newest}
+        return report
+
     async def _run_metadata_batch(self, session_ids):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload
         from sagents.v2.runtime.session.plugins._shared.redis_metadata import (

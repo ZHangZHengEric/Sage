@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from typing import Any, cast
-from sagents.v2.contracts.events import ToolEventData
+from sagents.v2.contracts.common import utc_now
 
 from sagents.v2.agent.engine import AgentLoopEngine
 from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
+from sagents.v2.runtime.observability.performance.recording import PerformanceRecorder, RunTimingStage
+from sagents.v2.runtime.observability.run_output import capture_run_trace_output
 from sagents.v2.runtime.observability.timing import log_duration
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.contracts.items import TextBlock
@@ -95,11 +97,13 @@ class ObservedRunDriver(AgentLoopEngine):
         *,
         trace_sink: TraceSink | None = None,
         log_sink: LogSink | None = None,
+        performance: PerformanceRecorder | None = None,
         **engine_dependencies: Any,
     ) -> None:
         super().__init__(**engine_dependencies)
         self._observed_trace_sink = trace_sink
         self._observed_log_sink = log_sink
+        self._performance = performance
         if log_sink is not None:
             self.context_assembler = _ObservedContextAssembler(
                 self.context_assembler, self._structured_logger()
@@ -115,6 +119,12 @@ class ObservedRunDriver(AgentLoopEngine):
         if self._observed_log_sink is None:
             return None
         return StructuredLogger(self._observed_log_sink, "sagents.agent")
+
+    def _record_stage(self, run, event, segment, **fields):
+        if self._performance is not None and self._performance.sink is not None:
+            self._performance.record_stage(RunTimingStage(
+                run.session_id, run.run_id, event, segment, utc_now(), **fields,
+            ))
 
     async def _prepare_self_configuration(self, run_id, context):
         if self.self_configuration is None:
@@ -217,6 +227,8 @@ class ObservedRunDriver(AgentLoopEngine):
         correlation = (
             {"correlation_id": correlation_id} if correlation_id is not None else {}
         )
+        segment = str(run.revision)
+        self._record_stage(run, "agent.run.started", segment, agent_id=command.agent_id)
         if logger is not None:
             logger.info(
                 "agent.run.started",
@@ -238,8 +250,15 @@ class ObservedRunDriver(AgentLoopEngine):
             correlation_id=correlation_id,
             attributes=attributes,
         )
+        capture_output = (
+            self._observed_trace_sink is not None
+            and getattr(self._observed_trace_sink, "content_mode", "redacted") != "metadata"
+        )
         try:
-            with structured_log_context(**correlation, run_id=run.run_id, session_id=run.session_id):
+            with (
+                structured_log_context(**correlation, run_id=run.run_id, session_id=run.session_id),
+                capture_run_trace_output(run_id, enabled=capture_output) as output,
+            ):
                 snapshot = await body(
                     run_id,
                     context.model_copy(
@@ -254,6 +273,7 @@ class ObservedRunDriver(AgentLoopEngine):
                     ),
                 )
         except BaseException as exc:
+            self._record_stage(run, "agent.run.failed", segment)
             handle.end(TraceStatus.ERROR, error=exc)
             if logger is not None:
                 logger.exception(
@@ -266,22 +286,17 @@ class ObservedRunDriver(AgentLoopEngine):
                 )
             raise
         status, event, message, log_method = _run_outcome_observation(snapshot.state)
+        self._record_stage(run, event, segment, state=snapshot.state.value)
         final_attributes = {"run_state": snapshot.state.value}
         try:
-            if (
-                self._observed_trace_sink is not None
-                and getattr(self._observed_trace_sink, "content_mode", "redacted")
-                != "metadata"
-                and snapshot.state
-                in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}
-            ):
-                result = await self.runtime.get_run_result(run_id)
-                final_attributes["output"] = trace_content(
-                    self._observed_trace_sink, result.final_items
-                )
-                if result.error is not None:
+            if output is not None and snapshot.state in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}:
+                if output.items:
+                    final_attributes["output"] = trace_content(
+                        self._observed_trace_sink, tuple(output.items.values()),
+                    )
+                if output.error is not None:
                     final_attributes["status_message"] = trace_content(
-                        self._observed_trace_sink, result.error.message
+                        self._observed_trace_sink, output.error.message,
                     )
         except Exception:
             pass
@@ -351,6 +366,8 @@ class ObservedRunDriver(AgentLoopEngine):
             },
         )
         logger = self._structured_logger()
+        timing_scope = {"identity": call.tool_call_id, "turn_id": turn_id}
+        self._record_stage(run, "tool.call.started", call.operation_id, **timing_scope)
         if logger is not None:
             logger.info(
                 "tool.call.started",
@@ -367,6 +384,7 @@ class ObservedRunDriver(AgentLoopEngine):
                 run, call, context, turn_id, step_id=step_id, state=state
             )
         except BaseException as exc:
+            self._record_stage(run, "tool.call.failed", call.operation_id, **timing_scope)
             handle.end(TraceStatus.ERROR, error=exc)
             if logger is not None:
                 logger.exception(
@@ -381,21 +399,12 @@ class ObservedRunDriver(AgentLoopEngine):
                     attributes={"tool_name": call.tool_name},
                 )
             raise
-        returned_result = result
-        if result is None:
-            # Terminal/uncertain failures deliberately stop the engine with no
-            # result. Observe their durable Tool failure instead of reporting success.
-            from sagents.v2.tool.contracts import ToolExecutionResult
-            for event in reversed(await self.runtime.session_store.read_events(run.run_id)):
-                data = event.data
-                if (isinstance(data, ToolEventData) and data.tool_call_id == call.tool_call_id
-                        and data.error is not None):
-                    result = ToolExecutionResult(tool_call_id=call.tool_call_id,
-                        operation_id=call.operation_id, error=data.error)
-                    break
+        failed = result is not None and result.error is not None
+        outcome = "interrupted" if result is None else "failed" if failed else "completed"
+        self._record_stage(run, "tool.call." + outcome, call.operation_id, **timing_scope)
         handle.end(
             TraceStatus.ERROR
-            if result is None or getattr(result, "error", None) is not None
+            if result is None or failed
             else TraceStatus.OK,
             attributes={
                 "execution_result": trace_content(
@@ -409,10 +418,9 @@ class ObservedRunDriver(AgentLoopEngine):
                 "status_message": trace_content(self._observed_trace_sink, str(result.error))
                 if result is not None and result.error is not None
                 else None,
-                "outcome": "interrupted" if result is None else "failed" if result.error else "completed",
+                "outcome": outcome,
             },
         )
-        failed = getattr(result, "error", None) is not None
         if logger is not None:
             fields = {
                 "session_id": run.session_id,
@@ -435,7 +443,7 @@ class ObservedRunDriver(AgentLoopEngine):
                 logger.error("tool.call.failed", "tool call failed", **fields)
             else:
                 logger.info("tool.call.completed", "tool call completed", **fields)
-        return run, returned_result
+        return run, result
 
 
 __all__ = ["ObservedRunDriver"]

@@ -4,7 +4,36 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+from sagents.v2.contracts.events import RuntimeEvent
+
+
+CommitObserver = Callable[[str, tuple[RuntimeEvent, ...]], None]
+_commit_observer: ContextVar[CommitObserver | None] = ContextVar("sage_commit_observer", default=None)
+
+
+@contextmanager
+def observe_commits(observer: CommitObserver | None) -> Iterator[None]:
+    """Expose committed events to the caller's execution scope without replay."""
+    token = _commit_observer.set(observer)
+    try:
+        yield
+    finally:
+        _commit_observer.reset(token)
+
+
+def notify_committed_events(run_id: str, events: tuple[RuntimeEvent, ...]) -> None:
+    observer = _commit_observer.get()
+    if observer is not None:
+        try:
+            observer(run_id, events)
+        except Exception:
+            # A post-commit projection must not change the committed outcome.
+            pass
+
 
 
 class SubscriptionHub:

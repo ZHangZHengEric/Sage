@@ -488,6 +488,30 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             return result
         return await asyncio.to_thread(read)
 
+    async def report_business_events(self, *, start, end, agent_id="", max_runs=10000, max_events=100000):
+        from heapq import nlargest
+        from sagents.v2.runtime.session.reporting import replay_session_views, run_id_range
+
+        lower, upper = run_id_range(start, end)
+
+        def candidates():
+            with self._index_lock:
+                runs = nlargest(
+                    max_runs + 1,
+                    ((sid, rid) for sid, summary in self._session_index.items()
+                     for rid in summary["run_ids"] if lower <= rid < upper),
+                    key=lambda item: item[1],
+                )
+                uncertain = bool(self._unreadable_snapshots or self._index_uncertain)
+            return runs, uncertain
+
+        runs, uncertain = await asyncio.to_thread(candidates)
+        report = await replay_session_views(
+            self, runs, start=start, end=end, agent_id=agent_id, max_runs=max_runs, max_events=max_events,
+        )
+        report.cohort_truncated |= uncertain
+        return report
+
     async def _run_metadata_batch(self, session_ids):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload
         from sagents.v2.runtime.session.plugins.filesystem.metadata import read_filesystem_metadata

@@ -41,6 +41,7 @@ def observed_model_registry(
                 async def session_id(run_id):
                     return (await store.get_run(run_id)).session_id
 
+                observation = providers.require_unique("observability.provider")
                 for key, value in values.items():
                     if key.capability != "model.provider":
                         continue
@@ -50,9 +51,10 @@ def observed_model_registry(
                         )
                     values[key] = RecordingModelProvider(
                         value,
-                        sink=providers.require_unique("observability.provider").diagnostics,
-                        trace_sink=providers.require_unique("observability.provider").traces,
-                        log_sink=providers.require_unique("observability.provider").logs,
+                        sink=observation.diagnostics,
+                        trace_sink=observation.traces,
+                        log_sink=observation.logs,
+                        performance=observation.performance,
                         session_id_resolver=session_id,
                         provider_metadata={
                             "agent_id": (context.agent_configuration or {}).get(

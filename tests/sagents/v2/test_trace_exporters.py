@@ -498,3 +498,26 @@ def test_slow_exporter_saturates_bounded_queue_without_blocking(monkeypatch):
     finally:
         release.set()
         sink.close()
+
+
+@pytest.mark.asyncio
+async def test_run_trace_uses_committed_output_without_reading_run_result(monkeypatch):
+    from tests.sagents.v2.test_agent_loop_matrix import CONTEXT, completed, setup_loop
+    from sagents.v2.contracts.run_state import RunState
+
+    sink, exporter = make_sink("langfuse", content_mode="raw")
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("trace output"),)),))
+    runtime, handle, loop, _ = await setup_loop(model, trace_sink=sink)
+    reads = 0
+
+    async def get_result(run_id):
+        nonlocal reads
+        reads += 1
+        raise AssertionError("unexpected Run result read")
+
+    monkeypatch.setattr(runtime, "get_run_result", get_result)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    root, = [span for span in exporter.get_finished_spans() if span.name == "agent.run"]
+    assert reads == 0
+    assert "trace output" in root.attributes["langfuse.observation.output"]

@@ -76,6 +76,7 @@ from sagents.v2.contracts.run_state import (
     SessionSnapshot,
     TERMINAL_RUN_STATES,
 )
+from sagents.v2.runtime.session.subscriptions import notify_committed_events
 from sagents.v2.contracts.session_commit import (
     ProposeSessionCommit,
     PublishSessionCommit,
@@ -2669,6 +2670,19 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             )
             return row.start_command if row is not None else None
 
+    async def report_business_events(self, *, start, end, agent_id="", max_runs=10000, max_events=100000):
+        from sagents.v2.runtime.session.reporting import replay_session_views
+
+        async with self._lock:
+            candidates = sorted(
+                ((row.session_id, row.run_id) for row in self._runs.values()
+                 if start <= row.created_at.timestamp() < end),
+                key=lambda item: item[1], reverse=True,
+            )
+        return await replay_session_views(
+            self, candidates, start=start, end=end, agent_id=agent_id, max_runs=max_runs, max_events=max_events,
+        )
+
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]:
         async with self._session_read(session_id):
             if session_id not in self._sessions:
@@ -4433,6 +4447,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         return active
 
     def _fanout_locked(self, run_id: str, events: tuple[RuntimeEvent, ...]) -> None:
+        notify_committed_events(run_id, events)
         for subscriber in tuple(self._subscribers.get(run_id, ())):
             if subscriber.closed:
                 continue

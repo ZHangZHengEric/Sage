@@ -269,6 +269,12 @@ class ServerHost:
             })
             self._application = await builder.build(runtime=runtime)
             self.observability = self._application.service("observability.provider")
+            store = self._application.service("session.store")
+            self.observability.business_report_reader = getattr(store, "report_business_events", None)
+            if not self.observability.performance_available:
+                from app.v2.server.observability.performance import DatabasePerformance
+
+                self.observability.install_performance(DatabasePerformance(self.database))
             old_logs = self.log_sink
             from app.v2.server.observability.logging import LoggingSettings, init_logging
             self.log_sink = init_logging(

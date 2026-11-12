@@ -63,6 +63,7 @@ class ModeAwareAgentLoopFactory:
         child_run_config_resolver: ChildRunConfigResolver | None = None,
         trace_sink=None,
         log_sink=None,
+        performance=None,
     ) -> None:
         self.runtime = runtime
         self.model_factory = model_factory
@@ -77,6 +78,7 @@ class ModeAwareAgentLoopFactory:
         self.fallback_invocation_mode = fallback_invocation_mode
         self.trace_sink = trace_sink
         self.log_sink = log_sink
+        self.performance = performance
         self._coordinators: dict[tuple[str, AgentMode], MultiAgentCoordinator] = {}
 
         async def build_child(descriptor, run_id, context):
@@ -150,10 +152,10 @@ class ModeAwareAgentLoopFactory:
             return loop
         engine_type = (
             ObservedRunDriver
-            if self.trace_sink is not None or self.log_sink is not None
+            if self.trace_sink is not None or self.log_sink is not None or self.performance is not None
             else AgentLoopEngine
         )
-        observation: dict[str, Any] = ({"trace_sink": self.trace_sink, "log_sink": self.log_sink}
+        observation: dict[str, Any] = ({"trace_sink": self.trace_sink, "log_sink": self.log_sink, "performance": self.performance}
             if engine_type is ObservedRunDriver else {})
         return engine_type(
             runtime=self.runtime,

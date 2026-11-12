@@ -152,21 +152,27 @@ def report(
     timezone_name="Asia/Shanghai",
     max_runs=10000,
     max_timing_rows=100000,
+    business=None,
 ):
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)) as db:
         db.row_factory = sqlite3.Row
-        candidates = list(
-            db.execute(
-                """SELECT run_id, MIN(CASE WHEN event='server.run.performance.accepted' THEN started_at ELSE at END) AS cohort FROM performance_events
-            WHERE ((event='agent.run.started' AND at>=? AND at<?)
-            OR (event='server.run.performance.accepted' AND started_at>=? AND started_at<?))
-            AND (?='' OR agent_id=?)
-            GROUP BY run_id ORDER BY cohort DESC LIMIT ?""",
-                (start, end, start, end, agent_id, agent_id, max_runs + 1),
+        if business is not None:
+            run_ids = [rid for _, rid in business.runs]
+            truncated = len(run_ids) > max_runs
+            ids = run_ids[:max_runs]
+        else:
+            candidates = list(
+                db.execute(
+                    """SELECT run_id, MIN(CASE WHEN event='server.run.performance.accepted' THEN started_at ELSE at END) AS cohort FROM performance_events
+                WHERE ((event='agent.run.started' AND at>=? AND at<?)
+                OR (event='server.run.performance.accepted' AND started_at>=? AND started_at<?))
+                AND (?='' OR agent_id=?)
+                GROUP BY run_id ORDER BY cohort DESC LIMIT ?""",
+                    (start, end, start, end, agent_id, agent_id, max_runs + 1),
+                )
             )
-        )
-        truncated = len(candidates) > max_runs
-        ids = [r["run_id"] for r in candidates[:max_runs]]
+            truncated = len(candidates) > max_runs
+            ids = [r["run_id"] for r in candidates[:max_runs]]
         events = defaultdict(list)
         models = defaultdict(list)
         timing_rows = 0
@@ -203,6 +209,7 @@ def report(
         bucket=bucket,
         timezone_name=timezone_name,
         truncated=truncated,
+        business=business,
     )
 
 
