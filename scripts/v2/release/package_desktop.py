@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 from pathlib import Path
 import shutil
@@ -12,6 +13,25 @@ from urllib.request import urlretrieve
 
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = '2.2.0'
+
+
+def build_windows_installer(nsis: str, script: Path, bundle: Path) -> None:
+    """Give NSIS a short source path even for deeply nested runtime assets."""
+    drives = ctypes.windll.kernel32.GetLogicalDrives()
+    for letter in reversed("DEFGHIJKLMNOPQRSTUVWXYZ"):
+        if not drives & (1 << (ord(letter) - ord("A"))):
+            drive = f"{letter}:"
+            break
+    else:
+        raise RuntimeError("No drive letter is available for Windows installer staging")
+    subprocess.run(["subst.exe", drive, str(bundle)], check=True)
+    try:
+        subprocess.run(
+            [nsis, f"/DSAGE_BUNDLE_DRIVE={drive}", str(script)],
+            check=True,
+        )
+    finally:
+        subprocess.run(["subst.exe", drive, "/D"], check=True)
 
 
 def main() -> None:
@@ -99,7 +119,7 @@ Abort
 webview_ready:
 SetRegView 32
 SetOutPath "$INSTDIR"
-File /r "{bundle}\\*"
+File /r "${{SAGE_BUNDLE_DRIVE}}\\*"
 WriteUninstaller "$INSTDIR\\Uninstall.exe"
 CreateShortcut "$DESKTOP\\Sage.lnk" "$INSTDIR\\sage_desktop_v2.exe"
 CreateShortcut "$SMPROGRAMS\\Sage.lnk" "$INSTDIR\\sage_desktop_v2.exe"
@@ -114,7 +134,7 @@ RMDir /r "$INSTDIR"
 DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SageV2"
 SectionEnd
 ''')
-            subprocess.run([nsis, str(script)], check=True)
+            build_windows_installer(nsis, script, bundle)
         else:
             subprocess.run(['tar', '-czf', str(output / f'{name}.tar.gz'), '-C', str(relocated), 'Sage'], check=True)
             deb = Path(temp) / 'deb'
