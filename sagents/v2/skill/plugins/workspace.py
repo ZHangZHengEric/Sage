@@ -17,15 +17,19 @@ import json
 import posixpath
 from weakref import WeakValueDictionary
 
-from sagents.v2.contracts.errors import ErrorCategory, errors_before_side_effect
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error, errors_before_side_effect
 from sagents.v2.runtime.execution.sandbox import FileOperation, OperationIntent
+from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.skill.bundles import files_digest, skill_error
 from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor, LoadedSkill
 from sagents.v2.skill.plugins._shared.workspace import SandboxSkillWorkspaceBase
 
 
+_LOG = get_logger(__name__)
+
 _locks: WeakValueDictionary = WeakValueDictionary()
 _users: dict[tuple, dict[object, str]] = {}
+_lease_releases: WeakValueDictionary[tuple, asyncio.Event] = WeakValueDictionary()
 
 
 def _hashes(files):
@@ -63,12 +67,25 @@ class _StableSkillWorkspace(SandboxSkillWorkspaceBase, ABC):
     def _lock_for(self, destination):
         return _locks.setdefault(self._key(destination), asyncio.Lock())
 
-    def _claim(self, destination, content_hash, *, changing=False):
+    def _claim(self, destination, content_hash, *, changing=False, run_id=None, state=None):
         owners = _users.get(self._key(destination), {})
-        if any(
-            owner is not self._identity and (changing or value != content_hash)
-            for owner, value in owners.items()
-        ):
+        conflicts = {
+            value for owner, value in owners.items()
+            if owner is not self._identity and (changing or value != content_hash)
+        }
+        if conflicts:
+            _LOG.info(
+                "skill.workspace.conflict", "Skill 工作区同步遇到占用",
+                run_id=run_id,
+                attributes={
+                    "skill_name": posixpath.basename(destination),
+                    "requested_content_hash": content_hash,
+                    "active_content_hashes": sorted(conflicts),
+                    "installed_content_hash": state.get("content_hash") if state else None,
+                    "sync_pending": state is not None and "pending_files" in state,
+                    "files_need_sync": changing,
+                },
+            )
             with errors_before_side_effect("skill.workspace_in_use"):
                 raise skill_error(
                     "skill.workspace_in_use",
@@ -84,6 +101,9 @@ class _StableSkillWorkspace(SandboxSkillWorkspaceBase, ABC):
             owners.pop(self._identity, None)
             if not owners:
                 _users.pop(key, None)
+            release = _lease_releases.pop(key, None)
+            if release is not None:
+                release.set()
         self._leased.clear()
 
     def _check(self, bundle):
@@ -247,6 +267,7 @@ def _parents(path):
 
 class AutoSyncSkillWorkspace(_StableSkillWorkspace):
     manager_authoritative = True
+    _lease_wait_seconds = 1.0
     plugin_id = "sage.skill.workspace.auto-sync"
     name = "Manager-authoritative Skill synchronization"
     description = "Archive Agent edits, then synchronize the stable Skill directory to the manager's selected contents."
@@ -296,6 +317,49 @@ class AutoSyncSkillWorkspace(_StableSkillWorkspace):
                     "Auto-sync requires a separate manager source; the source and Agent working directory are the same",
                     ErrorCategory.VALIDATION,
                 )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._lease_wait_seconds
+        key = self._key(destination)
+        while True:
+            release = _lease_releases.setdefault(key, asyncio.Event())
+            try:
+                return await self._materialize_once(bundle, run_id, destination)
+            except SageV2Error as exc:
+                if exc.info.code != "skill.workspace_in_use":
+                    raise
+                # The directory lock is released before waiting. Re-read the
+                # files and sync state after a lease is released.
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        await release.wait()
+                except TimeoutError:
+                    isolated = self._isolated_destination(bundle, run_id, destination)
+                    _LOG.info(
+                        "skill.workspace.isolated", "共享 Skill 工作区仍被占用，使用任务副本",
+                        run_id=run_id, attributes={"skill_name": bundle.descriptor.name},
+                    )
+                    return await self._materialize_once(bundle, run_id, isolated)
+
+    def _isolated_destination(self, bundle, run_id, destination):
+        scope = hashlib.sha256(
+            f"{run_id}\0{destination}\0{bundle.content_hash}".encode("utf-8")
+        ).hexdigest()
+        skill_root = posixpath.dirname(destination)
+        return posixpath.join(
+            posixpath.dirname(skill_root), ".sage-skill-scopes", scope,
+            posixpath.basename(skill_root), posixpath.basename(destination),
+        )
+
+    async def reattach(self, loaded, bundle, *, run_id, destination):
+        destination = self.sandbox.filesystem.normalize_path(destination)
+        isolated = self._isolated_destination(bundle, run_id, destination)
+        if loaded.workspace_path == isolated:
+            destination = isolated
+        return await super().reattach(
+            loaded, bundle, run_id=run_id, destination=destination,
+        )
+
+    async def _materialize_once(self, bundle, run_id, destination):
         async with self._lock_for(destination):
             actual, directories = await self._tree(destination, run_id)
             current = _hashes(actual)
@@ -313,6 +377,7 @@ class AutoSyncSkillWorkspace(_StableSkillWorkspace):
             shared = self._claim(
                 destination, files_digest(bundle.files),
                 changing=current != desired and not reusable,
+                run_id=run_id, state=state,
             )
             if shared and reusable:
                 return destination

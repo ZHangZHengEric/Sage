@@ -283,22 +283,55 @@ async def test_fixed_copy_keeps_initial_version_and_agent_edits(targets):
 
 
 @pytest.mark.asyncio
-async def test_real_shared_workspaces_allow_same_version_and_block_live_replacement(
-    targets,
-):
+async def test_shared_workspace_waits_for_release_before_replacing(targets, monkeypatch):
     first, second = await targets(disk=True), await targets(disk=True, run_id="run2")
     path = "/workspace/skills/demo"
-    await asyncio.gather(
-        first.materialize(bundle(), run_id="run1", destination=path),
-        second.materialize(bundle(), run_id="run2", destination=path),
-    )
-    with pytest.raises(SageV2Error) as caught:
-        await second.materialize(bundle("v2"), run_id="run2", destination=path)
-    assert caught.value.info.code == "skill.workspace_in_use"
-    assert await first._read(path + "/SKILL.md", "run1") == b"v1"
-    await first.close()
-    await second.materialize(bundle("v2"), run_id="run2", destination=path)
-    assert await second._read(path + "/SKILL.md", "run2") == b"v2"
+    shared = await first.materialize(bundle(), run_id="run1", destination=path)
+    attempted = asyncio.Event()
+    claim = second._claim
+
+    def signal_claim(*args, **kwargs):
+        attempted.set()
+        return claim(*args, **kwargs)
+
+    monkeypatch.setattr(second, "_claim", signal_claim)
+    replacement = asyncio.create_task(second.materialize(bundle("v2"), run_id="run2", destination=path))
+    try:
+        await asyncio.wait_for(attempted.wait(), timeout=5)
+        assert not replacement.done()
+        assert await first._read(path + "/SKILL.md", "run1") == b"v1"
+        await first.close()
+        assert await replacement == shared
+        assert await second._read(path + "/SKILL.md", "run2") == b"v2"
+    finally:
+        if not replacement.done():
+            replacement.cancel()
+            await asyncio.gather(replacement, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_shared_workspace_loads_conflicting_version_into_run_copy(targets, monkeypatch):
+    first, second = await targets(disk=True), await targets(disk=True, run_id="run2")
+    path = "/workspace/skills/demo"
+    shared = await first.materialize(bundle(), run_id="run1", destination=path)
+    assert await second.materialize(bundle(), run_id="run2", destination=path) == shared
+    monkeypatch.setattr(second, "_lease_wait_seconds", 0)
+    manager = MemorySkillRepository()
+    try:
+        await manager.publish(bundle("v2"))
+        active = loader(manager, second)
+        loaded = await active.load("demo", run_id="run2")
+        assert loaded.workspace_path != shared
+        assert await first._read(path + "/SKILL.md", "run1") == b"v1"
+        assert await second._read(loaded.workspace_path + "/SKILL.md", "run2") == b"v2"
+
+        snapshot = await active.snapshot_run("run2")
+        await second.close()
+        restored = loader(manager, await targets(disk=True, run_id="run2"))
+        await restored.restore_run("run2", snapshot)
+        assert (await restored.loaded(run_id="run2"))[0].workspace_path == loaded.workspace_path
+    finally:
+        await manager.close()
 
 
 @pytest.mark.asyncio
@@ -313,7 +346,7 @@ async def test_independent_sandboxes_do_not_share_workspace_leases(targets):
 
 
 @pytest.mark.asyncio
-async def test_shared_skill_reuses_agent_work_until_other_users_release(targets):
+async def test_shared_skill_reuses_agent_work_until_other_users_release(targets, monkeypatch):
     first = await targets(disk=True)
     second = await targets(disk=True, run_id="run2")
     third = await targets(disk=True, run_id="run3")
@@ -329,12 +362,12 @@ async def test_shared_skill_reuses_agent_work_until_other_users_release(targets)
     await first.materialize(bundle(), run_id="run1", destination=path)
     assert await second._read(path + "/SKILL.md", "run2") == b"team edit"
     assert await third._read(path + "/result.txt", "run3") == b"team result"
-    with pytest.raises(SageV2Error, match="Another active Run"):
-        await second.materialize(bundle("v2"), run_id="run2", destination=path)
+    monkeypatch.setattr(second, "_lease_wait_seconds", 0)
+    isolated = await second.materialize(bundle("v2"), run_id="run2", destination=path)
     await first.close()
     # One member closing must not release another member's claim.
-    with pytest.raises(SageV2Error, match="Another active Run"):
-        await second.materialize(bundle("v2"), run_id="run2", destination=path)
+    assert await second.materialize(bundle("v2"), run_id="run2", destination=path) == isolated
+    assert await third._read(path + "/result.txt", "run3") == b"team result"
     await third.close()
     await second.materialize(bundle(), run_id="run2", destination=path)
     assert (await second._tree(path, "run2"))[0] == bundle().files
