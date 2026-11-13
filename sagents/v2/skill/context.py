@@ -21,11 +21,12 @@ class AvailableSkillsContextProvider:
 
     def __init__(
         self, catalog: SkillCatalog, *, default_visible_skills: tuple[str, ...] | None = None,
-        search_enabled: bool = False,
+        search_enabled: bool = False, load_by_reference: bool = False,
     ) -> None:
         self.catalog = catalog
         self.default_visible_skills = default_visible_skills
         self.search_enabled = search_enabled
+        self.load_by_reference = load_by_reference
 
     async def segments(
         self, command: StartRun, *, run_id: str | None = None
@@ -53,11 +54,14 @@ class AvailableSkillsContextProvider:
                     "</skill>",
                 )
             )
+        usage = "skills"
+        if search_enabled:
+            usage = "skill_search_by_reference" if self.load_by_reference else "skill_search"
         lines.extend(
             (
                 "</available_skills>",
                 "<skill_usage>",
-                prompt_text("skill_search" if search_enabled else "skills", run_prompt_language(command.config.metadata)),
+                prompt_text(usage, run_prompt_language(command.config.metadata)),
                 "</skill_usage>",
             )
         )

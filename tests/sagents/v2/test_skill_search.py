@@ -137,6 +137,7 @@ async def test_package_search_loads_only_authorized_skill(tmp_path, attachment):
         ]
         requests = [request for _, request in models.seen]
         first_prompt = prompt(requests[0])
+        assert "Call load_skill with the exact Skill name before following it." in first_prompt
         assert "<skill_name>visible-guide</skill_name>" in first_prompt
         assert f"<skill_name>{target}</skill_name>" not in first_prompt
         assert "search_skills" in {tool.name for tool in requests[0].tools}

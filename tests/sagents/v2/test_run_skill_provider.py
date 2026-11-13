@@ -66,6 +66,8 @@ async def test_run_provider_search_and_load_without_package_skills(tmp_path):
         state = [event.data.state for event in events if event.type == "skill.state"][-1]
         assert state["selected_references"] == [{"skill_id": "report", "version_id": "v1"}]
         assert "AUTHORIZED REPORT" not in str(state)
+        first_prompt = prompt(models.seen[0][1])
+        assert "Call load_skill with the skill_id and version_id from the search result" in first_prompt
         assert "AUTHORIZED REPORT v1" in prompt(models.seen[-1][1])
         assert "AUTHORIZED REPORT v2" not in prompt(models.seen[-1][1])
     finally:

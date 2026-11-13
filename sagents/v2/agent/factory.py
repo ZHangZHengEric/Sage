@@ -393,6 +393,7 @@ class AgentCompositionFactory:
                         skill_loader.catalog,
                         default_visible_skills=agent.default_visible_skills,
                         search_enabled="search_skills" in selected_tools,
+                        load_by_reference=getattr(skill_loader, "run_provider", None) is not None,
                     ),
                     ActiveSkillsContextProvider(skill_loader),
                 )

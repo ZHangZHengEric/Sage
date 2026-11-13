@@ -258,6 +258,7 @@ class AgentLoopEngine:
                     default_visible_skills=skill_context.default_visible_skills
                     if skill_context is not None else None,
                     search_enabled=skill_context is not None and skill_context.search_enabled,
+                    load_by_reference=getattr(skill_loader, "run_provider", None) is not None,
                 ),
                 ActiveSkillsContextProvider(skill_loader),
                 self_configuration,
