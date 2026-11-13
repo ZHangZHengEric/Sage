@@ -43,7 +43,9 @@ class RuntimeHost {
        _shutdownGracePeriod = terminationGracePeriod,
        _registryReadyAttempts = sidecarReadyAttempts,
        _registryPollInterval = sidecarPollInterval,
-       _clientId = clientId ?? _newClientId();
+       _clientId = clientId ?? _newClientId() {
+    this.api.desktopClientId = _clientId;
+  }
 
   final V2ApiClient api;
   final File? _sidecarRegistryFileOverride;
@@ -59,6 +61,7 @@ class RuntimeHost {
   final Duration _registryPollInterval;
   final Duration _leaseHeartbeatInterval;
   final String _clientId;
+  String get clientId => _clientId;
   Process? _process;
   int? _sidecarPid;
   bool _ownsSidecar = false;
@@ -424,8 +427,8 @@ class RuntimeHost {
   }
 
   Future<void> _attachClientLease() async {
-    if (_leaseAttached) return;
     await api.attachRuntimeClient(_clientId);
+    if (_leaseAttached) return;
     _leaseAttached = true;
     _leaseHeartbeat?.cancel();
     _leaseHeartbeat = Timer.periodic(_leaseHeartbeatInterval, (_) {

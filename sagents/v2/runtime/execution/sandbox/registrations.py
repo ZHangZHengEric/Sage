@@ -160,7 +160,7 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
                     "properties": {
                         "mode": {
                             "type": "string",
-                            "enum": ["none", "unrestricted", "allowlist", "proxy"],
+                            "enum": ["none", "unrestricted", "allowlist", "proxy", "http_requests"],
                         },
                         "deny_private_networks": {"type": "boolean"},
                         "allowed_hosts": {"type": "array", "items": {"type": "string"}},

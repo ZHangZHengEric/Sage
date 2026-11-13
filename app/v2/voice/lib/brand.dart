@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 const sageVoiceName = 'Sage Voice';
 const sageLogoAsset = 'assets/sage_logo.png';
+const voiceTitleBarHeight = 32.0;
 
 class SageBrand extends StatelessWidget {
   const SageBrand({super.key, this.size = 25});

@@ -55,6 +55,7 @@ from app.v2.desktop.backend.rsi import DesktopRsiMixin
 from app.v2.desktop.backend.catalog_service import DesktopCatalogServiceMixin
 from app.v2.desktop.backend.observability import create_desktop_observability
 from app.v2.desktop.backend.studio import DesktopStudioMixin, StudioStore
+from app.v2.desktop.backend.desktop_plugins import DesktopPluginStore
 from app.v2.desktop.backend.openui import OpenUiParser, OpenUiStore, OpenUiProjector
 from app.v2.desktop.backend.schemas import (
     AgentCreate as AgentCreate,
@@ -150,6 +151,7 @@ class DesktopV2Service(
         self.log_sink = self.observability.logs
         self.diagnostics = self.observability.diagnostics
         self.logger = StructuredLogger(self.log_sink, "desktop.service")
+        self.desktop_plugins = DesktopPluginStore(self.runtime_root / "desktop-plugins.sqlite3", self.logger)
         self.logger.info(
             "service.initializing",
             "Desktop v2 service is initializing",

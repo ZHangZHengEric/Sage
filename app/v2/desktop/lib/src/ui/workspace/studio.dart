@@ -397,9 +397,9 @@ class _StudioThreadState extends State<_StudioThread> {
                           child: _InteractionCard(
                             key: ValueKey(interaction.id),
                             interaction: interaction,
-                            onOpenPlan: (content) => _PlanPreviewScope.maybeOf(
+                            onOpenPlan: (content) => _WorkspacePreviewScope.maybeOf(
                               context,
-                            )?.call(content),
+                            )?.onOpen(content),
                             onReply:
                                 (
                                   decision, {

@@ -617,7 +617,7 @@ class LocalResourceBoundary:
                 )
                 launch_fds.append(
                     _seccomp_filter(
-                        network_enabled=spec.network.mode != NetworkMode.NONE,
+                        network_enabled=spec.network.mode not in {NetworkMode.NONE, NetworkMode.HTTP_REQUESTS},
                         proxy_bridge=self.network_broker is not None,
                     )
                 )
@@ -667,7 +667,7 @@ class LocalResourceBoundary:
                     str(self.network_broker.socket_path),
                     "/sage-egress.sock",
                 ]
-            if spec.network.mode != NetworkMode.NONE:
+            if spec.network.mode not in {NetworkMode.NONE, NetworkMode.HTTP_REQUESTS}:
                 for path in (
                     "/etc/resolv.conf",
                     "/etc/hosts",

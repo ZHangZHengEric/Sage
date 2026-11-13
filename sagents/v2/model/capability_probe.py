@@ -14,6 +14,8 @@ import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from sagents.v2.contracts.common import new_id
@@ -34,6 +36,26 @@ from sagents.v2.model.capability_contracts import (
     ProbeName,
 )
 from sagents.v2.model.provider import ModelProvider
+
+
+_probe_progress: ContextVar[Callable[[str, int, int], None] | None] = ContextVar(
+    "model_probe_progress", default=None
+)
+
+
+@contextmanager
+def model_probe_progress(callback: Callable[[str, int, int], None]):
+    token = _probe_progress.set(callback)
+    try:
+        yield
+    finally:
+        _probe_progress.reset(token)
+
+
+def report_model_probe_progress(stage: str, completed: int = 0, total: int = 0):
+    callback = _probe_progress.get()
+    if callback is not None:
+        callback(stage, completed, total)
 
 
 _PROBE_IMAGE = (
@@ -72,6 +94,7 @@ async def negotiate_model_output_limit(
 ) -> tuple[int, ModelCapabilityProbeOutcome]:
     """Find one accepted output budget without changing wire protocols."""
 
+    report_model_probe_progress("connection")
     candidates = (request.max_output_tokens,) + tuple(
         value
         for value in request.output_token_fallbacks
@@ -113,6 +136,7 @@ async def probe_model_reasoning_controls(
 ) -> tuple[ModelCapabilityProbeOutcome, dict[str, Any]]:
     """Probe plugin-declared reasoning variants and select one exact strategy."""
 
+    report_model_probe_progress("reasoning")
     prompt = (
         "Think carefully about 17 multiplied by 19, then reply with the number only."
     )
@@ -160,10 +184,14 @@ async def probe_model_reasoning_controls(
                     break
 
     effort_slots = asyncio.Semaphore(4)
+    total_efforts = len(effort_strategies) * len(request.reasoning_efforts)
+    completed_efforts = 0
+    report_model_probe_progress("reasoning", completed_efforts, total_efforts)
 
     async def probe_effort(
         effort_strategy: str, effort: str
     ) -> tuple[bool, bool, dict[str, Any]]:
+        nonlocal completed_efforts
         # Keep text/tool dependencies and provider state within one combination.
         async with effort_slots:
             candidate = provider_factory(effort_strategy, effort)
@@ -195,6 +223,8 @@ async def probe_model_reasoning_controls(
                 not report.supports_tools
                 or (tool_outcome is not None and tool_outcome.supported)
             )
+            completed_efforts += 1
+            report_model_probe_progress("reasoning", completed_efforts, total_efforts)
             return text_supported, runtime_supported, values
 
     # TaskGroup drains sibling probes on cancellation or unexpected failure.
@@ -321,8 +351,18 @@ async def probe_model_capabilities(
     """
 
     run_id = new_id("model_capability_probe")
+    completed = 0
+    report_model_probe_progress("capabilities", completed, 5)
+
+    async def run_check(name, probe, *, timeout_seconds):
+        nonlocal completed
+        outcome = await _bounded_probe(name, probe, timeout_seconds=timeout_seconds)
+        completed += 1
+        report_model_probe_progress("capabilities", completed, 5)
+        return outcome
+
     executable = await asyncio.gather(
-        _bounded_probe(
+        run_check(
             "connection",
             _probe_connection(
                 provider,
@@ -332,7 +372,7 @@ async def probe_model_capabilities(
             ),
             timeout_seconds=timeout_seconds,
         ),
-        _bounded_probe(
+        run_check(
             "multimodal",
             _probe_multimodal(
                 provider,
@@ -342,7 +382,7 @@ async def probe_model_capabilities(
             ),
             timeout_seconds=timeout_seconds,
         ),
-        _bounded_probe(
+        run_check(
             "structured_output",
             _probe_structured_output(
                 provider,
@@ -352,7 +392,7 @@ async def probe_model_capabilities(
             ),
             timeout_seconds=timeout_seconds,
         ),
-        _bounded_probe(
+        run_check(
             "json_object",
             _probe_json_object(
                 provider,
@@ -362,7 +402,7 @@ async def probe_model_capabilities(
             ),
             timeout_seconds=timeout_seconds,
         ),
-        _bounded_probe(
+        run_check(
             "tool_calling",
             _probe_tool_calling(
                 provider,

@@ -59,6 +59,9 @@ class _VoicePageState extends State<VoicePage>
         glassColor: active ? colors.primary : colors.surfaceContainer,
         blur: 2,
         thickness: 4,
+        lightIntensity: 0,
+        glowIntensity: 0,
+        shadowElevation: 0,
       ),
       child: IconButton(
         tooltip: tooltip,
@@ -92,7 +95,10 @@ class _VoicePageState extends State<VoicePage>
       enabled: !reduceMotion,
       child: Column(
         children: [
-          const SizedBox(height: 36, child: Center(child: SageBrand(size: 16))),
+          const SizedBox(
+            height: voiceTitleBarHeight,
+            child: Center(child: SageBrand(size: 16)),
+          ),
           Expanded(
             child: Stack(
               fit: StackFit.expand,

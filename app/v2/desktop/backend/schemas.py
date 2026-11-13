@@ -206,6 +206,7 @@ class OpenUiAction(BaseModel):
 
 
 class DesktopRunRequest(BaseModel):
+    desktop_client_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,96}$")
     ui_preference: Literal["auto", "interactive"] = "auto"
     openui_action: OpenUiAction | None = None
     studio_id: str | None = None

@@ -21,6 +21,8 @@ from sagents.v2.runtime.execution.sandbox import (
     LocalWorkspaceSandboxProvider,
     NetworkMode,
     NetworkPolicy,
+    NetworkRequest,
+    NetworkResult,
     OperationIntent,
     ProcessPolicy,
     ProcessRequest,
@@ -960,10 +962,51 @@ async def test_local_process_may_close_stdin_before_consuming_input(tmp_path):
         await handle.destroy()
 
 
+@pytest.mark.asyncio
+async def test_http_network_mode_requires_matching_single_use_grant(tmp_path, monkeypatch):
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support import network
+
+    async def respond(request, policy):
+        assert policy.deny_private_networks
+        return NetworkResult(
+            request_id="request_1", status_code=200, final_url=request.url, body=b"ok"
+        )
+
+    monkeypatch.setattr(network, "request_http", respond)
+    issuer, handle = await provision(
+        tmp_path,
+        process_enabled=False,
+        network=NetworkPolicy(mode=NetworkMode.HTTP_REQUESTS),
+    )
+    url = "https://example.com/one"
+    request = NetworkRequest(url=url)
+    intent, grant = authorization(
+        issuer,
+        handle,
+        "network.request",
+        network_host="example.com",
+        network_port=443,
+        metadata={"method": "GET", "url": url},
+    )
+    try:
+        with pytest.raises(PermissionError, match="does not match"):
+            await handle.network.request(
+                NetworkRequest(url="https://example.com/two"), intent=intent, grant=grant
+            )
+        response = await handle.network.request(request, intent=intent, grant=grant)
+        assert response.body == b"ok"
+        with pytest.raises(PermissionError, match="already used"):
+            await handle.network.request(request, intent=intent, grant=grant)
+    finally:
+        await handle.destroy()
+
+
 @_SKIP_SANDBOX_PROCESS_IN_CI
 @pytest.mark.asyncio
-@pytest.mark.parametrize("enabled", [False, True])
-async def test_shell_network_mode_controls_real_connections(tmp_path, enabled):
+@pytest.mark.parametrize(
+    "mode", [NetworkMode.NONE, NetworkMode.HTTP_REQUESTS, NetworkMode.UNRESTRICTED]
+)
+async def test_shell_network_mode_controls_real_connections(tmp_path, mode):
     async def respond(reader, writer):
         try:
             await reader.read(1)
@@ -979,10 +1022,8 @@ async def test_shell_network_mode_controls_real_connections(tmp_path, enabled):
         issuer, handle = await provision(
             tmp_path,
             network=NetworkPolicy(
-                mode=NetworkMode.UNRESTRICTED, deny_private_networks=False
-            )
-            if enabled
-            else NetworkPolicy(),
+                mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED
+            ),
             allowed_executables=("python3",),
             max_output_bytes=4096,
             max_wall_time_seconds=10,
@@ -1004,7 +1045,7 @@ async def test_shell_network_mode_controls_real_connections(tmp_path, enabled):
             result = await handle.process.run(
                 ProcessRequest(argv=argv, cwd="/workspace"), intent=intent, grant=grant
             )
-            if enabled:
+            if mode == NetworkMode.UNRESTRICTED:
                 assert result.exit_code == 0, result.stderr
                 assert b"network-ok" in result.stdout
             else:

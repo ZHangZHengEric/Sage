@@ -23,7 +23,7 @@ from .voice_pipeline.observability import (
 )
 from .voice_pipeline.tts import QwenAudioTTS, VolcengineTTS
 from .voice_pipeline.observability.events import ProgressSpeechEvent
-from .voice_pipeline.tool_speech import default_tool_speech_settings
+from .tools import voice_tool_catalog
 from .voice_pipeline.turn_detection import SmartTurnV3
 from .voice_pipeline.vad import AdaptiveInputLevelGate, SileroVAD
 from pydantic import ValidationError
@@ -169,7 +169,10 @@ class VoiceRuntime:
                     self.agent = None
                 save_config(self.path, config)
                 self.config = config
-                return {"preserved_conversation": preserves_agent}
+                return {
+                    "preserved_conversation": preserves_agent,
+                    "settings": config.fields(),
+                }
             case "start":
                 if self.config is None:
                     raise ValueError("请先配置模型和语音服务。")
@@ -216,7 +219,7 @@ async def serve(path, root, emit):
     emit(
         "ready",
         settings=runtime.config.fields() if runtime.config else None,
-        tool_speech_defaults=default_tool_speech_settings(),
+        tools=voice_tool_catalog(),
     )
     reader = asyncio.StreamReader(limit=128 * 1024)
     pipe, _ = await asyncio.get_running_loop().connect_read_pipe(

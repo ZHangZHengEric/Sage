@@ -41,6 +41,7 @@ from app.v2.desktop.backend.schemas import (
     RunMessageContent,
 )
 from app.v2.desktop.backend.service import DesktopV2Service
+from app.v2.desktop.backend.desktop_plugin_api import plugin_router
 from app.v2.desktop.backend.studio import StudioSyncRequest
 from app.v2.desktop.backend.anytool import DesktopV2AnyToolApp
 from app.v2.desktop.backend.runtime_protocol import (
@@ -132,6 +133,43 @@ async def _safe(call):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _stream_model_probe(run):
+    from sagents.v2.model.capability_probe import model_probe_progress
+
+    async def frames():
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        def progress(stage, completed, total):
+            queue.put_nowait({
+                "kind": "progress", "stage": stage,
+                "completed": completed, "total": total,
+            })
+
+        async def execute():
+            try:
+                progress("connection", 0, 0)
+                with model_probe_progress(progress):
+                    result = await _safe(run())
+                queue.put_nowait({"kind": "result", "data": result})
+            except HTTPException as exc:
+                queue.put_nowait({
+                    "kind": "error", "status": exc.status_code, "detail": exc.detail,
+                })
+            finally:
+                queue.put_nowait(None)
+
+        task = asyncio.create_task(execute())
+        try:
+            while (frame := await queue.get()) is not None:
+                yield json.dumps(frame) + "\n"
+            await task
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    return StreamingResponse(frames(), media_type="application/x-ndjson")
+
+
 def create_app(
     *,
     service: DesktopV2Service | None = None,
@@ -197,7 +235,7 @@ def create_app(
 
     app = FastAPI(
         title="Sage Desktop v2",
-        version="2.1.1",
+        version="2.2.0",
         lifespan=lifespan,
     )
     app.state.v2_service = runtime_service
@@ -643,8 +681,13 @@ def create_app(
 
     @app.post("/api/v2/model-providers/verify-capabilities")
     async def verify_new_model_provider_capabilities(
-        value: ModelProviderCreate, request: Request
+        value: ModelProviderCreate, request: Request, stream: bool = False
     ):
+        user_id = get_desktop_user_id(request)
+        if stream:
+            return _stream_model_probe(
+                lambda: runtime_service.verify_model_provider_capabilities(value, user_id)
+            )
         return _success(
             await _safe(
                 runtime_service.verify_model_provider_capabilities(
@@ -680,8 +723,16 @@ def create_app(
 
     @app.post("/api/v2/model-providers/{provider_id}/verify-capabilities")
     async def verify_existing_model_provider_capabilities(
-        provider_id: str, value: ModelProviderPatch, request: Request
+        provider_id: str, value: ModelProviderPatch, request: Request,
+        stream: bool = False,
     ):
+        user_id = get_desktop_user_id(request)
+        if stream:
+            return _stream_model_probe(
+                lambda: runtime_service.verify_model_provider_capabilities(
+                    value, user_id, provider_id=provider_id
+                )
+            )
         return _success(
             await _safe(
                 runtime_service.verify_model_provider_capabilities(
@@ -891,6 +942,9 @@ def create_app(
         terminal_session(session_id, request)
         await _safe(terminals.close_session(session_id, get_desktop_user_id(request)))
         return _success({"session_id": session_id})
+
+    if hasattr(runtime_service, "desktop_plugins"):
+        app.include_router(plugin_router(runtime_service.desktop_plugins, get_desktop_user_id))
 
     @app.post("/api/v2/runs/stream")
     async def run_stream(body: DesktopRunRequest, request: Request):

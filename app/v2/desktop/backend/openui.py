@@ -142,14 +142,17 @@ def node_executable() -> str:
 class OpenUiParser:
     """One bounded local parser process; serial IPC prevents crossed responses."""
 
-    def __init__(self):
+    def __init__(self, *, idle_timeout: float = 30):
         self.process = None
         self.lock = asyncio.Lock()
+        self._idle_timeout = idle_timeout
+        self._idle_shutdown: asyncio.Task[None] | None = None
 
     async def parse(self, code: str, *, complete: bool, stream_id: str = "default"):
         if not code.strip() or len(code.encode()) > 65536:
             raise ValueError("OpenUI code must contain 1–65536 UTF-8 bytes")
         async with self.lock:
+            self._cancel_idle_shutdown()
             if self.process is None or self.process.returncode is not None:
                 self.process = await asyncio.create_subprocess_exec(
                     node_executable(),
@@ -187,15 +190,39 @@ class OpenUiParser:
             except ValueError:
                 raise
             except BaseException:
-                await self.close()
+                await self._stop_process()
                 raise
+            finally:
+                if self.process is not None:
+                    self._idle_shutdown = asyncio.create_task(self._stop_when_idle())
+
+    def _cancel_idle_shutdown(self) -> None:
+        if self._idle_shutdown is not None:
+            self._idle_shutdown.cancel()
+            self._idle_shutdown = None
+
+    async def _stop_when_idle(self) -> None:
+        await asyncio.sleep(self._idle_timeout)
+        async with self.lock:
+            self._idle_shutdown = None
+            await self._stop_process()
+
+    async def _stop_process(self) -> None:
+        process = self.process
+        if process is None:
+            return
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        await process.wait()
+        self.process = None
 
     async def close(self):
-        if self.process is not None:
-            if self.process.returncode is None:
-                self.process.kill()
-            await self.process.wait()
-            self.process = None
+        async with self.lock:
+            self._cancel_idle_shutdown()
+            await self._stop_process()
 
 
 def openui_blocks(text):
@@ -610,11 +637,10 @@ class OpenUiStore:
 
 class OpenUiContextProvider:
     async def segments(self, command, *, run_id=None):
-        interactive = command.config.metadata.get("ui_preference") == "interactive"
+        if command.config.metadata.get("ui_preference") != "interactive":
+            return ()
         routing = (
             "The user enabled Prefer interactive UI for this chat. Prefer native UI for structured answers, comparisons, dashboards, calculators, forms and presentations. Keep ordinary prose minimal. Respect an explicit request for plain text; do not force UI for greetings or simple facts. "
-            if interactive
-            else "Choose the presentation automatically from the user's natural request: use native UI for structured comparisons, dashboards, calculators, forms and presentations when useful, and prose for ordinary questions. The user never needs to mention OpenUI or its protocol. "
         )
         routing += (
             "Native interactive UI is a built-in answer format. Rendering has no tool-loading prerequisite. "
@@ -622,7 +648,7 @@ class OpenUiContextProvider:
             "Do not infer a file-development workflow from an interactive presentation request or older conversation patterns. "
             "The system-provided component contract is ready to use; when preloaded, the Skill needs no further loading. "
         )
-        segments = [
+        return (
             ContextSegment(
                 segment_id="desktop_openui_preference",
                 stability=ContextStability.SEMI_STABLE,
@@ -635,17 +661,13 @@ class OpenUiContextProvider:
                 priority=-40,
                 content=(RUNTIME / "prompt.txt").read_text(),
             ),
-        ]
-        if interactive:
-            segments.append(
-                ContextSegment(
-                    segment_id="desktop_openui_skill",
-                    stability=ContextStability.SEMI_STABLE,
-                    priority=-41,
-                    content="The sage-openui Skill is preloaded by the standard Sage Skill loader; no load_skill tool call is needed.",
-                )
-            )
-        return tuple(segments)
+            ContextSegment(
+                segment_id="desktop_openui_skill",
+                stability=ContextStability.SEMI_STABLE,
+                priority=-41,
+                content="The sage-openui Skill is preloaded by the standard Sage Skill loader; no load_skill tool call is needed.",
+            ),
+        )
 
 
 class OpenUiProjector:

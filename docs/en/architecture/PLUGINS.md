@@ -31,3 +31,28 @@ Installed extensions can use the `sage.extensions` Python entry-point group. Sou
 Legal lifecycle transitions, canonical event ordering, and Session history authority are framework contracts. A plugin must advertise only guarantees it enforces. A database-backed store does not automatically provide cross-process subscriptions, distributed claims, or durable jobs.
 
 [Manifest configuration](../CONFIGURATION.md) · [Extension contracts](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md) · [Integration examples](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/使用手册.md)
+
+## Implementation and validation contracts
+
+Standard capabilities and optional features use lowercase dotted names with hyphens
+within segments. The Skill read interface is `skill.provider`, and its
+`CapabilityOffer.features` can declare `skill.search`. `SkillSearchProvider` names the
+corresponding Python protocol. Custom IDs from existing hosts still resolve.
+
+A plugin can expose multiple capabilities. Each standard capability must implement the
+required interface for its API major version. The SDK validates standard feature names
+at registration. `ExtensionHost.open_scope()` and `open_scope_sync()` validate exports
+and members during composition and roll back on failure. Optional members are checked
+when declared or enabled. Server and Desktop show the same contract and plugin metadata.
+
+Skill plugins implement `list_skills`, `get_skill` and `fetch`. Packages that enable
+`search_skills` also require `search_skills(query, *, run_id, allowed_names, limit)`.
+Search applies authorization before selecting results. Publishing uses
+`skill.management` with `skill.publish`. The filesystem provider retains legacy
+management bindings and reports publishing as unsupported.
+
+`sagents.v2.runtime.extensions.capability_contract_inventory()` lists contracts and
+`sagents.v2.testing.check_provider_contract()` checks structure. Skill, Tool, Model,
+Scheduler and Session Store providers also have reusable behavioral checks. Use isolated
+test storage or accounts and supply fixtures. Verify declared features and durability in
+the intended deployment.

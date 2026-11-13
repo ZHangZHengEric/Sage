@@ -27,6 +27,14 @@ class MainFlutterWindow: NSWindow {
       case "setLanguage":
         defaults.set(call.arguments as? String, forKey: key)
         result(nil)
+      case "openHelpLink":
+        guard let address = call.arguments as? String,
+              let url = URL(string: address),
+              url.scheme == "https", url.host != nil else {
+          result(false)
+          return
+        }
+        result(NSWorkspace.shared.open(url))
       default:
         result(FlutterMethodNotImplemented)
       }

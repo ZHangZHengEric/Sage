@@ -502,6 +502,9 @@ class OfficialToolRuntime:
             network_host=parsed.hostname,
             network_port=port,
         )
+        intent = intent.model_copy(
+            update={"metadata": {"method": request.method, "url": request.url}}
+        )
         return await self.sandbox.network.request(
             request, intent=intent, grant=self._grant(intent)
         )

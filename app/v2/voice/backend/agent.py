@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,27 +9,19 @@ from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
 from sagents.v2.contracts.commands import CancelRun, InputItem, RunConfig
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.events import ToolEventData
-from sagents.v2.contracts.items import MessageItemData, TextBlock
+from sagents.v2.contracts.items import (
+    JsonBlock,
+    MessageItemData,
+    TextBlock,
+    ToolResultItemData,
+)
 from sagents.v2.contracts.principals import PrincipalType
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.package.manifest import SageManifest
-from sagents.v2.runtime.extensions import (
-    CapabilityOffer,
-    ExtensionDescriptor,
-    ExtensionRegistration,
-    ExtensionScope,
-)
-from sagents.v2.tool.decorated import DecoratedToolProvider
-from sagents.v2.tool.decorators import tool
+from sagents.v2.runtime.execution.configuration import LocalExecutionPolicy
 
 from .voice_pipeline.agent import ToolActivity
 from .voice_pipeline.tool_speech import tool_speech_target
-
-
-class LocalVoiceTools:
-    @tool(description="Get the current date and time in the Mac's local time zone.")
-    def get_local_time(self) -> str:
-        return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 VOICE_INSTRUCTIONS = (
@@ -65,32 +56,44 @@ class SageVoiceAgent:
         )
         builder = SAgentBuilder()
         tool_capabilities = {}
-        tool_names = []
-        if self.settings.local_tools:
-            plugin_id = "sage.voice.local-tools"
-            builder.register(
-                ExtensionRegistration(
-                    descriptor=ExtensionDescriptor(
-                        plugin_id=plugin_id,
-                        name="Sage Voice local tools",
-                        version="1",
-                        provides=(
-                            CapabilityOffer(
-                                capability="tool.provider", api_version="2"
-                            ),
-                        ),
-                        supported_scopes=frozenset({ExtensionScope.AGENT}),
-                    ),
-                    factory=lambda context, deps: DecoratedToolProvider(
-                        LocalVoiceTools()
-                    ),
+        tool_names = self.settings.enabled_tools
+        if tool_names:
+            tool_capabilities["tool.provider"] = {"plugin": "sage.tool.official"}
+            workspace = self.root / "workspace"
+            workspace.mkdir(parents=True, mode=0o700, exist_ok=True)
+            policy = (
+                LocalExecutionPolicy()
+                .narrow(
+                    {"process": {"enabled": False}}
+                    if not {"execute_shell_command", "read_lints"}.intersection(
+                        tool_names
+                    )
+                    else None
                 )
+                .model_dump(mode="json")
             )
-            tool_capabilities = {
-                "tool.provider": {"plugin": plugin_id},
-                "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
+            if "fetch_webpages" in tool_names:
+                policy["network"].update(
+                    mode="http_requests", allowed_schemes=["http", "https"]
+                )
+            tool_capabilities["execution.binding"] = {
+                "plugin": "sage.execution.binding.local-workspace",
+                "config": {
+                    "workspace": str(workspace),
+                    "policy": policy,
+                },
             }
-            tool_names = ["get_local_time"]
+            if "search_memory" in tool_names:
+                tool_capabilities["session-memory.provider"] = {
+                    "plugin": "sage.session-memory.sqlite-bm25",
+                }
+            tool_capabilities["agent.tool-policy"] = {
+                "plugin": "sage.agent.tool-policy.default",
+                "config": {"approval_strategy": "auto_approve"},
+            }
+            tool_capabilities["tool.selection-policy"] = {
+                "plugin": "sage.tool-selection.direct",
+            }
         app = await builder.build(
             runtime={
                 "state_root": str(self.root),
@@ -123,6 +126,7 @@ class SageVoiceAgent:
                         "request": self.settings.model_request(),
                         "capabilities": {
                             "tool_calling": bool(tool_names),
+                            "multimodal": "analyze_image" in tool_names,
                             "reasoning": self.settings.reasoning_effort
                             not in (None, "none"),
                         },
@@ -185,6 +189,16 @@ class SageVoiceTurn:
         self.host = host
         self.failure = None
         self.completed = False
+        # Goal runs require both Sage control tools to be explicitly enabled.
+        goal_tools = {"goal_submit", "goal_complete"}
+        command, _, goal = prompt.partition(" ")
+        goal_mode = (
+            command == "/goal"
+            and bool(goal.strip())
+            and goal_tools.issubset(host.settings.enabled_tools)
+        )
+        if goal_mode:
+            prompt = goal.strip()
         self.admission = asyncio.create_task(
             host.app.entrypoint().run_stream(
                 StartRun(
@@ -193,7 +207,11 @@ class SageVoiceTurn:
                     session_id=host.session_id,
                     input=(InputItem(role="user", content=(TextBlock(text=prompt),)),),
                     idempotency_key=uuid4().hex,
-                    config=RunConfig(automatic_stage_continuation=False),
+                    invocation_mode="goal" if goal_mode else None,
+                    config=RunConfig(
+                        automatic_stage_continuation=False,
+                        enabled_tools=host.settings.enabled_tools,
+                    ),
                 ),
                 host.context,
                 agent=host.agent,
@@ -207,6 +225,7 @@ class SageVoiceTurn:
         self.host.session_id = stream.handle.session_id
         streamed_items = set()
         tool_targets: dict[str, str | None] = {}
+        questionnaire_items: set[str] = set()
         async for event in stream.events:
             delta = None
             if event.type == "message.delta" and isinstance(event.data.delta, str):
@@ -224,9 +243,37 @@ class SageVoiceTurn:
                             for block in item.data.content
                             if isinstance(block, TextBlock)
                         )
+            elif (
+                event.type == "item.completed" and event.item_id in questionnaire_items
+            ):
+                item = event.data.item
+                if item is not None and isinstance(item.data, ToolResultItemData):
+                    for block in item.data.content:
+                        if isinstance(block, JsonBlock) and isinstance(
+                            block.value, dict
+                        ):
+                            if block.value.get("status") == "awaiting_user_input":
+                                lines = [block.value["title"]]
+                                for question in block.value["questions"]:
+                                    lines.append(
+                                        question.get("title") or question["question"]
+                                    )
+                                    lines.extend(
+                                        option["label"]
+                                        if isinstance(option, dict)
+                                        else option
+                                        for option in question.get("options", [])
+                                    )
+                                delta = "\n".join(lines)
             elif event.type == "run.failed":
                 self.failure = event.data.error
             elif isinstance(event.data, ToolEventData):
+                if (
+                    event.type == "tool.call.succeeded"
+                    and event.data.tool_name == "questionnaire_async"
+                    and event.data.result_item_id is not None
+                ):
+                    questionnaire_items.add(event.data.result_item_id)
                 if event.type == "tool.call.proposed":
                     tool_targets[event.data.tool_call_id] = tool_speech_target(
                         event.data.tool_name, event.data.arguments or {}

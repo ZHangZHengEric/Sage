@@ -21,7 +21,13 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from sagents.v2.runtime.execution.sandbox.contracts import NetworkMode, NetworkPolicy
+from sagents.v2.contracts.common import new_id
+from sagents.v2.runtime.execution.sandbox.contracts import (
+    NetworkMode,
+    NetworkPolicy,
+    NetworkRequest,
+    NetworkResult,
+)
 
 _HEADER_LIMIT = 32 * 1024
 _PROXY_MODES = {NetworkMode.ALLOWLIST, NetworkMode.PROXY}
@@ -48,7 +54,7 @@ def _host(value: str) -> str:
 
 
 def validate_shell_network(policy: NetworkPolicy) -> None:
-    if policy.mode == NetworkMode.NONE:
+    if policy.mode in {NetworkMode.NONE, NetworkMode.HTTP_REQUESTS}:
         return
     if policy.mode == NetworkMode.UNRESTRICTED:
         expected = NetworkPolicy(mode=policy.mode, deny_private_networks=False)
@@ -94,6 +100,91 @@ def validate_shell_network(policy: NetworkPolicy) -> None:
     for field in ("allowed_methods", "allowed_request_headers", "max_redirects"):
         if getattr(policy, field) != getattr(defaults, field):
             raise ValueError(f"Shell proxy modes cannot enforce {field}")
+
+
+async def _resolve_address(host: str, port: int, *, public_only: bool) -> str:
+    answers = await asyncio.get_running_loop().getaddrinfo(
+        host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+    )
+    for _, _, _, _, address in answers:
+        ip = ipaddress.ip_address(address[0])
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not public_only or (ip.is_global and not ip.is_multicast):
+            return str(ip)
+    raise PermissionError("destination has no permitted IP address")
+
+
+async def request_http(request: NetworkRequest, policy: NetworkPolicy) -> NetworkResult:
+    """Perform a bounded HTTP request with the verified address pinned per hop."""
+    import httpx
+
+    method = request.method.upper()
+    if method not in {"GET", "HEAD"} or method not in policy.allowed_methods:
+        raise PermissionError("request method is outside network policy")
+    if {name.lower() for name in request.headers} - set(policy.allowed_request_headers):
+        raise PermissionError("request headers are outside network policy")
+    if request.body:
+        raise PermissionError("HTTP requests cannot send a body")
+    timeout = min(
+        request.timeout_seconds or policy.max_wall_time_seconds,
+        policy.max_wall_time_seconds,
+    )
+    url = httpx.URL(request.url)
+    async with asyncio.timeout(timeout):
+        for redirect in range(policy.max_redirects + 1):
+            if url.scheme not in policy.allowed_schemes or not url.host or url.userinfo:
+                raise PermissionError("URL is outside network policy")
+            host = _host(url.host)
+            port = url.port or (443 if url.scheme == "https" else 80)
+            if port not in (policy.allowed_ports or (80, 443)):
+                raise PermissionError("destination port is outside network policy")
+            if policy.allowed_hosts and not any(
+                host.endswith("." + _host(pattern[2:]))
+                if pattern.startswith("*.")
+                else host == _host(pattern)
+                for pattern in policy.allowed_hosts
+            ):
+                raise PermissionError("destination host is outside network policy")
+            address = await _resolve_address(
+                host, port, public_only=policy.deny_private_networks
+            )
+            authority = url.netloc.decode("ascii")
+            async with httpx.AsyncClient(trust_env=False) as client:
+                async with client.stream(
+                    method,
+                    url.copy_with(host=address),
+                    headers={
+                        **request.headers,
+                        "Host": authority,
+                        "Accept-Encoding": "identity",
+                    },
+                    extensions={"sni_hostname": host},
+                ) as response:
+                    if response.is_redirect and "location" in response.headers:
+                        url = url.join(response.headers["location"])
+                        continue
+                    if (
+                        response.headers.get("content-encoding", "identity").lower()
+                        != "identity"
+                    ):
+                        raise ValueError(
+                            "server returned an unsupported content encoding"
+                        )
+                    body = bytearray()
+                    async for chunk in response.aiter_raw(chunk_size=65536):
+                        if len(body) + len(chunk) > policy.max_response_bytes:
+                            raise ValueError("response exceeds network policy")
+                        body.extend(chunk)
+                    return NetworkResult(
+                        request_id=new_id("network"),
+                        status_code=response.status_code,
+                        final_url=str(url),
+                        headers=dict(response.headers),
+                        body=bytes(body),
+                        redirect_count=redirect,
+                    )
+    raise PermissionError("redirect limit exceeded")
 
 
 def _client_hello_host(hello: bytes) -> str | None:
@@ -258,22 +349,9 @@ class ShellNetworkBroker:
             raise PermissionError("destination host is outside network policy")
         if port not in (self.policy.allowed_ports or (80, 443)):
             raise PermissionError("destination port is outside network policy")
-        answers = await asyncio.get_running_loop().getaddrinfo(
-            host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
+        return await _resolve_address(
+            host, port, public_only=self.policy.deny_private_networks
         )
-        for _, _, _, _, address in answers:
-            ip = ipaddress.ip_address(address[0])
-            if (
-                self.policy.deny_private_networks
-                and not (
-                    ip.ipv4_mapped
-                    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped
-                    else ip
-                ).is_global
-            ):
-                continue
-            return str(ip)
-        raise PermissionError("destination has no permitted IP address")
 
     async def _connect(self, address: str, port: int):
         if self.policy.mode != NetworkMode.PROXY:

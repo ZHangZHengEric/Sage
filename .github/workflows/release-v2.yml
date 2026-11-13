@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish v2.1.1 after every package passes verification
+        description: Publish v2.2.0 after every package passes verification
         type: boolean
         default: false
 
@@ -32,7 +32,7 @@ jobs:
           cache-dependency-path: app/v2/server/web/package-lock.json
       - name: Check release metadata and documentation
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then test "$GITHUB_REF_NAME" = "v2.1.1"; fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then test "$GITHUB_REF_NAME" = "v2.2.0"; fi
           python -m pip install build pyyaml
           python scripts/v2/release/check_release.py
           python docs/scripts/check_docs.py
@@ -54,8 +54,8 @@ jobs:
           npm run build
       - name: Package source and Web
         run: |
-          git archive --format=tar.gz --prefix=Sage-2.1.1/ HEAD > release-assets/Sage-2.1.1-source.tar.gz
-          tar -czf release-assets/Sage-2.1.1-server-web.tar.gz -C app/v2/server/web dist
+          git archive --format=tar.gz --prefix=Sage-2.2.0/ HEAD > release-assets/Sage-2.2.0-source.tar.gz
+          tar -czf release-assets/Sage-2.2.0-server-web.tar.gz -C app/v2/server/web dist
       - uses: actions/upload-artifact@v4
         with:
           name: sage-v2-packages
@@ -118,7 +118,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev bubblewrap
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev liblzma-dev bubblewrap xvfb
       - name: Install Windows installer tooling
         if: matrix.platform == 'windows'
         run: choco install nsis --no-progress -y
@@ -128,11 +128,19 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
+      - name: Verify native Desktop plugin host
+        working-directory: app/v2/desktop
+        run: |
+          if [ "${{ matrix.platform }}" = linux ]; then
+            xvfb-run -a flutter test --no-pub -d linux integration_test/desktop_plugin_view_test.dart
+          else
+            flutter test --no-pub -d ${{ matrix.platform }} integration_test/desktop_plugin_view_test.dart
+          fi
       - name: Build Flutter v2 client
         working-directory: app/v2/desktop
-        run: flutter build ${{ matrix.platform }} --release --build-name=2.1.1 --build-number=1
+        run: flutter build ${{ matrix.platform }} --release --build-name=2.2.0 --build-number=1
       - name: Bundle, relocate and verify Desktop v2
-        run: python scripts/v2/release/package_desktop.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.1.1-py3-none-any.whl --out release-assets
+        run: python scripts/v2/release/package_desktop.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.2.0-py3-none-any.whl --out release-assets
       - uses: actions/upload-artifact@v4
         with:
           name: sage-v2-desktop-${{ matrix.platform }}-${{ matrix.arch }}
@@ -161,4 +169,4 @@ jobs:
           cd release-assets
           sha256sum * > SHA256SUMS
           cd ..
-          gh release create v2.1.1 release-assets/* --target '${{ github.sha }}' --title 'Sage 2.1.1' --notes-file release_notes/v2.1.1.md --latest
+          gh release create v2.2.0 release-assets/* --target '${{ github.sha }}' --title 'Sage 2.2.0' --notes-file release_notes/v2.2.0.md --latest

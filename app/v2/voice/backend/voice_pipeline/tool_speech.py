@@ -6,7 +6,6 @@ from urllib.parse import urlsplit
 
 # Labels in the settings UI come from Sage's shared tool name map.
 DEFAULT_TOOL_SPEECH = {
-    "get_local_time": ("我在核对时间。", "I'm checking the time."),
     "search_web": ("我在查找网页资料。", "I'm searching the web."),
     "fetch_webpages": ("我在查看网页。", "I'm checking the page."),
     "file_read": ("我在读取文件。", "I'm reading the file."),

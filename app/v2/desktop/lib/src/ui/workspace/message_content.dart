@@ -304,10 +304,19 @@ class _MessageReferenceBuilder extends MarkdownElementBuilder {
 }
 
 class _MessageReferenceChip extends StatefulWidget {
-  const _MessageReferenceChip({required this.part, this.onLoadReference});
+  const _MessageReferenceChip({
+    required this.part,
+    this.onLoadReference,
+    this.child,
+    this.imageOnly = false,
+    super.key,
+  });
 
   final _MessageContentPart part;
   final Future<WorkspaceFileContent> Function(String source)? onLoadReference;
+
+  final Widget? child;
+  final bool imageOnly;
 
   @override
   State<_MessageReferenceChip> createState() => _MessageReferenceChipState();
@@ -446,7 +455,7 @@ class _MessageReferenceChipState extends State<_MessageReferenceChip> {
                 _previewFallback(context, loading: false),
           );
         }
-        if (value.isText) {
+        if (!widget.imageOnly && value.isText) {
           return _MessageReferenceTextPreview(
             text: utf8.decode(value.bytes, allowMalformed: true),
             referenceSource: part.referenceSource,
@@ -502,51 +511,56 @@ class _MessageReferenceChipState extends State<_MessageReferenceChip> {
             setState(() => _focused = focused);
             _updatePreviewVisibility();
           },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-            child: AnimatedContainer(
-              key: ValueKey('message-reference-chip:${part.referenceSource}'),
-              duration: animationsDisabled
-                  ? Duration.zero
-                  : const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
-              height: 25,
-              constraints: BoxConstraints(
-                maxWidth: min(280, MediaQuery.sizeOf(context).width * 0.42),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: colors.primaryContainer.withValues(
-                  alpha: _hovered || _focused ? 0.56 : 0.42,
-                ),
-                borderRadius: BorderRadius.circular(7),
-                border: Border.all(
-                  color: colors.primary.withValues(
-                    alpha: _hovered || _focused ? 0.38 : 0.24,
+          child:
+              widget.child ??
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                child: AnimatedContainer(
+                  key: ValueKey(
+                    'message-reference-chip:${part.referenceSource}',
                   ),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 11, color: colors.primary),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(
-                      part.value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        fontSize: 11,
-                        color: colors.onSurface,
-                        fontWeight: FontWeight.w600,
+                  duration: animationsDisabled
+                      ? Duration.zero
+                      : const Duration(milliseconds: 160),
+                  curve: Curves.easeOutCubic,
+                  height: 25,
+                  constraints: BoxConstraints(
+                    maxWidth: min(280, MediaQuery.sizeOf(context).width * 0.42),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer.withValues(
+                      alpha: _hovered || _focused ? 0.56 : 0.42,
+                    ),
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(
+                      color: colors.primary.withValues(
+                        alpha: _hovered || _focused ? 0.38 : 0.24,
                       ),
                     ),
                   ),
-                ],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(icon, size: 11, color: colors.primary),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(
+                          part.value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                fontSize: 11,
+                                color: colors.onSurface,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
         ),
       ),
     );

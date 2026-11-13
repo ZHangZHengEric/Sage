@@ -109,16 +109,54 @@ extension StudioWorkspace on WorkspaceController {
     selectedStudioMemberId = '';
     studioRecipientId = '';
     studioRecipientIds.clear();
+    if (_hostStudios.contains(value.id)) {
+      unawaited(recoverStudio(value).whenComplete(_startStudioPolling));
+    }
     _startStudioPolling();
     _notifyStudioChanged();
     unawaited(refreshSkills());
   }
 
+  bool _studioNeedsFastPolling(Studio studio) =>
+      !studioAccessDenied(studio) &&
+      (studio.members.any((member) {
+            final execution = studioExecution(studio, member);
+            return execution != null && _isActive(execution.status);
+          }) ||
+          studio.turns.any(
+            (turn) =>
+                turn.pendingMemberIds.isNotEmpty ||
+                turn.startingMemberIds.isNotEmpty,
+          ));
+
   void _startStudioPolling() {
-    _studioPollTimer ??= Timer.periodic(const Duration(seconds: 2), (_) {
-      for (final studio in studios) {
-        unawaited(recoverStudio(studio, background: true));
-      }
+    _studioPollTimer?.cancel();
+    if (_disposed ||
+        !studios.any(
+          (studio) =>
+              !studioAccessDenied(studio) &&
+              (_hostStudios.contains(studio.id) ||
+                  _studioNeedsFastPolling(studio)),
+        )) {
+      return;
+    }
+    const sweepInterval = Duration(seconds: 30);
+    const activeInterval = Duration(seconds: 2);
+    final remaining = sweepInterval - _studioSweepClock.elapsed;
+    final delay =
+        studios.any(_studioNeedsFastPolling) && remaining > activeInterval
+        ? activeInterval
+        : remaining;
+    _studioPollTimer = Timer(delay, () async {
+      final sweep = _studioSweepClock.elapsed >= sweepInterval;
+      if (sweep) _studioSweepClock.reset();
+      await Future.wait([
+        for (final studio in studios)
+          if ((sweep && _hostStudios.contains(studio.id)) ||
+              _studioNeedsFastPolling(studio))
+            recoverStudio(studio, background: true),
+      ]);
+      _startStudioPolling();
     });
   }
 
@@ -423,6 +461,7 @@ extension StudioWorkspace on WorkspaceController {
       return false;
     } finally {
       _studioSending.remove(studio.id);
+      _startStudioPolling();
       if (!_disposed) _notifyStudioChanged();
     }
   }
@@ -547,6 +586,7 @@ extension StudioWorkspace on WorkspaceController {
     } finally {
       if (identical(_studioSyncs[studio.id], operation)) {
         _studioSyncs.remove(studio.id);
+        _startStudioPolling();
       }
     }
   }

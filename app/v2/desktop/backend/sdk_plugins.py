@@ -73,6 +73,9 @@ async def desktop_run_inputs(service, context, dependencies):
 
 def desktop_registrations(service):
     def registration(capability, factory, *, ownership: Literal["owned", "borrowed"] = "borrowed"):
+        dependencies = (ExtensionDependency(capability="execution.environment"),)
+        if capability == "tool.provider":
+            dependencies += (ExtensionDependency(capability="execution.tool-runtime"),)
         return ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id="com.sage.desktop.run." + capability.replace(".", "-"),
@@ -81,7 +84,7 @@ def desktop_registrations(service):
                 capability=capability, api_version="2",
                 features=("skill.search", "skill.latest") if capability == "skill.provider" else (),
             ),),
-                dependencies=(ExtensionDependency(capability="execution.environment"),),
+                dependencies=dependencies,
                 supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
                 config_schema={"type": "object", "additionalProperties": False},
             ), factory=factory, ownership=ownership,
@@ -99,8 +102,11 @@ def desktop_registrations(service):
         return service._skill_provider(agent)
 
     async def tools(context, deps):
-        from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor, FilteredToolCatalog
+        from sagents.v2.tool import (
+            CompositeToolCatalog, CompositeToolExecutor, DecoratedToolProvider, FilteredToolCatalog,
+        )
         from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog, InMemoryToolExecutor
+        from .desktop_plugins import DesktopPluginTools, PLUGIN_EDIT_TOOLS
         run, environment, agent = await desktop_run_inputs(service, context, deps)
         declared = set(context.agent_configuration["definition"]["tools"])
         if run.command.config.enabled_tools is not None:
@@ -113,6 +119,24 @@ def desktop_registrations(service):
             providers.append(SimpleNamespace(
                 catalog=FilteredToolCatalog(generated.catalog, declared),
                 executor=generated.executor,
+            ))
+        client = run.command.config.metadata.get("desktop_client_id")
+        if run.command.invocation_mode == "plan":
+            declared.discard("register_desktop_plugin")
+            declared.discard("download_desktop_plugin")
+        if not client:
+            declared.discard("register_desktop_plugin")
+        if declared.intersection(("register_desktop_plugin", *PLUGIN_EDIT_TOOLS)):
+            plugin = DecoratedToolProvider(
+                DesktopPluginTools(
+                    service.desktop_plugins,
+                    deps.require("execution.tool-runtime"),
+                    run.context.actor.principal_id,
+                    client,
+                )
+            )
+            providers.append(SimpleNamespace(
+                catalog=FilteredToolCatalog(plugin.catalog, declared), executor=plugin.executor,
             ))
         binding = await service.studio_run_binding(run.run_id, agent, run.command.session_id)
         if binding:

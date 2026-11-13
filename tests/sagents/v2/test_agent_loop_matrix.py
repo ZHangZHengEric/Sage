@@ -536,9 +536,14 @@ async def test_tool_selection_preparation_runs_in_parallel_with_memory_recall():
 
     class CoordinatedRecallQuery:
         async def generate(self, user_input, *, run_id):
+            from sagents.v2.model.recovery_scope import reserve_additional_request
+
             del user_input, run_id
             await asyncio.sleep(0)
             assert selection_started.is_set()
+            await reserve_additional_request(
+                "compatibility", purpose="memory_recall_query"
+            )
             recall_started.set()
             return "current task"
 
@@ -562,6 +567,8 @@ async def test_tool_selection_preparation_runs_in_parallel_with_memory_recall():
 
     assert result.state == RunState.COMPLETED
     assert selection_started.is_set() and recall_started.is_set()
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert any(event.type == "step.retry_scheduled" for event in events)
 
 
 @pytest.mark.asyncio

@@ -881,6 +881,7 @@ class ChatMessage {
     this.processOnly = false,
     this.sequence = 0,
     this.content = const [],
+    this.preferredSkills = const [],
     List<Map<String, Object?>>? openUiSurfaces,
     DateTime? createdAt,
   }) : openUiSurfaces = openUiSurfaces ?? [],
@@ -900,6 +901,7 @@ class ChatMessage {
   bool processOnly;
   final int sequence;
   final List<ChatMessageContent> content;
+  final List<String> preferredSkills;
   final DateTime createdAt;
 
   factory ChatMessage.fromJson(Map<String, Object?> json) {
@@ -918,6 +920,7 @@ class ChatMessage {
       interrupted: json['interrupted'] == true,
       processOnly: json['process_only'] == true,
       sequence: (json['sequence'] as num?)?.toInt() ?? 0,
+      preferredSkills: _stringList(json['preferred_skills']),
       content: rawContent is List
           ? [
               for (final value in rawContent)
@@ -933,6 +936,7 @@ class ChatMessage {
     'id': id,
     'role': role,
     'text': text,
+    if (preferredSkills.isNotEmpty) 'preferred_skills': preferredSkills,
     if (content.isNotEmpty)
       'content': [for (final value in content) value.toJson()],
     if (openUiSurfaces.isNotEmpty) 'openui_surfaces': openUiSurfaces,

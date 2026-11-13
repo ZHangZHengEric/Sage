@@ -48,8 +48,18 @@ async def check_openui():
         await parser.close()
 asyncio.run(check_openui())
 from sagents.v2 import SAgentBuilder
-assert importlib.metadata.version('sage') == '2.1.1'
+assert importlib.metadata.version('sage') == '2.2.0'
 assert any((Path(app.__file__).parent / 'skills').glob('*/SKILL.md'))
+from app.v2.desktop.backend.desktop_plugins import plugin_contract_root, validate_package
+from app.v2.desktop.backend.desktop_plugin_api import _document
+import io
+import zipfile
+plugin = plugin_contract_root() / 'example'
+package = io.BytesIO()
+with zipfile.ZipFile(package, 'w') as archive:
+    for asset in plugin.iterdir():
+        archive.write(asset, asset.name)
+assert '__sage/sdk.js' in _document(validate_package(package.getvalue()))['assets']
 assert not any(n.startswith(('app.v1.', 'sagents.v1.')) for n in sys.modules)
 # Verify native one-writer locks, including Windows, across processes.
 import asyncio

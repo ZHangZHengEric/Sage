@@ -10,7 +10,7 @@ import '../models.dart';
 import '../usage_models.dart';
 
 const sageSidecarProtocol = 'sage.runtime/v2';
-const sageSidecarRevision = 17;
+const sageSidecarRevision = 19;
 const _maxUploadBytes = 64 * 1024 * 1024;
 
 class SageApiException implements Exception {
@@ -51,6 +51,98 @@ class V2ApiClient {
   final HttpClient _http;
   String? expectedBuildId;
   String? authToken;
+  String? desktopClientId;
+
+  static const _pluginsPath = '/api/v2/desktop-plugins';
+
+  Stream<Map<String, Object?>> desktopPluginEvents(String client) => _ndjson(
+    'GET',
+    '$_pluginsPath/events?client=${Uri.encodeQueryComponent(client)}',
+  );
+
+  Future<void> acknowledgeDesktopPlugin(String client, String id) =>
+      _command('$_pluginsPath/opens/$client/$id');
+
+  Future<void> manageDesktopPlugin(String id, String action) =>
+      _command('$_pluginsPath/$id/manage/$action');
+
+  Future<Map<String, Object?>> desktopPluginDocument(
+    String id,
+    String digest,
+  ) async => (await _json('GET', '$_pluginsPath/$id/$digest/document') as Map)
+      .cast<String, Object?>();
+
+  Future<Uint8List> desktopPluginLogo(String id, String digest) async {
+    final request = await _request(
+      'GET',
+      baseUri.resolve('$_pluginsPath/$id/$digest/logo'),
+    );
+    final response = await request.close();
+    if (response.statusCode != 200) {
+      throw _httpError(response.statusCode, await response.transform(utf8.decoder).join());
+    }
+    return _responseBytes(response);
+  }
+
+  Future<Map<String, Object?>> previewDesktopPlugin(XFile file) =>
+      _sendDesktopPluginPackage(file, '$_pluginsPath/preview');
+
+  Future<Map<String, Object?>> uploadDesktopPlugin(XFile file, String client) =>
+      _sendDesktopPluginPackage(
+        file,
+        '$_pluginsPath/upload?client=${Uri.encodeQueryComponent(client)}',
+      );
+
+  Future<Map<String, Object?>> _sendDesktopPluginPackage(
+    XFile file,
+    String path,
+  ) async {
+    if (await file.length() > 8 * 1024 * 1024) {
+      throw const SageApiException('Plugin package exceeds 8 MiB');
+    }
+    final request = await _request('POST', baseUri.resolve(path));
+    request.headers.contentType = ContentType.binary;
+    request.add(await file.readAsBytes());
+    final response = await request.close();
+    return (_unwrap(await _decodeResponse(response), response.statusCode)
+            as Map)
+        .cast<String, Object?>();
+  }
+
+  Future<Object?> desktopPluginStorage(
+    String id,
+    String digest,
+    Map<String, Object?> body,
+  ) => _json('POST', '$_pluginsPath/$id/$digest/storage', body: body);
+
+  Future<Map<String, Object?>> desktopPluginPermission(
+    String id,
+    String digest,
+    Map<String, Object?> body, {
+    bool grant = false,
+  }) async =>
+      (await _json(
+                'POST',
+                '$_pluginsPath/$id/$digest/permission?grant=$grant',
+                body: body,
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<Object?> desktopPluginHttps(
+    String id,
+    String digest,
+    String endpoint,
+    Object? body,
+  ) async {
+    final path =
+        '$_pluginsPath/$id/$digest/https/${Uri.encodeComponent(endpoint)}';
+    final request = await _request('POST', baseUri.resolve(path));
+    request.headers.contentType = ContentType.json;
+    request.add(utf8.encode(jsonEncode(body)));
+    final response = await request.close();
+    return _unwrap(await _decodeResponse(response), response.statusCode);
+  }
 
   String _rsiPath(String agentId) =>
       '/api/v2/agents/${Uri.encodeComponent(agentId)}/rsi';
@@ -537,12 +629,32 @@ class V2ApiClient {
   Future<Map<String, Object?>> verifyModelProviderCapabilities(
     Map<String, Object?> draft, {
     String? providerId,
+    void Function(String stage, int completed, int total)? onProgress,
   }) async {
     final path = providerId == null
         ? '/api/v2/model-providers/verify-capabilities'
         : '/api/v2/model-providers/${Uri.encodeComponent(providerId)}/verify-capabilities';
-    return (await _json('POST', path, body: draft) as Map)
-        .cast<String, Object?>();
+    if (onProgress == null) {
+      return (await _json('POST', path, body: draft) as Map)
+          .cast<String, Object?>();
+    }
+    await for (final frame in _ndjson('POST', '$path?stream=true', body: draft)) {
+      switch (frame['kind']) {
+        case 'progress':
+          onProgress(
+            frame['stage'] as String,
+            frame['completed'] as int,
+            frame['total'] as int,
+          );
+        case 'result':
+          return (frame['data'] as Map).cast<String, Object?>();
+        case 'error':
+          throw _httpError(frame['status'] as int, jsonEncode(frame));
+        case null when frame['code'] == 0 && frame['data'] is Map:
+          return (frame['data'] as Map).cast<String, Object?>();
+      }
+    }
+    throw const SageApiException('Model capability check ended without a result.');
   }
 
   Future<List<ModelProviderSummary>> deleteModelProvider(
@@ -797,8 +909,14 @@ class V2ApiClient {
     }
   }
 
-  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) =>
-      _ndjson('POST', '/api/v2/runs/stream', body: body);
+  Stream<Map<String, Object?>> startRun(Map<String, Object?> body) => _ndjson(
+    'POST',
+    '/api/v2/runs/stream',
+    body: {
+      ...body,
+      if (desktopClientId != null) 'desktop_client_id': desktopClientId,
+    },
+  );
 
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {

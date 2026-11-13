@@ -10,6 +10,7 @@
     "protocolVersion": {"const": 1},
     "entry": {"type": "string", "pattern": "\\.html$", "maxLength": 240},
     "icon": {"enum": ["puzzle", "checklist", "chart", "clock", "folder", "calculator"]},
+    "logo": {"type": "string", "pattern": "\\.png$", "maxLength": 240, "description": "Required when installing or updating. Relative path to a bundled static square PNG, 64–512 pixels and at most 256 KiB."},
     "capabilities": {"type": "array", "uniqueItems": true, "items": {"enum": ["context", "file.read", "file.export", "draft", "https"]}},
     "endpoints": {
       "type": "object", "maxProperties": 16,
@@ -18,7 +19,8 @@
         "type": "object", "additionalProperties": false, "required": ["url", "method"],
         "properties": {
           "url": {"type": "string", "pattern": "^https://", "maxLength": 2048},
-          "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]}
+          "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+          "auth": {"const": "bearer"}
         }
       }
     }

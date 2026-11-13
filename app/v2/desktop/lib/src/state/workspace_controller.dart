@@ -17,6 +17,8 @@ import '../services/terminal_service.dart';
 import '../services/image_clipboard.dart';
 import '../usage_models.dart';
 
+import 'desktop_plugins.dart';
+
 part 'workspace_studio.dart';
 
 typedef PreferencesLoader = Future<SharedPreferences> Function();
@@ -50,12 +52,37 @@ class WorkspaceController extends ChangeNotifier {
 
   static const agentWorkspaceId = 'agent-workspace';
   static const _conversationsKey = 'sage.desktop_v2.conversations.v1';
+  static const _collapsedProjectsKey =
+      'sage.desktop_v2.collapsed_projects.v1';
   static const archivedConversationsKey =
       'sage.desktop_v2.archived_conversations.v1';
   static const _largeStreamingDeltaThreshold = 24;
   static const _streamingTextRevealInterval = Duration(milliseconds: 24);
 
   final V2ApiClient _api;
+  late final DesktopPlugins desktopPlugins = DesktopPlugins(
+    _api,
+    _runtimeHost?.clientId ?? _id('plugin-window'),
+    _runtimeHost?.ensureReady,
+  );
+  final Map<String, String> _pluginDraftInsertions = {};
+
+  String? takePluginDraftInsertion(String id) =>
+      _pluginDraftInsertions.remove(id);
+
+  void insertPluginDraft(String text) {
+    final conversation = composerConversation;
+    if (conversation == null || viewingSubSession) {
+      throw StateError('There is no active composer');
+    }
+    _pluginDraftInsertions.update(
+      conversation.id,
+      (old) => '$old\n$text',
+      ifAbsent: () => text,
+    );
+    notifyListeners();
+  }
+
   final RuntimeHost? _runtimeHost;
   final PreferencesLoader _preferencesLoader;
   final Map<String, List<Conversation>> _conversations = {};
@@ -68,6 +95,8 @@ class WorkspaceController extends ChangeNotifier {
   final Map<String, List<ComposerReference>> _composerReferences = {};
   final Map<String, int> _reconnectAttempts = {};
   final Set<String> _recoveringStreams = {};
+  final Set<String> _hydratingOpenUi = {};
+  final Set<String> _hydratingSessionTrees = {};
   final Set<String> _startingApprovedPlans = {};
   final Map<String, String> _planFeedbackDrafts = {};
 
@@ -105,6 +134,7 @@ class WorkspaceController extends ChangeNotifier {
 
   final List<Studio> studios = [];
   Timer? _studioPollTimer;
+  final Stopwatch _studioSweepClock = Stopwatch()..start();
   final Set<String> _studioRefreshing = {};
   final Set<String> _studioAccessDenied = {};
   final Set<String> _studioRecovering = {};
@@ -119,8 +149,15 @@ class WorkspaceController extends ChangeNotifier {
   static const _studiosKey = 'sage.desktop_v2.studios.v1';
 
   SharedPreferences? _preferences;
+  final Set<String> _collapsedProjectIds = {};
   List<AgentSummary> agents = const [];
-  List<SkillSummary> skills = const [];
+  List<SkillSummary> _skills = const [];
+  String? _skillsAgentId;
+  int _skillsRefreshRevision = 0;
+  List<SkillSummary> get skills =>
+      _skillsAgentId != null && _skillsAgentId == composerAgentId
+      ? _skills
+      : const [];
   List<SkillSummary> skillCatalog = const [];
   List<ToolSummary> toolCatalog = const [];
   List<ModelProviderSummary> modelProviders = const [];
@@ -440,7 +477,11 @@ class WorkspaceController extends ChangeNotifier {
     _agentStatusPolling = true;
     try {
       final values = await _api.listAgents();
-      if (!_disposed) {
+      if (!_disposed &&
+          !listEquals(
+            agents.map((a) => (a.id, a.name, a.isDefault, a.rsiStatus)).toList(),
+            values.map((a) => (a.id, a.name, a.isDefault, a.rsiStatus)).toList(),
+          )) {
         agents = values;
         notifyListeners();
       }
@@ -448,20 +489,34 @@ class WorkspaceController extends ChangeNotifier {
       // A temporary polling failure must not discard the visible catalog.
     } finally {
       _agentStatusPolling = false;
+      if (_agentStatusTimer != null) _scheduleAgentStatusRefresh();
     }
   }
 
-  Future<void> initialize() async {
-    _agentStatusTimer ??= Timer.periodic(
-      const Duration(seconds: 4),
-      (_) => refreshAgentStatuses(),
+  void _scheduleAgentStatusRefresh() {
+    if (_disposed) return;
+    _agentStatusTimer?.cancel();
+    final active = agents.any(
+      (agent) => agent.rsiStatus == 'queued' || agent.rsiStatus == 'running',
     );
+    _agentStatusTimer = Timer(
+      Duration(seconds: active ? 4 : 30),
+      refreshAgentStatuses,
+    );
+  }
+
+  Future<void> initialize() async {
     loading = true;
     error = null;
     notifyListeners();
     try {
       await _runtimeHost?.ensureReady();
       _preferences = await _preferencesLoader();
+      final collapsedProjects = _preferences?.get(_collapsedProjectsKey);
+      _collapsedProjectIds.clear();
+      if (collapsedProjects is List) {
+        _collapsedProjectIds.addAll(collapsedProjects.whereType<String>());
+      }
       _restoreConversations();
       _restoreStudios();
       final values = await Future.wait<Object>([
@@ -469,6 +524,7 @@ class WorkspaceController extends ChangeNotifier {
         _api.getSettings(),
       ]);
       agents = values[0] as List<AgentSummary>;
+      _scheduleAgentStatusRefresh();
       settings = values[1] as DesktopSettings;
       selectedAgentId = _initialAgentId();
       if (_visibleConversations(selectedGroupId).isEmpty) {
@@ -476,11 +532,24 @@ class WorkspaceController extends ChangeNotifier {
       }
       selectedConversationId = _visibleConversations(selectedGroupId).first.id;
       _adoptConversationAgent();
-      await Future.wait([refreshSkills(), refreshFiles()]);
-      await _reconnectRuns();
-      await _hydrateOpenUi();
+      _studioSweepClock.reset();
+      for (final studio in studios) {
+        if (_hostStudios.contains(studio.id) || _studioNeedsFastPolling(studio)) {
+          unawaited(recoverStudio(studio, background: true));
+        }
+      }
       _startStudioPolling();
-      await _hydrateSessionTrees();
+      if (_runtimeHost != null) {
+        desktopPlugins.start();
+      }
+      loading = false;
+      notifyListeners();
+      await Future.wait([
+        _hydrateSelectedConversation(),
+        _restoreStartupActivity(),
+        refreshSkills(),
+        refreshFiles(),
+      ]);
     } on Object catch (exception, stackTrace) {
       debugPrint('Sage Desktop v2 initialization failed: $exception');
       debugPrintStack(stackTrace: stackTrace);
@@ -569,7 +638,26 @@ class WorkspaceController extends ChangeNotifier {
     selectedFile = null;
     selectedFileContent = null;
     notifyListeners();
+    unawaited(_hydrateSelectedConversation());
     await Future.wait([refreshSkills(), refreshFiles()]);
+  }
+
+  bool isProjectExpanded(String id) => !_collapsedProjectIds.contains(id);
+
+  Future<void> setProjectExpanded(String id, bool expanded) async {
+    final changed = expanded
+        ? _collapsedProjectIds.remove(id)
+        : _collapsedProjectIds.add(id);
+    if (!changed) return;
+    notifyListeners();
+    try {
+      await _preferences?.setStringList(
+        _collapsedProjectsKey,
+        _collapsedProjectIds.toList(),
+      );
+    } on Object catch (exception) {
+      debugPrint('Could not save project expansion state: $exception');
+    }
   }
 
   Future<void> selectGroup(String id) async {
@@ -587,6 +675,7 @@ class WorkspaceController extends ChangeNotifier {
     selectedFile = null;
     selectedFileContent = null;
     notifyListeners();
+    unawaited(_hydrateSelectedConversation());
     await Future.wait([refreshSkills(), refreshFiles()]);
   }
 
@@ -611,6 +700,7 @@ class WorkspaceController extends ChangeNotifier {
     selectedFile = null;
     selectedFileContent = null;
     notifyListeners();
+    unawaited(_hydrateSelectedConversation());
     await Future.wait([refreshSkills(), refreshFiles()]);
   }
 
@@ -618,6 +708,7 @@ class WorkspaceController extends ChangeNotifier {
     selectedConversationId = conversationId;
     selectedSubSessionId = sessionId;
     notifyListeners();
+    unawaited(_hydrateSelectedConversation());
   }
 
   Future<void> selectAgent(String id) async {
@@ -638,17 +729,25 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> refreshSkills() async {
+    final revision = ++_skillsRefreshRevision;
     if (selectedAgentId.isEmpty) {
-      skills = const [];
+      _skills = const [];
+      _skillsAgentId = null;
       return;
     }
+    final agentId = composerAgentId;
     try {
-      skills = await _api.listSkills(composerAgentId);
+      final values = await _api.listSkills(agentId);
+      if (_disposed || revision != _skillsRefreshRevision) return;
+      _skillsAgentId = agentId;
+      _skills = values;
+      if (agentId != composerAgentId) return;
       preferredSkills.removeWhere(
-        (name) => !skills.any((value) => value.name == name),
+        (name) => !values.any((value) => value.name == name),
       );
       notifyListeners();
     } on Object catch (exception) {
+      if (_disposed || revision != _skillsRefreshRevision) return;
       error = exception.toString();
       notifyListeners();
     }
@@ -1117,6 +1216,7 @@ class WorkspaceController extends ChangeNotifier {
             .where((value) => value.id != project.id)
             .toList(),
       );
+      unawaited(setProjectExpanded(project.id, true));
       if (selectedGroupId == project.id) {
         selectedGroupId = agentWorkspaceId;
         if (_visibleConversations(selectedGroupId).isEmpty) {
@@ -1307,7 +1407,7 @@ class WorkspaceController extends ChangeNotifier {
         );
       }
       if (selectedAgentId.isNotEmpty) {
-        skills = await _api.listSkills(composerAgentId);
+        await refreshSkills();
       }
       notifyListeners();
     } on Object catch (exception) {
@@ -1398,6 +1498,11 @@ class WorkspaceController extends ChangeNotifier {
           revision == _agentPatchRevision) {
         agentConfiguration = saved;
         _updateAgentSummary(saved);
+      }
+      if (!_disposed &&
+          patch.containsKey('available_skills') &&
+          composerAgentId == agentId) {
+        await refreshSkills();
       }
       if (!_disposed) notifyListeners();
     } on Object catch (exception) {
@@ -1770,11 +1875,13 @@ class WorkspaceController extends ChangeNotifier {
   Future<Map<String, Object?>> verifyModelProviderCapabilities(
     Map<String, Object?> draft, {
     String? providerId,
+    void Function(String stage, int completed, int total)? onProgress,
   }) async {
     try {
       return await _api.verifyModelProviderCapabilities(
         draft,
         providerId: providerId,
+        onProgress: onProgress,
       );
     } on Object catch (exception) {
       error = exception.toString();
@@ -1957,7 +2064,11 @@ class WorkspaceController extends ChangeNotifier {
         return;
       }
     }
-    await send(prompt, content: updatedContent);
+    await send(
+      prompt,
+      content: updatedContent,
+      messageSkills: message.preferredSkills,
+    );
   }
 
   Future<bool> branchFromRun(String runId) async {
@@ -2224,20 +2335,45 @@ class WorkspaceController extends ChangeNotifier {
     message.processOnly = false;
   }
 
-  Future<void> _hydrateOpenUi() async {
-    for (final conversations in _conversations.values) {
-      for (final conversation in conversations) {
-        if (conversation.archived || conversation.sessionId == null) continue;
-        try {
-          for (final surface in await _api.getOpenUiSurfaces(
-            conversation.sessionId!,
-          )) {
-            _applyOpenUiSurface(conversation, surface);
-          }
-        } on Object {
-          /* Ordinary conversations remain usable if UI recovery fails. */
-        }
+  Future<void> _hydrateSelectedConversation() async {
+    final root = selectedConversation;
+    final displayed = selectedDisplayConversation;
+    await Future.wait([
+      if (displayed != null) _hydrateOpenUi(displayed),
+      if (root != null) _hydrateSessionTree(root),
+    ]);
+  }
+
+  Future<void> _restoreStartupActivity() async {
+    await _reconnectRuns();
+    if (_disposed) return;
+    final roots = _conversations.values.expand((values) => values).toList();
+    for (final root in roots) {
+      if (_disposed) return;
+      if (!root.archived && _treeHasActiveRun(root)) {
+        await _hydrateSessionTree(root);
       }
+    }
+  }
+
+  Future<void> _hydrateOpenUi(Conversation conversation) async {
+    final sessionId = conversation.sessionId;
+    if (sessionId == null || !_hydratingOpenUi.add(sessionId)) return;
+    try {
+      final surfaces = await _api.getOpenUiSurfaces(sessionId);
+      if (_disposed ||
+          conversation.archived ||
+          conversation.sessionId != sessionId) {
+        return;
+      }
+      for (final surface in surfaces) {
+        _applyOpenUiSurface(conversation, surface);
+      }
+      if (surfaces.isNotEmpty) notifyListeners();
+    } on Object {
+      // The conversation remains usable if UI recovery fails.
+    } finally {
+      _hydratingOpenUi.remove(sessionId);
     }
   }
 
@@ -2259,6 +2395,7 @@ class WorkspaceController extends ChangeNotifier {
     String text, {
     Map<String, Object?>? openUiAction,
     List<ChatMessageContent> content = const [],
+    List<String>? messageSkills,
   }) async {
     final conversation = selectedConversation;
     final prompt = text.trim();
@@ -2293,11 +2430,34 @@ class WorkspaceController extends ChangeNotifier {
       conversation.sessionId = _newSessionId();
     }
     conversation.agentId = selectedAgentId;
+    final draftSkills = preferredSkills;
+    final cachedRequest = previousQuestionnaire?.payload['_start_request'];
+    final requestSessionId = pendingFork
+        ? conversation.parentSessionId
+        : conversation.sessionId;
+    final currentMessage = {
+      'role': 'user',
+      'text': prompt,
+      'content': [for (final part in structuredContent) part.toJson()],
+    };
+    final retryingSameRequest =
+        cachedRequest is Map &&
+        cachedRequest['agent_id'] == selectedAgentId &&
+        cachedRequest['session_id'] == requestSessionId &&
+        jsonEncode(cachedRequest['messages']) == jsonEncode([currentMessage]);
+    final sentSkills = List<String>.unmodifiable(
+      retryingSameRequest
+          ? (cachedRequest['preferred_skills'] as List? ?? []).whereType<String>()
+          : (messageSkills ?? (draftSkills.toList()..sort())).where(
+              (name) => name != 'sage-openui',
+            ),
+    );
     final userMessage = ChatMessage(
       id: _id('message'),
       role: 'user',
       text: prompt,
       content: structuredContent,
+      preferredSkills: sentSkills,
     );
     conversation.messages.add(userMessage);
     conversation.processPanels.add(
@@ -2330,24 +2490,15 @@ class WorkspaceController extends ChangeNotifier {
       'response_language': settings.language == 'system'
           ? PlatformDispatcher.instance.locale.languageCode
           : settings.language,
-      'messages': [
-        {
-          'role': 'user',
-          'text': prompt,
-          'content': [for (final part in structuredContent) part.toJson()],
-        },
-      ],
-      if (pendingFork)
-        'session_id': conversation.parentSessionId
-      else if (conversation.sessionId != null)
-        'session_id': conversation.sessionId,
+      'messages': [currentMessage],
+      'session_id': ?requestSessionId,
       if (pendingFork) 'session_concurrency_mode': 'fork',
       if (pendingFork)
         'base_session_revision': conversation.forkBaseSessionRevision,
       if (pendingFork) 'fork_source_run_id': conversation.parentRunId,
       if (selectedGroup.workspaceId.isNotEmpty)
         'workspace_id': selectedGroup.workspaceId,
-      'preferred_skills': preferredSkills.toList()..sort(),
+      'preferred_skills': sentSkills,
       if (!structuredContent.any((part) => part.isReference) &&
           selectedAttachments.isNotEmpty)
         'attachment_paths': [
@@ -2364,14 +2515,10 @@ class WorkspaceController extends ChangeNotifier {
           : 'openui:${openUiAction['surface_id']}:${openUiAction['revision']}',
     };
     if (previousQuestionnaire != null) {
-      final cached = previousQuestionnaire.payload['_start_request'];
-      if (cached is Map &&
-          cached['agent_id'] == body['agent_id'] &&
-          cached['session_id'] == body['session_id'] &&
-          jsonEncode(cached['messages']) == jsonEncode(body['messages'])) {
+      if (retryingSameRequest) {
         body
           ..clear()
-          ..addAll(cached.cast<String, Object?>());
+          ..addAll(cachedRequest.cast<String, Object?>());
       }
       conversation.completedQuestionnaire = PendingInteraction(
         id: previousQuestionnaire.id,
@@ -2384,12 +2531,13 @@ class WorkspaceController extends ChangeNotifier {
     _listen(
       conversation,
       _api.startRun(body),
-      onStartAccepted: previousQuestionnaire == null
-          ? null
-          : () {
-              conversation.completedQuestionnaire = null;
-              error = null;
-            },
+      onStartAccepted: () {
+        if (messageSkills == null) draftSkills.removeAll(sentSkills);
+        if (previousQuestionnaire != null) {
+          conversation.completedQuestionnaire = null;
+          error = null;
+        }
+      },
       onStartFailure: previousQuestionnaire == null
           ? null
           : () {
@@ -2588,6 +2736,12 @@ class WorkspaceController extends ChangeNotifier {
         {'approve', 'approve_once', 'approve_and_remember'}.contains(decision);
     try {
       if (approvingPlan && payload['execute_plan'] == true) {
+        final planPanel = value.processPanels
+            .where((panel) => panel.runId == value.runId)
+            .firstOrNull;
+        final planMessage = value.messages
+            .where((message) => message.id == planPanel?.anchorMessageId)
+            .firstOrNull;
         final language = settings.language == 'system'
             ? PlatformDispatcher.instance.locale.languageCode
             : settings.language;
@@ -2614,7 +2768,8 @@ class WorkspaceController extends ChangeNotifier {
                 'content': [ChatMessageContent.text(prompt).toJson()],
               },
             ],
-            'preferred_skills': preferredSkills.toList()..sort(),
+            'preferred_skills': planMessage?.preferredSkills ?? const <String>[],
+            'ui_preference': value.preferInteractiveUi ? 'interactive' : 'auto',
             'approval_mode': value.approvalMode.wireValue,
             'invocation_mode': 'goal',
             'idempotency_key': 'desktop-plan-execute:${value.runId}',
@@ -2802,34 +2957,44 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> _reconnectRuns() async {
-    for (final values in _conversations.values) {
-      for (final conversation in values) {
-        if (conversation.archived) continue;
-        if (conversation.runId.isEmpty ||
-            (conversation.pendingPlanExecution == null &&
-                !{
-                  RunStatus.starting,
-                  RunStatus.running,
-                  RunStatus.suspending,
-                  RunStatus.suspended,
-                }.contains(conversation.status))) {
-          continue;
+    final conversations = _conversations.values
+        .expand((values) => values)
+        .toList();
+    for (final conversation in conversations) {
+      if (_disposed) return;
+      if (conversation.archived) continue;
+      if (conversation.runId.isEmpty ||
+          (conversation.pendingPlanExecution == null &&
+              !{
+                RunStatus.starting,
+                RunStatus.running,
+                RunStatus.suspending,
+                RunStatus.suspended,
+              }.contains(conversation.status))) {
+        continue;
+      }
+      final runId = conversation.runId;
+      try {
+        final snapshot = await _api.getRun(runId);
+        if (_disposed) return;
+        if (conversation.archived || conversation.runId != runId) continue;
+        final remoteSequence = _snapshotRunSequence(snapshot);
+        _applySnapshot(conversation, snapshot);
+        if (remoteSequence > conversation.runSequence ||
+            conversation.status == RunStatus.running ||
+            conversation.status == RunStatus.starting ||
+            conversation.status == RunStatus.suspending) {
+          _subscribe(conversation);
         }
-        try {
-          final snapshot = await _api.getRun(conversation.runId);
-          final remoteSequence = _snapshotRunSequence(snapshot);
-          _applySnapshot(conversation, snapshot);
-          if (remoteSequence > conversation.runSequence ||
-              conversation.status == RunStatus.running ||
-              conversation.status == RunStatus.starting ||
-              conversation.status == RunStatus.suspending) {
-            _subscribe(conversation);
-          }
-        } on Object catch (_) {
+      } on Object catch (_) {
+        if (!_disposed &&
+            !conversation.archived &&
+            conversation.runId == runId) {
           conversation.status = RunStatus.failed;
         }
       }
     }
+    if (!_disposed) notifyListeners();
   }
 
   void _applyEvent(Conversation conversation, Map<String, Object?> event) {
@@ -3491,6 +3656,8 @@ class WorkspaceController extends ChangeNotifier {
             role: 'user',
             text: prompt,
             content: [ChatMessageContent.text(prompt)],
+            preferredSkills:
+                (body['preferred_skills'] as List? ?? []).whereType<String>().toList(),
           ),
         );
         conversation.processPanels.add(
@@ -3524,35 +3691,29 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _hydrateSessionTrees() async {
-    var hydratedAnyNodes = false;
-    for (final values in _conversations.values) {
-      for (final conversation in values) {
-        if (conversation.archived || (conversation.sessionId ?? '').isEmpty) {
-          continue;
-        }
-        try {
-          final nodes = await _api.getSessionTree(conversation.sessionId!);
-          hydratedAnyNodes = hydratedAnyNodes || nodes.isNotEmpty;
-          for (final node in nodes) {
-            _upsertSubSession(conversation, node);
-          }
-          // Completed history only needs the one-shot snapshot above. Opening
-          // a follow stream for every old conversation adds avoidable startup
-          // work and briefly retains an HTTP stream even though the backend
-          // will close it immediately. Active roots or children still receive
-          // the live tree stream and its reconnect protection.
-          if (_treeHasActiveRun(conversation)) {
-            _subscribeSessionTree(conversation);
-          }
-        } on Object {
-          // A stale local conversation must not block Desktop startup.
-        }
-      }
+  Future<void> _hydrateSessionTree(Conversation root) async {
+    final sessionId = root.sessionId;
+    if (sessionId == null ||
+        sessionId.isEmpty ||
+        !_hydratingSessionTrees.add(sessionId)) {
+      return;
     }
-    // Avoid serializing the entire local conversation cache on every startup
-    // when hydration did not discover anything new.
-    if (hydratedAnyNodes) _persist();
+    try {
+      final nodes = await _api.getSessionTree(sessionId);
+      if (_disposed || root.archived || root.sessionId != sessionId) return;
+      for (final node in nodes) {
+        _upsertSubSession(root, node);
+      }
+      if (_treeHasActiveRun(root)) _subscribeSessionTree(root);
+      if (nodes.isNotEmpty) {
+        notifyListeners();
+        _persist();
+      }
+    } on Object {
+      // A stale local conversation can be reopened and retried.
+    } finally {
+      _hydratingSessionTrees.remove(sessionId);
+    }
   }
 
   void _subscribeSessionTree(Conversation root) {
@@ -3880,6 +4041,7 @@ class WorkspaceController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    desktopPlugins.dispose();
     _workspaceRefreshTimer?.cancel();
     _agentStatusTimer?.cancel();
     _studioPollTimer?.cancel();

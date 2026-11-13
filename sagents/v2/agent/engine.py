@@ -384,9 +384,11 @@ class AgentLoopEngine:
             try:
                 if self.automatic_memory_recall:
                     run, state = await self._run_automatic_memory_recall(
-                        run, state, command, context
+                        run, state, command, context, tool_selection_task
                     )
-                await tool_selection_task
+                else:
+                    await tool_selection_task
+                    run = await self.runtime.get_run(run.run_id)
             except BaseException as exc:
                 if not tool_selection_task.done():
                     tool_selection_task.cancel()
@@ -531,25 +533,33 @@ class AgentLoopEngine:
         )
         self._prepared_tool_selection_runs.add(run_id)
 
-    async def _run_automatic_memory_recall(self, run, state, command, context) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
+    async def _run_automatic_memory_recall(
+        self, run, state, command, context, tool_selection_task
+    ) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
         """Run v1-compatible Memory recall as a real Tool input/output pair."""
 
         latest_user = next(
             (item for item in reversed(command.input) if item.role == "user"), None
         )
-        if latest_user is None:
-            return run, state
-        user_input = "\n".join(
-            block.text for block in latest_user.content if isinstance(block, TextBlock)
-        ).strip()
-        if not user_input:
-            return run, state
-        generate = self.memory_recall_query_generator.generate
-        # Third-party query generators using the original port remain compatible.
-        query_options = {"run_id": run.run_id}
-        if "language" in inspect.signature(generate).parameters:
-            query_options["language"] = run_prompt_language(command.config.metadata)
-        query = await generate(user_input, **query_options)
+        user_input = (
+            "\n".join(
+                block.text for block in latest_user.content if isinstance(block, TextBlock)
+            ).strip()
+            if latest_user is not None
+            else ""
+        )
+        query = ""
+        if user_input:
+            generate = self.memory_recall_query_generator.generate
+            # Third-party query generators using the original port remain compatible.
+            query_options = {"run_id": run.run_id}
+            if "language" in inspect.signature(generate).parameters:
+                query_options["language"] = run_prompt_language(command.config.metadata)
+            query = await generate(user_input, **query_options)
+        # Both preparations may write model recovery events. Finish them before
+        # taking the revision used to commit the memory tool call.
+        await tool_selection_task
+        run = await self.runtime.get_run(run.run_id)
         if not query.strip():
             return run, state
         try:

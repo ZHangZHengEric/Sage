@@ -21,6 +21,32 @@ from sagents.v2.model.provider import (
 )
 
 
+def memory_recall_query_request(source: str, *, run_id: str, language: str) -> ModelRequest:
+    system = prompt_text("memory_system", language)
+    prompt = prompt_text("memory_request", language)
+    return ModelRequest(
+        request_id=new_id("memory_query"),
+        run_id=run_id,
+        model_binding="fast",
+        messages=(
+            ModelMessage(role="system", content=(TextBlock(text=system),)),
+            ModelMessage(role="user", content=(TextBlock(text=prompt + source),)),
+        ),
+        tools=(),
+        tool_choice="none",
+        metadata={
+            "purpose": "memory_recall_query",
+            "response_language": language,
+            "json_fence_compatible": True,
+            "output_validation_schema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
+        },
+    )
+
+
 class LLMMemoryRecallQueryGenerator:
     """Use a model to turn the current request into compact search keywords."""
 
@@ -51,21 +77,7 @@ class LLMMemoryRecallQueryGenerator:
         if not source:
             return ""
         language = prompt_language(language if language is not None else self.language)
-        system = prompt_text("memory_system", language)
-        prompt = prompt_text("memory_request", language)
-        request = ModelRequest(
-            request_id=new_id("memory_query"),
-            run_id=run_id,
-            model_binding="fast",
-            messages=(
-                ModelMessage(role="system", content=(TextBlock(text=system),)),
-                ModelMessage(role="user", content=(TextBlock(text=prompt + source),)),
-            ),
-            tools=(),
-            tool_choice="none",
-            metadata={"purpose": "memory_recall_query", "response_language": language, "json_fence_compatible": True,
-                "output_validation_schema": {"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}}},
-        )
+        request = memory_recall_query_request(source, run_id=run_id, language=language)
         response = None
         stream = stream_auxiliary_model(
             self.model, request, timeout_seconds=self.timeout_seconds,

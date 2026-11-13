@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -7,7 +8,7 @@ if TYPE_CHECKING:
 
 import pytest
 
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.commands import InputItem, ResumeRun, StartRun
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
@@ -150,6 +151,51 @@ async def test_session_tree_subscription_authorizes_before_first_event():
     first = await anext(owner_stream)
     assert first.session.session_id == handle.session_id
     await getattr(owner_stream, 'aclose')()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_root", [False, True])
+async def test_session_tree_slows_while_suspended_and_detects_resume(
+    monkeypatch, include_root,
+):
+    store, access, handle = await setup_access()
+    suspended = await suspend_access_run(store, access, handle.run_id)
+    assert suspended.suspension_id is not None
+    suspension = await store.get_suspension(suspended.suspension_id)
+    delays = []
+
+    async def sleep(delay):
+        delays.append(delay)
+        if len(delays) == 1:
+            await access.runtime.resume_run(
+                ResumeRun(
+                    run_id=handle.run_id,
+                    expected_revision=suspended.revision,
+                    suspension_id=suspension.suspension_id,
+                    expected_suspension_revision=suspension.expected_revision,
+                    idempotency_key="resume-tree",
+                ),
+                OWNER,
+            )
+        else:
+            raise StopMonitoring
+
+    class StopMonitoring(Exception):
+        pass
+
+    monkeypatch.setattr("sagents.v2.runtime.kernel.asyncio", SimpleNamespace(sleep=sleep))
+    resumed = False
+    with pytest.raises(StopMonitoring):
+        async for observation in access.subscribe_session_tree(
+            handle.session_id, OWNER, include_root=include_root,
+        ):
+            if (
+                observation.event is not None
+                and observation.event.type == "run.resume_requested"
+            ):
+                resumed = True
+    assert delays == [5.0, 0.2]
+    assert resumed is include_root
 
 
 @pytest.mark.asyncio

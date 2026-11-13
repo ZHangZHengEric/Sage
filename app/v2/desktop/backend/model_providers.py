@@ -80,8 +80,12 @@ class DesktopModelProviders:
             # Minimal still reasons, and some gateways reject reasoning_effort.
             # Auxiliary OpenAI reasoning requests keep provider defaults;
             # vendor-specific controls are used only by the chat mapping.
-            if provider.protocol == "openai-chat-completions" and (
-                enable_thinking or not is_openai_reasoning_model(provider.model)
+            # A verified plugin profile supplies the wire control itself.
+            # Heuristic controls can conflict with its tested strategy.
+            if (
+                plugin_profile is None
+                and provider.protocol == "openai-chat-completions"
+                and (enable_thinking or not is_openai_reasoning_model(provider.model))
             ):
                 request_extra.update(
                     build_llm_extra_body(

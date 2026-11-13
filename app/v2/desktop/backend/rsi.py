@@ -283,9 +283,14 @@ class RsiStore:
             db.execute(
                 "CREATE INDEX IF NOT EXISTS record_owner ON records(user, agent, kind)"
             )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS active_run_owner ON records(user) "
+                "WHERE kind='run' AND json_extract(summary, '$.status') IN ('queued', 'running')"
+            )
             # There is deliberately no replay of calls with unknown outcomes.
             for row in db.execute(
-                "SELECT id, body FROM records WHERE kind='run'"
+                "SELECT id, body FROM records WHERE kind='run' "
+                "AND json_extract(summary, '$.status') IN ('queued', 'running')"
             ).fetchall() if recover_interrupted else ():
                 value = json.loads(row[1])
                 if (self.external_alive(value) or process_alive(value.get("_host_owner"))
@@ -320,8 +325,13 @@ class RsiStore:
 
     def external_active(self):
         with self.connect() as db:
-            rows = db.execute("SELECT body FROM records WHERE kind='run' AND json_extract(body, '$.external_host')=1 AND json_extract(body, '$.status')='running'").fetchall()
-        return any(self.external_alive(json.loads(row[0])) for row in rows)
+            rows = db.execute(
+                "SELECT id FROM records WHERE kind='run' "
+                "AND json_extract(summary, '$.status') IN ('queued', 'running') "
+                "AND json_extract(summary, '$.external_host')=1 "
+                "AND json_extract(summary, '$.status')='running'"
+            ).fetchall()
+        return any(self.external_alive({"id": identity, "external_host": True}) for (identity,) in rows)
 
     @staticmethod
     def metadata(value):
@@ -443,6 +453,20 @@ class RsiStore:
                     (user, agent, kind),
                 ).fetchall()
             ]
+
+    def active_run_statuses(self, user: str) -> dict[str, str]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT agent, json_extract(summary, '$.status') AS status "
+                "FROM records WHERE user=? AND kind='run' "
+                "AND json_extract(summary, '$.status') IN ('queued', 'running') "
+                "ORDER BY rowid DESC",
+                (user,),
+            )
+            statuses: dict[str, str] = {}
+            for agent, status in rows:
+                statuses.setdefault(agent, status)
+        return statuses
 
     def iterations(self, user, agent, run_id):
         with self.connect() as db:

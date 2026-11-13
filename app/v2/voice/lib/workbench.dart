@@ -60,9 +60,9 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
     return Column(
       children: [
         SizedBox(
-          height: 46,
+          height: voiceTitleBarHeight,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(88, 0, 16, 0),
+            padding: const EdgeInsets.fromLTRB(104, 0, 16, 0),
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final showLabels = constraints.maxWidth >= 800;
@@ -71,6 +71,7 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                     const SageBrand(size: 16),
                     const Spacer(),
                     VoiceGlassButton(
+                      plain: true,
                       tooltip: context.tr('新对话', 'New conversation'),
                       label: showLabels
                           ? context.tr('新对话', 'New conversation')
@@ -80,8 +81,9 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                           ? widget.onNew
                           : null,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 2),
                     VoiceGlassButton(
+                      plain: true,
                       tooltip: context.tr('语音界面', 'Voice view'),
                       label: showLabels
                           ? context.tr('语音界面', 'Voice view')
@@ -89,16 +91,18 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                       icon: Icons.graphic_eq_rounded,
                       onPressed: widget.onVoice,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 2),
                     VoiceGlassButton(
+                      plain: true,
                       tooltip: context.tr('监控', 'Monitor'),
                       label: showLabels ? context.tr('监控', 'Monitor') : null,
                       icon: Icons.tune_rounded,
                       selected: monitor,
                       onPressed: () => setState(() => monitor = !monitor),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 2),
                     VoiceGlassButton(
+                      plain: true,
                       tooltip: context.tr('配置', 'Settings'),
                       label: showLabels ? context.tr('配置', 'Settings') : null,
                       icon: Icons.settings_outlined,
@@ -106,8 +110,9 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                           ? widget.onSettings
                           : null,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 2),
                     VoiceGlassButton(
+                      plain: true,
                       tooltip: widget.dark
                           ? context.tr('浅色模式', 'Light mode')
                           : context.tr('深色模式', 'Dark mode'),
@@ -137,7 +142,7 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
             ),
           ),
         ),
-        const Divider(height: 1),
+        Divider(height: 1, color: colors.outlineVariant.withValues(alpha: .35)),
         Expanded(
           child: Row(
             children: [
@@ -160,6 +165,9 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                               glassColor: colors.surfaceContainerLow,
                               blur: 3,
                               thickness: 4,
+                              lightIntensity: 0,
+                              glowIntensity: 0,
+                              shadowElevation: 0,
                               standardOpacityMultiplier: 1,
                             ),
                             child: Padding(

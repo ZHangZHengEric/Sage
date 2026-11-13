@@ -18,6 +18,22 @@ from pydantic import Field
 
 from sagents.v2.contracts.common import StrictModel, utc_now
 from sagents.v2.model.capability_contracts import ModelCapabilityProfile
+from .desktop_plugins import PLUGIN_EDIT_TOOLS
+
+
+SAGE_DEFAULT_SKILLS = (
+    "sage-openui",
+    "sage-desktop-plugin-development",
+    "agent-browser",
+    "deep-research-agent",
+    "docx",
+    "excalidraw-diagram-generator",
+    "frontend-design",
+    "pdf",
+    "skill-creator",
+    "xlsx",
+)
+SAGE_DEFAULT_VISIBLE_SKILLS = SAGE_DEFAULT_SKILLS[:2]
 
 
 def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, Any]:
@@ -53,8 +69,10 @@ def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, 
             "todo_read",
             "turn_status",
             "load_skill",
+            "register_desktop_plugin",
+            *PLUGIN_EDIT_TOOLS,
         ],
-        "availableSkills": ["sage-openui"],
+        "availableSkills": ["sage-openui", "sage-desktop-plugin-development"],
     }
 
 
@@ -190,6 +208,13 @@ class JsonDesktopCatalogStore:
             state = await asyncio.to_thread(self._read)
             changed = False
             if not any(value.user_id == user_id for value in state.agents):
+                config = default_agent_config()
+                config["availableSkills"] = list(SAGE_DEFAULT_SKILLS)
+                config["defaultVisibleSkills"] = list(SAGE_DEFAULT_VISIBLE_SKILLS)
+                config["availableTools"].append("search_skills")
+                config["desktopPluginToolsMigrated"] = True
+                config["desktopPluginEditToolsMigrated"] = True
+                config["sageDefaultSkillsMigrated"] = True
                 state = state.model_copy(
                     update={
                         "agents": (
@@ -199,12 +224,60 @@ class JsonDesktopCatalogStore:
                                 user_id=user_id,
                                 name="Sage",
                                 is_default=True,
-                                config=default_agent_config(),
+                                config=config,
                             ),
                         )
                     }
                 )
                 changed = True
+            agents = []
+            for agent in state.agents:
+                config = dict(agent.config)
+                if agent.user_id == user_id:
+                    tools = config.get("availableTools")
+                    if "validate_desktop_plugin" in (tools or ()):
+                        config["availableTools"] = [
+                            name for name in tools if name != "validate_desktop_plugin"
+                        ]
+                        config["desktopPluginToolsMigrated"] = True
+                    if agent.agent_id == "sage" and agent.is_default:
+                        if (
+                            not config.get("desktopPluginToolsMigrated")
+                            and tools is not None
+                        ):
+                            config["availableTools"] = list(
+                                dict.fromkeys((*tools, "register_desktop_plugin"))
+                            )
+                            config["desktopPluginToolsMigrated"] = True
+                        if not config.get("sageDefaultSkillsMigrated"):
+                            current_skills = config.get("availableSkills") or ()
+                            config["availableSkills"] = list(
+                                dict.fromkeys((*current_skills, *SAGE_DEFAULT_SKILLS))
+                            )
+                            config.setdefault(
+                                "defaultVisibleSkills", list(SAGE_DEFAULT_VISIBLE_SKILLS)
+                            )
+                            configured_tools = config.get("availableTools")
+                            if configured_tools is not None:
+                                config["availableTools"] = list(
+                                    dict.fromkeys((*configured_tools, "search_skills"))
+                                )
+                            config["sageDefaultSkillsMigrated"] = True
+                        configured_tools = config.get("availableTools")
+                        if (
+                            not config.get("desktopPluginEditToolsMigrated")
+                            and "register_desktop_plugin" in (configured_tools or ())
+                        ):
+                            config["availableTools"] = list(
+                                dict.fromkeys((*configured_tools, *PLUGIN_EDIT_TOOLS))
+                            )
+                            config["desktopPluginEditToolsMigrated"] = True
+                if config != agent.config:
+                    agent = agent.model_copy(update={"config": config})
+                    changed = True
+                agents.append(agent)
+            if changed:
+                state = state.model_copy(update={"agents": tuple(agents)})
             if not any(value.user_id == user_id for value in state.model_providers):
                 state = state.model_copy(
                     update={

@@ -1,16 +1,22 @@
 part of '../workspace_screen.dart';
 
-class _PlanPreviewScope extends InheritedWidget {
-  const _PlanPreviewScope({required this.onOpen, required super.child});
+class _WorkspacePreviewScope extends InheritedWidget {
+  const _WorkspacePreviewScope({
+    required this.onOpen,
+    required this.onLoadImage,
+    required super.child,
+  });
 
   final ValueChanged<String> onOpen;
 
-  static ValueChanged<String>? maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_PlanPreviewScope>()?.onOpen;
+  final Future<WorkspaceFileContent> Function(String) onLoadImage;
+
+  static _WorkspacePreviewScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_WorkspacePreviewScope>();
 
   @override
-  bool updateShouldNotify(_PlanPreviewScope oldWidget) =>
-      oldWidget.onOpen != onOpen;
+  bool updateShouldNotify(_WorkspacePreviewScope oldWidget) =>
+      oldWidget.onOpen != onOpen || oldWidget.onLoadImage != onLoadImage;
 }
 
 class _PlanPreviewState extends ValueNotifier<String> {

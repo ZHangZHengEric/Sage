@@ -59,6 +59,21 @@ def test_live_owner_survives_reopening_and_pid_reuse_is_detected(tmp_path):
     assert reopened.get('live', 'alice', 'agent-A', 'run')['status'] == 'interrupted'
 
 
+def test_active_run_statuses_skip_history_and_payloads(tmp_path, monkeypatch):
+    store = RsiStore(tmp_path / 'rsi.sqlite3')
+    store.put({'id': 'older', 'status': 'running'}, 'alice', 'agent-A', 'run')
+    store.put({'id': 'current', 'status': 'queued'}, 'alice', 'agent-A', 'run')
+    store.put({'id': 'finished', 'status': 'completed'}, 'alice', 'agent-A', 'run')
+    store.put({'id': 'unrelated', 'status': 'running'}, 'bob', 'agent-B', 'run')
+
+    def reject_decode(*_):
+        pytest.fail('Status lookups must not decode run payloads')
+
+    monkeypatch.setattr(store, '_decode', reject_decode)
+    assert store.active_run_statuses('alice') == {'agent-A': 'queued'}
+    assert store.active_run_statuses('bob') == {'agent-B': 'running'}
+
+
 def test_other_live_host_cannot_cancel_or_overwrite_owned_run(tmp_path, monkeypatch):
     store = RsiStore(tmp_path / 'rsi.sqlite3')
     store.put({'id': 'live', 'status': 'running'}, 'alice', 'agent-A', 'run')

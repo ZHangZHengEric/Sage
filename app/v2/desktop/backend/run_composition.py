@@ -427,6 +427,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         response_language = normalize_language(response_language)
         metadata = {
             "workspace_id": request.workspace_id,
+            "desktop_client_id": request.desktop_client_id,
             "preferred_skills": request.preferred_skills,
             "ui_preference": request.ui_preference,
             "approval_mode": request.approval_mode,

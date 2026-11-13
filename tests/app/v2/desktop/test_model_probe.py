@@ -10,6 +10,7 @@ from sagents.v2.model import (
     ModelCapabilityProbeStatus,
     ModelCapabilityProfile,
 )
+from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 
 
 def test_chat_multimodal_diagnostic_stays_within_chat_protocol() -> None:
@@ -64,6 +65,25 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin(
     class PluginProvider:
         raw_client = None
 
+        def __init__(self, route):
+            self.route = route
+
+        async def stream(self, request):
+            assert self.route.capability_profile is not None
+            assert request.metadata["capability_probe"] is True
+            assert request.metadata["purpose"] == "memory_recall_query"
+            assert request.response_format is None
+            assert request.response_schema is None
+            assert request.model_binding == "fast"
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id="probe-response",
+                    text='{"query":"Paris office"}' if object_supported else '{"wrong":true}',
+                    finish_reason="stop",
+                ),
+            )
+
         async def probe_capabilities(self, request):
             calls.append(request)
             outcomes = tuple(
@@ -113,7 +133,7 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin(
     )
     result = await probe_model_provider_capabilities(
         record,
-        provider_factory=lambda *args, **kwargs: PluginProvider(),
+        provider_factory=lambda route, *args, **kwargs: PluginProvider(route),
         compatibility_fingerprint=lambda value: "sha256:route",
         output_token_fallbacks=(4_096, 512),
         reasoning_disable_extras={"omit": {}},
@@ -130,3 +150,8 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin(
     profile = result["compatibility_profile"]["plugin_profile"]
     assert profile["plugin_id"] == f"sage.model.{protocol}"
     assert profile["invocation_strategy"]["image_detail_mode"] == "omit"
+    replay = profile["metadata"]["memory_recall_query"]
+    assert replay["status"] == ("supported" if object_supported else "error")
+    assert "memory_recall_query" in result[
+        "successful_probes" if object_supported else "failed_probes"
+    ]

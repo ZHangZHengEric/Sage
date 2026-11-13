@@ -139,6 +139,7 @@ class DesktopCatalogServiceMixin:
         self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         values = await self.catalog.list_agents(user_id)
+        statuses = await asyncio.to_thread(self.rsi_store.active_run_statuses, user_id)
         return [
             {
                 "id": value.agent_id,
@@ -146,7 +147,7 @@ class DesktopCatalogServiceMixin:
                 "is_default": value.is_default,
                 "tool_count": len(value.config.get("availableTools") or []),
                 "skill_count": len(value.config.get("availableSkills") or []),
-                **({"rsi_status": status} if (status := next((run["status"] for run in self.rsi_store.list(user_id, value.agent_id, "run") if run["status"] in {"queued", "running"}), None)) else {}),
+                **({"rsi_status": statuses[value.agent_id]} if value.agent_id in statuses else {}),
             }
             for value in values
         ]
@@ -186,11 +187,12 @@ class DesktopCatalogServiceMixin:
         self = cast("DesktopV2Service", self)
         agent = await self._agent(agent_id, user_id)
         allowed = set(agent.config.get("availableSkills") or [])
+        if not allowed:
+            return []
         values = self._skill_provider().descriptors()
-        names = sorted(allowed if allowed else values)
         return [
             self._skill_summary(name, values[name])
-            for name in names
+            for name in sorted(allowed)
             if name in values and _SKILL_NAME.fullmatch(name)
         ]
 
@@ -275,6 +277,9 @@ class DesktopCatalogServiceMixin:
             **official_tool_categories(),
             "load_skill": "system",
             "search_skills": "system",
+            "register_desktop_plugin": "system",
+            "list_desktop_plugins": "system",
+            "download_desktop_plugin": "system",
         }
         definitions = []
         for value in self._native_tool_definitions():
@@ -305,7 +310,17 @@ class DesktopCatalogServiceMixin:
         return definitions
 
     def _native_tool_definitions(self) -> tuple[ToolDefinition, ...]:
+        from .desktop_plugins import DesktopPluginTools
+
         definitions = official_tool_definitions()
+        plugin_tools = (
+            decorated_tool_definition(method) for method in (
+                DesktopPluginTools.register_desktop_plugin,
+                DesktopPluginTools.list_desktop_plugins,
+                DesktopPluginTools.download_desktop_plugin,
+            )
+        )
+        definitions = (*definitions, *(tool for tool in plugin_tools if tool is not None))
         skill_tools = (
             decorated_tool_definition(owner.execute) for owner in (SkillLoadTool, SkillSearchTool)
         )

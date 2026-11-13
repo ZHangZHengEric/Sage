@@ -89,6 +89,18 @@ class _ComposerState extends State<_Composer> {
   }
 
   void _syncComposerReferences() {
+    final insertion = widget.controller.takePluginDraftInsertion(
+      widget.conversation.id,
+    );
+    if (insertion != null) {
+      final prefix = _text.text.isEmpty ? '' : '\n';
+      _text.value = TextEditingValue(
+        text: '${_text.text}$prefix$insertion',
+        selection: TextSelection.collapsed(
+          offset: _text.text.length + prefix.length + insertion.length,
+        ),
+      );
+    }
     final references = widget.controller.composerReferences;
     _text.syncReferences(references);
     if (widget.studio != null) {
@@ -1895,6 +1907,9 @@ class _SkillPickerState extends State<_SkillPicker> {
 
   void _toggle() => _isOpen ? _close() : _open();
 
+  Iterable<SkillSummary> get _selectableSkills =>
+      widget.controller.skills.where((skill) => skill.name != 'sage-openui');
+
   void _open() {
     if (_isOpen) return;
     _overlayEntry = OverlayEntry(
@@ -2006,7 +2021,7 @@ class _SkillPickerState extends State<_SkillPicker> {
                         context,
                       ).colorScheme.outlineVariant.withValues(alpha: 0.4),
                     ),
-                    if (widget.controller.skills.isEmpty)
+                    if (_selectableSkills.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -2014,18 +2029,12 @@ class _SkillPickerState extends State<_SkillPicker> {
                         ),
                         child: Text(context.l10n.text('workspace.noSkills')),
                       ),
-                    for (final skill in widget.controller.skills)
+                    for (final skill in _selectableSkills)
                       _ComposerMenuItem(
                         key: ValueKey('composer-skill-option:${skill.name}'),
-                        enabled:
-                            !(skill.name == 'sage-openui' &&
-                                widget.conversation.preferInteractiveUi),
-                        selected:
-                            (skill.name == 'sage-openui' &&
-                                widget.conversation.preferInteractiveUi) ||
-                            widget.controller.preferredSkills.contains(
-                              skill.name,
-                            ),
+                        selected: widget.controller.preferredSkills.contains(
+                          skill.name,
+                        ),
                         icon: CupertinoIcons.sparkles,
                         label: skill.name,
                         onTap: () {

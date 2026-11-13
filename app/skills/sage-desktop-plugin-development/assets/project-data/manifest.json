@@ -1,0 +1,13 @@
+{
+  "id": "example.project-data",
+  "name": "项目数据",
+  "version": "1.0.0",
+  "protocolVersion": 1,
+  "entry": "index.html",
+  "logo": "logo.png",
+  "icon": "chart",
+  "capabilities": ["context", "file.read", "https"],
+  "endpoints": {
+    "example": {"url": "https://api.github.com/repos/flutter/flutter", "method": "GET"}
+  }
+}

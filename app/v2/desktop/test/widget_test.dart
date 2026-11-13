@@ -29,6 +29,30 @@ import 'package:sage_desktop_v2/src/ui/shared/desktop_notice.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
 
+class _DesktopPluginApi extends _FakeApi {
+  final events = StreamController<Map<String, Object?>>();
+  final acknowledgements = <String>[];
+  final managementActions = <String>[];
+
+  @override
+  Stream<Map<String, Object?>> desktopPluginEvents(String client) => events.stream;
+
+  @override
+  Future<void> acknowledgeDesktopPlugin(String client, String id) async {
+    acknowledgements.add(id);
+  }
+
+  @override
+  Future<void> manageDesktopPlugin(String id, String action) async {
+    managementActions.add('$id:$action');
+  }
+
+  @override
+  Future<Map<String, Object?>> desktopPluginDocument(String id, String digest) async {
+    throw StateError('Native plugin rendering is covered by integration tests');
+  }
+}
+
 class _McpCatalogApi extends _FakeApi {
   @override
   Future<List<ToolSummary>> listTools() async => [
@@ -251,6 +275,7 @@ class _FakeApi extends V2ApiClient {
   Map<String, Object?>? lastModelCreate;
   Map<String, Object?>? lastModelCapabilityDraft;
   Map<String, Object?>? modelCapabilityResult;
+  Completer<void>? modelCapabilityGate;
   String? lastModelCapabilityProviderId;
   DesktopSettings? lastSettings;
   String? lastDeletedModelId;
@@ -590,9 +615,14 @@ Inspect the complete diff before reporting findings.
   Future<Map<String, Object?>> verifyModelProviderCapabilities(
     Map<String, Object?> draft, {
     String? providerId,
+    void Function(String stage, int completed, int total)? onProgress,
   }) async {
     lastModelCapabilityDraft = Map<String, Object?>.of(draft);
     lastModelCapabilityProviderId = providerId;
+    if (modelCapabilityGate case final gate?) {
+      onProgress?.call('reasoning', 3, 12);
+      await gate.future;
+    }
     return modelCapabilityResult ??
         const {
           'connection': {'supported': true},
@@ -3545,6 +3575,170 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('registered plugin is pinned and opened before any chat refresh', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _DesktopPluginApi();
+    final controller = await _controller(api: api);
+    addTearDown(() async {
+      _disposeController(controller);
+      await api.events.close();
+    });
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    controller.desktopPlugins.start();
+    final plugin = {'id': 'test.todo', 'name': 'Plugin Todo', 'icon': 'checklist',
+      'digest': 'first', 'enabled': true, 'pin': 1};
+    final event = {'revision': 1, 'plugins': [plugin], 'opens': [
+      {'request': 'register-once', 'plugin': 'test.todo', 'revision': 1},
+    ]};
+    api.events.add(event);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('desktop-plugin-pin:test.todo')), findsOneWidget);
+    final tab = find.byKey(const ValueKey('workspace-panel-tab:test.todo:1'));
+    expect(tab, findsOneWidget);
+    expect(api.acknowledgements, ['register-once']);
+    final thread = find.byKey(const ValueKey('thread-repaint-boundary'));
+    final composer = find.descendant(of: thread, matching: find.byType(EditableText));
+    await tester.enterText(composer, 'existing draft');
+    final toggle = find.byKey(const ValueKey('workspace-panel-toggle-expansion'));
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(thread, findsNothing);
+    expect(tab, findsOneWidget);
+    controller.insertPluginDraft('from plugin');
+    await tester.pump();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<EditableText>(composer).controller.text, 'existing draft\nfrom plugin');
+
+    await tester.tap(find.byKey(const ValueKey('workspace-panel-close:test.todo:1')));
+    await tester.pumpAndSettle();
+    api.events.add(event);
+    await tester.pumpAndSettle();
+    expect(tab, findsNothing);
+    final launcher = find.byKey(const ValueKey('desktop-plugins'));
+    final collection = find.byKey(const ValueKey('desktop-plugin-collection'));
+    final panelContent = find.byKey(const ValueKey('workspace-panel-stack'));
+    final add = find.byKey(const ValueKey('workspace-panel-open-menu'));
+    final newChat = find.byKey(const ValueKey('new-agent-workspace-conversation'));
+    expect(tester.getTopLeft(launcher).dy, greaterThan(tester.getTopLeft(newChat).dy));
+    await tester.tap(launcher);
+    await tester.pumpAndSettle();
+    expect(collection, findsOneWidget);
+    expect(tester.getRect(collection), tester.getRect(panelContent));
+    expect(thread, findsNothing);
+    expect(launcher, findsOneWidget);
+    final upload = find.byKey(const ValueKey('desktop-plugin-upload'));
+    expect(upload, findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+    final appIcon = find.byKey(const ValueKey('desktop-plugin:test.todo'));
+    expect(tester.getSize(upload), tester.getSize(appIcon));
+    expect(tester.getCenter(upload).dy, tester.getCenter(appIcon).dy);
+    expect(tester.getCenter(upload).dx, greaterThan(tester.getCenter(appIcon).dx));
+    final pointer = tester.getCenter(appIcon) + const Offset(15, 8);
+    await tester.tapAt(pointer, buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    final openPlugin = find.byKey(const ValueKey('desktop-plugin-menu:test.todo:open'));
+    final contextMenu = find.byKey(const ValueKey('desktop-plugin-context-menu'));
+    expect(tester.getTopLeft(contextMenu), pointer);
+    tester.view.physicalSize = Size(pointer.dx + 80, pointer.dy + 65);
+    await tester.pumpAndSettle();
+    expect(tester.getBottomRight(contextMenu), pointer);
+    tester.view.physicalSize = const Size(1440, 900);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('desktop-plugin-menu:test.todo:pin')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('desktop-plugin-menu:test.todo:unpin')),
+      findsOneWidget,
+    );
+    await tester.tap(openPlugin);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('workspace-panel-tab:test.todo:2')), findsOneWidget);
+    expect(thread, findsNothing);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(thread, findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('workspace-panel-close:sage.workspace.desktop-plugins:1')));
+    await tester.pumpAndSettle();
+    await tester.tap(add);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('桌面插件').last);
+    await tester.pumpAndSettle();
+    expect(collection, findsOneWidget);
+    expect(thread, findsNothing);
+    await tester.tap(find.byKey(const ValueKey('workspace-panel-tab:test.todo:2')));
+    await tester.pumpAndSettle();
+    expect(thread, findsOneWidget);
+    await tester.tap(launcher);
+    await tester.pumpAndSettle();
+    expect(thread, findsNothing);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(thread, findsOneWidget);
+    expect(collection, findsOneWidget);
+    expect(tester.getRect(collection), tester.getRect(panelContent));
+
+    await tester.tap(launcher);
+    await tester.pumpAndSettle();
+    expect(thread, findsNothing);
+    final previousConversation = controller.selectedConversationId;
+    await tester.tap(newChat);
+    await tester.pumpAndSettle();
+    expect(controller.selectedConversationId, isNot(previousConversation));
+    expect(thread, findsOneWidget);
+    expect(collection, findsOneWidget);
+
+    await tester.tap(launcher);
+    await tester.pumpAndSettle();
+    expect(thread, findsNothing);
+    final history = find.byKey(
+      ValueKey('conversation-tile:$previousConversation'),
+    );
+    await tester.ensureVisible(history);
+    await tester.tap(history);
+    await tester.pumpAndSettle();
+    expect(controller.selectedConversationId, previousConversation);
+    expect(thread, findsOneWidget);
+    expect(collection, findsOneWidget);
+
+    final pin = find.byKey(const ValueKey('desktop-plugin-pin:test.todo'));
+    for (var i = 0; i < 32; i++) {
+      controller.createConversation();
+    }
+    await tester.pumpAndSettle();
+    final railList = find.byKey(const ValueKey('project-rail-scroll'));
+    final railScrollable = tester.state<ScrollableState>(
+      find.descendant(of: railList, matching: find.byType(Scrollable)).first,
+    );
+    final launcherPosition = tester.getTopLeft(launcher);
+    final pinPosition = tester.getTopLeft(pin);
+    await tester.drag(railList, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(railScrollable.position.pixels, greaterThan(0));
+    expect(tester.getTopLeft(launcher), launcherPosition);
+    expect(tester.getTopLeft(pin), pinPosition);
+    await tester.tap(pin, buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('desktop-plugin-unpin:test.todo')));
+    await tester.pumpAndSettle();
+    expect(api.managementActions, ['test.todo:unpin']);
+    api.events.add({
+      'revision': 2,
+      'plugins': [{...plugin, 'pin': null}],
+      'opens': [],
+    });
+    await tester.pumpAndSettle();
+    expect(pin, findsNothing);
+    expect(find.byKey(const ValueKey('desktop-plugin:test.todo')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   test(
     'all supported frontend locales contain the complete translation set',
     () {
@@ -5236,6 +5430,34 @@ void main() {
     expect(controller.selectedFile, isNull);
   });
 
+  testWidgets('selected skill is sent and shown on its message', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeApi();
+    final controller = await _controller(api: api);
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+
+    controller.toggleSkill('code-review');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('composer-selected-skill:code-review')),
+        findsOneWidget);
+    await controller.send('Review this change');
+    await tester.pumpAndSettle();
+
+    final message = controller.selectedConversation!.messages
+        .firstWhere((message) => message.role == 'user');
+    expect(api.lastRunBody?['preferred_skills'], ['code-review']);
+    expect(find.byKey(ValueKey('message-skill:${message.id}:code-review')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('composer-selected-skill:code-review')),
+        findsNothing);
+    expect(ChatMessage.fromJson(message.toJson()).preferredSkills, ['code-review']);
+  });
+
   testWidgets('desktop layout exposes agent, skill, workspace, and files', (
     tester,
   ) async {
@@ -5898,7 +6120,7 @@ void main() {
 
   for (final brightness in Brightness.values) {
     testWidgets(
-      'project conversations only collapse explicitly in ${brightness.name} mode',
+      'project folders restore expansion in ${brightness.name} mode',
       (tester) async {
         tester.view.physicalSize = const Size(1440, 900);
         tester.view.devicePixelRatio = 1;
@@ -5906,11 +6128,34 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-        final controller = await _controller();
+        final api = _FakeApi();
+        api.desktopSettings = api.desktopSettings.copyWith(
+          projects: [
+            ...api.desktopSettings.projects,
+            const DesktopProject(
+              id: 'project_other',
+              name: 'Other Project',
+              path: '/tmp/other-project',
+            ),
+          ],
+        );
+        final controller = await _controller(api: api);
         addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
+
+        final projectHeader = find.byKey(
+          const ValueKey('workspace-header:project_demo'),
+        );
+        final otherHeader = find.byKey(
+          const ValueKey('workspace-header:project_other'),
+        );
+        expect(
+          tester.getTopLeft(otherHeader).dy -
+              tester.getBottomLeft(projectHeader).dy,
+          2,
+        );
 
         final recentNewConversation = find.byKey(
           const ValueKey('recent-new-conversation'),
@@ -5964,8 +6209,8 @@ void main() {
 
         expect(conversationTile, findsOneWidget);
         final projectIcon = find.descendant(
-          of: find.byKey(const ValueKey('workspace-header:project_demo')),
-          matching: find.byIcon(CupertinoIcons.square_stack_3d_up),
+          of: disclosure,
+          matching: find.byIcon(Icons.folder_open),
         );
         final projectConversationIcon = find.descendant(
           of: conversationTile,
@@ -5981,10 +6226,7 @@ void main() {
           tester.getCenter(recentConversationIcon).dx,
         );
         expect(
-          find.descendant(
-            of: disclosure,
-            matching: find.byIcon(CupertinoIcons.chevron_down),
-          ),
+          projectIcon,
           findsOneWidget,
         );
         expect(
@@ -6051,15 +6293,42 @@ void main() {
         expect(
           find.descendant(
             of: disclosure,
-            matching: find.byIcon(CupertinoIcons.chevron_right),
+            matching: find.byIcon(Icons.folder_outlined),
           ),
           findsOneWidget,
         );
 
+        await tester.pumpWidget(const SizedBox.shrink());
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.reload();
+        final restarted = _newController(
+          api: api,
+          preferencesLoader: SharedPreferences.getInstance,
+        );
+        addTearDown(() => _disposeController(restarted));
+        await tester.pumpWidget(SageDesktopV2App(controller: restarted));
+        await tester.pumpAndSettle();
+
+        expect(conversationTile, findsNothing);
+        expect(
+          find.descendant(
+            of: disclosure,
+            matching: find.byIcon(Icons.folder_outlined),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: otherHeader,
+            matching: find.byIcon(Icons.folder_open),
+          ),
+          findsOneWidget,
+        );
         await tester.tap(disclosure);
         await tester.pumpAndSettle();
 
         expect(conversationTile, findsOneWidget);
+        expect(restarted.selectedGroupId, WorkspaceController.agentWorkspaceId);
         expect(tester.takeException(), isNull);
       },
     );
@@ -6344,6 +6613,55 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
     await tester.pump();
     expect(find.text('正在检查实现。'), findsOneWidget);
+  });
+
+  testWidgets('image analysis previews its workspace image on hover', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final persisted = _persistedGroupedActivitiesConversation();
+    final process = (persisted['process_panels'] as List).single as Map;
+    process['activities'] = [
+      {
+        'id': 'inspect-logo',
+        'label': 'analyze_image',
+        'active': false,
+        'sequence': 10,
+        'arguments': {'image_path': '/workspace/logo.png', 'prompt': 'Inspect'},
+      },
+    ];
+    SharedPreferences.setMockInitialValues({
+      'sage.desktop_v2.conversations.v1': jsonEncode({
+        WorkspaceController.agentWorkspaceId: [persisted],
+      }),
+    });
+    final api = _FakeApi()
+      ..workspaceFileContent = WorkspaceFileContent(
+        bytes: base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+        mediaType: 'image/png',
+      );
+    final controller = _newController(api: api, preferencesLoader: SharedPreferences.getInstance);
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('process-panel-toggle')));
+    await tester.pumpAndSettle();
+    final row = find.byKey(const ValueKey('process-image-preview:inspect-logo:/workspace/logo.png'));
+    expect(row, findsOneWidget);
+    expect(api.workspaceFileCalls, 0);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: tester.getCenter(row));
+    await tester.pumpAndSettle();
+    expect(api.lastWorkspaceFilePath, 'logo.png');
+    final image = find.byKey(const ValueKey('message-reference-preview-image:/workspace/logo.png'));
+    expect(image, findsOneWidget);
+    await mouse.moveTo(Offset.zero);
+    await tester.pumpAndSettle();
+    expect(image, findsNothing);
   });
 
   for (final brightness in Brightness.values) {
@@ -10465,7 +10783,8 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
-    final api = _FakeApi();
+    final gate = Completer<void>();
+    final api = _FakeApi()..modelCapabilityGate = gate;
     final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
@@ -10502,7 +10821,13 @@ void main() {
     await tester.ensureVisible(capabilityCheck);
     await tester.pumpAndSettle();
     await tester.tap(capabilityCheck);
+    await tester.pump();
+    expect(find.text('3 / 12'), findsOneWidget);
+    final progress = find.byKey(const ValueKey('settings-model-probe-progress'));
+    expect(tester.widget<GlassProgressIndicator>(progress).value, 0.25);
+    gate.complete();
     await tester.pumpAndSettle();
+    expect(progress, findsNothing);
 
     expect(api.lastModelPatch, isNull);
     expect(api.lastModelCapabilityProviderId, 'model_main');

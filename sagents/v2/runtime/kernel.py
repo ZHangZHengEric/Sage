@@ -54,6 +54,10 @@ from sagents.v2.runtime.contracts import RuntimeRunStream, RuntimeSessionTreeEve
 from sagents.v2.i18n import error_recovery_payload, localize_error
 
 
+_SESSION_TREE_ACTIVE_INTERVAL = 0.2
+_SESSION_TREE_SUSPENDED_INTERVAL = 5.0
+
+
 class HarnessRuntime:
     """Transport-neutral asynchronous command/query/event facade.
 
@@ -171,13 +175,13 @@ class HarnessRuntime:
             # Otherwise presentation clients race the first delegation: they
             # subscribe when the root stream opens, observe no children, and
             # permanently miss the child Session and all of its events.
-            active = False
+            unfinished_states: set[RunState] = set()
             if not include_root:
                 root_runs = await self.session_store.list_session_runs(
                     root.session_id
                 )
                 if root_runs and root_runs[-1].state not in TERMINAL_RUN_STATES:
-                    active = True
+                    unfinished_states.add(root_runs[-1].state)
             for session in sessions:
                 runs = await self.session_store.list_session_runs(session.session_id)
                 if not runs:
@@ -217,10 +221,16 @@ class HarnessRuntime:
                         event=event,
                     )
                 if run.state not in TERMINAL_RUN_STATES:
-                    active = True
-            if not active:
+                    unfinished_states.add(run.state)
+            if not unfinished_states:
                 return
-            await asyncio.sleep(0.2)
+            # Suspended runs can still be resumed by another client. Keep the
+            # subscription alive, while avoiding rapid scans of quiescent trees.
+            await asyncio.sleep(
+                _SESSION_TREE_SUSPENDED_INTERVAL
+                if unfinished_states == {RunState.SUSPENDED}
+                else _SESSION_TREE_ACTIVE_INTERVAL
+            )
 
     async def get_run(self, run_id: str) -> RunSnapshot:
         return await self.session_store.get_run(run_id)

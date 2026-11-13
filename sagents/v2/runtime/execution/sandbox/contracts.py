@@ -32,6 +32,7 @@ class FileSystemMode(str, Enum):
 
 class NetworkMode(str, Enum):
     NONE = "none"
+    HTTP_REQUESTS = "http_requests"
     ALLOWLIST = "allowlist"
     PROXY = "proxy"
     UNRESTRICTED = "unrestricted"

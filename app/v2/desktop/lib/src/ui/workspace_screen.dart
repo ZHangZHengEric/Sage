@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -17,6 +18,7 @@ import '../studio_models.dart';
 import '../localization/app_localizations.dart';
 import '../services/terminal_service.dart';
 import '../state/workspace_controller.dart';
+import '../state/desktop_plugins.dart';
 import 'file_preview.dart';
 import 'openui_surface.dart';
 import 'openui_deck.dart';
@@ -27,6 +29,7 @@ import 'shared/desktop_notice.dart';
 import 'tool_activity_presentation.dart';
 import 'workspace_panels/terminal/terminal_workspace_panel_plugin.dart';
 import 'workspace_panels/workspace_panel_plugin.dart';
+import 'workspace_panels/desktop_plugin_panel.dart';
 
 part 'workspace/thread.dart';
 part 'workspace/replay.dart';
@@ -38,6 +41,7 @@ part 'workspace/message_content.dart';
 part 'workspace/composer.dart';
 part 'workspace/files.dart';
 part 'workspace/chrome.dart';
+part 'workspace/desktop_plugins.dart';
 part 'workspace/studio.dart';
 part 'workspace_panels/studio_workspace_panel_plugin.dart';
 part 'workspace_panels/openui_workspace_panel_plugin.dart';
@@ -78,7 +82,132 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _railCollapsed = false;
   bool _workspaceCollapsed = false;
   bool _workspaceExpanded = false;
+  bool _collectionOpenedExpanded = false;
   bool _settingsOpen = false;
+  final _dockKey = GlobalKey();
+  bool _pluginsOpenScheduled = false;
+  FocusNode? _pluginReturnFocus;
+  bool _pluginAutoExpanded = false;
+  bool get _isCustomPluginActive =>
+      _panelDockController.activePlugin is DesktopPluginPanel ||
+      _panelDockController.activePlugin is _DesktopPluginCollectionPanel;
+
+  void _restorePluginDock() {
+    if (_workspaceExpanded) {
+      _toggleWorkspaceExpansion();
+      return;
+    }
+    if (_pluginAutoExpanded) {
+      _collapseWorkspace();
+      _pluginReturnFocus?.requestFocus();
+    }
+  }
+
+  void _restoreDockForConversation({required bool canDockPlugin}) {
+    final hideDock = _isCustomPluginActive && !canDockPlugin;
+    if (_workspaceExpanded || (hideDock && !_workspaceCollapsed)) {
+      setState(() {
+        _workspaceExpanded = false;
+        _collectionOpenedExpanded = false;
+        if (hideDock) _workspaceCollapsed = true;
+      });
+    }
+  }
+
+  void _onDesktopPluginsChanged() {
+    final wasPluginActive = _isCustomPluginActive;
+    final plugins = widget.controller.desktopPlugins;
+    if (plugins.opens.any(
+      (request) => !plugins.wasOpened(request['request'] as String),
+    )) {
+      _settingsOpen = false;
+    }
+    _rebuildPanelRegistry();
+    setState(() {
+      if (wasPluginActive && !_isCustomPluginActive) _workspaceExpanded = false;
+    });
+    _schedulePendingPlugins();
+  }
+
+  void _schedulePendingPlugins() {
+    final plugins = widget.controller.desktopPlugins;
+    if (_pluginsOpenScheduled ||
+        !plugins.opens.any(
+          (request) => !plugins.wasOpened(request['request'] as String),
+        )) {
+      return;
+    }
+    _pluginsOpenScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pluginsOpenScheduled = false;
+      if (mounted) _openPendingPlugins();
+    });
+  }
+
+  void _openPendingPlugins() {
+    if (_settingsOpen || widget.controller.loading) return;
+    final plugins = widget.controller.desktopPlugins;
+    for (final request in plugins.opens) {
+      final requestId = request['request'] as String;
+      if (plugins.wasOpened(requestId)) continue;
+      final pluginId = request['plugin'] as String;
+      if (_openDesktopPlugin(pluginId)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_settingsOpen && _dockKey.currentContext != null) {
+            plugins.mounted(requestId);
+          }
+        });
+      }
+    }
+  }
+
+  bool _openDesktopPlugin(String id, {bool expand = false}) {
+    final target = _panelRegistry[id];
+    if (target is! DesktopPluginPanel) return false;
+    final same =
+        _panelDockController.activePluginId == id && !_workspaceCollapsed;
+    _pluginReturnFocus = FocusManager.instance.primaryFocus;
+    setState(() {
+      _workspaceCollapsed = false;
+      if (expand) {
+        _collectionOpenedExpanded = false;
+        _workspaceExpanded = true;
+      } else if (!same) {
+        _workspaceExpanded = false;
+      }
+    });
+    return _panelDockController.dispatch(WorkspacePanelIntent(pluginId: id)) !=
+        null;
+  }
+
+  void _openDesktopPluginCollection() =>
+      _openDockPanel(_DesktopPluginCollectionPanel.panelId);
+
+  bool get _pluginCollectionSelected =>
+      !_workspaceCollapsed &&
+      _panelDockController.activePluginId == _DesktopPluginCollectionPanel.panelId;
+
+  WorkspacePanelInstance? _openDockPanel(String id) {
+    if (id == _DesktopPluginCollectionPanel.panelId) {
+      _pluginReturnFocus = FocusManager.instance.primaryFocus;
+      setState(() {
+        _workspaceCollapsed = false;
+        _workspaceExpanded = true;
+        _collectionOpenedExpanded = true;
+      });
+    }
+    return _panelDockController.open(id);
+  }
+
+  void _pluginMounted(String id) {
+    final plugins = widget.controller.desktopPlugins;
+    for (final request in plugins.opens.where(
+      (request) => request['plugin'] == id,
+    )) {
+      plugins.mounted(request['request'] as String);
+    }
+  }
+
   String _lastStudioId = '';
   int _lastOpenUiRevision = 0;
 
@@ -92,6 +221,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _onStudioDockChanged() {
+    if (_collectionOpenedExpanded &&
+        _panelDockController.activePluginId !=
+            _DesktopPluginCollectionPanel.panelId) {
+      setState(() {
+        _collectionOpenedExpanded = false;
+        _workspaceExpanded = false;
+      });
+    }
     if (_panelDockController.openInstances.isNotEmpty) return;
     final collapse =
         widget.controller.selectedStudio != null && !_workspaceCollapsed;
@@ -103,8 +240,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
-  void _toggleWorkspaceExpansion() =>
-      setState(() => _workspaceExpanded = !_workspaceExpanded);
+  void _toggleWorkspaceExpansion() {
+    setState(() => _workspaceExpanded = !_workspaceExpanded);
+    if (!_workspaceExpanded) _pluginReturnFocus?.requestFocus();
+  }
 
   void _collapseWorkspace() => setState(() {
     _workspaceExpanded = false;
@@ -114,15 +253,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _threadVisibility({
     double? width,
     double? height,
+    bool? hidden,
     required Widget child,
   }) => Visibility(
-    visible: !_workspaceExpanded,
+    visible: !(hidden ?? _workspaceExpanded),
     maintainState: true,
     child: OverflowBox(
-      minWidth: _workspaceExpanded ? width : null,
-      maxWidth: _workspaceExpanded ? width : null,
-      minHeight: _workspaceExpanded ? height : null,
-      maxHeight: _workspaceExpanded ? height : null,
+      minWidth: (hidden ?? _workspaceExpanded) ? width : null,
+      maxWidth: (hidden ?? _workspaceExpanded) ? width : null,
+      minHeight: (hidden ?? _workspaceExpanded) ? height : null,
+      maxHeight: (hidden ?? _workspaceExpanded) ? height : null,
       child: child,
     ),
   );
@@ -173,6 +313,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _panelDockController.addListener(_onStudioDockChanged);
     widget.controller.addListener(_onStudioSelectionChanged);
     widget.controller.addListener(_onOpenUiSelectionChanged);
+    widget.controller.desktopPlugins.addListener(_onDesktopPluginsChanged);
   }
 
   @override
@@ -181,6 +322,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onStudioSelectionChanged);
       oldWidget.controller.removeListener(_onOpenUiSelectionChanged);
+      oldWidget.controller.desktopPlugins.removeListener(
+        _onDesktopPluginsChanged,
+      );
+      widget.controller.desktopPlugins.addListener(_onDesktopPluginsChanged);
       widget.controller.addListener(_onStudioSelectionChanged);
       widget.controller.addListener(_onOpenUiSelectionChanged);
     }
@@ -204,6 +349,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _panelDockController.removeListener(_onStudioDockChanged);
     widget.controller.removeListener(_onStudioSelectionChanged);
     widget.controller.removeListener(_onOpenUiSelectionChanged);
+    widget.controller.desktopPlugins.removeListener(_onDesktopPluginsChanged);
     if (_ownsPanelDockController) _panelDockController.dispose();
     _planPreview.dispose();
     _replayFrame.dispose();
@@ -215,6 +361,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       const _FileWorkspacePanelPlugin(),
       const TerminalWorkspacePanelPlugin(),
       ...widget.panelPlugins,
+      _DesktopPluginCollectionPanel(
+        widget.controller,
+        (id) => _openDesktopPlugin(id, expand: true),
+      ),
+      for (final plugin in widget.controller.desktopPlugins.installed)
+        if (plugin.enabled)
+          DesktopPluginPanel(
+            plugin,
+            widget.controller,
+            _restorePluginDock,
+            _pluginMounted,
+          ),
       const _StudioDetailsPlugin(),
       const _OpenUiWorkspacePanelPlugin(),
       const _PlanWorkspacePanelPlugin(),
@@ -271,6 +429,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         return ListenableBuilder(
           listenable: widget.controller,
           builder: (context, _) {
+            if (!widget.controller.loading && !_settingsOpen) {
+              _schedulePendingPlugins();
+            }
             final colors = Theme.of(context).colorScheme;
             return GlassScaffold(
               statusBarStyle: GlassStatusBarStyle.auto,
@@ -292,12 +453,23 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                             language: widget.language,
                             onLanguageChanged: widget.onLanguageChanged,
                             railFraction: _railFraction,
-                            onClose: () =>
-                                setState(() => _settingsOpen = false),
+                            onClose: () {
+                              setState(() => _settingsOpen = false);
+                              _openPendingPlugins();
+                            },
                           )
-                        : _PlanPreviewScope(
+                        : _WorkspacePreviewScope(
                             onOpen: _openPlanPreview,
-                            child: _buildWorkspaceShell(),
+                            onLoadImage: widget.controller.loadMessageReference,
+                            child: CallbackShortcuts(
+                              bindings: {
+                                if (_isCustomPluginActive)
+                                  const SingleActivator(
+                                    LogicalKeyboardKey.escape,
+                                  ): _restorePluginDock,
+                              },
+                              child: _buildWorkspaceShell(),
+                            ),
                           ),
                   ),
                 ],
@@ -317,6 +489,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           final railHeight = _railCollapsed
               ? 0.0
               : desktopCompactRailHeight(constraints.maxHeight);
+          final expanded =
+              _workspaceExpanded ||
+              (!_workspaceCollapsed && _isCustomPluginActive);
+          _pluginAutoExpanded = expanded && !_workspaceExpanded;
           final workspaceHeight = _workspaceCollapsed
               ? 0.0
               : (constraints.maxHeight * panelSizing.compactHeightFraction)
@@ -334,6 +510,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     height: railHeight,
                     child: _ProjectRail(
                       controller: widget.controller,
+                      onNavigateConversation: () =>
+                          _restoreDockForConversation(canDockPlugin: false),
+                      onOpenPlugin: _openDesktopPlugin,
+                      onOpenPluginCollection: _openDesktopPluginCollection,
+                      pluginCollectionSelected: _pluginCollectionSelected,
                       onOpenSettings: () =>
                           setState(() => _settingsOpen = true),
                       horizontal: true,
@@ -342,6 +523,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 ),
               Expanded(
                 child: _threadVisibility(
+                  hidden: expanded,
                   height: max(
                     0.0,
                     constraints.maxHeight - railHeight - workspaceHeight,
@@ -387,20 +569,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               ),
               if (!_workspaceCollapsed)
                 SizedBox(
-                  height: _workspaceExpanded
+                  height: expanded
                       ? max(0.0, constraints.maxHeight - railHeight)
                       : workspaceHeight,
                   child: RepaintBoundary(
                     key: const ValueKey('workspace-repaint-boundary'),
                     child: WorkspacePanelDock(
+                      key: _dockKey,
                       onCollapse: widget.controller.selectedStudio == null
                           ? null
                           : _collapseWorkspace,
-                      expanded: _workspaceExpanded,
-                      onToggleExpansion: _toggleWorkspaceExpansion,
+                      expanded: expanded,
+                      onToggleExpansion: _pluginAutoExpanded
+                          ? _restorePluginDock
+                          : _toggleWorkspaceExpansion,
                       registry: _panelRegistry,
                       services: _panelServices,
                       controller: _panelDockController,
+                      onOpenPanel: _openDockPanel,
                       compact: true,
                     ),
                   ),
@@ -425,16 +611,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         );
         final showSplitWorkspace =
             !_workspaceCollapsed && maxWorkspaceWidth >= minWorkspaceWidth;
+        final expanded =
+            _workspaceExpanded ||
+            (!_workspaceCollapsed &&
+                !showSplitWorkspace &&
+                _isCustomPluginActive);
+        _pluginAutoExpanded = expanded && !_workspaceExpanded;
         final showWorkspace =
-            !_workspaceCollapsed && (showSplitWorkspace || _workspaceExpanded);
+            !_workspaceCollapsed && (showSplitWorkspace || expanded);
         final splitWorkspaceWidth = showSplitWorkspace
             ? (constraints.maxWidth * _workspaceFraction)
                   .clamp(minWorkspaceWidth, maxWorkspaceWidth)
                   .toDouble()
             : 0.0;
-        final workspaceWidth = _workspaceExpanded
-            ? widthAfterRail
-            : splitWorkspaceWidth;
+        final workspaceWidth = expanded ? widthAfterRail : splitWorkspaceWidth;
         return Stack(
           children: [
             Row(
@@ -446,6 +636,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                       width: railWidth,
                       child: _ProjectRail(
                         controller: widget.controller,
+                        onNavigateConversation: () =>
+                            _restoreDockForConversation(
+                              canDockPlugin: showSplitWorkspace,
+                            ),
+                        onOpenPlugin: _openDesktopPlugin,
+                        onOpenPluginCollection: _openDesktopPluginCollection,
+                        pluginCollectionSelected: _pluginCollectionSelected,
                         onOpenSettings: () =>
                             setState(() => _settingsOpen = true),
                         onToggleRail: () =>
@@ -461,6 +658,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                 ],
                 Expanded(
                   child: _threadVisibility(
+                    hidden: expanded,
                     width: max(
                       0.0,
                       widthAfterRail -
@@ -508,7 +706,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   ),
                 ),
                 if (showWorkspace) ...[
-                  if (!_workspaceExpanded)
+                  if (!expanded)
                     _SplitResizeHandle(
                       key: const ValueKey('workspace-split-handle'),
                       onDragUpdate: (details) => _resizeWorkspace(
@@ -521,14 +719,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                     child: RepaintBoundary(
                       key: const ValueKey('workspace-repaint-boundary'),
                       child: WorkspacePanelDock(
+                        key: _dockKey,
                         onCollapse: widget.controller.selectedStudio == null
                             ? null
                             : _collapseWorkspace,
-                        expanded: _workspaceExpanded,
-                        onToggleExpansion: _toggleWorkspaceExpansion,
+                        expanded: expanded,
+                        onToggleExpansion: _pluginAutoExpanded
+                            ? _restorePluginDock
+                            : _toggleWorkspaceExpansion,
                         registry: _panelRegistry,
                         services: _panelServices,
                         controller: _panelDockController,
+                        onOpenPanel: _openDockPanel,
                       ),
                     ),
                   ),
@@ -608,13 +810,21 @@ class _Background extends StatelessWidget {
 class _ProjectRail extends StatefulWidget {
   const _ProjectRail({
     required this.controller,
+    required this.onNavigateConversation,
     required this.onOpenSettings,
+    required this.onOpenPlugin,
+    required this.onOpenPluginCollection,
+    required this.pluginCollectionSelected,
     this.onToggleRail,
     this.horizontal = false,
   });
 
   final WorkspaceController controller;
+  final VoidCallback onNavigateConversation;
   final VoidCallback onOpenSettings;
+  final ValueChanged<String> onOpenPlugin;
+  final VoidCallback onOpenPluginCollection;
+  final bool pluginCollectionSelected;
   final VoidCallback? onToggleRail;
   final bool horizontal;
 
@@ -623,30 +833,31 @@ class _ProjectRail extends StatefulWidget {
 }
 
 class _ProjectRailState extends State<_ProjectRail> {
-  final Set<String> _collapsedProjectIds = <String>{};
   final Set<String> _collapsedConversationIds = <String>{};
 
-  // Project conversations stay open while the user moves between projects or
-  // Agent Workspace. Only an explicit disclosure-button click may collapse a
-  // project; changing the current selection must not rewrite navigation state.
-  bool _isExpanded(WorkspaceGroup group) =>
-      !_collapsedProjectIds.contains(group.id);
+  void _newConversation() {
+    widget.onNavigateConversation();
+    unawaited(widget.controller.createAgentWorkspaceConversation());
+  }
+
+  void _newProjectConversation() {
+    widget.onNavigateConversation();
+    widget.controller.createConversation();
+  }
 
   void _selectProject(WorkspaceGroup group) {
-    if (_collapsedProjectIds.remove(group.id)) setState(() {});
+    unawaited(widget.controller.setProjectExpanded(group.id, true));
     unawaited(widget.controller.selectGroup(group.id));
   }
 
   void _toggleProject(WorkspaceGroup group) {
-    if (group.id != widget.controller.selectedGroupId) {
-      _selectProject(group);
-      return;
-    }
-    setState(() {
-      if (!_collapsedProjectIds.add(group.id)) {
-        _collapsedProjectIds.remove(group.id);
-      }
-    });
+    final controller = widget.controller;
+    unawaited(
+      controller.setProjectExpanded(
+        group.id,
+        !controller.isProjectExpanded(group.id),
+      ),
+    );
   }
 
   List<Widget> _conversationBranch(
@@ -673,11 +884,16 @@ class _ProjectRailState extends State<_ProjectRail> {
                 }
               })
             : null,
-        onTap: () => agentWorkspace
-            ? widget.controller.selectAgentWorkspaceConversation(
-                conversation.id,
-              )
-            : widget.controller.selectConversation(groupId, conversation.id),
+        onTap: () {
+          widget.onNavigateConversation();
+          unawaited(
+            agentWorkspace
+                ? widget.controller.selectAgentWorkspaceConversation(
+                    conversation.id,
+                  )
+                : widget.controller.selectConversation(groupId, conversation.id),
+          );
+        },
         onArchive: () =>
             widget.controller.archiveConversation(groupId, conversation.id),
         onDelete: () => _deleteConversation(context, groupId, conversation),
@@ -703,10 +919,10 @@ class _ProjectRailState extends State<_ProjectRail> {
           selected:
               widget.controller.selectedConversationId == root.id &&
               widget.controller.selectedSubSessionId == child.sessionId,
-          onTap: () => widget.controller.selectSubSession(
-            root.id,
-            child.sessionId ?? '',
-          ),
+          onTap: () {
+            widget.onNavigateConversation();
+            widget.controller.selectSubSession(root.id, child.sessionId ?? '');
+          },
         ),
         ..._subSessionTiles(root, child.sessionId, depth: depth + 1),
       ],
@@ -735,21 +951,28 @@ class _ProjectRailState extends State<_ProjectRail> {
                   onTap: widget.onOpenSettings,
                 ),
               ),
-              _StudioRail(controller: widget.controller, compact: true),
               const SizedBox(width: 8),
               SizedBox(
-                width: 150,
+                width: MediaQuery.sizeOf(context).width < 360 ? 94 : 150,
                 child: _NewConversationAction(
-                  onTap: widget.controller.createAgentWorkspaceConversation,
+                  onTap: _newConversation,
                   compact: true,
                 ),
               ),
+              _DesktopPluginRail(
+                controller: widget.controller,
+                onOpen: widget.onOpenPlugin,
+                onOpenCollection: widget.onOpenPluginCollection,
+                collectionSelected: widget.pluginCollectionSelected,
+                compact: true,
+              ),
+              _StudioRail(controller: widget.controller, compact: true),
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.all(12),
                   scrollDirection: Axis.horizontal,
                   itemCount: projects.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  separatorBuilder: (_, _) => const SizedBox(width: 2),
                   itemBuilder: (context, index) {
                     final group = projects[index];
                     return SizedBox(
@@ -757,10 +980,9 @@ class _ProjectRailState extends State<_ProjectRail> {
                       child: _WorkspaceHeader(
                         group: group,
                         selected: group.id == widget.controller.selectedGroupId,
-                        expanded: group.id == widget.controller.selectedGroupId,
+                        expanded: widget.controller.isProjectExpanded(group.id),
                         onTap: () => _selectProject(group),
-                        onToggleExpanded: () => _selectProject(group),
-                        onNewConversation: widget.controller.createConversation,
+                        onNewConversation: _newProjectConversation,
                         onRemoveProject: () => unawaited(
                           widget.controller.removeProject(group.id),
                         ),
@@ -812,11 +1034,21 @@ class _ProjectRailState extends State<_ProjectRail> {
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
               child: _NewConversationAction(
-                onTap: widget.controller.createAgentWorkspaceConversation,
+                onTap: _newConversation,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: _DesktopPluginRail(
+                controller: widget.controller,
+                onOpen: widget.onOpenPlugin,
+                onOpenCollection: widget.onOpenPluginCollection,
+                collectionSelected: widget.pluginCollectionSelected,
               ),
             ),
             Expanded(
               child: ListView(
+                key: const ValueKey('project-rail-scroll'),
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
                 children: [
                   _StudioRail(controller: widget.controller),
@@ -849,21 +1081,21 @@ class _ProjectRailState extends State<_ProjectRail> {
                     _WorkspaceHeader(
                       group: group,
                       selected: group.id == widget.controller.selectedGroupId,
-                      expanded: _isExpanded(group),
+                      expanded: widget.controller.isProjectExpanded(group.id),
                       onTap: () => _selectProject(group),
                       onToggleExpanded: () => _toggleProject(group),
-                      onNewConversation: widget.controller.createConversation,
+                      onNewConversation: _newProjectConversation,
                       onRemoveProject: () =>
                           unawaited(widget.controller.removeProject(group.id)),
                     ),
-                    if (_isExpanded(group))
+                    if (widget.controller.isProjectExpanded(group.id))
                       for (final conversation in group.conversations)
                         ..._conversationBranch(
                           group.id,
                           conversation,
                           agentWorkspace: false,
                         ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 2),
                   ],
                   if (widget
                       .controller
@@ -890,9 +1122,7 @@ class _ProjectRailState extends State<_ProjectRail> {
                             ),
                             icon: CupertinoIcons.square_pencil,
                             keyValue: 'recent-new-conversation',
-                            onTap: widget
-                                .controller
-                                .createAgentWorkspaceConversation,
+                            onTap: _newConversation,
                           ),
                         ],
                       ),
@@ -1046,22 +1276,27 @@ class _WorkspaceHeader extends StatelessWidget {
     required this.selected,
     required this.expanded,
     required this.onTap,
-    required this.onToggleExpanded,
     required this.onNewConversation,
     required this.onRemoveProject,
+    this.onToggleExpanded,
   });
 
   final WorkspaceGroup group;
   final bool selected;
   final bool expanded;
   final VoidCallback onTap;
-  final VoidCallback onToggleExpanded;
+  final VoidCallback? onToggleExpanded;
   final VoidCallback onNewConversation;
   final VoidCallback onRemoveProject;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final folderIcon = Icon(
+      expanded ? Icons.folder_open : Icons.folder_outlined,
+      size: 16,
+      color: colors.onSurface,
+    );
     return GlassMenu(
       key: ValueKey('project-context-menu:${group.id}'),
       menuWidth: 176,
@@ -1082,7 +1317,7 @@ class _WorkspaceHeader extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             onTap: onTap,
             child: Container(
-              height: 39,
+              height: 34,
               padding: const EdgeInsets.only(left: 8, right: 4),
               decoration: BoxDecoration(
                 color: Colors.transparent,
@@ -1090,13 +1325,30 @@ class _WorkspaceHeader extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    group.project == null
-                        ? CupertinoIcons.sparkles
-                        : CupertinoIcons.square_stack_3d_up,
-                    size: 16,
-                    color: colors.onSurface,
-                  ),
+                  if (onToggleExpanded == null)
+                    folderIcon
+                  else
+                    Tooltip(
+                      message: context.l10n.text(
+                        expanded
+                            ? 'workspace.collapseProject'
+                            : 'workspace.expandProject',
+                      ),
+                      child: Semantics(
+                        button: true,
+                        expanded: expanded,
+                        child: InkWell(
+                          key: ValueKey('project-disclosure:${group.id}'),
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: onToggleExpanded,
+                          child: SizedBox(
+                            width: 18,
+                            height: 30,
+                            child: folderIcon,
+                          ),
+                        ),
+                      ),
+                    ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -1117,18 +1369,6 @@ class _WorkspaceHeader extends StatelessWidget {
                       keyValue: 'project-new-conversation:${group.id}',
                       onTap: onNewConversation,
                     ),
-                  _SidebarIconButton(
-                    tooltip: context.l10n.text(
-                      expanded
-                          ? 'workspace.collapseProject'
-                          : 'workspace.expandProject',
-                    ),
-                    icon: expanded
-                        ? CupertinoIcons.chevron_down
-                        : CupertinoIcons.chevron_right,
-                    keyValue: 'project-disclosure:${group.id}',
-                    onTap: onToggleExpanded,
-                  ),
                 ],
               ),
             ),

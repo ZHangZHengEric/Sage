@@ -8,7 +8,7 @@
 [![Chinese](https://img.shields.io/badge/Language-Chinese-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-2.1.1-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-2.2.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
@@ -22,7 +22,7 @@
   <img alt="Run · Evaluate · Evolve; Models and Context, Skills and MCP, Stateful Execution, Multi-agent, Sandbox and Approvals, Multiple Hosts" src="assets/features-en-light.png" width="1200">
 </picture>
 
-[Try RSI](docs/en/applications/FIRST_RSI_RUN.md) · [Download Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) · [Python SDK](sagents/v2/README.md) · [Docs](docs/en/README.md)
+[Try RSI](docs/en/applications/FIRST_RSI_RUN.md) · [Download Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0) · [Python SDK](sagents/v2/README.md) · [Docs](docs/en/README.md)
 
 ## 🔄 How RSI works
 
@@ -41,15 +41,15 @@ Sage, Desktop, Server, and SAgents refer to the current v2 implementation by def
 | 🎙️ **Sage Voice** — Talk with an agent, interrupt replies, and configure spoken tool updates. Run from source on Apple Silicon (macOS 15+). | [Sage Voice setup (中文)](app/v2/voice/README.md) |
 | 🌐 **Server** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
 | 🧠 **SAgents** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md) |
-| 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
+| 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0) |
 
 <details>
 <summary>📦 Install Desktop</summary>
 
-1. Download [Sage 2.1.1](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) for macOS (arm64/x86_64), Windows (x86_64), or Linux (arm64/x86_64).
+1. Download [Sage 2.2.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0) for macOS (arm64/x86_64), Windows (x86_64), or Linux (arm64/x86_64).
 2. Install and open Sage. Python and the backend are bundled; no repository checkout, system Python, or Flutter is needed. Linux still requires GTK and bubblewrap.
 3. Add your model in Settings → Configure an Agent → Start a conversation. Your model service may charge usage fees. See the [Desktop guide](docs/en/applications/DESKTOP.md#first-task).
-4. macOS packages are not notarized; Windows installers are not code-signed. See the [release notes](release_notes/v2.1.1.md) for package details.
+4. macOS packages are not notarized; Windows installers are not code-signed. See the [release notes](release_notes/v2.2.0.md) for package details.
 
 </details>
 
@@ -73,7 +73,7 @@ flutter run -d macos
 
 The app starts its local backend automatically. Settings and session data live in `~/sage/runtime`; the default workspace is `~/sage/agent_workspace`.
 
-For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). Sage 2.1 packages and the release boundary are documented in [v2.1.1 release notes](release_notes/v2.1.1.md). GitHub Actions builds Flutter v2 installers with an embedded Python runtime; the legacy Tauri installers belong to v1.
+For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). Sage 2.2 packages and the release boundary are documented in [v2.2.0 release notes](release_notes/v2.2.0.md). GitHub Actions builds Flutter v2 installers with an embedded Python runtime; the legacy Tauri installers belong to v1.
 
 </details>
 

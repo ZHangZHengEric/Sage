@@ -1,5 +1,4 @@
 const sageToolNames = <String, Map<String, String>>{
-  'get_local_time': {'zh': '查询本机时间', 'en': 'Get local time'},
   'file_read': {'zh': '读取文件', 'en': 'Read file', 'pt': 'Ler arquivo'},
   'read_file': {'zh': '读取文件', 'en': 'Read file', 'pt': 'Ler arquivo'},
   'file_write': {'zh': '写入文件', 'en': 'Write file', 'pt': 'Gravar arquivo'},

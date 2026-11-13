@@ -1,0 +1,10 @@
+{
+  "id": "example.todo",
+  "name": "待办清单",
+  "version": "1.0.0",
+  "protocolVersion": 1,
+  "entry": "index.html",
+  "logo": "logo.png",
+  "icon": "checklist",
+  "capabilities": ["draft"]
+}

@@ -5,6 +5,7 @@ if TYPE_CHECKING:
     from app.v2.desktop.backend.schemas import OpenUiAction
     from sagents.v2.application import SAgentApplication
 
+import asyncio
 import json
 
 import pytest
@@ -43,6 +44,23 @@ async def test_official_parser_streams_before_completion_and_isolates_messages()
     finally:
         await parser.close()
     assert parser.process is None
+
+
+@pytest.mark.asyncio
+async def test_parser_releases_idle_process_and_resumes_a_preview():
+    parser = OpenUiParser(idle_timeout=0)
+    try:
+        await parser.parse('root = Text("He', complete=False, stream_id="preview")
+        original_process = parser.process
+        assert original_process is not None
+        async with asyncio.timeout(5):
+            await original_process.wait()
+        assert (
+            await parser.parse('root = Text("Hello")', complete=False, stream_id="preview")
+        )["props"]["content"] == "Hello"
+        assert parser.process is not original_process
+    finally:
+        await parser.close()
 
 
 def test_fences_are_not_detected_inside_other_code_blocks():
@@ -121,9 +139,7 @@ async def test_desktop_stream_and_action_replay_use_no_ui_tool(
                     agent_id="sage",
                     messages=[RunMessage(role="user", text="Trip")],
                     ui_preference=ui_preference,
-                    preferred_skills=["sage-openui"]
-                    if ui_preference == "interactive"
-                    else [],
+                    preferred_skills=["sage-openui"],
                     idempotency_key="first",
                 ),
                 "owner",
@@ -138,13 +154,6 @@ async def test_desktop_stream_and_action_replay_use_no_ui_tool(
         assert any(surface["tree"] and not surface["complete"] for surface in updates)
         surface = next(surface for surface in reversed(updates) if surface["complete"])
         assert not any(frame.get("type", "").startswith("tool.") for frame in frames)
-        assert "fenced Markdown block" in "\n".join(
-            block.text
-            for message in requests[0].messages
-            if message.role == "system"
-            for block in message.content
-            if block.kind == "text"
-        )
         system_text = "\n".join(
             block.text
             for message in requests[0].messages
@@ -153,16 +162,20 @@ async def test_desktop_stream_and_action_replay_use_no_ui_tool(
             if block.kind == "text"
         )
         assert ("# Sage OpenUI" in system_text) == (ui_preference == "interactive")
-        assert "built-in answer format" in system_text
-        assert "Rendering has no tool-loading prerequisite" in system_text
-        assert "operations independently required" in system_text
+        assert ("fenced Markdown block" in system_text) == (ui_preference == "interactive")
+        assert ("built-in answer format" in system_text) == (ui_preference == "interactive")
         assert ("preloaded by the standard Sage Skill loader" in system_text) == (
             ui_preference == "interactive"
         )
         if ui_preference == "interactive":
             assert "They are not loaded. Call load_skill" not in system_text
         else:
-            assert "Choose the presentation automatically" in system_text
+            assert "sage-openui" not in system_text
+            accepted = await cast("SAgentApplication", service.application).run_configuration(
+                frames[0]["handle"]["run_id"], service._context("owner")
+            )
+            assert "sage-openui" not in accepted["agent"]["skills"]
+            assert "sage-desktop-plugin-development" in accepted["agent"]["skills"]
         hydrated = await service.openui_surfaces(surface["session_id"], "owner")
         assert hydrated[0]["surface_id"] == surface["surface_id"]
         request = DesktopRunRequest(

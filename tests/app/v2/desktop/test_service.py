@@ -597,8 +597,8 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
             "id": "sage",
             "name": "Sage",
             "is_default": True,
-            "tool_count": 14,
-            "skill_count": 1,
+            "tool_count": 18,
+            "skill_count": 10,
         }
     ]
     assert providers[0]["protocol"] == "openai-responses"
@@ -1159,6 +1159,97 @@ async def test_new_model_capability_check_does_not_create_provider(tmp_path: Pat
     after = await service.list_model_providers("user_1")
     assert [value["id"] for value in after] == [value["id"] for value in before]
     await cast(ApplicationResource, service.session_store).close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_profile_controls_auxiliary_wire_parameters(tmp_path: Path):
+    from sagents.v2.model.capability_contracts import (
+        ModelCapabilityProbeOutcome,
+        ModelCapabilityProfile,
+    )
+
+    service = DesktopV2Service(tmp_path)
+    try:
+        agent = await service._agent("sage", "user_1")
+        provider = await service.catalog.get_model_provider("model_main", "user_1")
+        assert provider is not None
+        provider = provider.model_copy(update={
+            "protocol": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash-1017",
+            "base_url": "https://gateway.test/v1",
+            "api_key": "test-key",
+        })
+        fingerprint = service._model_compatibility_fingerprint(provider)
+        plugin_profile = ModelCapabilityProfile(
+            plugin_id="sage.model.openai-chat-completions",
+            plugin_version="3.0.0",
+            protocol=provider.protocol,
+            route_fingerprint=fingerprint,
+            effective_max_output_tokens=4096,
+            invocation_strategy={"reasoning_disable_strategy": "reasoning_effort_none"},
+            outcomes=tuple(
+                ModelCapabilityProbeOutcome(name=name, status="supported")
+                for name in (
+                    "connection", "multimodal", "structured_output",
+                    "json_object", "tool_calling", "reasoning_control",
+                )
+            ),
+        )
+        provider = provider.model_copy(update={
+            "compatibility_profile": DesktopModelCompatibilityProfile(
+                route_fingerprint=fingerprint,
+                effective_max_output_tokens=4096,
+                plugin_profile=plugin_profile,
+            ),
+        })
+        model = await service._model_provider(provider, agent, enable_thinking=False)
+        payload = model.diagnostic_request(ModelRequest(
+            request_id="probe-regression",
+            run_id="probe-regression",
+            model_binding="fast",
+            messages=(ModelMessage(role="user", content=(TextBlock(text="OK"),)),),
+        ))
+        assert payload["extra_body"] == {"reasoning_effort": "none"}
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_model_capability_progress_stream(tmp_path: Path):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.v2.desktop.backend.app import create_app
+    from sagents.v2.model.capability_probe import report_model_probe_progress
+
+    service = DesktopV2Service(tmp_path)
+
+    async def probe(_candidate):
+        report_model_probe_progress("capabilities", 2, 5)
+        return {"valid": True}
+
+    service._probe_model_provider_capabilities = probe  # type: ignore[method-assign]
+    app = create_app(service=service, auth_token="test-token")
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+            headers={"Authorization": "Bearer test-token"},
+        ) as client:
+            response = await client.post(
+                "/api/v2/model-providers/verify-capabilities?stream=true",
+                json={
+                    "name": "Draft", "model": "draft-model",
+                    "base_url": "https://draft.test/v1", "api_keys": ["test-key"],
+                },
+            )
+            assert response.status_code == 200
+            frames = [json.loads(line) for line in response.text.splitlines()]
+            assert frames == [
+                {"kind": "progress", "stage": "connection", "completed": 0, "total": 0},
+                {"kind": "progress", "stage": "capabilities", "completed": 2, "total": 5},
+                {"kind": "result", "data": {"valid": True}},
+            ]
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -2615,7 +2706,7 @@ async def test_create_agent_uses_independent_runnable_defaults(
     assert created["agent_mode"] == "simple"
     assert created["max_loop_count"] == 48
     assert created["available_tools"]
-    assert created["available_skills"] == ["sage-openui"]
+    assert created["available_skills"] == ["sage-openui", "sage-desktop-plugin-development"]
     assert created["is_default"] is False
     assert {value["id"] for value in await service.list_agents("user_1")} == {
         "sage",
@@ -2934,6 +3025,9 @@ async def test_skills_are_discovered_and_imported_by_native_filesystem_provider(
         AgentSettingsPatch(available_skills=["review"]),
         "user_1",
     )
+    assert [
+        value["name"] for value in await service.list_skills("sage", "user_1")
+    ] == ["review"]
     deleted = await service.delete_skill("review", "user_1")
 
     assert deleted == {"deleted_name": "review"}
@@ -2944,6 +3038,7 @@ async def test_skills_are_discovered_and_imported_by_native_filesystem_provider(
     assert (await service.get_agent_settings("sage", "user_1"))[
         "available_skills"
     ] == []
+    assert await service.list_skills("sage", "user_1") == []
     with pytest.raises(ValueError, match="Imported Skill not found"):
         await service.delete_skill("skill-creator", "user_1")
     await cast(ApplicationResource, service.session_store).close()
@@ -3129,15 +3224,20 @@ async def test_sandbox_workspace_root_is_generic_run_configuration(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plan_mode_is_a_read_only_run_contract(tmp_path):
-    from tests.app.v2.desktop.sdk_fixture import desktop, execute
-    service, model, _ = desktop(tmp_path)
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step
+    scripted = ScriptedModelProvider((step(ModelToolCall(
+        tool_call_id="submit-plan", name="goal_submit",
+        arguments={"content": "Review the project before making changes", "session_id": None},
+    )),))
+    service, model, _ = desktop(tmp_path, model=scripted)
     try:
         run, command, _ = await execute(service, request=DesktopRunRequest(agent_id="sage",
-            messages=[RunMessage(role="user", text="plan this change")], invocation_mode="plan"))
+            messages=[RunMessage(role="user", text="plan this change")], invocation_mode="plan",
+            desktop_client_id="desktop-plan-test"))
         assert run.state.value == "suspended"
         names = {tool.name for tool in model.requests[0].tools}
         assert {"file_read", "todo_write", "goal_submit"} <= names
-        assert names.isdisjoint({"file_write", "execute_shell_command"})
+        assert names.isdisjoint({"file_write", "execute_shell_command", "register_desktop_plugin"})
         assert command.invocation_mode == "plan"
         snapshot = await cast('SAgentApplication', service.application).execution_configuration(run.run_id, service._context("user_1"))
         assert cast('Any', snapshot).policy["process"]["read_only"]

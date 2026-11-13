@@ -250,12 +250,52 @@ class _MessageBubbleState extends State<_MessageBubble> {
                         borderRadius: BorderRadius.circular(18),
                       ),
                       child: user
-                          ? _UserMessageContent(
-                              key: ValueKey('message-selection:${message.id}'),
-                              data: _messageDisplayText(context, message),
-                              content: message.content,
-                              onReferenceSelection: widget.onReference,
-                              onLoadReference: widget.onLoadReference,
+                          ? Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (message.preferredSkills.isNotEmpty) ...[
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      for (final skill
+                                          in message.preferredSkills)
+                                        GlassCard(
+                                          key: ValueKey(
+                                            'message-skill:${message.id}:$skill',
+                                          ),
+                                          shape: const LiquidRoundedRectangle(
+                                            borderRadius: 8,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          child: Text(
+                                            skill,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall
+                                                ?.copyWith(
+                                                  color: colors.onSurface,
+                                                ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                                _UserMessageContent(
+                                  key: ValueKey(
+                                    'message-selection:${message.id}',
+                                  ),
+                                  data: _messageDisplayText(context, message),
+                                  content: message.content,
+                                  onReferenceSelection: widget.onReference,
+                                  onLoadReference: widget.onLoadReference,
+                                ),
+                              ],
                             )
                           : _AssistantOpenUiContent(
                               message: message,

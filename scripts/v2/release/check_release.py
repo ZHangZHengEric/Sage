@@ -9,7 +9,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[3]
-VERSION = '2.1.1'
+VERSION = '2.2.0'
 
 
 def main() -> None:
@@ -34,8 +34,8 @@ def main() -> None:
     assert next(p['version'] for p in lock['package'] if p['name'] == 'sage-terminal') == VERSION
     for readme in ('README.md', 'README_CN.md'):
         text = (ROOT / readme).read_text()
-        assert 'Version-2.1.1-green.svg' in text, readme
-        assert '/releases/tag/v2.1.1' in text, readme
+        assert 'Version-2.2.0-green.svg' in text, readme
+        assert '/releases/tag/v2.2.0' in text, readme
     assert not (ROOT / '.github/workflows/release-desktop.yml').exists(), 'Legacy application release must stay disabled'
     workflow = (ROOT / '.github/workflows/release-v2.yml').read_text()
     assert 'app/v1' not in workflow and 'desktop-v1' not in workflow
@@ -52,7 +52,12 @@ def main() -> None:
                              'app/v2/desktop/backend/openui_runtime/slide_layout.json',
                              'app/v2/desktop/backend/openui_runtime/OPENUI-LICENSE',
                              'app/v2/desktop/backend/openui_runtime/THIRD_PARTY_NOTICES.txt',
-                             'app/skills/sage-openui/SKILL.md']:
+                             'app/skills/sage-openui/SKILL.md',
+                             *[f'app/skills/sage-desktop-plugin-development/{item}' for item in (
+                                 'SKILL.md', 'assets/manifest.schema.json', 'assets/sdk.js', 'assets/theme.css',
+                                 'assets/example/manifest.json', 'assets/example/index.html', 'assets/example/todo.js', 'assets/example/logo.png',
+                                 'assets/project-data/manifest.json', 'assets/project-data/index.html', 'assets/project-data/project.js', 'assets/project-data/logo.png',
+                             )]]:
                 assert required in names, f'Missing wheel module: {required}'
             assert any(n.startswith('app/skills/') and n.endswith('/SKILL.md') for n in names)
             metadata = archive.read(f'sage-{VERSION}.dist-info/METADATA').decode()

@@ -157,6 +157,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 value
                 for value in (agent.config.get("availableSkills") or ())
                 if isinstance(value, str) and _SKILL_NAME.fullmatch(value)
+                and (value != "sage-openui" or request.ui_preference == "interactive")
             )
             if valid_skills and "load_skill" not in valid_tools:
                 valid_tools = (*valid_tools, "load_skill")
@@ -731,7 +732,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 source = environment.agents[source_id]
                 provider = environment.provider(source)
                 candidate = manifest if source_id == agent.agent_id else self._manifest(source, provider,
-                    tuple(source.config.get("availableTools") or ()), tuple(source.config.get("availableSkills") or ()))
+                    tuple(source.config.get("availableTools") or ()),
+                    tuple(name for name in (source.config.get("availableSkills") or ())
+                          if name != "sage-openui" or command.config.metadata.get("ui_preference") == "interactive"))
                 definition = candidate.agents[source_id]
                 from .runtime_config import _continuation_agent_instructions
                 completion = runtime.selections("agent.continuation-policy")[0].plugin

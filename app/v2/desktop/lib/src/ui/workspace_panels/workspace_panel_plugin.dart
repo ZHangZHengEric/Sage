@@ -372,6 +372,7 @@ class WorkspacePanelDock extends StatefulWidget {
     this.onCollapse,
     this.expanded = false,
     this.onToggleExpansion,
+    this.onOpenPanel,
     super.key,
   });
 
@@ -382,6 +383,7 @@ class WorkspacePanelDock extends StatefulWidget {
   final VoidCallback? onCollapse;
   final bool expanded;
   final VoidCallback? onToggleExpansion;
+  final WorkspacePanelInstance? Function(String pluginId)? onOpenPanel;
 
   @override
   State<WorkspacePanelDock> createState() => _WorkspacePanelDockState();
@@ -485,7 +487,7 @@ class _WorkspacePanelDockState extends State<WorkspacePanelDock> {
           activeInstanceId: open[selectedIndex].instanceId,
           onActivate: widget.controller.activateInstance,
           onClose: widget.controller.closeInstance,
-          onOpen: widget.controller.open,
+          onOpen: widget.onOpenPanel ?? widget.controller.open,
           onCollapse: widget.onCollapse,
           expanded: widget.expanded,
           onToggleExpansion: widget.onToggleExpansion,

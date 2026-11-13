@@ -853,11 +853,33 @@ class _ProcessActivityLine extends StatelessWidget {
         ],
       ),
     );
+    final previews = _WorkspacePreviewScope.maybeOf(context);
+    if (activity.label == 'analyze_image' && previews != null) {
+      final rawPath =
+          activity.arguments['image_path'] ?? activity.arguments['path'];
+      final path = rawPath is String ? rawPath.trim() : '';
+      if (path.isNotEmpty &&
+          !path.contains('://') &&
+          !path.startsWith('data:')) {
+        return _MessageReferenceChip(
+          key: ValueKey('process-image-preview:${activity.id}:$path'),
+          part: _MessageContentPart.reference(
+            path,
+            _MessageReferenceKind.file,
+            path,
+            null,
+          ),
+          onLoadReference: previews.onLoadImage,
+          imageOnly: true,
+          child: line,
+        );
+      }
+    }
     final content = activity.arguments['content'];
     final isPlan =
         activity.label == 'goal_submit' || activity.label == 'plan_submit';
     if (!isPlan || content is! String || content.trim().isEmpty) return line;
-    final onOpenPlan = _PlanPreviewScope.maybeOf(context);
+    final onOpenPlan = previews?.onOpen;
     if (onOpenPlan == null) return line;
     final tooltip = context.l10n.text('workspace.planDetails');
     return Tooltip(

@@ -5,9 +5,18 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from sagents.v2.contracts.common import ToolName
 
+from .tools import SAGE_TOOL_NAMES
 from .voice_pipeline.tool_speech import TARGETED_TOOL_SPEECH, canonical_tool_name
 
 
@@ -35,14 +44,37 @@ class VoiceConfig(BaseModel):
     speech_api_key: SecretStr
     voice: str = ""
     workspace_id: str = ""
-    local_tools: bool = False
+    enabled_tools: tuple[ToolName, ...] = ()
     tool_speech: dict[ToolName, ToolSpeechOverride] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_local_tools(cls, value):
+        if not isinstance(value, dict) or "local_tools" not in value:
+            return value
+        values = dict(value)
+        values.pop("local_tools")
+        return values
+
+    @field_validator("enabled_tools")
+    @classmethod
+    def validate_enabled_tools(cls, names):
+        # Older Voice versions could save this private tool alongside Sage tools.
+        enabled = set(names) - {"get_local_time"}
+        unknown = enabled - SAGE_TOOL_NAMES
+        if unknown:
+            raise ValueError(
+                "Tools unavailable in Voice: " + ", ".join(sorted(unknown))
+            )
+        return tuple(sorted(enabled))
 
     @field_validator("tool_speech")
     @classmethod
     def check_tool_speech(cls, rules):
         normalized = {}
         for name, rule in rules.items():
+            if name == "get_local_time":
+                continue
             canonical = canonical_tool_name(name)
             for text in (rule.zh, rule.en):
                 remainder = text.replace("{target}", "")

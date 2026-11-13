@@ -40,7 +40,7 @@ class VoiceEngine extends ChangeNotifier {
   String? _progressSpeech;
   VoiceState state = VoiceState.loading;
   Map<String, Object?>? settings;
-  Map<String, Object?> toolSpeechDefaults = {};
+  List<Map<String, Object?>> tools = [];
   String transcript = '';
   String? error;
   double level = 0;
@@ -183,9 +183,10 @@ class VoiceEngine extends ChangeNotifier {
         _startupTimer?.cancel();
         _connecting = false;
         settings = (data['settings'] as Map?)?.cast<String, Object?>();
-        toolSpeechDefaults =
-            (data['tool_speech_defaults'] as Map?)?.cast<String, Object?>() ??
-            {};
+        tools = [
+          for (final tool in (data['tools'] as List? ?? []))
+            Map<String, Object?>.from(tool as Map),
+        ];
         state = VoiceState.idle;
       case 'error':
         final message = data['message'] as String;
@@ -316,7 +317,7 @@ class VoiceEngine extends ChangeNotifier {
   Future<void> configure(Map<String, Object?> values) async {
     final reply = await _command('configure', {'settings': values});
     if (_disposed) return;
-    settings = values;
+    settings = (reply['settings'] as Map?)?.cast<String, Object?>() ?? values;
     error = null;
     if (reply['preserved_conversation'] != true) _clearConversation();
     notifyListeners();

@@ -10,6 +10,7 @@ class VoiceGlassButton extends StatelessWidget {
     this.tooltip,
     this.selected = false,
     this.primary = false,
+    this.plain = false,
   });
 
   final VoidCallback? onPressed;
@@ -18,6 +19,7 @@ class VoiceGlassButton extends StatelessWidget {
   final String? tooltip;
   final bool selected;
   final bool primary;
+  final bool plain;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +30,11 @@ class VoiceGlassButton extends StatelessWidget {
         if (states.contains(WidgetState.disabled)) {
           return colors.onSurface.withValues(alpha: .38);
         }
-        return primary ? colors.onPrimary : colors.onSurface;
+        return primary
+            ? colors.onPrimary
+            : selected
+            ? colors.primary
+            : colors.onSurface;
       }),
       shape: const WidgetStatePropertyAll(
         RoundedRectangleBorder(
@@ -49,28 +55,35 @@ class VoiceGlassButton extends StatelessWidget {
         children: [
           if (icon != null) Icon(icon, size: 17),
           if (icon != null && label != null) const SizedBox(width: 8),
-          if (label != null) Flexible(child: Text(label!)),
+          if (label != null)
+            Flexible(
+              child: Text(label!, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
         ],
       ),
     );
     return Tooltip(
       message: tooltip ?? label ?? '',
-      child: GlassContainer(
-        shape: const LiquidRoundedRectangle(borderRadius: radius),
-        useOwnLayer: true,
-        settings: LiquidGlassSettings(
-          glassColor: onPressed != null && primary
-              ? colors.primary
-              : selected
-              ? colors.secondaryContainer
-              : colors.surfaceContainer,
-          blur: 2,
-          thickness: 4,
-          lightIntensity: .2,
-          standardOpacityMultiplier: 1,
-        ),
-        child: button,
-      ),
+      child: plain
+          ? button
+          : GlassContainer(
+              shape: const LiquidRoundedRectangle(borderRadius: radius),
+              useOwnLayer: true,
+              settings: LiquidGlassSettings(
+                glassColor: onPressed != null && primary
+                    ? colors.primary
+                    : selected
+                    ? colors.secondaryContainer
+                    : colors.surfaceContainer,
+                blur: 2,
+                thickness: 4,
+                lightIntensity: 0,
+                glowIntensity: 0,
+                shadowElevation: 0,
+                standardOpacityMultiplier: 1,
+              ),
+              child: button,
+            ),
     );
   }
 }

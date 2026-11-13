@@ -134,6 +134,8 @@ parent: API
 | `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/workspace/user-preferences` | `conversations` |
+| `PUT` | `/api/agents/{agent_id}/workspace/user-preferences` | `conversations` |
 | `GET` | `/api/approvals` | `conversations` |
 | `POST` | `/api/approvals/{run_id}/decisions` | `conversations` |
 | `GET` | `/api/threads` | `conversations` |
@@ -145,6 +147,7 @@ parent: API
 | `GET` | `/api/threads/{thread_id}/package` | `conversations` |
 | `GET` | `/api/threads/{thread_id}/result` | `conversations` |
 | `POST` | `/api/threads/{thread_id}/resume` | `conversations` |
+| `GET` | `/api/threads/{thread_id}/runs/{run_id}/timing` | `conversations` |
 | `POST` | `/api/threads/{thread_id}/steer` | `conversations` |
 | `GET` | `/api/workspace/download` | `files` |
 | `DELETE` | `/api/workspace/files` | `files` |

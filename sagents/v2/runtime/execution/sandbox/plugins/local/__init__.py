@@ -636,9 +636,30 @@ class _LocalProcessRuntime:
         return bytes(kept), overflow
 
 
-class _NoNetwork:
+class _LocalNetwork:
+    def __init__(self, provider, row):
+        self.provider = provider
+        self.row = row
+
     async def request(self, request, *, intent, grant):
-        raise PermissionError("network access is disabled by local-workspace policy")
+        from urllib.parse import urlsplit
+
+        from .support.network import request_http
+
+        policy = self.row.spec.network
+        if policy.mode != NetworkMode.HTTP_REQUESTS:
+            raise PermissionError("network access is disabled by local-workspace policy")
+        parsed = urlsplit(request.url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        if (
+            intent.network_host != parsed.hostname
+            or intent.network_port != port
+            or intent.metadata.get("method") != request.method
+            or intent.metadata.get("url") != request.url
+        ):
+            raise PermissionError("sandbox intent does not match the HTTP request")
+        self.provider._verify(self.row, "network.request", intent, grant)
+        return await request_http(request, policy)
 
 
 class _LocalHandle:
@@ -648,7 +669,7 @@ class _LocalHandle:
         self.workspace_identity = "local:" + str(row.root)
         self.filesystem = _LocalFileSystem(provider, row)
         self.process = _LocalProcessRuntime(provider, row)
-        self.network = _NoNetwork()
+        self.network = _LocalNetwork(provider, row)
         self._closed = False
         self._close_task = None
 
@@ -787,6 +808,7 @@ class LocalWorkspaceSandboxProvider:
             network_modes=frozenset(
                 {
                     NetworkMode.NONE,
+                    NetworkMode.HTTP_REQUESTS,
                     NetworkMode.UNRESTRICTED,
                     NetworkMode.ALLOWLIST,
                     NetworkMode.PROXY,

@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.request import urlretrieve
 
 ROOT = Path(__file__).resolve().parents[3]
-VERSION = '2.1.1'
+VERSION = '2.2.0'
 
 
 def main() -> None:
@@ -58,6 +60,14 @@ def main() -> None:
             nsis = shutil.which('makensis') or r'C:\Program Files (x86)\NSIS\makensis.exe'
             installer = output / f'{name}-setup.exe'
             script = Path(temp) / 'sage.nsi'
+            bootstrapper = Path(temp) / 'MicrosoftEdgeWebview2Setup.exe'
+            urlretrieve('https://go.microsoft.com/fwlink/p/?LinkId=2124703', bootstrapper)
+            subprocess.run([
+                'powershell', '-NoProfile', '-Command',
+                '$signature = Get-AuthenticodeSignature -LiteralPath $env:SAGE_WEBVIEW_BOOTSTRAPPER; '
+                'if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "CN=Microsoft Corporation") { exit 1 }',
+            ], env={**os.environ, 'SAGE_WEBVIEW_BOOTSTRAPPER': str(bootstrapper)}, check=True)
+            webview_runtime = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
             script.write_text(f'''Unicode True
 Name "Sage {VERSION}"
 OutFile "{installer}"
@@ -70,6 +80,24 @@ RequestExecutionLevel user
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 Section
+ReadRegStr $0 HKCU "Software\\Microsoft\\EdgeUpdate\\Clients\\{webview_runtime}" "pv"
+StrCmp $0 "" webview_machine
+StrCmp $0 "0.0.0.0" webview_machine webview_ready
+webview_machine:
+SetRegView 32
+ReadRegStr $0 HKLM "Software\\Microsoft\\EdgeUpdate\\Clients\\{webview_runtime}" "pv"
+StrCmp $0 "" webview_install
+StrCmp $0 "0.0.0.0" webview_install webview_ready
+webview_install:
+InitPluginsDir
+SetOutPath "$PLUGINSDIR"
+File "{bootstrapper}"
+ExecWait '\"$PLUGINSDIR\\MicrosoftEdgeWebview2Setup.exe\" /silent /install' $0
+StrCmp $0 "0" webview_ready
+MessageBox MB_ICONSTOP "Microsoft Edge WebView2 Runtime installation failed ($0)."
+Abort
+webview_ready:
+SetRegView 32
 SetOutPath "$INSTDIR"
 File /r "{bundle}\\*"
 WriteUninstaller "$INSTDIR\\Uninstall.exe"
@@ -97,7 +125,7 @@ SectionEnd
 Version: {VERSION}
 Architecture: {"arm64" if args.arch == "arm64" else "amd64"}
 Maintainer: Sage <noreply@github.com>
-Depends: libgtk-3-0, libstdc++6, liblzma5, bubblewrap
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libstdc++6, liblzma5, bubblewrap
 Description: Sage Desktop v2 with its Python runtime
 ''')
             desktop = deb / 'usr/share/applications'

@@ -10,7 +10,10 @@ from app.v2.desktop.backend.catalog import (
     DesktopModelCompatibilityProfile,
     DesktopModelProviderRecord,
 )
+from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.memory.plugins.recall_llm import memory_recall_query_request
+from sagents.v2.model.capability_probe import report_model_probe_progress
 from sagents.v2.model import (
     ModelProvider,
     ModelCapabilityProbeRequest,
@@ -22,6 +25,8 @@ from sagents.v2.model import (
 from sagents.v2.model.plugins.openai_compatible import (
     default_chat_completion_token_field,
 )
+from sagents.v2.model.recovery import collect_response, model_call_budget
+from sagents.v2.model.response_validation import checked_response
 from sagents.v2.package.manifest.models import (
     ModelCapabilityDeclaration,
     ModelLimits,
@@ -75,6 +80,7 @@ async def probe_model_provider_capabilities(
         maximum_field: str | None = None,
         reasoning_effort: str | None = None,
         request_extra: dict[str, Any] | None = None,
+        capability_profile=None,
     ):
         extra = dict(request_extra or {})
         if (
@@ -105,6 +111,7 @@ async def probe_model_provider_capabilities(
                 reasoning=True,
                 parallel_tool_calls=True,
             ),
+            capability_profile=capability_profile,
         )
         model_provider = provider_factory(
             route,
@@ -169,15 +176,48 @@ async def probe_model_provider_capabilities(
         plugin_probe = getattr(negotiation_provider, "probe_capabilities", None)
         if callable(plugin_probe):
             route_fingerprint = compatibility_fingerprint(provider)
-            plugin_profile = await negotiation_provider.probe_capabilities(
-                ModelCapabilityProbeRequest(
-                    model_binding=provider.id,
-                    route_fingerprint=route_fingerprint,
-                    max_output_tokens=provider.max_tokens,
-                    output_token_fallbacks=output_token_fallbacks,
-                    reasoning_efforts=reasoning_efforts,
-                )
+            probe_request = ModelCapabilityProbeRequest(
+                model_binding=provider.id,
+                route_fingerprint=route_fingerprint,
+                max_output_tokens=provider.max_tokens,
+                output_token_fallbacks=output_token_fallbacks,
+                reasoning_efforts=reasoning_efforts,
             )
+            plugin_profile = await negotiation_provider.probe_capabilities(probe_request)
+            if plugin_profile.supports("connection"):
+                report_model_probe_progress("memory_recall_query", 0, 1)
+                # Use the saved strategy and the same request builder as a Run.
+                # Probe mode prevents request repair from hiding a rejected parameter.
+                replay_provider = create_probe_provider(
+                    max_output_tokens=plugin_profile.effective_max_output_tokens,
+                    capability_profile=plugin_profile,
+                )
+                replay = memory_recall_query_request(
+                    "Find the notes about the Paris office move.",
+                    run_id=new_id("model_capability_probe"),
+                    language="en",
+                )
+                try:
+                    with model_call_budget():
+                        response = await collect_response(
+                            replay_provider, replay, purpose="capability_probe",
+                            request_timeout_seconds=probe_request.timeout_seconds,
+                        )
+                    checked_response(response, replay)
+                    replay_outcome = {"status": "supported"}
+                except SageV2Error as exc:
+                    replay_outcome = {
+                        "status": "error", "error_code": exc.info.code,
+                        "provider_code": exc.info.provider_code,
+                        "diagnostic_error": exc.info.message[:1000],
+                    }
+                plugin_profile = plugin_profile.model_copy(update={
+                    "metadata": {
+                        **plugin_profile.metadata,
+                        "memory_recall_query": replay_outcome,
+                    },
+                })
+                report_model_probe_progress("memory_recall_query", 1, 1)
             probes = {
                 outcome.name: serialize_outcome(outcome)
                 for outcome in plugin_profile.outcomes
@@ -185,6 +225,8 @@ async def probe_model_provider_capabilities(
             reasoning_outcome = plugin_profile.outcome("reasoning_control")
             reasoning_control = probes["reasoning_control"]
             reasoning_control.update(reasoning_outcome.metadata)
+            if replay_outcome := plugin_profile.metadata.get("memory_recall_query"):
+                probes["memory_recall_query"] = replay_outcome
             reasoning_control["probed"] = True
             probes["reasoning_control"] = reasoning_control
             successful_probes = [
@@ -197,6 +239,11 @@ async def probe_model_provider_capabilities(
                 for outcome in plugin_profile.outcomes
                 if outcome.status.value in {"error", "unsupported"}
             ]
+            if replay_outcome := probes.get("memory_recall_query"):
+                if replay_outcome["status"] == "supported":
+                    successful_probes.append("memory_recall_query")
+                else:
+                    failed_probes.append("memory_recall_query")
             skipped_probes = [
                 outcome.name
                 for outcome in plugin_profile.outcomes
@@ -338,6 +385,7 @@ async def probe_model_provider_capabilities(
             "Think carefully about 17 multiplied by 19, then reply with the "
             "number only."
         )
+        report_model_probe_progress("reasoning")
         omit_outcome = await probe_model_connection(
             model_provider,
             model_binding=provider.id,
@@ -383,6 +431,9 @@ async def probe_model_provider_capabilities(
                         break
 
         effort_strategy_results: dict[str, dict[str, Any]] = {}
+        completed_efforts = 0
+        total_efforts = 2 * len(reasoning_efforts)
+        report_model_probe_progress("reasoning", completed_efforts, total_efforts)
         for effort_strategy in (
             "reasoning_effort",
             "chat_template_reasoning_effort",
@@ -446,6 +497,8 @@ async def probe_model_provider_capabilities(
                     if runtime_supported
                     else unsupported_reasoning_efforts
                 ).append(effort)
+                completed_efforts += 1
+                report_model_probe_progress("reasoning", completed_efforts, total_efforts)
             effort_strategy_results[effort_strategy] = {
                 "supported": supported_reasoning_efforts,
                 "text_only": text_only_reasoning_efforts,

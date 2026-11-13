@@ -1,0 +1,22 @@
+:root {
+  color-scheme: light dark;
+  font: 14px system-ui, sans-serif;
+  color: var(--sage-text, CanvasText);
+  background: var(--sage-surface, Canvas);
+  accent-color: var(--sage-primary, AccentColor);
+  scrollbar-color: var(--sage-border, GrayText) transparent;
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+body { margin: 0; padding: 16px; }
+*, *::before, *::after { box-sizing: border-box; }
+button, input, textarea, select {
+  font: inherit;
+  color: inherit;
+  background: var(--sage-control, ButtonFace);
+  border: 1px solid var(--sage-border, GrayText);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--sage-primary, Highlight); outline-offset: 2px; }

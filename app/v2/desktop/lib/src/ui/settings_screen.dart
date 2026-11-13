@@ -6150,6 +6150,9 @@ class _ModelSettingsState extends State<_ModelSettings> {
   bool _supportsToolCalling = true;
   Map<String, Object?>? _compatibilityProfile;
   Map<String, Object?>? _capabilityReport;
+  String _probeStage = 'connection';
+  int _probeCompleted = 0;
+  int _probeTotal = 0;
   final _name = TextEditingController();
   final _baseUrl = TextEditingController();
   final _model = TextEditingController();
@@ -6415,6 +6418,9 @@ class _ModelSettingsState extends State<_ModelSettings> {
     }
     setState(() {
       _checking = true;
+      _probeStage = 'connection';
+      _probeCompleted = 0;
+      _probeTotal = 0;
       _detectionError = null;
       _detected = false;
       _compatibilityProfile = null;
@@ -6424,6 +6430,14 @@ class _ModelSettingsState extends State<_ModelSettings> {
       final result = await widget.controller.verifyModelProviderCapabilities(
         patch,
         providerId: _creating ? null : providerId,
+        onProgress: (stage, completed, total) {
+          if (!mounted || providerId != _selectedId) return;
+          setState(() {
+            _probeStage = stage;
+            _probeCompleted = completed;
+            _probeTotal = total;
+          });
+        },
       );
       if (!mounted || (!_creating && providerId != _selectedId)) return;
       setState(() {
@@ -6853,6 +6867,37 @@ class _ModelSettingsState extends State<_ModelSettings> {
                 displayed.maxModelLength?.toString() ?? '',
                 _maxModelLength,
               ),
+              if (_checking)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(context.l10n.text(
+                              'model.probeStage.$_probeStage',
+                            )),
+                          ),
+                          if (_probeTotal > 0)
+                            Text('$_probeCompleted / $_probeTotal'),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      GlassProgressIndicator.linear(
+                        key: const ValueKey('settings-model-probe-progress'),
+                        minWidth: 0,
+                        color: Theme.of(context).colorScheme.primary,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.outlineVariant,
+                        value: _probeTotal == 0
+                            ? null
+                            : _probeCompleted / _probeTotal,
+                      ),
+                    ],
+                  ),
+                ),
               _ModelCapabilityResult(
                 profile: activeCompatibilityProfile,
                 report: _editing ? _capabilityReport : null,
@@ -6909,7 +6954,11 @@ class _ModelCapabilityResult extends StatelessWidget {
     final values = _list(key);
     if (values.isEmpty) return '—';
     return values
-        .map((value) => thinking ? _thinkingLevelLabel(value, l10n) : value)
+        .map((value) => thinking
+            ? _thinkingLevelLabel(value, l10n)
+            : value == 'memory_recall_query'
+            ? l10n.text('model.probeStage.memory_recall_query')
+            : value)
         .join(' · ');
   }
 
@@ -6991,6 +7040,7 @@ class _ModelCapabilityResult extends StatelessWidget {
     final l10n = context.l10n;
     final verified = profile != null;
     final multimodalFailure = _probeFailure('multimodal');
+    final memoryRecallFailure = _probeFailure('memory_recall_query');
     final capabilities = <Widget>[
       _CapabilityStatusTag(label: l10n.text('model.text'), supported: true),
       _CapabilityStatusTag(
@@ -7068,6 +7118,13 @@ class _ModelCapabilityResult extends StatelessWidget {
                 '${_modelProtocolLabel(protocol)} · '
                 '${l10n.text('model.failedProbes')}',
                 multimodalFailure,
+                technical: true,
+                failed: true,
+              ),
+            if (memoryRecallFailure != null)
+              _CapabilityMetricData(
+                l10n.text('model.probeStage.memory_recall_query'),
+                memoryRecallFailure,
                 technical: true,
                 failed: true,
               ),

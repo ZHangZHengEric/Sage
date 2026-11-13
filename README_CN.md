@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-2.1.1-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-2.2.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
@@ -22,7 +22,7 @@
   <img alt="执行 · 评测 · 进化；模型与上下文、Skills 与 MCP、有状态执行、多智能体、沙箱与审批、多端接入" src="assets/features-zh-light.png" width="1200">
 </picture>
 
-[体验 RSI](docs/zh/applications/FIRST_RSI_RUN.md) · [下载 Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) · [Python SDK](sagents/v2/README.md) · [文档](docs/zh/README.md)
+[体验 RSI](docs/zh/applications/FIRST_RSI_RUN.md) · [下载 Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0) · [Python SDK](sagents/v2/README.md) · [文档](docs/zh/README.md)
 
 ## 🔄 RSI 如何迭代
 
@@ -41,15 +41,15 @@ Sage、Desktop、Server 和 SAgents 默认指当前 v2 实现。旧版单独见 
 | 🎙️ **Sage Voice** — 与智能体实时语音对话，支持打断回复和自定义工具进度播报。在 Apple Silicon Mac（macOS 15+）上从源码运行。 | [Sage Voice 启动与配置](app/v2/voice/README.md) |
 | 🌐 **Server** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
 | 🧠 **SAgents** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md) |
-| 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
+| 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0) |
 
 <details>
 <summary>📦 安装 Desktop</summary>
 
-1. 下载 [Sage 2.1.1](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1)：支持 macOS（arm64/x86_64）、Windows（x86_64）和 Linux（arm64/x86_64）。
+1. 下载 [Sage 2.2.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0)：支持 macOS（arm64/x86_64）、Windows（x86_64）和 Linux（arm64/x86_64）。
 2. 安装并打开 Sage。安装包已包含 Python 和后端，无需克隆仓库、安装系统 Python 或 Flutter；Linux 仍需 GTK 和 bubblewrap。
 3. 在设置中添加模型 → 配置 Agent → 开始对话。模型服务可能收取使用费用，操作步骤见[桌面端指南](docs/zh/applications/DESKTOP.md#第一个任务)。
-4. macOS 安装包未公证，Windows 安装包未做代码签名；各类安装包详情见 [版本说明](release_notes/v2.1.1.md)。
+4. macOS 安装包未公证，Windows 安装包未做代码签名；各类安装包详情见 [版本说明](release_notes/v2.2.0.md)。
 
 </details>
 
@@ -73,7 +73,7 @@ flutter run -d macos
 
 应用自动启动本机后端。设置与会话数据保存在 `~/sage/runtime`，默认工作区为 `~/sage/agent_workspace`。
 
-Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.1 发布包与版本边界见 [v2.1.1 版本说明](release_notes/v2.1.1.md)。GitHub Actions 构建包含 Python 运行环境的 Flutter v2 安装包；旧 Tauri 安装包属于 v1。
+Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.2 发布包与版本边界见 [v2.2.0 版本说明](release_notes/v2.2.0.md)。GitHub Actions 构建包含 Python 运行环境的 Flutter v2 安装包；旧 Tauri 安装包属于 v1。
 
 </details>
 

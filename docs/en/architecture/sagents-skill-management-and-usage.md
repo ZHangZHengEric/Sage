@@ -55,6 +55,45 @@ need acceptance-time selection retain their accepted composition snapshots.
 
 The Server MySQL skill library also provides version history, file diffs, and rollback APIs. Agents can follow the latest version or pin a `version_id`; this binding is frozen when a Run is accepted. Pinned versions are not replaced by `fetch_latest` or same-named packaged skills. See [Server skill version management](../../../app/v2/server/README.md#技能版本管理) for the UI, API, and database upgrade.
 
+## Default visibility and search
+
+Declare available Skills and the default visible list under `agents.<id>` in the Agent Package.
+
+```yaml
+agents:
+  researcher:
+    skills: [web-research, pdf-analysis, fact-check]
+    default_visible_skills: [web-research]
+    default_visible_skills_limit: 30
+    tools: [search_skills]
+```
+
+The visibility limit defaults to 20 and can be set per Agent. Visible names must belong to
+the Agent's Skill list and pass current Run authorization. An explicit empty list shows zero
+Skills. With no list, a Run with search receives search guidance. A Run without search
+receives the authorized catalog.
+
+Search covers authorized Package Skills and Run attachments. The model calls `load_skill`
+with the exact name from the result. Users can name a Skill with `<skill>pdf-analysis</skill>`.
+The built-in SQLite FTS5 provider ranks names, descriptions and `SKILL.md` content with BM25
+over authorized versions, with exact names first. Server checks the frozen artifact hash
+on first indexing and stores snapshots per Team member. Providers with
+`skill.restore-version` can restore the checkpointed version, preserving content already
+present in a shared workspace.
+
+### Run-scoped Skill providers
+
+A host can select a `skill.provider` implementing `RunSkillProvider`. The provider uses
+trusted Run context to scope `search_skills(query, run_id, limit)`. Results contain metadata
+and a `SkillReference`. The model passes the result's `skill_id` and `version_id` to
+`load_skill`. Package and local directory Skills still support authorized name-based loading.
+
+`fetch_reference` checks current Run access on each exact-version read. Sage verifies the
+reference came from that Run's search and checks artifact identity and digest. The Run pins
+the selected version. Recovery reads the checkpointed reference and reconstructs the
+instructions from the artifact. Initial loading and recovery share workspace materialization
+and the active instruction budget.
+
 ## Workspace policies
 
 All three policies expose a Skill at `skills/<name>/`. A reference is read at
