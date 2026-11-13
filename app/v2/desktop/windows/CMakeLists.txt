@@ -57,6 +57,12 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# webview_all_windows still uses /await and <experimental/coroutine>.
+# New MSVC versions require this opt-in until the plugin adopts C++20.
+if(MSVC AND TARGET webview_all_windows_plugin)
+  target_compile_definitions(webview_all_windows_plugin PRIVATE
+    _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+endif()
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
