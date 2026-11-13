@@ -120,7 +120,12 @@ class SageVoiceAgent:
                         "base_url": self.settings.model_base_url,
                         "model": self.settings.model,
                         "credential": "voice-key",
-                        "capabilities": {"tool_calling": bool(tool_names)},
+                        "request": self.settings.model_request(),
+                        "capabilities": {
+                            "tool_calling": bool(tool_names),
+                            "reasoning": self.settings.reasoning_effort
+                            not in (None, "none"),
+                        },
                     }
                 },
             },
@@ -141,7 +146,10 @@ class SageVoiceAgent:
                                 "name": "Sage Voice",
                                 "mode": "simple",
                                 "models": {"primary": "primary"},
-                                "instructions": {"inline": VOICE_INSTRUCTIONS},
+                                "instructions": {
+                                    "inline": self.settings.system_prompt
+                                    or VOICE_INSTRUCTIONS
+                                },
                                 "tools": tool_names,
                                 "skills": [],
                                 "memory": {"recall": False, "auto_write": False},

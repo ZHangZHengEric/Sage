@@ -150,6 +150,19 @@ class RunMetadataContextProvider:
                     sensitive=True,
                 )
             )
+        if command.continuation_of_run_id is not None:
+            values.append(ContextSegment(
+                segment_id="run_continuation",
+                content=(
+                    f"Continue the work from Run {command.continuation_of_run_id}. "
+                    "Use the existing conversation and verify previous tool results. "
+                    "Check unresolved external operations before dispatching them again.\n"
+                    + (command.continuation_instruction or "")
+                ),
+                stability=ContextStability.VOLATILE,
+                priority=110,
+                sensitive=True,
+            ))
         return tuple(values)
 
     @staticmethod

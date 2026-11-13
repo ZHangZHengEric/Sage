@@ -115,11 +115,12 @@ class VoiceEngine extends ChangeNotifier {
           .listen((line) {
             if (_process == process) _receive(line);
           }, onDone: () => _disconnected(process));
-    } on Object catch (_) {
+    } on Object catch (exception) {
       if (_disposed) return;
       _connecting = false;
       state = VoiceState.idle;
-      error = '无法启动语音引擎。请检查 Python 安装，并从 Sage 源码运行。';
+      error = '语音引擎启动失败';
+      _log(exception.toString());
       notifyListeners();
     }
   }
@@ -187,8 +188,9 @@ class VoiceEngine extends ChangeNotifier {
             {};
         state = VoiceState.idle;
       case 'error':
-        error = data['message'] as String;
-        _log(error!);
+        final message = data['message'] as String;
+        _log(message);
+        error = _connecting ? '语音引擎启动失败' : message;
       case 'session':
         switch (data['state']) {
           case 'starting':

@@ -206,6 +206,13 @@ def create_registered_model_provider(
         # max_tokens) when a catalog/manifest leaves the request limit unset.
         common.pop("default_max_output_tokens")
     extra = dict(route.request.extra)
+    image_limits = {}
+    if protocol in {BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS, BuiltinModelProtocol.OPENAI_RESPONSES}:
+        image_limits = {
+            key: extra.pop(key)
+            for key in ("max_request_bytes", "max_inline_images", "max_inline_image_bytes", "max_inline_image_edge")
+            if key in extra
+        }
     if protocol == BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS:
         maximum_field = str(
             extra.pop(
@@ -220,6 +227,7 @@ def create_registered_model_provider(
             )
         config = OpenAIChatCompletionsConfig(
             **common,
+            **image_limits,
             reasoning_effort=route.request.reasoning_effort,
             max_output_tokens_field=cast(Literal["auto", "max_tokens", "max_completion_tokens"], maximum_field),
             reasoning_parameter_fallback=bool(
@@ -233,6 +241,7 @@ def create_registered_model_provider(
     if protocol == BuiltinModelProtocol.OPENAI_RESPONSES:
         config = OpenAIResponsesConfig(
             **common,
+            **image_limits,
             reasoning_effort=route.request.reasoning_effort,
             store=bool(extra.pop("store", False)),
             reasoning_parameter_fallback=bool(
@@ -261,6 +270,10 @@ def create_registered_model_provider(
         anthropic_version=str(extra.pop("anthropic_version", "2023-06-01")),
         prompt_cache=extra.pop("prompt_cache", True),
         automatic_prompt_cache=extra.pop("automatic_prompt_cache", True),
+        max_request_bytes=extra.pop("max_request_bytes", None),
+        max_inline_images=extra.pop("max_inline_images", 20),
+        max_inline_image_bytes=extra.pop("max_inline_image_bytes", 10_000_000),
+        max_inline_image_edge=extra.pop("max_inline_image_edge", 8_000),
         extra_headers=dict(extra.pop("extra_headers", {})),
         extra_body=extra,
     )

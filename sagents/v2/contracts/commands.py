@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName
 from sagents.v2.contracts.errors import RuntimeErrorInfo
@@ -95,6 +95,8 @@ class StartRun(StrictModel):
     resolved_spec_hash: str
     idempotency_key: Identifier
     parent_run_id: Identifier | None = None
+    continuation_of_run_id: Identifier | None = None
+    continuation_instruction: str | None = Field(default=None, max_length=16_000)
     invocation_mode: str | None = None
 
     @model_validator(mode="after")
@@ -104,7 +106,26 @@ class StartRun(StrictModel):
             and self.session_id is None
         ):
             raise ValueError("fork mode requires a parent session_id")
+        if self.continuation_of_run_id is not None:
+            if (
+                self.session_id is None
+                or self.session_concurrency_mode != SessionConcurrencyMode.SERIAL
+                or self.parent_run_id is not None
+                or self.input
+                or not (self.continuation_instruction or "").strip()
+            ):
+                raise ValueError("continuation requires the original serial session, empty input, and an instruction")
+        elif self.continuation_instruction is not None:
+            raise ValueError("continuation instruction requires a source run")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_start_run(self, handler):
+        value = handler(self)
+        if self.continuation_of_run_id is None:
+            value.pop("continuation_of_run_id", None)
+            value.pop("continuation_instruction", None)
+        return value
 
 
 class RunCommand(StrictModel):

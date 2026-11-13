@@ -199,7 +199,10 @@ class CubeWorkspaceStorage:
             try:
                 cube_file_call(sandbox, "write_chunk", path, token=token, offset=0,
                                max_bytes=limit, data=base64.b64encode(content).decode("ascii"))
-                cube_file_call(sandbox, "write_commit", path, token=token, overwrite=overwrite)
+                cube_file_call(
+                    sandbox, "write_commit", path, token=token, overwrite=overwrite,
+                    expected_revision=revision, max_bytes=limit,
+                )
             finally:
                 cube_file_call(sandbox, "write_abort", path, token=token)
             return preferences_document(content)

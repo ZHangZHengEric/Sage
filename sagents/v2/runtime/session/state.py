@@ -59,6 +59,7 @@ from sagents.v2.contracts.events import (
     SandboxEventData,
     SessionCommitEventData,
     SteeringEventData,
+    ToolEventData,
 )
 from sagents.v2.contracts.interactions import (
     InteractionRequest,
@@ -1276,6 +1277,29 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                     handle=self._handle(row), events=(), duplicate=True
                 )
 
+            if command.continuation_of_run_id is not None:
+                self._authorize_session_actor_locked(planned_session_id, context)
+                previous = self._runs.get(command.continuation_of_run_id)
+                if previous is None or previous.session_id != planned_session_id:
+                    raise self._not_found("run.not_found", command.continuation_of_run_id)
+                if previous.state not in {RunState.FAILED, RunState.CANCELLED}:
+                    raise self._conflict(
+                        "run.invalid_transition", "continuation requires a failed or cancelled run",
+                    )
+                pending = set()
+                for event in self._run_events.get(previous.run_id, ()):
+                    if not isinstance(event.data, ToolEventData):
+                        continue
+                    operation = event.data.operation_id or event.data.tool_call_id
+                    if event.type in {"tool.call.dispatching", "tool.call.started", "tool.call.unknown"}:
+                        pending.add(operation)
+                    elif event.type in {"tool.call.succeeded", "tool.call.failed", "tool.call.cancelled", "tool.call.reconciled"}:
+                        pending.discard(operation)
+                if pending:
+                    raise self._conflict(
+                        "run.continuation_unresolved_tools",
+                        "Resolve uncertain tool operations before continuing this run",
+                    )
             now = self._clock()
             parent_session_id: str | None = None
             fork_base_revision: int | None = None

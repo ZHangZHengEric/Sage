@@ -36,6 +36,14 @@ from sagents.v2.model.plugins._shared.wire import (
     wire_value,
 )
 from sagents.v2.model.plugins._shared.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.image_limits import (
+    OPENAI_INLINE_IMAGE_BYTES,
+    OPENAI_INLINE_IMAGE_EDGE,
+    OPENAI_MAX_IMAGES,
+    OPENAI_MAX_REQUEST_BYTES,
+    limit_openai_images,
+    retry_openai_image_payload,
+)
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
@@ -77,6 +85,10 @@ class OpenAIResponsesConfig(StrictModel):
     reasoning_effort: str | None = None
     invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
+    max_request_bytes: int | None = Field(default=None, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
+    max_inline_images: int = Field(default=OPENAI_MAX_IMAGES, ge=0, le=OPENAI_MAX_IMAGES)
+    max_inline_image_bytes: int = Field(default=OPENAI_INLINE_IMAGE_BYTES, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
+    max_inline_image_edge: int = Field(default=OPENAI_INLINE_IMAGE_EDGE, gt=0, le=65_535)
     store: bool = False
     extra_body: dict[str, Any] = Field(default_factory=dict)
     reasoning_parameter_fallback: bool = False
@@ -303,6 +315,10 @@ class OpenAIResponsesModelProvider:
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         payload = self.diagnostic_request(request)
+        original_sources = {}
+        request_bytes = await limit_openai_images(
+            payload, self.config, responses=True, original_sources=original_sources,
+        )
         upstream = None
         response_id = new_id("model_response")
         text = ""
@@ -318,45 +334,64 @@ class OpenAIResponsesModelProvider:
         def stream_failure(error):
             observed_usage = usage
             return SageV2Error(annotate_stream_failure(
-                error, provider=self.config.provider_id, usage=observed_usage,
+                error.model_copy(update={"metadata": {
+                    **error.metadata, "request_bytes": request_bytes,
+                }}), provider=self.config.provider_id, usage=observed_usage,
                 response_id=response_id, terminal_received=terminal_event_received,
                 text=text, reasoning=reasoning, tools=tool_fragments,
             ))
 
         try:
-            try:
+            allow_negotiation = not request.metadata.get("capability_probe")
+            image_retry_used = False
+            while True:
                 await record_wire_request(
                     payload, model=self.config.model, provider=self.config.provider_id,
                 )
                 record_wire_event(
                     {"diagnostic_event": "request_attempt", "payload": payload}
                 )
-                upstream = await self._client.responses.create(**payload)
-            except Exception as exc:
-                record_wire_event(
-                    {
+                try:
+                    upstream = await self._client.responses.create(**payload)
+                    break
+                except Exception as exc:
+                    record_wire_event({
                         "diagnostic_event": "request_error",
                         "error": {"type": type(exc).__name__, "message": str(exc)},
+                    })
+                    if not allow_negotiation:
+                        raise
+                    status = self._provider_status(exc)
+                    if status == 413 and not image_retry_used:
+                        smaller = await retry_openai_image_payload(
+                            payload, self.config, responses=True,
+                            original_sources=original_sources,
+                            rejected_bytes=request_bytes, error=provider_error(exc).info,
+                        )
+                        if smaller is None:
+                            raise
+                        request_bytes = smaller
+                        image_retry_used = True
+                        continue
+                    if compatibility_fallback is not None:
+                        raise
+                    fallback = self._reasoning_fallback_request(payload, exc)
+                    if fallback is None:
+                        raise
+                    from sagents.v2.model.recovery_scope import reserve_additional_request
+                    await reserve_additional_request("compatibility", purpose="responses_reasoning")
+                    request_bytes = await limit_openai_images(
+                        fallback, self.config, responses=True,
+                        original_sources=original_sources, already_compressed=True,
+                    )
+                    payload = fallback
+                    compatibility_fallback = {
+                        "kind": "reasoning_controls_omitted",
+                        "removed": ["reasoning"],
+                        "provider_status": status,
                     }
-                )
-                fallback_payload = None if request.metadata.get("capability_probe") else self._reasoning_fallback_request(payload, exc)
-                if fallback_payload is None:
-                    raise
-                from sagents.v2.model.recovery_scope import reserve_additional_request
-                await reserve_additional_request("compatibility", purpose="responses_reasoning")
-                await record_wire_request(
-                    fallback_payload, model=self.config.model, provider=self.config.provider_id,
-                )
-                record_wire_event(
-                    {"diagnostic_event": "request_attempt", "payload": fallback_payload}
-                )
-                upstream = await self._client.responses.create(**fallback_payload)
+            if compatibility_fallback is not None:
                 self._reasoning_control_rejected = True
-                compatibility_fallback = {
-                    "kind": "reasoning_controls_omitted",
-                    "removed": ["reasoning"],
-                    "provider_status": self._provider_status(exc),
-                }
             async for event in upstream:
                 record_wire_event(event)
                 event_type = str(wire_value(event, "type", "") or "")

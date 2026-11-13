@@ -172,11 +172,9 @@ class _LocalFileSystem:
         )
 
     async def write_bytes(self, path, content, *, intent, grant, overwrite=True):
-        operation = (
-            FileOperation.WRITE
-            if self.provider._path(self.row, path).exists()
-            else FileOperation.CREATE
-        )
+        create_only = not overwrite and intent.operation == FileOperation.CREATE.value
+        exists = not create_only and self.provider._path(self.row, path).exists()
+        operation = FileOperation.WRITE if exists else FileOperation.CREATE
         candidate = self.provider._authorize(self.row, operation, path, intent, grant)
         if candidate.exists() and not overwrite:
             raise FileExistsError(path)
@@ -185,6 +183,8 @@ class _LocalFileSystem:
             raise ValueError("file exceeds max_file_bytes")
         async with self.row.mutation_lock:
             self.provider._require_ready(self.row, operation=operation.value)
+            if operation == FileOperation.CREATE and candidate.exists():
+                raise FileExistsError(path)
             previous_size = candidate.stat().st_size if candidate.is_file() else 0
             total_limit = min(
                 policy.max_total_bytes or self.row.spec.resources.disk_mb * 1024**2,

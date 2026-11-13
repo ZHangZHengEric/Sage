@@ -13,7 +13,7 @@ import shlex
 
 
 _REMOTE = r'''
-import base64, errno, hashlib, json, os, secrets, shutil, stat, sys
+import base64, errno, fcntl, hashlib, json, os, secrets, shutil, stat, sys
 
 request = json.loads(base64.b64decode(sys.argv[1]))
 root = request["root"]
@@ -164,6 +164,23 @@ try:
                     result = {}
                 else:
                     info(parent, token, token)
+                    if "expected_revision" in request:
+                        fcntl.flock(parent, fcntl.LOCK_EX)
+                        try:
+                            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+                        except FileNotFoundError:
+                            revision = "missing"
+                        else:
+                            with os.fdopen(fd, "rb") as current:
+                                item = os.fstat(current.fileno())
+                                if not stat.S_ISREG(item.st_mode) or item.st_nlink != 1:
+                                    raise ValueError("invalid revision target")
+                                data = current.read(request["max_bytes"] + 1)
+                                if len(data) > request["max_bytes"]:
+                                    raise OverflowError("file exceeds limit")
+                                revision = hashlib.sha256(data).hexdigest()
+                        if revision != request["expected_revision"]:
+                            raise FileExistsError("file revision changed")
                     if request["overwrite"]:
                         try: info(parent, name, name)
                         except FileNotFoundError: pass

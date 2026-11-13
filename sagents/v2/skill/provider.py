@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from inspect import signature
 from weakref import WeakValueDictionary
 from xml.sax.saxutils import escape
 from collections.abc import Awaitable, Callable, Iterable
@@ -182,7 +183,18 @@ class SkillLoader:
         allowed = await self.run_skill_names(run_id) if self.run_skill_names is not None else None
         if not query.strip() or allowed == frozenset():
             return ()
-        matches = await self.run_provider.search_skills(query, run_id=run_id, limit=limit)
+        search = self.run_provider.search_skills
+        if allowed is None:
+            matches = await search(query, run_id=run_id, limit=limit)
+        else:
+            try:
+                signature(search).bind(query, run_id=run_id, limit=limit, allowed_names=allowed)
+            except (TypeError, ValueError):
+                # Legacy providers accept only top-k. Expand the search within
+                # a bounded window before applying the Run's name grant.
+                matches = await search(query, run_id=run_id, limit=max(limit, 100))
+            else:
+                matches = await search(query, run_id=run_id, limit=limit, allowed_names=allowed)
         matches = tuple(item for item in matches if allowed is None or item.name in allowed)[:limit]
         references = tuple(item.reference for item in matches if item.reference is not None)
         if len(references) != len(matches):

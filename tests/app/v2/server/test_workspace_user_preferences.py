@@ -44,3 +44,34 @@ def test_workspace_user_preferences_preserve_existing_file_and_scope(tmp_path):
         file.symlink_to(outside)
         assert client.get(endpoint, headers=headers).status_code == 422
         assert outside.read_text(encoding="utf-8") == "private"
+
+
+def test_workspace_preferences_competing_revisions(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from types import SimpleNamespace
+
+    from app.v2.server.storage.cube_workspaces import CubeWorkspaceStorage
+    from app.v2.server.storage.user_preferences import user_preferences
+    from tests.sagents.v2.cube_fakes import FakeCubeClient
+
+    paths = SimpleNamespace(workspace_dir=lambda *_: tmp_path, linux_execution_uid=None)
+    cube = CubeWorkspaceStorage(SimpleNamespace(execution=SimpleNamespace(
+        sandbox_provider=SimpleNamespace(client=FakeCubeClient(tmp_path / "cube")),
+    )))
+
+    for save in (lambda *args, **kwargs: user_preferences(paths, *args, **kwargs), cube.user_preferences):
+        initial = save("tenant", "agent", text="initial", revision="missing")
+        gate = Barrier(2)
+
+        def replace(text):
+            gate.wait(timeout=5)
+            try:
+                return save("tenant", "agent", text=text, revision=initial["revision"])
+            except FileExistsError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(replace, ("edit A", "edit B")))
+        winner, = (result for result in results if result is not None)
+        assert save("tenant", "agent") == winner

@@ -8,8 +8,9 @@ import copy
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import Field
@@ -45,7 +46,14 @@ from sagents.v2.model.plugins._shared.wire import (
     validate_extra_body,
     wire_json_value,
 )
+from sagents.v2.model.plugins._shared.image_limits import (
+    compress_wire_images,
+    json_bytes,
+    limit_wire_images,
+    request_too_large,
+)
 from sagents.v2.model.wire_diagnostics import record_wire_event, record_wire_request
+from sagents.v2.model.recovery_scope import reserve_additional_request
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 
 _HOST_OWNED_REQUEST_FIELDS = frozenset(
@@ -62,6 +70,11 @@ _HOST_OWNED_REQUEST_FIELDS = frozenset(
         "output_config",
     }
 )
+_CLAUDE_MAX_REQUEST_BYTES = 128_000_000
+_COMPATIBLE_MAX_REQUEST_BYTES = 32_000_000
+_CLAUDE_MAX_IMAGE_BYTES = 10_000_000
+# Above 20 images the API applies a stricter dimension limit to every image.
+_INLINE_IMAGE_LIMIT = 20
 
 
 class AnthropicMessagesConfig(StrictModel):
@@ -76,6 +89,10 @@ class AnthropicMessagesConfig(StrictModel):
     reasoning_effort: str | None = None
     invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
+    max_request_bytes: int | None = Field(default=None, gt=0, le=_CLAUDE_MAX_REQUEST_BYTES)
+    max_inline_images: int = Field(default=_INLINE_IMAGE_LIMIT, ge=0, le=_INLINE_IMAGE_LIMIT)
+    max_inline_image_bytes: int = Field(default=_CLAUDE_MAX_IMAGE_BYTES, gt=0, le=_CLAUDE_MAX_IMAGE_BYTES)
+    max_inline_image_edge: int = Field(default=8_000, gt=0, le=8_000)
     prompt_cache: bool = True
     automatic_prompt_cache: bool = True
     thinking_prefix_mismatch_behavior: Literal["drop_block", "error"] | None = None
@@ -232,8 +249,72 @@ class AnthropicMessagesModelProvider:
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         self._validate_request(request)
+        return self._build_payload(request)
+
+    async def _prepare_payload(self, request: ModelRequest):
+        maximum = self.config.max_request_bytes
+        if maximum is None:
+            direct = urlsplit(self.config.base_url).hostname == "api.anthropic.com"
+            maximum = _CLAUDE_MAX_REQUEST_BYTES if direct else _COMPATIBLE_MAX_REQUEST_BYTES
+        payload = self.diagnostic_request(request)
+        replacements = {}
+        payload = await self._limit_images(request, payload, maximum, replacements)
+        size = self._request_bytes(payload)
+        if size > maximum:
+            raise request_too_large(size, maximum)
+        return payload, size, replacements
+
+    async def _limit_images(self, request, payload, maximum, replacements):
+        images = tuple(self._wire_images(payload["messages"]))
+        if not images:
+            return payload
+        reference_count = sum(image["type"] == "text" for image in replacements.values())
+        inline_indices = [
+            index for index in range(len(images) + reference_count)
+            if index not in replacements or replacements[index]["type"] != "text"
+        ]
+        originals, unresolved = await compress_wire_images(
+            images, source_for=lambda image: image["source"],
+            update=lambda image, source: image.update(source=source),
+            max_bytes=self.config.max_inline_image_bytes,
+            max_edge=self.config.max_inline_image_edge,
+        )
+        original_wire = None
+
+        def source_for(image):
+            nonlocal original_wire
+            if id(image) in originals:
+                return originals[id(image)]
+            if not replacements:
+                return image["source"]
+            if original_wire is None:
+                original_wire = tuple(self._wire_images(self.diagnostic_request(request)["messages"]))
+            return original_wire[indices_by_id[id(image)]]["source"]
+
+        indices_by_id = {id(image): index for index, image in zip(inline_indices, images, strict=True)}
+        await limit_wire_images(
+            images, size=json_bytes(payload), max_bytes=maximum,
+            max_images=self.config.max_inline_images,
+            exceeds=lambda image: id(image) in unresolved,
+            source_for=source_for, text_type="text",
+        )
+        changed = {
+            index: image for index, image in zip(inline_indices, images, strict=True)
+            if image["type"] == "text" or id(image) in originals
+        }
+        if changed:
+            replacements.update(changed)
+            return self._build_payload(request, image_references=replacements)
+        return payload
+
+    def _build_payload(self, request: ModelRequest, *, image_references=None) -> dict[str, Any]:
         bindings: list[tuple[int, int, str]] = []
         system, messages = self._messages(request.messages, bindings=bindings)
+        if image_references:
+            for index, image in enumerate(self._wire_images(messages)):
+                if index in image_references:
+                    image.clear()
+                    image.update(image_references[index])
         payload: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -373,6 +454,19 @@ class AnthropicMessagesModelProvider:
         return payload
 
     @staticmethod
+    def _request_bytes(payload: dict[str, Any]) -> int:
+        return len(httpx.Request("POST", "https://api.anthropic.com/v1/messages", json=payload).content)
+
+    @classmethod
+    def _wire_images(cls, messages):
+        for message in messages:
+            for block in message["content"]:
+                if block.get("type") == "image":
+                    yield block
+                elif block.get("type") == "tool_result" and isinstance(block.get("content"), list):
+                    yield from cls._wire_images([block])
+
+    @staticmethod
     def _prefix_digest(payload, messages):
         prefix = copy.deepcopy(
             {
@@ -411,7 +505,7 @@ class AnthropicMessagesModelProvider:
         return headers
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
-        payload = self.diagnostic_request(request)
+        payload, request_bytes, replacements = await self._prepare_payload(request)
         response_id = new_id("model_response")
         text = ""
         reasoning = ""
@@ -434,19 +528,46 @@ class AnthropicMessagesModelProvider:
                 models=(self.config.model,), provider_usage=provider_usage,
             )
             return SageV2Error(annotate_stream_failure(
-                error, provider=self.config.provider_id, usage=observed_usage,
+                error.model_copy(update={"metadata": {
+                    **error.metadata, "request_bytes": request_bytes,
+                }}), provider=self.config.provider_id, usage=observed_usage,
                 response_id=response_id, terminal_received=terminal_event_received,
                 text=text, reasoning=reasoning, tools=tools,
             ))
 
         try:
-            await record_wire_request(
-                payload, model=self.config.model, provider=self.config.provider_id,
-            )
-            record_wire_event(
-                {"diagnostic_event": "request_attempt", "payload": payload}
-            )
-            async with self._open_stream(payload) as response:
+            async with AsyncExitStack() as streams:
+                async def open_attempt():
+                    await record_wire_request(
+                        payload, model=self.config.model, provider=self.config.provider_id,
+                    )
+                    record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
+                    return await streams.enter_async_context(self._open_stream(payload))
+
+                response = await open_attempt()
+                if (
+                    getattr(response, "status_code", None) == 413
+                    and not request.metadata.get("capability_probe")
+                    and any(self._wire_images(payload["messages"]))
+                ):
+                    await streams.aclose()
+                    smaller = await self._limit_images(
+                        request, payload, request_bytes // 2, replacements,
+                    )
+                    smaller_bytes = self._request_bytes(smaller)
+                    if smaller_bytes < request_bytes:
+                        await reserve_additional_request(
+                            "compatibility", purpose="anthropic_image_references",
+                            error=RuntimeErrorInfo(
+                                code="model.request_too_large",
+                                category=ErrorCategory.PROVIDER_PERMANENT,
+                                message="Claude Messages rejected the request body.",
+                                provider_code="413",
+                                metadata={"request_bytes": request_bytes},
+                            ),
+                        )
+                        payload, request_bytes = smaller, smaller_bytes
+                        response = await open_attempt()
                 raise_for_status = getattr(response, "raise_for_status", None)
                 if raise_for_status is not None:
                     raise_for_status()
@@ -825,7 +946,13 @@ class AnthropicMessagesModelProvider:
             messages.append({"role": role, "content": content})
 
     @classmethod
-    def _plain_content(cls, message: ModelMessage) -> str:
+    def _plain_content(cls, message: ModelMessage) -> str | list[dict[str, Any]]:
+        if any(isinstance(block, ImageBlock) for block in message.content):
+            return [
+                cls._content_block(block) if isinstance(block, ImageBlock)
+                else {"type": "text", "text": cls._block_text(block)}
+                for block in message.content
+            ]
         return "\n".join(cls._block_text(block) for block in message.content)
 
     @staticmethod
@@ -834,6 +961,8 @@ class AnthropicMessagesModelProvider:
             return block.text
         if isinstance(block, JsonBlock):
             return compact_json(block.value)
+        if isinstance(block, ImageBlock) and block.uri.startswith("data:"):
+            return "[Image reference: unavailable]"
         if isinstance(block, (ImageBlock, AudioBlock, FileBlock, ResourceRefBlock)):
             return f"[{block.kind}: {block.uri}]"
         raise TypeError(f"unsupported content block {type(block)!r}")

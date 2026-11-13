@@ -1074,3 +1074,22 @@ async def test_online_shell_keeps_file_isolation_and_denies_listening(tmp_path):
         assert sentinel.read_text() == "private"
     finally:
         await handle.destroy()
+
+
+async def test_create_only_grant_preserves_existing_workspace_image(tmp_path):
+    from sagents.v2.runtime.artifact.workspace_images import (
+        bind_image_workspace,
+        materialize_image_source,
+    )
+    from types import SimpleNamespace
+
+    issuer, handle = await provision(tmp_path, process_enabled=False)
+    source = {"type": "base64", "data": "YWJj", "media_type": "image/png"}
+    with bind_image_workspace(SimpleNamespace(sandbox=handle, grant_issuer=issuer)):
+        relative = await materialize_image_source(source)
+        assert await materialize_image_source(source) == relative
+    path = handle.filesystem.normalize_path(relative)
+    intent, grant = authorization(issuer, handle, "create", path=path)
+    with pytest.raises(FileExistsError):
+        await handle.filesystem.write_bytes(path, b"replacement", intent=intent, grant=grant, overwrite=False)
+    assert (tmp_path / relative).read_bytes() == b"abc"

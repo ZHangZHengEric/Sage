@@ -25,6 +25,12 @@ class VoiceConfig(BaseModel):
     model_base_url: str
     model: str
     model_api_key: SecretStr
+    system_prompt: str = Field(default="", max_length=12000)
+    reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None
+    ) = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_output_tokens: int | None = Field(default=None, gt=0)
     speech_provider: Literal["qwen_audio", "volcengine"]
     speech_api_key: SecretStr
     voice: str = ""
@@ -78,6 +84,12 @@ class VoiceConfig(BaseModel):
             "model_api_key": self.model_api_key.get_secret_value(),
             "speech_api_key": self.speech_api_key.get_secret_value(),
         }
+
+    def model_request(self):
+        return self.model_dump(
+            include={"reasoning_effort", "temperature", "max_output_tokens"},
+            exclude_none=True,
+        )
 
 
 def save_config(path: Path, config: VoiceConfig):

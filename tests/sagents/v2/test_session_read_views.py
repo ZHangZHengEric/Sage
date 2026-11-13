@@ -322,3 +322,38 @@ async def test_approval_views_fail_on_missing_admission_header_without_loading_i
     else:
         view = (await store.read_session_views(['s']))['s'].runs[0]
     assert view.command is None
+
+
+async def test_continuation_reuses_session_without_adding_a_message():
+    from sagents.v2.context.runtime_metadata import RunMetadataContextProvider
+    from sagents.v2.contracts.commands import InputItem
+    from sagents.v2.contracts.items import TextBlock
+
+    store = SessionStoreCoordinator()
+    source = StartRun(
+        agent_id="agent", session_id="session", resolved_spec_hash="sha256:spec",
+        idempotency_key="source",
+        input=(InputItem(role="user", content=(TextBlock(text="Original brief"),)),),
+    )
+    original = (await store.create_run(source, OWNER)).handle
+    continuation = StartRun(
+        agent_id="agent", session_id=original.session_id, input=(),
+        resolved_spec_hash="sha256:spec", idempotency_key="continuation",
+        continuation_of_run_id=original.run_id, continuation_instruction="Finish the last scene.",
+    )
+    with pytest.raises(SageV2Error, match="failed or cancelled"):
+        await store.create_run(continuation, OWNER)
+    snapshot = await store.get_run(original.run_id)
+    await store.commit_run(
+        run_id=original.run_id, expected_revision=snapshot.revision,
+        expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED, drafts=(),
+        context=OWNER, idempotency_key="cancel",
+    )
+    result = await store.create_run(continuation, OWNER)
+    duplicate = await store.create_run(continuation, OWNER)
+    assert result.handle.session_id == original.session_id
+    assert result.handle.run_id != original.run_id
+    assert duplicate.duplicate and duplicate.handle.run_id == result.handle.run_id
+    assert all(event.type != "message.completed" for event in result.events)
+    segments = await RunMetadataContextProvider().segments(continuation)
+    assert "Finish the last scene." in next(s.content for s in segments if s.segment_id == "run_continuation")

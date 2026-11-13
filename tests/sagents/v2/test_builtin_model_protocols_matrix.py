@@ -27,6 +27,7 @@ from sagents.v2.model import (
     ModelRequest,
     ModelToolCall,
     ModelToolDefinition,
+    OpenAIChatCompletionsConfig,
     OpenAIChatCompletionsModelProvider,
     OpenAIResponsesConfig,
     OpenAIResponsesModelProvider,
@@ -1111,3 +1112,224 @@ async def test_responses_failed_terminal_preserves_usage_and_progress():
     assert failure["terminal_received"] is True
     assert failure["response_id"] == "failed_response"
     assert stream.closed
+
+
+@pytest.mark.parametrize("responses", [False, True], ids=["chat", "responses"])
+@pytest.mark.parametrize("budget", ["single", "count", "body", "remote_413", "reasoning_then_413", "413_then_reasoning"])
+async def test_openai_image_budget_keeps_recent_images_inline(responses, budget, tmp_path):
+    from types import SimpleNamespace
+
+    import httpx
+    from openai import AsyncOpenAI
+
+    from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
+    from tests.sagents.v2.test_local_workspace_sandbox_matrix import provision
+
+    images = (
+        ImageBlock(uri="data:image/png;base64," + "YWFh" * 300, mime_type="image/png"),
+        ImageBlock(uri="data:image/png;base64,YmJi", mime_type="image/png"),
+    )
+    messages = tuple(
+        ModelMessage(role="user", content=(TextBlock(text=label), image))
+        for label, image in zip(("old", "new"), images, strict=True)
+    )
+    limits = {
+        "remote_413": {},
+        "reasoning_then_413": {"reasoning_effort": "low", "reasoning_parameter_fallback": True},
+        "413_then_reasoning": {"reasoning_effort": "low", "reasoning_parameter_fallback": True},
+        "single": {"max_inline_image_bytes": 100},
+        "count": {"max_inline_images": 1},
+        "body": {"max_request_bytes": 1_000, "extra_body": {"metadata": {"tag": "x" * 100}}},
+    }
+    bodies = []
+
+    def capture(req):
+        bodies.append(json.loads(req.content))
+        attempt = len(bodies)
+        if (
+            budget in {"remote_413", "413_then_reasoning"} and attempt == 1
+            or budget == "reasoning_then_413" and attempt == 2
+        ):
+            return httpx.Response(413, json={"error": {"type": "request_too_large"}})
+        if budget == "reasoning_then_413" and attempt == 1 or budget == "413_then_reasoning" and attempt == 2:
+            field = "reasoning" if responses else "reasoning_effort"
+            return httpx.Response(400, json={"error": {"message": f"Unsupported parameter: {field}"}})
+        return httpx.Response(400, json={"error": {"message": "mock endpoint"}})
+
+    issuer, handle = await provision(tmp_path, process_enabled=False)
+    config_type, provider_type = (
+        (OpenAIResponsesConfig, OpenAIResponsesModelProvider) if responses
+        else (OpenAIChatCompletionsConfig, OpenAIChatCompletionsModelProvider)
+    )
+    async with AsyncOpenAI(
+        api_key="test", base_url="https://example.invalid/v1", max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(capture)),
+    ) as client:
+        provider = provider_type(config_type(
+            model="gpt-test", base_url="https://example.invalid/v1",
+            capabilities=CAPABILITIES, **limits[budget],
+        ), client=client)
+        with bind_image_workspace(SimpleNamespace(sandbox=handle, grant_issuer=issuer)):
+            with pytest.raises(SageV2Error, match="invalid_request"):
+                [event async for event in provider.stream(request(messages=messages, tools=()))]
+
+    if budget in {"remote_413", "reasoning_then_413", "413_then_reasoning"}:
+        assert len(bodies) == (2 if budget == "remote_413" else 3)
+        if budget != "remote_413":
+            field = "reasoning" if responses else "reasoning_effort"
+            assert field in bodies[0] and field not in bodies[-1]
+        original = bodies[0]["input" if responses else "messages"][0]["content"][1]
+        assert original["type"] == ("input_image" if responses else "image_url")
+    else:
+        assert len(bodies) == 1
+    body = bodies[-1]
+    old, new = body["input" if responses else "messages"]
+    assert old["content"][1]["type"] == ("input_text" if responses else "text")
+    assert new["content"][1]["type"] == ("input_image" if responses else "image_url")
+    relative = old["content"][1]["text"].removeprefix("[Workspace image: ").removesuffix("]")
+    assert relative.startswith(".sage-model-images/")
+    assert (tmp_path / relative).read_bytes() == b"a" * 900
+    assert messages[0].content[1] == images[0]
+
+
+@pytest.mark.parametrize("protocol", ["anthropic", "chat", "responses"])
+@pytest.mark.parametrize("constraint", ["edge", "bytes", "none"])
+async def test_provider_compresses_only_oversized_images(protocol, constraint):
+    import base64
+    import io
+    import random
+
+    import httpx
+    from openai import AsyncOpenAI
+    from PIL import Image
+
+    pixels = random.Random(42).randbytes(256 * 128 * 3)
+    with io.BytesIO() as output:
+        Image.frombytes("RGB", (256, 128), pixels).save(output, format="PNG")
+        original = base64.b64encode(output.getvalue()).decode("ascii")
+    req = request(messages=(ModelMessage(role="user", content=(
+        ImageBlock(uri=f"data:image/png;base64,{original}", mime_type="image/png"),
+    )),), tools=())
+    limits = {
+        "edge": {"max_inline_image_edge": 128},
+        "bytes": {"max_inline_image_bytes": 40_000},
+        "none": {},
+    }[constraint]
+    bodies = []
+
+    def capture(req):
+        bodies.append(json.loads(req.content))
+        return httpx.Response(400, json={"error": {"message": "mock endpoint"}})
+
+    config_type, provider_type = {
+        "anthropic": (AnthropicMessagesConfig, AnthropicMessagesModelProvider),
+        "chat": (OpenAIChatCompletionsConfig, OpenAIChatCompletionsModelProvider),
+        "responses": (OpenAIResponsesConfig, OpenAIResponsesModelProvider),
+    }[protocol]
+    endpoint = "https://example.invalid"
+    async with httpx.AsyncClient(base_url=endpoint, transport=httpx.MockTransport(capture)) as transport:
+        client = transport if protocol == "anthropic" else AsyncOpenAI(
+            api_key="test", base_url=endpoint, max_retries=0, http_client=transport,
+        )
+        provider = provider_type(config_type(
+            model="test", base_url=endpoint, capabilities=CAPABILITIES, **limits,
+        ), client=client)
+        with pytest.raises(SageV2Error, match="invalid_request"):
+            [event async for event in provider.stream(req)]
+
+    body, = bodies
+    block = body["input" if protocol == "responses" else "messages"][0]["content"][0]
+    if protocol == "anthropic":
+        source = block["source"]
+        mime, data = source["media_type"], source["data"]
+    else:
+        url = block["image_url"] if protocol == "responses" else block["image_url"]["url"]
+        mime, data = url.removeprefix("data:").split(";base64,", 1)
+    if constraint == "none":
+        assert (mime, data) == ("image/png", original)
+    else:
+        assert mime == "image/jpeg"
+        assert len(data) < len(original)
+        if constraint == "bytes":
+            assert len(data) <= limits["max_inline_image_bytes"]
+        with Image.open(io.BytesIO(base64.b64decode(data))) as compressed:
+            assert compressed.size == ((128, 64) if constraint == "edge" else (256, 128))
+    assert req.messages[0].content[0].uri.endswith(original)
+
+
+def test_image_patch_budget_preserves_aspect_ratio_and_alpha():
+    import base64
+    import io
+    import math
+
+    from PIL import Image
+
+    from sagents.v2.model.plugins._shared.image_limits import _compress_source
+
+    with io.BytesIO() as output:
+        Image.new("RGBA", (256, 128), (200, 0, 0, 100)).save(output, format="PNG")
+        source = {"type": "base64", "media_type": "image/png",
+                  "data": base64.b64encode(output.getvalue()).decode("ascii")}
+    compressed, unresolved = _compress_source(
+        source, max_bytes=10_000, max_edge=1_000, max_patches=8,
+    )
+    assert not unresolved and compressed["media_type"] == "image/webp"
+    with Image.open(io.BytesIO(base64.b64decode(compressed["data"]))) as image:
+        assert math.ceil(image.width / 32) * math.ceil(image.height / 32) <= 8
+        assert abs(image.width - image.height * 2) <= 1
+        assert image.getpixel((0, 0))[-1] == 100
+
+
+@pytest.mark.parametrize("budget", ["bytes", "count"])
+async def test_image_budget_preserves_url_when_it_cannot_be_saved(monkeypatch, budget):
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+    from sagents.v2.model.plugins._shared import image_limits
+
+    old_url = {"type": "image_url", "image_url": {"url": "https://example.invalid/" + "x" * 160}}
+    newer_inline = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "YWFh" * 300}}
+    attempts = []
+
+    async def materialize(source):
+        attempts.append(source["type"])
+        if source["type"] == "url":
+            raise SageV2Error(RuntimeErrorInfo(
+                code="model.image_workspace_unavailable", category=ErrorCategory.VALIDATION,
+                message="Network disabled",
+            ))
+        return ".sage-model-images/" + "a" * 64 + ".png"
+
+    monkeypatch.setattr(image_limits, "materialize_image_source", materialize)
+    payload = {"messages": [{"content": [old_url, newer_inline]}]}
+    config = OpenAIChatCompletionsConfig(
+        model="test", base_url="https://example.invalid", capabilities=CAPABILITIES,
+        **({"max_request_bytes": 500} if budget == "bytes" else {"max_inline_images": 1}),
+    )
+    assert await image_limits.limit_openai_images(payload, config, responses=False) <= 500
+    assert attempts == ["url", "base64"]
+    assert old_url["type"] == "image_url"
+    assert newer_inline["type"] == "text"
+
+
+def test_oversized_image_above_decode_budget_is_not_reencoded(monkeypatch):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from sagents.v2.model.plugins._shared import image_limits
+
+    with io.BytesIO() as output:
+        Image.new("RGB", (128, 128)).save(output, format="PNG")
+        source = {
+            "type": "base64", "media_type": "image/png",
+            "data": base64.b64encode(output.getvalue()).decode("ascii"),
+        }
+
+    def unexpected_decode(image):
+        pytest.fail("Oversized image reached pixel decoding")
+
+    monkeypatch.setattr(image_limits, "_MAX_REENCODE_PIXELS", 1_000)
+    monkeypatch.setattr(image_limits.ImageOps, "exif_transpose", unexpected_decode)
+    assert image_limits._compress_source(
+        source, max_bytes=10_000, max_edge=64, max_patches=None,
+    ) == (None, True)

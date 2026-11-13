@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 import stat
@@ -40,6 +41,8 @@ def user_preferences(paths: ServerPaths, tenant: str, agent: str, *,
     root = os.open(paths.workspace_dir(tenant, agent),
                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        if text is not None:
+            fcntl.flock(root, fcntl.LOCK_EX)
         current = _read(root)
         document = preferences_document(current)
         if text is None:

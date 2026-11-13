@@ -97,6 +97,8 @@ class ModelRecoveryState(StrictModel):
     first_failure_at: datetime | None = None
     deadline: datetime | None = None
     error_fingerprint: str | None = None
+    first_failure: ModelFailure | None = None
+    first_request_bytes: int | None = None
     pending_action: ModelRecoveryAction | None = None
     pending_kind: ModelFailureKind | None = None
     dispatch_started: bool = False
@@ -106,6 +108,14 @@ class ModelRecoveryState(StrictModel):
 
     def next_call(self) -> "ModelRecoveryState":
         return ModelRecoveryState(run_requests=self.run_requests)
+
+    def first_failure_metadata(self) -> dict[str, Any]:
+        if self.first_failure is None:
+            return {}
+        return {
+            "first_model_failure": self.first_failure.model_dump(mode="json"),
+            "first_request_bytes": self.first_request_bytes,
+        }
 
 
 class ModelRecoveryDecision(StrictModel):

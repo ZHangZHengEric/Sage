@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
+  webview_all_windows
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

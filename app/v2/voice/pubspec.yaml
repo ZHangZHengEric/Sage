@@ -11,6 +11,9 @@ dependencies:
     path: ../shared/tool_labels
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  liquid_glass_widgets: ^0.18.4
 
 dev_dependencies:
   flutter_test:

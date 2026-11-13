@@ -803,3 +803,27 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
     assert cast('ConversationSummary', replacement).covered_message_digests == await message_digests_async(
         rewritten[:-1]
     )
+
+
+def test_continuation_deduplicates_repeated_batches_without_removing_other_images():
+    from sagents.v2.contracts.items import ImageBlock
+
+    batch = tuple(ImageBlock(uri=f"https://example.com/{n}.png", mime_type="image/png") for n in (1, 2))
+    one_image = (batch[0],)
+    user_messages = tuple(
+        ModelMessage(
+            role="user", content=(TextBlock(text=text), *images),
+            metadata={"source_run_id": run_id},
+        )
+        for run_id, text, images in (
+            ("original", "Original brief", batch),
+            ("original", "See this detail", one_image),
+            ("retry", "Continue this brief", batch),
+        )
+    )
+    dedup = DefaultContextAssembler._deduplicate_submission_images
+    assert dedup(user_messages, continuation_of=None) == user_messages
+    projected = dedup(user_messages, continuation_of="retry")
+    assert projected[0].content == (TextBlock(text="Original brief"),)
+    assert projected[1:] == user_messages[1:]
+    assert len(user_messages[0].content) == 3

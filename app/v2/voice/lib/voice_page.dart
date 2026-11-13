@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import 'brand.dart';
 import 'voice_engine.dart';
+import 'voice_locale.dart';
 
 class VoicePage extends StatefulWidget {
   const VoicePage({
@@ -47,22 +49,33 @@ class _VoicePageState extends State<VoicePage>
     bool busy = false,
   }) {
     final colors = Theme.of(context).colorScheme;
-    return IconButton.filled(
-      tooltip: tooltip,
-      style: IconButton.styleFrom(
-        fixedSize: const Size.square(52),
-        backgroundColor: active
-            ? const Color(0xff6c66df)
-            : colors.surfaceContainer,
-        foregroundColor: active ? Colors.white : colors.onSurfaceVariant,
+    final radius = active ? 16.0 : 13.0;
+    return GlassContainer(
+      width: active ? 52 : 44,
+      height: active ? 52 : 44,
+      shape: LiquidRoundedRectangle(borderRadius: radius),
+      useOwnLayer: true,
+      settings: LiquidGlassSettings(
+        glassColor: active ? colors.primary : colors.surfaceContainer,
+        blur: 2,
+        thickness: 4,
       ),
-      onPressed: action,
-      icon: busy
-          ? const SizedBox.square(
-              dimension: 17,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(icon, size: 21),
+      child: IconButton(
+        tooltip: tooltip,
+        style: IconButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radius),
+          ),
+          foregroundColor: active ? colors.onPrimary : colors.onSurfaceVariant,
+        ),
+        onPressed: action,
+        icon: busy
+            ? const SizedBox.square(
+                dimension: 17,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(icon, size: 21),
+      ),
     );
   }
 
@@ -70,6 +83,7 @@ class _VoicePageState extends State<VoicePage>
   Widget build(BuildContext context) {
     final engine = widget.engine;
     final colors = Theme.of(context).colorScheme;
+    final error = engine.error;
     final accent = engine.interrupted
         ? const Color(0xff9a664a)
         : colors.primary;
@@ -78,13 +92,7 @@ class _VoicePageState extends State<VoicePage>
       enabled: !reduceMotion,
       child: Column(
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(28, 13, 28, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: SageBrand(size: 21),
-            ),
-          ),
+          const SizedBox(height: 36, child: Center(child: SageBrand(size: 16))),
           Expanded(
             child: Stack(
               fit: StackFit.expand,
@@ -107,55 +115,58 @@ class _VoicePageState extends State<VoicePage>
                     ),
                   ),
                 ),
-                Positioned(
-                  left: 48,
-                  right: 48,
-                  bottom: 58,
-                  child: Text(
-                    engine.error ?? engine.transcript,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: engine.error == null
-                          ? colors.onSurface
-                          : colors.error,
-                      fontSize: engine.error == null ? 18 : 13,
+                if (engine.transcript.isNotEmpty)
+                  Positioned(
+                    left: 48,
+                    right: 48,
+                    bottom: 8,
+                    child: Text(
+                      engine.transcript,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: colors.onSurface, fontSize: 18),
                     ),
                   ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 20,
-                  child: Semantics(
-                    liveRegion: true,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          engine.interrupted
-                              ? Icons.pause_rounded
-                              : engine.state == VoiceState.speaking
-                              ? Icons.graphic_eq_rounded
-                              : Icons.radio_button_checked,
-                          size: 16,
-                          color: accent,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          engine.status,
-                          style: TextStyle(color: accent, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(32, 12, 32, 22),
+            padding: const EdgeInsets.symmetric(horizontal: 48),
+            child: Semantics(
+              liveRegion: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    error != null
+                        ? Icons.error_outline_rounded
+                        : engine.interrupted
+                        ? Icons.pause_rounded
+                        : engine.state == VoiceState.speaking
+                        ? Icons.graphic_eq_rounded
+                        : Icons.radio_button_checked,
+                    size: 16,
+                    color: error == null ? accent : colors.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      voiceMessage(context, error ?? engine.status),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: error == null ? accent : colors.onSurfaceVariant,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(26, 14, 26, 22),
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -163,7 +174,7 @@ class _VoicePageState extends State<VoicePage>
                   alignment: Alignment.centerLeft,
                   child: control(
                     context,
-                    '设置',
+                    context.tr('设置', 'Settings'),
                     Icons.settings_outlined,
                     engine.editingSettings ? widget.onSettings : null,
                   ),
@@ -171,10 +182,10 @@ class _VoicePageState extends State<VoicePage>
                 control(
                   context,
                   !engine.connected
-                      ? '重新连接'
+                      ? context.tr('重新连接', 'Reconnect')
                       : engine.active
-                      ? '结束语音'
-                      : '开始聆听',
+                      ? context.tr('结束语音', 'End voice')
+                      : context.tr('开始聆听', 'Start listening'),
                   !engine.connected ? Icons.refresh : Icons.mic_none_rounded,
                   engine.busy ? null : widget.onToggle,
                   active: engine.active,
@@ -188,7 +199,7 @@ class _VoicePageState extends State<VoicePage>
                       if (engine.conversation.isNotEmpty) ...[
                         control(
                           context,
-                          '新对话',
+                          context.tr('新对话', 'New conversation'),
                           Icons.add,
                           engine.busy ? null : widget.onNew,
                         ),
@@ -196,7 +207,7 @@ class _VoicePageState extends State<VoicePage>
                       ],
                       control(
                         context,
-                        '切换至工作台',
+                        context.tr('切换至工作台', 'Open workbench'),
                         Icons.grid_view_rounded,
                         widget.onWorkbench,
                       ),

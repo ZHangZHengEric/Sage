@@ -640,6 +640,62 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "3.2.0"
+  webview_all:
+    dependency: "direct main"
+    description:
+      name: webview_all
+      sha256: bd6193af5798905120f1ea893d7993cf51821bf9fdf8d22447e46aa34f8255ca
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
+  webview_all_android:
+    dependency: transitive
+    description:
+      name: webview_all_android
+      sha256: f40dc75d8b98a08ad2d33305b71e08d281e4d57c5cd23cbd84c9bafbaf161a97
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
+  webview_all_linux:
+    dependency: transitive
+    description:
+      name: webview_all_linux
+      sha256: "5ed68a90df7aac70d0ab31e6dce7c2eb1057a3182ab02bca113a134e4d8735f4"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
+  webview_all_ohos:
+    dependency: transitive
+    description:
+      name: webview_all_ohos
+      sha256: "94ba3b57c67f81c246c5f8edd7fc3a5a1758856b3571512de87d92f28ef1dc76"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
+  webview_all_web:
+    dependency: transitive
+    description:
+      name: webview_all_web
+      sha256: "9a1015234f016f054baea49d56c6cad57cadb10ffd01a66d39bc84ba9cc6f04d"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
+  webview_all_windows:
+    dependency: transitive
+    description:
+      name: webview_all_windows
+      sha256: e506b3214fa77637f22a194e6c94bf4a47c4247b845ad9746fb57167449b67b2
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
+  webview_all_wkwebview:
+    dependency: transitive
+    description:
+      name: webview_all_wkwebview
+      sha256: a45165155bcc2fb930833f8875252a588e30463d16b7ea9695747234df074801
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
   webview_flutter:
     dependency: "direct main"
     description:
@@ -672,6 +728,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "3.26.2"
+  webview_platform_interface:
+    dependency: transitive
+    description:
+      name: webview_platform_interface
+      sha256: "28ab96929ac123a1afc5d2b23efac6756298b1a21c6d095e08a1976e75246ce9"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "1.5.0"
   xdg_directories:
     dependency: transitive
     description:

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "version", "protocolVersion", "entry", "icon"],
+  "properties": {
+    "id": {"type": "string", "maxLength": 96, "pattern": "^(?!sage[.-])[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$"},
+    "protocolVersion": {"const": 1},
+    "entry": {"type": "string", "pattern": "\\.html$", "maxLength": 240},
+    "icon": {"enum": ["puzzle", "checklist", "chart", "clock", "folder", "calculator"]},
+    "capabilities": {"type": "array", "uniqueItems": true, "items": {"enum": ["context", "file.read", "file.export", "draft", "https"]}},
+    "endpoints": {
+      "type": "object", "maxProperties": 16,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_-]{0,39}$"},
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["url", "method"],
+        "properties": {
+          "url": {"type": "string", "pattern": "^https://", "maxLength": 2048},
+          "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]}
+        }
+      }
+    }
+  }
+}

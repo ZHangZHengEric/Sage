@@ -49,13 +49,14 @@ def consume_model_call():
         budget.consume()
 
 
-def recovery_error(code, message):
+def recovery_error(code, message, *, metadata=None):
     return SageV2Error(
         RuntimeErrorInfo(
             code=code,
             category=ErrorCategory.VALIDATION,
             message=message,
             safe_to_resume=True,
+            metadata=metadata or {},
         )
     )
 
@@ -183,7 +184,8 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                 scope.episode_deadlines.setdefault(scope.step_key, state.deadline)
             consume_model_call()
             if state.deadline is not None and scope.clock() >= state.deadline:
-                raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached")
+                raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached",
+                    metadata=state.first_failure_metadata())
             state = await scope.record_dispatch(key, state)
             from sagents.v2.model.stream_errors import normalized_model_stream
             stream = normalized_model_stream(model, request)
@@ -229,7 +231,8 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                 await scope.complete_call(key, state)
                 return response
             except TimeoutError as exc:
-                raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached") from exc
+                raise recovery_error("model.recovery_exhausted", "Model recovery deadline reached",
+                    metadata=state.first_failure_metadata()) from exc
             except SageV2Error as exc:
                 if scope.record_failed_usage is not None:
                     from sagents.v2.contracts.items import UsageSummary
@@ -245,6 +248,7 @@ async def collect_response(model, request, *, transient_retries=None, purpose=No
                     now=scope.clock(), purpose=purpose, jitter=random.uniform(0, .25))
                 if decision.action == ModelRecoveryAction.STOP_WITH_EXPLANATION:
                     raise SageV2Error(exc.info.model_copy(update={"metadata": {**exc.info.metadata,
+                        **state.first_failure_metadata(),
                         "recovery": {"version": "model-recovery/1", **decision.model_dump(mode="json"),
                                      "attempt": state.episode_requests}}})) from exc
                 state = reserve_recovery(state, decision, config, now=scope.clock(),

@@ -1,26 +1,49 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import 'brand.dart';
 import 'voice_engine.dart';
+import 'voice_locale.dart';
 import 'voice_page.dart';
 import 'voice_settings.dart';
 import 'workbench.dart';
 
-void main() => runApp(const SageVoiceApp());
+const preferences = MethodChannel('sage.voice/preferences');
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await LiquidGlassWidgets.initialize(enablePerformanceMonitor: false);
+  final language = await preferences.invokeMethod<String>('getLanguage');
+  runApp(
+    SageVoiceApp(initialLocale: language == null ? null : Locale(language)),
+  );
+}
 
 enum VoiceView { voice, workbench, settings }
 
 class SageVoiceApp extends StatefulWidget {
-  const SageVoiceApp({super.key});
+  const SageVoiceApp({super.key, this.initialLocale});
+
+  final Locale? initialLocale;
 
   @override
   State<SageVoiceApp> createState() => _SageVoiceAppState();
 }
 
 class _SageVoiceAppState extends State<SageVoiceApp> {
-  bool dark = false;
+  late Locale? locale = widget.initialLocale;
+  bool? darkOverride;
+
+  void setLanguage(Locale? value) {
+    setState(() => locale = value);
+    unawaited(
+      preferences.invokeMethod<void>('setLanguage', value?.languageCode),
+    );
+  }
 
   ThemeData theme(Brightness brightness) {
     final colors = ColorScheme.fromSeed(
@@ -46,10 +69,23 @@ class _SageVoiceAppState extends State<SageVoiceApp> {
     debugShowCheckedModeBanner: false,
     theme: theme(Brightness.light),
     darkTheme: theme(Brightness.dark),
-    themeMode: dark ? ThemeMode.dark : ThemeMode.light,
-    home: VoiceScreen(
-      dark: dark,
-      onToggleTheme: () => setState(() => dark = !dark),
+    locale: locale,
+    supportedLocales: const [Locale('en'), Locale('zh')],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
+    themeMode: switch (darkOverride) {
+      true => ThemeMode.dark,
+      false => ThemeMode.light,
+      null => ThemeMode.system,
+    },
+    home: Builder(
+      builder: (context) {
+        final dark = Theme.of(context).brightness == Brightness.dark;
+        return VoiceScreen(
+          dark: dark,
+          onToggleTheme: () => setState(() => darkOverride = !dark),
+          onLanguageChanged: setLanguage,
+        );
+      },
     ),
   );
 }
@@ -59,10 +95,12 @@ class VoiceScreen extends StatefulWidget {
     super.key,
     required this.dark,
     required this.onToggleTheme,
+    required this.onLanguageChanged,
   });
 
   final bool dark;
   final VoidCallback onToggleTheme;
+  final ValueChanged<Locale?> onLanguageChanged;
 
   @override
   State<VoiceScreen> createState() => _VoiceScreenState();
@@ -108,16 +146,21 @@ class _VoiceScreenState extends State<VoiceScreen> {
         await showDialog<bool>(
               context: context,
               builder: (context) => AlertDialog(
-                title: const Text('开始新对话？'),
-                content: const Text('当前聊天内容将被清除。'),
+                title: Text(context.tr('开始新对话？', 'Start a new conversation?')),
+                content: Text(
+                  context.tr(
+                    '当前聊天内容将被清除。',
+                    'This will clear the current conversation.',
+                  ),
+                ),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context, false),
-                    child: const Text('取消'),
+                    child: Text(context.tr('取消', 'Cancel')),
                   ),
                   FilledButton(
                     onPressed: () => Navigator.pop(context, true),
-                    child: const Text('开始新对话'),
+                    child: Text(context.tr('开始新对话', 'New conversation')),
                   ),
                 ],
               ),
@@ -150,7 +193,10 @@ class _VoiceScreenState extends State<VoiceScreen> {
           ),
           VoiceView.settings => VoiceSettings(
             engine: engine,
-            backLabel: previousView == VoiceView.voice ? '返回语音' : '返回工作台',
+            backLabel: previousView == VoiceView.voice
+                ? context.tr('返回语音', 'Back to Voice')
+                : context.tr('返回工作台', 'Back to Workbench'),
+            onLanguageChanged: widget.onLanguageChanged,
             onBack: () => navigate(previousView),
           ),
         },

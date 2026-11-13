@@ -369,8 +369,9 @@ class AgentLoopEngine:
         except Exception as exc:
             return await self._fail_skill_initialization(run, state, command, exc, context)
         from sagents.v2.model.recovery_scope import recovery_scope
+        from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
         scope = await self._create_recovery_scope(run, state, command, context)
-        with recovery_scope(scope):
+        with recovery_scope(scope), bind_image_workspace(self.tool_result_runtime):
             tool_selection_task = asyncio.create_task(
                 self._prepare_tool_selection(
                     command=command,
@@ -1565,8 +1566,9 @@ class AgentLoopEngine:
         empty_response_retries = 0
         context_overflow_retries = 0
         from sagents.v2.model.recovery_scope import recovery_scope
+        from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
         scope = await self._create_recovery_scope(run, state, command, context)
-        with recovery_scope(scope):
+        with recovery_scope(scope), bind_image_workspace(self.tool_result_runtime):
             while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
                 scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
                 scope.primary_recovery = bool(state.model_recovery.logical_call_id)
@@ -2558,7 +2560,8 @@ class AgentLoopEngine:
             error = error.model_copy(update={"metadata": {**error.metadata,
                 "recovery": {"version": "model-recovery/1", **decision.model_dump(mode="json"),
                     "attempt": recovery.episode_requests, "run_attempts": recovery.run_requests},
-                "transparent_retries_exhausted": recovery.episode_requests}})
+                "transparent_retries_exhausted": recovery.episode_requests,
+                **recovery.first_failure_metadata()}})
             return await self._fail(run, state, step_id, error, context), state, False
         recovery = reserve_recovery(recovery, decision, config, now=now,
             logical_call_id=scope.step_key if scope else step_id, error=error)

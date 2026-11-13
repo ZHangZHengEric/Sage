@@ -23,6 +23,14 @@ from sagents.v2.model.contracts import (
     ModelToolCall,
 )
 from sagents.v2.model.plugins._shared.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.image_limits import (
+    OPENAI_INLINE_IMAGE_BYTES,
+    OPENAI_INLINE_IMAGE_EDGE,
+    OPENAI_MAX_IMAGES,
+    OPENAI_MAX_REQUEST_BYTES,
+    limit_openai_images,
+    retry_openai_image_payload,
+)
 from sagents.v2.contracts.common import StrictModel, new_id
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -97,6 +105,10 @@ class OpenAICompatibleConfig(StrictModel):
         "auto"
     )
     timeout_seconds: float = Field(default=120, gt=0)
+    max_request_bytes: int | None = Field(default=None, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
+    max_inline_images: int = Field(default=OPENAI_MAX_IMAGES, ge=0, le=OPENAI_MAX_IMAGES)
+    max_inline_image_bytes: int = Field(default=OPENAI_INLINE_IMAGE_BYTES, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
+    max_inline_image_edge: int = Field(default=OPENAI_INLINE_IMAGE_EDGE, gt=0, le=65_535)
     extra_body: dict[str, Any] = Field(default_factory=dict)
     reasoning_parameter_fallback: bool = False
     image_detail_mode: Literal["include", "omit"] = "include"
@@ -301,6 +313,10 @@ class OpenAICompatibleModelProvider:
 
         self._validate_request(request)
         kwargs = self.diagnostic_request(request)
+        original_sources = {}
+        request_bytes = await limit_openai_images(
+            kwargs, self.config, responses=False, original_sources=original_sources,
+        )
 
         upstream = None
         text = ""
@@ -322,16 +338,37 @@ class OpenAICompatibleModelProvider:
         def stream_failure(error):
             observed_usage = usage
             return SageV2Error(annotate_stream_failure(
-                error, provider=self.config.provider_id, usage=observed_usage,
+                error.model_copy(update={"metadata": {
+                    **error.metadata, "request_bytes": request_bytes,
+                }}), provider=self.config.provider_id, usage=observed_usage,
                 response_id=response_id, terminal_received=terminal_event_received,
                 text=text, reasoning=reasoning, tools=tool_fragments,
             ))
 
         try:
-            (
-                upstream,
-                compatibility_fallback,
-            ) = await self._create_with_compatibility_negotiation(kwargs, allow_negotiation=not request.metadata.get("capability_probe", False))
+            allow_negotiation = not request.metadata.get("capability_probe", False)
+            async def retry_images(current, exc):
+                nonlocal request_bytes
+                smaller = await retry_openai_image_payload(
+                    current, self.config, responses=False, original_sources=original_sources,
+                    rejected_bytes=request_bytes, error=provider_error(exc).info,
+                )
+                if smaller is None:
+                    return False
+                request_bytes = smaller
+                return True
+
+            async def prepare_attempt(current):
+                nonlocal request_bytes
+                request_bytes = await limit_openai_images(
+                    current, self.config, responses=False, original_sources=original_sources,
+                    already_compressed=True,
+                )
+
+            upstream, compatibility_fallback = await self._create_with_compatibility_negotiation(
+                kwargs, allow_negotiation=allow_negotiation,
+                retry_images=retry_images, prepare_attempt=prepare_attempt,
+            )
             async for chunk in upstream:
                 record_wire_event(chunk)
                 failure = wire_value(chunk, "error")
@@ -540,7 +577,7 @@ class OpenAICompatibleModelProvider:
     async def _create_with_compatibility_negotiation(
         self,
         kwargs: dict[str, Any],
-        *, allow_negotiation: bool = True,
+        *, allow_negotiation: bool = True, retry_images=None, prepare_attempt=None,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Create one stream with bounded pre-stream dialect negotiation."""
 
@@ -550,9 +587,11 @@ class OpenAICompatibleModelProvider:
         token_fallback_used = False
         history_fallback_used = False
         while True:
-            if fallbacks:
+            if fallbacks and fallbacks[-1]["kind"] != "image_references":
                 from sagents.v2.model.recovery_scope import reserve_additional_request
                 await reserve_additional_request("compatibility", purpose=f"compatibility:{fallbacks[-1]['kind']}")
+                if prepare_attempt is not None:
+                    await prepare_attempt(current)
             try:
                 await record_wire_request(
                     current, model=self.config.model, provider=self.config.provider_id,
@@ -580,6 +619,12 @@ class OpenAICompatibleModelProvider:
                     }
                 )
                 if not allow_negotiation:
+                    raise
+                if self._provider_status(exc) == 413:
+                    if retry_images is not None and await retry_images(current, exc):
+                        retry_images = None
+                        fallbacks.append({"kind": "image_references", "provider_status": 413})
+                        continue
                     raise
                 if not history_fallback_used:
                     fallback = self._reasoning_history_fallback_request(current, exc)

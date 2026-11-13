@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import 'brand.dart';
 import 'voice_engine.dart';
+import 'voice_glass.dart';
+import 'voice_locale.dart';
 
 class VoiceWorkbench extends StatefulWidget {
   const VoiceWorkbench({
@@ -56,51 +59,82 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
     final colors = Theme.of(context).colorScheme;
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
-          child: Row(
-            children: [
-              const SageBrand(),
-              const Spacer(),
-              action(
-                '新对话',
-                Icons.add,
-                engine.connected && !engine.busy ? widget.onNew : null,
-              ),
-              action('语音界面', Icons.mic_none, widget.onVoice),
-              action(
-                '监控',
-                Icons.tune,
-                () => setState(() => monitor = !monitor),
-                selected: monitor,
-              ),
-              action(
-                '配置',
-                Icons.settings_outlined,
-                engine.editingSettings ? widget.onSettings : null,
-              ),
-              IconButton(
-                tooltip: widget.dark ? '浅色模式' : '深色模式',
-                onPressed: widget.onToggleTheme,
-                icon: Icon(
-                  widget.dark
-                      ? Icons.light_mode_outlined
-                      : Icons.dark_mode_outlined,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 6),
-              FilledButton(
-                onPressed: engine.busy ? null : widget.onToggle,
-                child: Text(
-                  !engine.connected
-                      ? '重新连接'
-                      : engine.active
-                      ? '结束语音'
-                      : '开始语音',
-                ),
-              ),
-            ],
+        SizedBox(
+          height: 46,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(88, 0, 16, 0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final showLabels = constraints.maxWidth >= 800;
+                return Row(
+                  children: [
+                    const SageBrand(size: 16),
+                    const Spacer(),
+                    VoiceGlassButton(
+                      tooltip: context.tr('新对话', 'New conversation'),
+                      label: showLabels
+                          ? context.tr('新对话', 'New conversation')
+                          : null,
+                      icon: Icons.add_rounded,
+                      onPressed: engine.connected && !engine.busy
+                          ? widget.onNew
+                          : null,
+                    ),
+                    const SizedBox(width: 6),
+                    VoiceGlassButton(
+                      tooltip: context.tr('语音界面', 'Voice view'),
+                      label: showLabels
+                          ? context.tr('语音界面', 'Voice view')
+                          : null,
+                      icon: Icons.graphic_eq_rounded,
+                      onPressed: widget.onVoice,
+                    ),
+                    const SizedBox(width: 6),
+                    VoiceGlassButton(
+                      tooltip: context.tr('监控', 'Monitor'),
+                      label: showLabels ? context.tr('监控', 'Monitor') : null,
+                      icon: Icons.tune_rounded,
+                      selected: monitor,
+                      onPressed: () => setState(() => monitor = !monitor),
+                    ),
+                    const SizedBox(width: 6),
+                    VoiceGlassButton(
+                      tooltip: context.tr('配置', 'Settings'),
+                      label: showLabels ? context.tr('配置', 'Settings') : null,
+                      icon: Icons.settings_outlined,
+                      onPressed: engine.editingSettings
+                          ? widget.onSettings
+                          : null,
+                    ),
+                    const SizedBox(width: 6),
+                    VoiceGlassButton(
+                      tooltip: widget.dark
+                          ? context.tr('浅色模式', 'Light mode')
+                          : context.tr('深色模式', 'Dark mode'),
+                      icon: widget.dark
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                      onPressed: widget.onToggleTheme,
+                    ),
+                    const SizedBox(width: 12),
+                    VoiceGlassButton(
+                      primary: true,
+                      icon: engine.connected
+                          ? (engine.active
+                                ? Icons.stop_rounded
+                                : Icons.mic_none_rounded)
+                          : Icons.refresh_rounded,
+                      onPressed: engine.busy ? null : widget.onToggle,
+                      label: !engine.connected
+                          ? context.tr('重新连接', 'Reconnect')
+                          : engine.active
+                          ? context.tr('结束语音', 'End voice')
+                          : context.tr('开始语音', 'Start voice'),
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
         const Divider(height: 1),
@@ -117,10 +151,16 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                         constraints: const BoxConstraints(maxWidth: 752),
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: colors.outlineVariant),
-                              borderRadius: BorderRadius.circular(18),
+                          child: GlassContainer(
+                            shape: const LiquidRoundedRectangle(
+                              borderRadius: 16,
+                            ),
+                            useOwnLayer: true,
+                            settings: LiquidGlassSettings(
+                              glassColor: colors.surfaceContainerLow,
+                              blur: 3,
+                              thickness: 4,
+                              standardOpacityMultiplier: 1,
                             ),
                             child: Padding(
                               padding: const EdgeInsets.fromLTRB(14, 10, 10, 8),
@@ -137,7 +177,10 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                                       const SizedBox(width: 7),
                                       Expanded(
                                         child: Text(
-                                          engine.error ?? engine.status,
+                                          voiceMessage(
+                                            context,
+                                            engine.error ?? engine.status,
+                                          ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
@@ -151,7 +194,9 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                                       if (engine.canInterrupt)
                                         TextButton(
                                           onPressed: engine.interrupt,
-                                          child: const Text('打断'),
+                                          child: Text(
+                                            context.tr('打断', 'Interrupt'),
+                                          ),
                                         ),
                                     ],
                                   ),
@@ -169,13 +214,19 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                                             disabledBorder: InputBorder.none,
                                             focusedBorder: InputBorder.none,
                                             hintText: engine.canSubmit
-                                                ? '输入消息…'
-                                                : '请先开始语音',
+                                                ? context.tr(
+                                                    '输入消息…',
+                                                    'Type a message…',
+                                                  )
+                                                : context.tr(
+                                                    '请先开始语音',
+                                                    'Start voice to send a message',
+                                                  ),
                                           ),
                                         ),
                                       ),
                                       IconButton.filled(
-                                        tooltip: '发送',
+                                        tooltip: context.tr('发送', 'Send'),
                                         onPressed:
                                             engine.canSubmit && !submitting
                                             ? submit
@@ -207,15 +258,18 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
         const Divider(height: 1),
         ListTile(
           dense: true,
-          title: const Text('运行事件'),
-          trailing: Icon(events ? Icons.expand_more : Icons.expand_less),
+          title: Text(context.tr('运行事件', 'Runtime events')),
+          trailing: Icon(
+            events ? Icons.expand_more : Icons.expand_less,
+            size: 18,
+          ),
           onTap: () => setState(() => events = !events),
         ),
         if (events)
           SizedBox(
             height: 124,
             child: engine.events.isEmpty
-                ? const Center(child: Text('暂无运行事件'))
+                ? Center(child: Text(context.tr('暂无运行事件', 'No runtime events')))
                 : ListView.builder(
                     reverse: true,
                     itemCount: engine.events.length,
@@ -231,7 +285,7 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
                           vertical: 3,
                         ),
                         child: Text(
-                          '$time   ${event.message}',
+                          '$time   ${voiceMessage(context, event.message)}',
                           style: const TextStyle(fontSize: 12),
                         ),
                       );
@@ -241,23 +295,6 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
       ],
     );
   }
-
-  Widget action(
-    String label,
-    IconData icon,
-    VoidCallback? press, {
-    bool selected = false,
-  }) => TextButton.icon(
-    onPressed: press,
-    style: TextButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      backgroundColor: selected
-          ? Theme.of(context).colorScheme.secondaryContainer
-          : null,
-    ),
-    icon: Icon(icon, size: 16),
-    label: Text(label),
-  );
 
   Widget conversation(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -269,13 +306,10 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
             Image.asset(sageLogoAsset, width: 44, height: 44),
             const SizedBox(height: 12),
             Text(
-              engine.canSubmit ? '可以开始了' : '语音尚未开启',
+              engine.canSubmit
+                  ? context.tr('可以开始了', 'Ready')
+                  : context.tr('语音尚未开启', 'Voice is off'),
               style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              engine.canSubmit ? '直接说话，或在下方输入消息。' : '点击右上角开始语音后查看实时对话。',
-              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
             ),
           ],
         ),
@@ -344,22 +378,28 @@ class _VoiceWorkbenchState extends State<VoiceWorkbench> {
   Widget monitorPanel(BuildContext context) => ListView(
     padding: const EdgeInsets.all(18),
     children: [
-      Text('监控', style: Theme.of(context).textTheme.titleSmall),
+      Text(
+        context.tr('监控', 'Monitor'),
+        style: Theme.of(context).textTheme.titleSmall,
+      ),
       const SizedBox(height: 20),
-      const Text('麦克风输入'),
+      Text(context.tr('麦克风输入', 'Microphone input')),
       const SizedBox(height: 8),
       LinearProgressIndicator(value: (engine.level * 5).clamp(0.0, 1.0)),
       const SizedBox(height: 22),
       for (final entry in {
-        'vad': '停顿确认',
-        'turn_detection': '发言结束判断',
-        'asr': '识别收尾',
-        'agent': 'Agent 首段输出',
-        'tts': '合成首段音频',
+        'vad': context.tr('停顿确认', 'Pause confirmation'),
+        'turn_detection': context.tr('发言结束判断', 'End-of-turn detection'),
+        'asr': context.tr('识别收尾', 'Transcription finalization'),
+        'agent': context.tr('Agent 首段输出', 'First agent output'),
+        'tts': context.tr('合成首段音频', 'First synthesized audio'),
         'playback': engine.metrics['progress_cue'] == true
-            ? '停说到首声（含提示）'
-            : '停说到首段播放',
-        'turn': '回合总耗时',
+            ? context.tr(
+                '停说到首声（含提示）',
+                'End of speech to first audio (with cue)',
+              )
+            : context.tr('停说到首段播放', 'End of speech to playback'),
+        'turn': context.tr('回合总耗时', 'Total turn time'),
       }.entries)
         Padding(
           padding: const EdgeInsets.only(bottom: 12),

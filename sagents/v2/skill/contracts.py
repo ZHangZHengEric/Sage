@@ -65,10 +65,11 @@ class RunSkillProvider(SkillProvider, Protocol):
     Return metadata with references from search and authorize every exact-version
     fetch, including recovery. The SDK checks that a new selection came from the
     same Run's search and that the returned bundle matches the reference.
+    Apply a supplied name grant before ranking and limiting the results.
     """
 
     async def search_skills(
-        self, query: str, *, run_id: str, limit: int
+        self, query: str, *, run_id: str, limit: int, allowed_names: frozenset[str] | None = None
     ) -> tuple[SkillDescriptor, ...]: ...
 
     async def fetch_reference(self, reference: SkillReference, *, run_id: str) -> SkillBundle: ...

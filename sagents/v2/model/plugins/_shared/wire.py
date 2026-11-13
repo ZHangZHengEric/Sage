@@ -264,8 +264,10 @@ def provider_error(exc: Exception, *, response_started: bool = False, provider: 
         kind = K.QUOTA
     elif status == 404 or types & {"model_not_found", "not_found_error"}:
         kind = K.ROUTE
+    elif status == 413 or types & {"request_too_large", "payload_too_large"}:
+        kind = K.PAYLOAD
     elif types & {"context_length_exceeded", "context_window_exceeded", "prompt_too_long"} or (
-        status in {None, 200, 400, 413, 422}
+        status in {None, 200, 400, 422}
         and ((not types or types <= {"invalid_request_error", "invalid_request", "invalid_argument", "bad_request"})
             and (any(v in details for v in _CONTEXT_WINDOW_MARKERS)
                  or ("input token count" in details and "exceeds" in details)))):
@@ -283,8 +285,6 @@ def provider_error(exc: Exception, *, response_started: bool = False, provider: 
     elif types & {
         "server_error", "internal_server_error", "overloaded_error", "server_is_overloaded", "no_capacity", "api_error", "response_failed"}:
         kind = K.OVERLOADED
-    elif status == 413:
-        kind = K.PAYLOAD
     elif status == 429:
         kind = K.RATE_LIMIT
     elif status in {400, 422}:
@@ -322,7 +322,7 @@ def provider_error(exc: Exception, *, response_started: bool = False, provider: 
     category = (ErrorCategory.PROVIDER_TRANSIENT if retryable else ErrorCategory.PROVIDER_PERMANENT)
     if kind == K.CONTEXT:
         category = ErrorCategory.VALIDATION
-    code = "model.context_window_exceeded" if kind == K.CONTEXT else (
+    code = "model.context_window_exceeded" if kind == K.CONTEXT else "model.request_too_large" if kind == K.PAYLOAD else (
         "model.provider_transient" if retryable else "model.provider_permanent")
     failure = ModelFailure(kind=kind, phase="transport", provider=provider, http_status=status,
         native_code=native, response_started=response_started, retry_after_seconds=retry_after,

@@ -146,3 +146,33 @@ async def test_delegation_preserves_run_provider_scope(tmp_path, enabled_skills)
     finally:
         await app.close()
         await bindings.close()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_named_grant_filters_provider_results_before_limit(legacy):
+    class RankedProvider(RunProvider):
+        async def search_skills(self, query, *, run_id, limit, allowed_names=None):
+            allowed = self.versions["v1"].descriptor
+            results = (allowed.model_copy(update={"name": "other"}), allowed)
+            return tuple(item for item in results if allowed_names is None or item.name in allowed_names)[:limit]
+
+    provider = RankedProvider()
+    if legacy:
+        ranked = provider.search_skills
+
+        async def search(query, *, run_id, limit):
+            return await ranked(query, run_id=run_id, limit=limit)
+
+        provider.search_skills = search
+
+    async def names(run_id):
+        return frozenset({"weekly-report"})
+
+    loader = SkillLoader(
+        catalog=provider, source=provider, workspace=InMemorySkillWorkspace(),
+        activations=InMemorySkillActivationRepository(), run_provider=provider,
+        run_skill_names=names,
+    )
+    assert [item.name for item in await loader.search_skills("report", run_id="run", limit=1)] == [
+        "weekly-report",
+    ]

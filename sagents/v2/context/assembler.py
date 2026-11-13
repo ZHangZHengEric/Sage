@@ -32,7 +32,7 @@ from sagents.v2.context.plugins.summary_ephemeral import (
 from sagents.v2.model import ModelMessage
 from sagents.v2.runtime.artifact.contracts import ArtifactStore
 from sagents.v2.runtime.artifact.images import hydrate_image_blocks, hydrate_wishseen_history
-from sagents.v2.contracts.items import ContentBlock
+from sagents.v2.contracts.items import ContentBlock, ImageBlock
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.context.session_history import (
@@ -333,7 +333,10 @@ class DefaultContextAssembler:
                 messages, self.budget, scope=scope.model_copy(update={"force": False})
             )
         self._compression_requested.pop(run_id, None)
-        view = self._apply_inference_view(projection.messages, volatile)
+        view = self._deduplicate_submission_images(
+            projection.messages, continuation_of=command.continuation_of_run_id,
+        )
+        view = self._apply_inference_view(view, volatile)
         artifact_store = self.artifact_store
         if artifact_store is None and run_id is not None and self.history is not None:
             from sagents.v2.runtime.artifact import SessionArtifactStore
@@ -410,6 +413,48 @@ class DefaultContextAssembler:
                     attributes={"input_tokens": input_tokens, "threshold_tokens": maximum},
                 )
                 self.request_compression(run_id, required=False)
+
+    @staticmethod
+    def _deduplicate_submission_images(
+        messages: tuple[ModelMessage, ...], *, continuation_of: str | None,
+    ) -> tuple[ModelMessage, ...]:
+        seen_submissions: set[tuple[str, str]] = set()
+        continuation_batches = {
+            tuple(block.uri for block in message.content if isinstance(block, ImageBlock))
+            for message in messages
+            if continuation_of is not None
+            and message.metadata.get("source_run_id") == continuation_of
+            and is_user_request(message)
+        }
+        prepared = []
+        for message in reversed(messages):
+            if not is_user_request(message):
+                prepared.append(message)
+                continue
+            images = tuple(block for block in message.content if isinstance(block, ImageBlock))
+            if not images:
+                prepared.append(message)
+                continue
+            submission_id = message.metadata.get("client_message_id")
+            source_run = message.metadata.get("source_run_id")
+            duplicate = False
+            if isinstance(submission_id, str) and submission_id:
+                digest = hashlib.sha256()
+                for block in message.content:
+                    digest.update(block.model_dump_json().encode())
+                    digest.update(b"\0")
+                key = (submission_id, digest.hexdigest())
+                duplicate = key in seen_submissions
+                seen_submissions.add(key)
+            elif len(images) > 1 and source_run and source_run != continuation_of:
+                duplicate = tuple(block.uri for block in images) in continuation_batches
+            if duplicate:
+                message = message.model_copy(update={
+                    "content": tuple(block for block in message.content if not isinstance(block, ImageBlock)),
+                })
+            if message.content:
+                prepared.append(message)
+        return tuple(reversed(prepared))
 
     @classmethod
     def _apply_inference_view(

@@ -163,6 +163,9 @@ def reserve_recovery(state, decision, config, *, now, logical_call_id, error):
             "episode_requests": state.episode_requests + 1,
             "run_requests": state.run_requests + 1,
             "first_failure_at": state.first_failure_at or now,
+            "first_failure": state.first_failure or failure_from_error(error),
+            "first_request_bytes": state.first_request_bytes
+            if state.first_failure is not None else error.metadata.get("request_bytes"),
             "deadline": state.deadline
             or now + timedelta(seconds=config.episode_seconds),
             "error_fingerprint": hashlib.sha256(
