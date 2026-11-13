@@ -34,7 +34,6 @@
 
 - **Desktop plugins**. Open **Desktop Plugins** in the sidebar to upload a ZIP, launch an installed plugin, or pin it. An Agent can build a plugin and open it in the workspace.
 - **Sage Voice**. Talk to an Agent with live captions and interruption. Enable tools individually and customize spoken progress updates. Voice runs separately from source on Apple Silicon Macs.
-- **Lighter Desktop standby**. Sage checks fewer background statuses and releases the idle OpenUI parser. Active tasks retain their faster refresh.
 - **Run-scoped Skills**. Agents can discover authorized Skills and load the version referenced by a search result.
 
 [Full release notes](release_notes/v2.2.0.md)
