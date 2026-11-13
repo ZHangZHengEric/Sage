@@ -23,7 +23,9 @@ void main() {
       final relative = Platform.isWindows
           ? '.venv/Scripts/python.exe'
           : '.venv/bin/python';
-      final executable = File('${directory.path}/$relative');
+      final executable = File(
+        '${directory.path}${Platform.pathSeparator}$relative',
+      );
       await executable.parent.create(recursive: true);
       if (Platform.isWindows) {
         await executable.writeAsString('fixture');

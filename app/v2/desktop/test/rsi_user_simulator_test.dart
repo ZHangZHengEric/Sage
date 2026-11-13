@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
 import 'package:flutter/material.dart';
@@ -181,7 +182,7 @@ class UserFileSelector extends FileSelectorPlatform {
     return XFile.fromData(
       utf8.encode('async def reply(request): pass'),
       name: 'tau_user.py',
-      path: '/tmp/tau_user.py',
+      path: '${Directory.systemTemp.path}${Platform.pathSeparator}tau_user.py',
     );
   }
 }

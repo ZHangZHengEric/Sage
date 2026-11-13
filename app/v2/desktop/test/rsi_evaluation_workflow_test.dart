@@ -65,13 +65,13 @@ class PlanFileSelector extends FileSelectorPlatform {
       ? XFile.fromData(
           utf8.encode(scorerSource),
           name: 'accuracy.py',
-          path: '/tmp/accuracy.py',
+          path: '${Directory.systemTemp.path}${Platform.pathSeparator}accuracy.py',
           mimeType: 'text/x-python',
         )
       : XFile.fromData(
           utf8.encode(jsonEncode(dataset)),
           name: 'dataset.json',
-          path: '/tmp/dataset.json',
+          path: '${Directory.systemTemp.path}${Platform.pathSeparator}dataset.json',
           mimeType: 'application/json',
         );
 }
