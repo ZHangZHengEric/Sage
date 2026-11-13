@@ -48,13 +48,17 @@ Windows 或 Linux 使用 `-d windows`、`-d linux`。应用自动启动托管 Py
 
 设置自动保存，模型和 Agent 配置不接受环境变量覆盖。源码调试时可给后端传 `--data-root /absolute/path`。注册项目仍使用各自的文件根目录。
 
-Desktop 不导入 v1 数据。[Sage 2.1.1](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) 安装包由 GitHub Actions 从 Flutter v2 客户端构建，包含 Python 与 v2 后端。旧 Tauri 发布仍属于 v1。macOS 包使用 ad-hoc 签名、未公证；Windows 包未做代码签名。
+Desktop 不导入 v1 数据。[Sage 2.2.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.2.0) 安装包由 GitHub Actions 从 Flutter v2 客户端构建，包含 Python 与 v2 后端。旧 Tauri 发布仍属于 v1。macOS 包使用 ad-hoc 签名、未公证；Windows 包未做代码签名。
 
 [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [故障排查](../TROUBLESHOOTING.md)
 
 ## RSI 与 Agent 版本
 
 参见 [RSI 流程、优化范围、独立审查与版本确认](RSI.md)。
+
+## 桌面插件
+
+从左栏「桌面插件」或工作区面板的加号菜单进入。可上传 ZIP、打开已安装的插件或将其固定到左栏。Agent 构建并注册的插件可在发起请求的窗口直接打开。Windows 使用 WebView2，Linux 使用 WebKitGTK 4.1。
 
 ## 交互式 UI 与演示文稿
 

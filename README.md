@@ -30,6 +30,15 @@
 
 [Workflow guide](docs/en/applications/RSI.md) · [Evaluation and selection rules](sagents/v2/optimization/README.md) · [Editable diagram (SVG)](assets/rsi-agent-harness-en.svg)
 
+## What's new in Sage 2.2.0
+
+- **Desktop plugins**. Open **Desktop Plugins** in the sidebar to upload a ZIP, launch an installed plugin, or pin it. An Agent can build a plugin and open it in the workspace.
+- **Sage Voice**. Talk to an Agent with live captions and interruption. Enable tools individually and customize spoken progress updates. Voice runs separately from source on Apple Silicon Macs.
+- **Lighter Desktop standby**. Sage checks fewer background statuses and releases the idle OpenUI parser. Active tasks retain their faster refresh.
+- **Run-scoped Skills**. Agents can discover authorized Skills and load the version referenced by a search result.
+
+[Full release notes](release_notes/v2.2.0.md)
+
 ## 🚀 Get Started
 
 Sage, Desktop, Server, and SAgents refer to the current v2 implementation by default. For the legacy version, use the separate [Sage v1 guide](app/v1/README.md).

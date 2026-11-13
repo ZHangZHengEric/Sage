@@ -189,7 +189,7 @@ Agent 编辑页的“复制”会先提交待保存内容，再打开副本的�
 
 安装包由 `.github/workflows/release-v2.yml` 在 GitHub Actions 构建，包含 Flutter 客户端、独立 CPython、v2 后端和内置 skills；安装后无需源码目录或系统 Python。macOS 提供 arm64 / x86_64 DMG，Windows 提供 x86_64 安装程序，Linux 提供 arm64 / x86_64 DEB 与便携 tar.gz。Linux 仍需要 GTK 等系统动态库与 bubblewrap。
 
-每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。全部平台成功后才创建 `v2.1.1` tag 和 GitHub Release。手动验证运行不发布；选择 `publish` 才发布。
+每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。推送 `v2.2.0` 标签后启动构建，全部平台成功后发布 GitHub Release。手动运行可通过 `publish` 选项启用发布。
 
 macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；Windows 包未做代码签名。旧 Tauri 发布流水线已移出 GitHub Actions，不再构建 v1 应用；历史 updater feed 不向 v1 自动推送 Flutter v2。
 

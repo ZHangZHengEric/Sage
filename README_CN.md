@@ -30,6 +30,15 @@
 
 [流程指南](docs/zh/applications/RSI.md) · [评测与版本选择规则](sagents/v2/optimization/README.md) · [可编辑原理图（SVG）](assets/rsi-agent-harness-zh.svg)
 
+## Sage 2.2.0 有什么新功能
+
+- **桌面插件**。从左栏「桌面插件」上传 ZIP、打开已安装的插件或固定到左栏。也可以让 Agent 创建插件并直接在工作台打开。
+- **Sage Voice**。与 Agent 实时语音对话，支持字幕、打断、逐项启用工具和自定义进度播报。在 Apple Silicon Mac 上单独从源码运行。
+- **更轻的桌面待机**。减少空闲时的后台状态检查，并回收闲置的 OpenUI 解析进程。活跃任务仍快速刷新。
+- **按 Run 授权的 Skill**。Agent 可以搜索当前任务获授权的 Skill，并按搜索结果中的版本引用加载。
+
+[完整版本说明](release_notes/v2.2.0.md)
+
 ## 🚀 快速开始
 
 Sage、Desktop、Server 和 SAgents 默认指当前 v2 实现。旧版单独见 [Sage v1 指南](app/v1/README.md)。
