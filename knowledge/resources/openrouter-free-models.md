@@ -20,6 +20,12 @@ Start discovery with the [OpenRouter models page with a zero-price filter](https
 5. **Review data handling.** Providers have their own training, logging, and retention policies. OpenRouter documents separate training-routing settings for free and paid models. Opting out of provider training is not the same as establishing a retention policy, and it does not determine OpenRouter's own handling. Check the actual provider and any third-party tools before sending private data. [Provider logging documentation](https://openrouter.ai/docs/guides/privacy/provider-logging)
 6. **Decide what happens when it fails.** Free-model availability and latency can vary. For experiments, tolerate a pause or retry. For repeatable evaluations, select a specific listed variant and record it. For production, decide acceptable outages and costs explicitly rather than silently switching to a paid fallback. [Free router limitations](https://openrouter.ai/docs/guides/routing/routers/free-router)
 
+## Free access and retry caveats
+
+Provider documentation checked: **2026-11-15**. OpenRouter's [free-model collection FAQ](https://openrouter.ai/collections/free-models) distinguishes listed `:free` variants, which do not require a credit purchase, from other zero-priced models, which can still require a funded account. Zero model pricing alone therefore does not establish that an unfunded account can use an entry.
+
+The same FAQ states that failed attempts count toward the daily request cap for `:free` variants. Budget retries as attempts, not only successful completions; avoid an unbounded retry loop when capacity is exhausted. Recheck the live FAQ and [limits documentation](https://openrouter.ai/docs/api_reference/limits) before planning a workload. These are provider-documentation statements, not an account or runtime test.
+
 ## Discovery has a modality default
 
 The Models API defaults to models that produce text. To discover across output types, use the documented `output_modalities=all` parameter, or specify the output modality you need. A default response is therefore not a complete cross-modality inventory. This filtering concerns output capability; inspect input modalities separately. [Models query parameters](https://openrouter.ai/docs/guides/overview/models)
