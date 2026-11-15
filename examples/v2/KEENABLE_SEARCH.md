@@ -62,9 +62,17 @@ python -m pytest -q tests/sagents/v2/test_keenable_search_example.py
 ```
 
 It covers public mode (endpoint, User-Agent, no `X-API-Key` or `Authorization`
-header), keyed mode (header sent, key absent from output, errors and config
-repr), tool-call arguments and `session_id` reuse, `session_id` omitted when the
-schema does not declare it, tool errors, a missing tool, and cleanup in each case.
+header), keyed mode (header sent), tool-call arguments and `session_id` reuse,
+`session_id` omitted when the schema does not declare it, tool-level errors, a
+missing tool, transport and initialization failures (HTTP 401 and 429 and a
+JSON-RPC error on `initialize`, surfaced as `SageV2Error`), and cleanup in each
+case.
+
+The key checks are scoped to these fixtures: their responses never contain the
+key, so the tests show the example itself does not print the key or add it to
+the raised error or the config repr. `SecretStr` protects configuration
+serialization only. It does not redact text a provider returns or what chained
+exceptions carry.
 
 The live command above is an optional smoke test only; it depends on the external
 service's availability and limits and is not part of CI.

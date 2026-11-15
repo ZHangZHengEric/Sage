@@ -11,6 +11,7 @@ import pytest
 from mcp.client.streamable_http import streamablehttp_client
 
 from examples.v2 import keenable_search as example
+from sagents.v2.contracts.errors import SageV2Error
 
 SECRET = "kn-test-secret-value"
 SESSION_PROP = {"session_id": {"type": "string", "maxLength": 128}}
@@ -20,7 +21,8 @@ FETCH_SCHEMA = {"type": "object", "required": ["url"],
                 "properties": {"url": {"type": "string"}, **SESSION_PROP}}
 
 
-def _install(monkeypatch, plugin_kwargs, *, tools=None, tool_error=False):
+def _install(monkeypatch, plugin_kwargs, *, tools=None, tool_error=False, init_status=None,
+             init_rpc_error=False):
     """Route the example's MCP transport to a fixture server and record traffic."""
     if tools is None:
         tools = {"search_web_pages": SEARCH_SCHEMA, "fetch_page_content": FETCH_SCHEMA}
@@ -34,6 +36,11 @@ def _install(monkeypatch, plugin_kwargs, *, tools=None, tool_error=False):
         if "id" not in message:
             return httpx.Response(202)
         method = message["method"]
+        if method == "initialize" and init_status is not None:
+            return httpx.Response(init_status, json={"error": "fixture transport failure"})
+        if method == "initialize" and init_rpc_error:
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"],
+                                             "error": {"code": -32603, "message": "fixture init failure"}})
         if method == "initialize":
             result = {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}},
                       "serverInfo": {"name": "fixture", "version": "1"}}
@@ -160,3 +167,28 @@ def test_create_plugin_selects_endpoint_by_key():
     keyed = example.create_plugin(SECRET).servers[0]
     assert keyed.url == example.KEYED_ENDPOINT
     assert SECRET not in keyed.model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plugin_kwargs", [{}, {"api_key": SECRET}])
+@pytest.mark.parametrize(("failure", "surfaced"), [
+    ({"init_status": 401}, "401 Unauthorized"),
+    ({"init_status": 429}, "429 Too Many Requests"),
+    ({"init_rpc_error": True}, "fixture init failure"),
+])
+async def test_transport_or_initialization_failure_surfaces_and_cleans_up(
+    monkeypatch, capsys, plugin_kwargs, failure, surfaced,
+):
+    """A connection/initialization failure (not a tool-level isError) during discovery."""
+    state = _install(monkeypatch, plugin_kwargs, **failure)
+    with pytest.raises(SageV2Error, match=surfaced) as excinfo:
+        await example.run("query", "https://example.org", api_key=plugin_kwargs.get("api_key"))
+
+    assert state["requests"], "the fixture server was never reached"
+    assert _calls(state) == []  # no tool call after a failed handshake
+    _assert_cleaned_up(state)
+    # Scoped to this fixture: its error bodies never contain the key, so this checks
+    # that the example itself adds nothing secret to output or the surfaced error.
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert SECRET not in repr(excinfo.value)
