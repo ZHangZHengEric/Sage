@@ -11,6 +11,25 @@ ref: v2-detail-sagents-v2-context-budget
 
 # v2 Context Compression
 
+To limit the Session history sent at Run entry, opt into `context.history-window` in the Agent runtime configuration. SDK callers can pass the configuration as `runtime` to `load_agent`.
+
+```yaml
+capabilities:
+  context.history-window:
+    plugin: sage.context.history-window.recent
+    config:
+      max_age_seconds: 604800
+      max_turns: 8
+```
+
+Set `max_age_seconds` or `max_turns` alone or together. Both limits work on whole turns, including tool calls and results. Age is measured from each historical Turn's first message to acceptance of the current Run. The boundary stays fixed throughout the Run, including after recovery. New messages are appended, and overflow still uses the selected context reducer. The original Session messages remain available to `search_memory` when that tool is enabled.
+
+Trusted `developer` instructions continue to apply. The history window does not make them available through `search_memory`.
+
+An explicit continuation of a failed or cancelled Run keeps the original task history so the model receives the continuation instruction alongside the original request. Context overflow still uses the reducer.
+
+Moving the boundary between Runs changes the request's history prefix and can reduce cache hits across Runs. Evaluate input cost using the provider's separate cache-hit and cache-miss rates.
+
 Local input-token estimation, calibration and preflight token gates are removed. Configured model input limits remain compression triggers: actual provider input usage at or above the configured limit minus explicit reserves schedules compression before the next request. Cached usage is a subset of input usage. New input size is known only after API feedback; output-token limits still go to the API.
 
 API context rejection triggers compression immediately, with at most six retries per uncommitted main step. Summary requests first send the complete source, including the previous checkpoint. Only API overflow splits it in half; both halves must complete before merging. Format retries and transient retries share a 64-call operation quota and splitting is limited to depth 12.

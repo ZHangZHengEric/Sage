@@ -3445,6 +3445,8 @@ String _runtimeComponentName(
     l10n.languageCode == 'zh' ? 'Run 完成判定' : 'Run completion policy',
   'skill.loading' => l10n.text('component.skillLoading.name'),
   'context.reducer' => l10n.text('component.reducer.name'),
+  'context.history-window' =>
+    l10n.languageCode == 'zh' ? '会话历史窗口' : 'Session history window',
   'context.summarizer' =>
     l10n.languageCode == 'zh' ? '上下文摘要器' : 'Context summarizer',
   'context.summary-store' =>
@@ -3473,6 +3475,10 @@ String _runtimeComponentValue(
         ? '决定 Agent 继续调用工具、请求用户输入、完成或失败'
         : 'Decides whether an Agent continues, asks the user, completes, or fails',
   'context.reducer' => l10n.text('component.reducer.value'),
+  'context.history-window' =>
+    l10n.languageCode == 'zh'
+        ? '仅在 Run 开始时选取历史；留空则不限制'
+        : 'Selects history at Run entry. Leave limits blank to keep all history.',
   'context.summarizer' =>
     l10n.languageCode == 'zh'
         ? '上下文超出预算时生成可持久复用的历史摘要'
@@ -3531,6 +3537,8 @@ String _runtimePluginName(
   'persistent-summary' => l10n.text('component.plugin.persistentSummary.name'),
   'sage.context.reducer.window' ||
   'window' => l10n.text('component.plugin.window.name'),
+  'sage.context.history-window.recent' =>
+    l10n.languageCode == 'zh' ? '近期会话历史' : 'Recent session history',
   'sage.context.summarizer.model' =>
     l10n.languageCode == 'zh' ? '模型摘要' : 'Model summary',
   'sage.context.summarizer.extractive' =>

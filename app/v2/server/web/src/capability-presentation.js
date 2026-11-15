@@ -3,6 +3,7 @@ import { componentName, parameterDefaults } from './plugin-presentation.js'
 // Presentation only. Availability and schemas always come from the host catalog.
 const nodes = [
   ['tool.result-processor', '工具结果处理', '工具与技能', 'file'],
+  ['context.history-window', '会话历史窗口', '上下文准备', 'history'],
   ['context.reducer', '上下文压缩', '上下文准备', 'history'],
   ['context.summarizer', '摘要生成', '上下文准备', 'file'],
   ['tool.selection-policy', '工具选择', '模型与工具', 'tools'],
@@ -47,6 +48,7 @@ const explanations = {
   'sage.tool-selection.recent': ['优先展示近期使用的工具。', ['根据近期工具调用记录安排展示顺序。', '无需筛选模型；新任务需关注工具覆盖范围。']],
   'sage.context.reducer.persistent-summary': ['需要压缩时，将历史对话整理为持久摘要。', ['在 API 拒绝输入或使用量达到限制等条件下触发压缩。', '使用摘要器保留历史要点，同时保护近期对话。', '摘要作为后续上下文使用，原始会话历史仍保留。']],
   'sage.context.reducer.window': ['需要压缩时，裁剪完整的历史对话单元。', ['压缩时移除较早的对话，保留当前任务相关的近期内容。', '摘要器在此策略下不参与压缩，不产生摘要请求。', '较早内容不再进入本次模型上下文。']],
+  'sage.context.history-window.recent': ['每个 Run 开始时按时间或轮数选取完整的历史轮次。', ['可单独设置或组合限制，同一个 Run 内的新增消息照常追加。', '窗口外的原文可以通过会话记忆工具查找。']],
   'sage.context.summarizer.model': ['调用主模型生成对话摘要。', ['仅在需要生成摘要时调用模型，并非每轮都调用。', '使用 primary 模型槽位，增加摘要请求。', '选择窗口裁剪时，此摘要器不参与上下文压缩。']],
   'sage.context.summarizer.extractive': ['从对话和工具结果中提取任务状态。', ['不调用模型，通过规则保留有限的任务状态和工具结果。', '摘要的细节保留方式与模型摘要不同。', '选择窗口裁剪时，此摘要器不参与上下文压缩。']],
   'sage.skill.loading.lazy': ['需要时再加载技能正文。', ['按需加载技能材料，受活动内容字符上限约束。', '此处决定加载方式；技能授权范围仍由可用技能配置决定。']],

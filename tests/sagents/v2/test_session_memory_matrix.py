@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
     from sagents.v2.session_memory.contracts import SessionMemoryProvider
@@ -217,6 +217,43 @@ async def test_session_memory_never_infers_history_when_reducer_declares_none():
         == ()
     )
     assert provider.recall_queries == []
+
+
+@pytest.mark.asyncio
+async def test_session_memory_rechecks_backend_hits_against_the_run_boundary():
+    def old_item(item_id: str, role: Literal["user", "developer"] = "user"):
+        return ModelMessage(
+            role=role, content=(TextBlock(text=item_id),),
+            metadata={"source_item_id": item_id},
+        )
+
+    class UnfilteredProvider(_RecordingProvider):
+        async def recall(self, query):
+            assert query.included_record_ids == ("valid",)
+            return tuple(
+                SessionMemoryHit(record=SessionMemoryRecord(
+                    record_id=item_id, session_id=session_id, role=role,
+                    content=item_id, position=0,
+                ), score=1)
+                for item_id, session_id, role in (
+                    ("valid", "another_session", "user"),
+                    ("instruction", "session_1", "developer"),
+                    ("visible", "session_1", "user"),
+                    ("valid", "session_1", "user"),
+                )
+            )
+
+    service = SessionMemoryService(UnfilteredProvider())
+    visible, valid, instruction = old_item("visible"), old_item("valid"), old_item("instruction", "developer")
+    await service.observe_projection(
+        "run_1",
+        ContextProjection(
+            messages=(visible,), historical_messages=(valid, instruction), source_message_count=3,
+        ),
+        session_id="session_1", source_messages=(valid, instruction, visible),
+    )
+    hits = await service.recall(run_id="run_1", session_id="session_1", text="any", limit=5)
+    assert [(hit.record.session_id, hit.record.record_id) for hit in hits] == [("session_1", "valid")]
 
 
 class _SessionSearch:

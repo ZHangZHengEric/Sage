@@ -254,6 +254,35 @@ async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_desktop_disabling_history_window_uses_next_run_settings(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+
+    service, _, _ = desktop(tmp_path)
+    capability = "context.history-window"
+    try:
+        await service.select_component(capability, ComponentSelectionRequest(
+            plugin_id="sage.context.history-window.recent", config={"max_turns": 2},
+        ), "user_1")
+        first, _, _ = await execute(service)
+        application = cast('SAgentApplication', service.application)
+        context = service._context("user_1")
+        first_plan = await application.run_configuration(first.run_id, context)
+        assert capability in first_plan["runtime"]["capabilities"]
+
+        settings = await service.get_settings()
+        await service.save_settings(settings.model_copy(update={
+            "component_selections": {}, "component_configs": {},
+        }))
+        second, _, _ = await execute(service)
+        second_plan = await application.run_configuration(second.run_id, context)
+        saved_first_plan = await application.run_configuration(first.run_id, context)
+        assert capability not in second_plan["runtime"]["capabilities"]
+        assert capability in saved_first_plan["runtime"]["capabilities"]
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
 async def test_workspace_initializer_reuses_agent_scope(tmp_path):
     from tests.app.v2.desktop.sdk_fixture import desktop
     service, _, _ = desktop(tmp_path)
@@ -2137,6 +2166,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         "skill.loading",
         "agent.continuation-policy",
         "context.reducer",
+        "context.history-window",
         "context.summarizer",
         "context.summary-store",
         "memory.provider",

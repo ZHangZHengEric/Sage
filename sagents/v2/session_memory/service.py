@@ -64,7 +64,7 @@ class SessionMemoryService:
         historical = frozenset(
             self.record_id(message)
             for message in projection.historical_messages
-            if message.role != "system"
+            if message.role not in {"system", "developer"}
         )
         async with self._lock:
             previous = self._boundaries.get(run_id)
@@ -127,9 +127,8 @@ class SessionMemoryService:
         async with self._lock:
             boundary = self._boundaries.get(run_id)
         # Missing projection and an explicit empty declaration both mean that
-        # the reducer exposed no searchable history for this request. The
-        # reducer plugin owns this boundary: Session Memory deliberately does
-        # not infer history as "canonical ledger minus visible request".
+        # context projection exposed no searchable history for this request.
+        # Session Memory uses the declared boundary, never a ledger diff.
         if (
             boundary is None
             or boundary.session_id != session_id
@@ -141,20 +140,25 @@ class SessionMemoryService:
             if tool_call_id is not None
             else frozenset()
         )
-        historical_record_ids = tuple(
-            sorted(boundary.historical - current_call_records)
-        )
+        historical_record_ids = boundary.historical - current_call_records
         if not historical_record_ids:
             return ()
-        return await self.provider.recall(
+        hits = await self.provider.recall(
             SessionMemoryQuery(
                 session_id=session_id,
                 run_id=run_id,
                 text=text,
                 limit=limit,
-                included_record_ids=historical_record_ids,
+                included_record_ids=tuple(sorted(historical_record_ids)),
                 excluded_record_ids=tuple(sorted(current_call_records)),
             )
+        )
+        # The SDK owns the boundary even if a backend returns an extra row.
+        return tuple(
+            hit for hit in hits
+            if hit.record.session_id == session_id
+            and hit.record.record_id in historical_record_ids
+            and hit.record.role not in {"system", "developer"}
         )
 
     async def forget_session(self, session_id: str) -> None:
@@ -204,7 +208,7 @@ class SessionMemoryService:
         return tuple(
             cls._record(session_id, message, start_position + offset)
             for offset, message in enumerate(messages)
-            if message.role != "system" and cls._content(message)
+            if message.role not in {"system", "developer"} and cls._content(message)
         )
 
     @staticmethod

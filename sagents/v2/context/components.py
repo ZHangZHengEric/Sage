@@ -14,6 +14,7 @@ from sagents.v2.context import (
     ContextReducer,
     WindowContextReducer,
 )
+from sagents.v2.context.contracts import RunHistoryWindow
 
 
 @dataclass
@@ -37,6 +38,7 @@ class ContextComponentBundle:
     max_summary_calls: int = 64
     reducer_id: str = "summary-only"
     reducer: ContextReducer | None = None
+    history_window: RunHistoryWindow | None = None
 
     def create_reducer(self):
         """Create the selected reducer while sharing its host-owned components."""

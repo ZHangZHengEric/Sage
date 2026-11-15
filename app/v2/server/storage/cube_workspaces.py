@@ -130,6 +130,7 @@ class CubeWorkspaceStorage:
         max_bytes=MAX_ARCHIVE_BYTES,
         max_entries=MAX_ARCHIVE_ENTRIES,
         exclude_root_entry=None,
+        file_only=False,
     ):
         path = relative_path(value)
         output = SpooledTemporaryFile(max_size=8 << 20, mode="w+b")
@@ -141,6 +142,8 @@ class CubeWorkspaceStorage:
                     raise OverflowError("file is too large to download")
                 self._copy(sandbox, entry, output)
                 return path.name
+            if file_only:
+                raise ValueError("workspace path must name a regular file")
             entries = cube_file_call(
                 sandbox,
                 "walk",

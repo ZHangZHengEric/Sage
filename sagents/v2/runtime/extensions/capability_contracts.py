@@ -74,6 +74,7 @@ _CONTRACTS = {
     ),
     "agent.tool-policy": _contract("decide"),
     "artifact.store": _contract("put get delete"),
+    "context.history-window": _contract("history_start"),
     "context.reducer": _contract("reduce"),
     "context.segment-provider": _contract("segments"),
     "context.summarizer": _contract("summarize"),

@@ -54,6 +54,10 @@ For external runs backed by a legacy hashed Session, AG-UI lifecycle frames and 
 
 `PUT /api/agents/{agent_id}/workspace/file?path=projects/site/uploads/clip.mp4` imports one nonempty raw binary request body, up to 64 MiB. Identical retries succeed; different existing content returns 409, invalid paths or empty bodies return 422, and oversized bodies return 413. Paths are relative to the tenant and Agent workspace; symbolic links are not followed.
 
+`GET /api/agents/{agent_id}/workspace/file?path=IDENTITY.md` reads one regular file from the Claw workspace identified by the calling backend's `SAGE-TENANT-ID` and the Agent ID. It requires a Bearer API key bound to that Agent with `a2a:read`. Success returns the original bytes with `Cache-Control: private, no-store`. Markdown uses `text/plain; charset=utf-8`. Missing or invalid credentials return 401, Agent or scope mismatch returns 403, missing files return 404, and directories, path escapes, and symlinks return 422.
+
+The Agent API key can select any tenant workspace for its bound Agent. The calling backend must keep the key server-side and set `SAGE-TENANT-ID` from its authenticated and authorized user context. Discard any client-supplied tenant header. Duplicate tenant headers return 422.
+
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=uploads` optionally excludes one top-level entry from the Run workspace archive. Nested entries with the same name remain included. The remaining archive is subject to the existing 32 MiB and 512-entry limits.
 
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version?exclude=uploads` returns `{code:0,data:{version,files,bytes}}` under the same Agent API key and tenant authorization as downloads. `version` is lowercase SHA-256 over sorted relative file paths encoded as UTF-8, each followed by NUL and the raw 32-byte SHA-256 of its contents. Regular file bytes define identity, not modification times; empty directories do not affect it. The optional single root exclusion, symlink handling, 32 MiB and 512-entry limits match downloads. This operation hashes in a worker without creating a ZIP; Cube computes inside its bound volume and returns metadata only. The exact latest Run by persisted admission revision (not wall-clock time) is checked before and after hashing; an older Run returns409, concurrent writes503, quota overflow413, missing files404, and unsupported storage501. There is no ZIP fallback. Clients must hash downloads with the same recipe and reject a version mismatch before caching a derived snapshot.
@@ -132,6 +136,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/workspace/user-preferences` | `conversations` |

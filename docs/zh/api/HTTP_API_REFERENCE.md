@@ -54,6 +54,10 @@ parent: API
 
 `PUT /api/agents/{agent_id}/workspace/file?path=projects/site/uploads/clip.mp4` 导入单个非空原始二进制请求体，最大 64 MiB。相同内容可幂等重试；已有内容不同时返回 409，路径无效或请求体为空时返回 422，超限返回 413。路径相对于租户和 Agent 的工作区，不跟随符号链接。
 
+`GET /api/agents/{agent_id}/workspace/file?path=IDENTITY.md` 使用绑定该 Agent 且具有 `a2a:read` 权限的 Bearer API Key，按调用方后端传入的 `SAGE-TENANT-ID` 读取 Claw 工作区中的单个普通文件。成功时直接返回原文件字节，Markdown 的类型为 `text/plain; charset=utf-8`，缓存策略为 `private, no-store`。凭证缺失或无效返回 401，Agent 或权限不匹配返回 403，文件不存在返回 404，目录、越界路径或符号链接返回 422。
+
+Agent API Key 可选择所绑定 Agent 的任一租户工作区。调用方后端须保管密钥，根据已认证且获授权的用户身份生成 `SAGE-TENANT-ID`，并丢弃客户端传入的同名请求头。重复的租户请求头返回 422。
+
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=uploads` 可选排除 Run 工作区归档根下的一个条目；更深层的同名条目仍保留。剩余归档沿用 32 MiB 和 512 个条目的限制。
 
 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version?exclude=uploads` 沿用文件下载的Agent Key与租户鉴权，返回 `{code:0,data:{version,files,bytes}}`。`version` 为64位小写SHA-256：按相对路径排序，依次写入路径UTF-8、NUL及文件原始字节的32字节SHA-256摘要，再计算总摘要；时间戳不作为内容身份，空目录不影响版本。单个顶层exclude、符号链接处理、32MiB与512条目限制沿用下载规则。worker只哈希，不创建ZIP；Cube在绑定卷内部计算，仅返回元数据。哈希前后均按持久化受理序号核对准确的最新Run，不以墙上时间判断先后；旧Run返回409、并发写入503、超额413、文件缺失404、存储不支持501，不回退下载ZIP。客户端须用相同算法验证下载快照，版本不一致时拒绝缓存派生结果。
@@ -132,6 +136,7 @@ parent: API
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/workspace/user-preferences` | `conversations` |

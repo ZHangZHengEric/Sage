@@ -501,11 +501,16 @@ class ApplicationAssembler:
             tenant_id=tenant_id,
         )
         component_sets = {}
+        history_window_selection = _selection(runtime_config, "context.history-window")
+        history_window_plugin = (
+            history_window_selection.plugin if history_window_selection else None
+        )
         for member_id in models_by_agent:
             component_sets[member_id] = await AgentComponents.compose(
                 open_capability=open_agent_capability,
                 agent_id=member_id,
                 runtime=driver_runtime,
+                history_window_plugin=history_window_plugin,
             )
         root_components = component_sets[selected_agent]
         # Selecting a plugin is executable configuration, including auxiliary
@@ -681,6 +686,7 @@ class ApplicationAssembler:
                 active_components = await AgentComponents.compose(
                     open_capability=open_active_capability, agent_id=entry_descriptor.agent_id,
                     runtime=driver_runtime,
+                    history_window_plugin=history_window_plugin,
                 )
                 active_policy = self.state.tool_policy
                 policy_selection = _selection(runtime_config, "agent.tool-policy")
@@ -1652,7 +1658,7 @@ class ApplicationAssembler:
         config = _merge_plugin_config(declarations, plugin_id, config)
         selected_scope = self._selection_scope(selection, default_scope) if selection else default_scope
         dynamic_agent_ports = {
-            "model.provider", "context.summarizer", "context.reducer",
+            "model.provider", "context.summarizer", "context.reducer", "context.history-window",
             "memory.recall-query", "skill.loading", "agent.continuation-policy", "agent.tool-policy",
             "agent.self-configuration", "agent.output-checker", "context.segment-provider", "skill.provider",
             "skill.workspace", "tool.selection-policy", "tool.result-processor",

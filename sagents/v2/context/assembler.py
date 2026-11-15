@@ -22,6 +22,7 @@ from sagents.v2.context.contracts import (
     ContextSegment,
     ContextSegmentProvider,
     ContextStability,
+    RunHistoryWindow,
 )
 from sagents.v2.context.plugins.summary_only import (
     SummaryOnlyContextReducer,
@@ -97,6 +98,7 @@ class DefaultContextAssembler:
         budget: ContextBudget | None = None,
         reducer: ContextReducer | None = None,
         history_reader: SessionHistoryReader | None = None,
+        history_window: RunHistoryWindow | None = None,
         projection_observer: ContextProjectionObserver | None = None,
         artifact_store: ArtifactStore | None = None,
     ) -> None:
@@ -134,8 +136,9 @@ class DefaultContextAssembler:
         self.reducer = reducer or SummaryOnlyContextReducer(
             InMemoryConversationSummaryStore()
         )
+        self._history_window_enabled = history_window is not None
         self.history = (
-            SessionHistoryLedgerBuilder(history_reader)
+            SessionHistoryLedgerBuilder(history_reader, history_window=history_window)
             if history_reader is not None
             else None
         )
@@ -152,6 +155,74 @@ class DefaultContextAssembler:
             ModelMessage(role=item.role, content=item.content, metadata=item.metadata)
             for item in command.input
         )
+
+    async def _history_start(self, command: StartRun, run_id: str | None) -> int:
+        # An explicit continuation has no new input. Its instructions attach to
+        # the original user request and rely on history from the named Run.
+        if (
+            not self._history_window_enabled or self.history is None or run_id is None
+            or command.continuation_of_run_id is not None
+        ):
+            return 0
+        return await self.history.window_start(run_id)
+
+    async def windowed_ledger(
+        self, command: StartRun, ledger: tuple[ModelMessage, ...], *, run_id: str
+    ) -> tuple[ModelMessage, ...]:
+        start = await self._history_start(command, run_id)
+        visible, _ = self._split_history_window(ledger, start)
+        return visible
+
+    @staticmethod
+    def _split_history_window(
+        ledger: tuple[ModelMessage, ...], start: int
+    ) -> tuple[tuple[ModelMessage, ...], tuple[ModelMessage, ...]]:
+        if not start:
+            return ledger, ()
+        prior = ledger[:start]
+        # Trusted developer instructions retain the same visibility they have
+        # without a window. They never enter the history search boundary.
+        visible = (
+            *(message for message in prior if message.role == "developer"),
+            *ledger[start:],
+        )
+        omitted = tuple(message for message in prior if message.role not in {"system", "developer"})
+        return visible, omitted
+
+    async def prepare_history_search(
+        self, command: StartRun, ledger: tuple[ModelMessage, ...], *, run_id: str, session_id: str
+    ) -> None:
+        """Publish the window boundary for recall before the first model call."""
+        if self.projection_observer is None:
+            return
+        start = await self._history_start(command, run_id)
+        if not start:
+            return
+        visible, omitted = self._split_history_window(ledger, start)
+        await self.projection_observer.observe_projection(
+            run_id,
+            ContextProjection(
+                messages=visible,
+                historical_messages=omitted,
+                source_message_count=len(ledger),
+                dropped_message_count=len(omitted),
+                strategy="history_window",
+            ),
+            session_id=session_id,
+            source_messages=ledger,
+        )
+
+    async def restore_history_search(
+        self, command: StartRun, ledger: tuple[ModelMessage, ...], *, run_id: str
+    ) -> None:
+        """Restore omitted history when a saved tool call runs before the next model request."""
+        if (
+            not self._history_window_enabled
+            or self.projection_observer is None
+            or run_id in self._projection_signatures
+        ):
+            return
+        await self._project_context(command, ledger, run_id=run_id, history_only=True)
 
     async def prepare_messages(
         self,
@@ -185,7 +256,19 @@ class DefaultContextAssembler:
         of Agent instructions. Volatile runtime context is injected into the
         latest user message while preserving the original multimodal block order.
         """
+        return await self._project_context(command, ledger, run_id=run_id)
 
+    async def _project_context(
+        self,
+        command: StartRun,
+        ledger: tuple[ModelMessage, ...],
+        *,
+        run_id: str | None,
+        history_only: bool = False,
+    ) -> ContextProjection:
+        source_ledger = ledger
+        start = await self._history_start(command, run_id)
+        ledger, omitted = self._split_history_window(ledger, start)
         segments = []
         latest_user = next((message for message in reversed(ledger) if is_user_request(message)), None)
         if (run_id is not None and latest_user is not None
@@ -197,7 +280,7 @@ class DefaultContextAssembler:
                 stability=ContextStability.STABLE,
                 priority=-170,
             ))
-        for provider in self.providers:
+        for provider in (() if history_only else self.providers):
             ledger_segments = getattr(provider, "segments_for_ledger", None)
             segments.extend(
                 await ledger_segments(command, ledger, run_id=run_id)
@@ -295,9 +378,10 @@ class DefaultContextAssembler:
         scope = ContextReductionScope(
             context_key=self._summary_context_key(
                 run.session_id if run is not None else run_id or command.agent_id,
+                # A session-wide summary may contain turns excluded by this Run.
                 run_id=run_id
                 if run is not None
-                and run.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED
+                and (start or run.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED)
                 else None,
             ),
             session_id=run.session_id
@@ -310,8 +394,10 @@ class DefaultContextAssembler:
             response_language=str(
                 command.config.metadata.get("response_language") or "en"
             ),
-            force=run_id in self._compression_requested,
-            allow_summary_rewrite=self._compression_requested.get(run_id, False),
+            force=not history_only and run_id in self._compression_requested,
+            allow_summary_rewrite=(
+                not history_only and self._compression_requested.get(run_id, False)
+            ),
             # References only shrink this request view; canonical history keeps
             # the full results, so pressure that survives them must summarize.
             allow_reference_compaction=not (
@@ -320,9 +406,10 @@ class DefaultContextAssembler:
                 == "reference_compaction"
             ),
         )
-        required = self._compression_requested.get(run_id, False)
+        required = not history_only and self._compression_requested.get(run_id, False)
+        budget = None if history_only else self.budget
         try:
-            projection = await self.reducer.reduce(messages, self.budget, scope=scope)
+            projection = await self.reducer.reduce(messages, budget, scope=scope)
         except SageV2Error as exc:
             if required or exc.info.code not in {
                 "context.no_reducible_history",
@@ -330,8 +417,24 @@ class DefaultContextAssembler:
             }:
                 raise
             projection = await self.reducer.reduce(
-                messages, self.budget, scope=scope.model_copy(update={"force": False})
+                messages, budget, scope=scope.model_copy(update={"force": False})
             )
+        if omitted:
+            # Expose both sources of omitted history to the Session search index.
+            projection = projection.model_copy(update={
+                "historical_messages": (
+                    *omitted, *projection.historical_messages,
+                ),
+                "source_message_count": projection.source_message_count + len(omitted),
+                "dropped_message_count": projection.dropped_message_count + len(omitted),
+                "dropped_digest": None,
+                "strategy": (
+                    "history_window" if projection.strategy == "none" else projection.strategy
+                ),
+            })
+        if history_only:
+            await self._observe_projection(run_id, run, projection, source_ledger)
+            return projection
         self._compression_requested.pop(run_id, None)
         view = self._deduplicate_submission_images(
             projection.messages, continuation_of=command.continuation_of_run_id,
@@ -369,14 +472,17 @@ class DefaultContextAssembler:
             self._projection_signatures.move_to_end(run_id)
             while len(self._projection_signatures) > 128:
                 self._projection_signatures.popitem(last=False)
+        await self._observe_projection(run_id, run, projection, source_ledger)
+        return projection
+
+    async def _observe_projection(self, run_id, run, projection, source_ledger) -> None:
         if self.projection_observer is not None and run_id is not None:
             await self.projection_observer.observe_projection(
                 run_id,
                 projection,
                 session_id=run.session_id if run is not None else None,
-                source_messages=ledger,
+                source_messages=source_ledger,
             )
-        return projection
 
     @staticmethod
     def _summary_context_key(session_id: str, *, run_id: str | None = None) -> str:

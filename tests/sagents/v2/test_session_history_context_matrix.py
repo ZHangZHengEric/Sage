@@ -3,22 +3,30 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from sagents.v2.runtime.session.contracts import SessionStore
+    from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
+    from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
 import asyncio
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from sagents.v2.agent import AgentLoopEngine
-from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.context import DefaultContextAssembler, InMemoryConversationSummaryStore, RunMetadataContextProvider, SummaryOnlyContextReducer
+from sagents.v2.context.plugins.run_history_window import RecentRunHistoryWindow
+from sagents.v2.context.plugins.summary_session import SessionDerivedConversationSummaryStore
+from sagents.v2.contracts.commands import CancelRun, InputItem, ReplyInteraction, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
     ActorRef,
     PrincipalType,
     RequestContext,
 )
-from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.run_state import SessionConcurrencyMode
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.events import ContinuationEventData
+from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.contracts.session_commit import (
     ProposeSessionCommit,
     PublishSessionCommit,
@@ -35,6 +43,10 @@ from sagents.v2.model import (
     ModelToolCall,
     ScriptedModelProvider,
 )
+from sagents.v2.session_memory.plugins.sqlite_bm25 import SqliteBm25SessionMemoryProvider
+from sagents.v2.session_memory.service import SessionMemoryService
+from sagents.v2.tool.decorated import DecoratedToolProvider
+from sagents.v2.tool.official.memory import MemoryTools
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 from sagents.v2.tool import (
     InMemoryToolCatalog,
@@ -43,7 +55,7 @@ from sagents.v2.tool import (
     ToolDefinition,
     ToolExecutionResult,
 )
-from sagents.v2.runtime.session import FilesystemSessionStore
+from sagents.v2.runtime.session import EventDraft, FilesystemSessionStore
 
 
 CONTEXT = RequestContext(
@@ -116,7 +128,6 @@ async def execute(runtime, handle, model, *, definitions=(), handlers=None):
 
 @pytest.mark.asyncio
 async def test_user_cancel_without_tool_reply_allows_next_turn_after_restart(tmp_path):
-    from sagents.v2.contracts.commands import CancelRun
     from sagents.v2.context.session_history import SessionEventModelProjector
 
     store = FilesystemSessionStore(tmp_path)
@@ -221,6 +232,304 @@ async def test_serial_run_projects_completed_history_from_previous_runs():
         ("assistant", "first answer"),
         ("user", "follow up"),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limits", [
+    {"max_turns": 1},
+    {"max_age_seconds": 60},
+    {"max_age_seconds": 600, "max_turns": 1},
+    {"max_age_seconds": 60, "max_turns": 2},
+])
+@pytest.mark.parametrize("mode", [
+    SessionConcurrencyMode.SERIAL,
+    SessionConcurrencyMode.FORK,
+    SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+])
+async def test_run_history_window_preserves_prefix_search_and_overflow_recovery(tmp_path, limits, mode):
+    now = datetime.now(timezone.utc)
+    runtime = ephemeral_runtime(clock=lambda: now)
+    old_text = "The original release codename was Saturn."
+    trusted_instruction = "Apply the permanent Heliotrope rule."
+    old_command = command(old_text, "old")
+    old = await runtime.start_run(old_command.model_copy(update={"input": (
+        *old_command.input,
+        InputItem(role="developer", content=(TextBlock(text=trusted_instruction),)),
+    )}), CONTEXT.model_copy(update={"actor": CONTEXT.actor.model_copy(update={
+        "scopes": ("session.trusted_input",),
+    })}))
+    await execute(runtime, old, ScriptedModelProvider((ScriptedModelStep(events=(completed("Noted."),)),)))
+    now += timedelta(minutes=10)
+    recent_text = ("Keep the following recent discussion in context. " * 20).strip()
+    recent_command = command(recent_text, "recent", session_id=old.session_id)
+    recent = await runtime.start_run(recent_command.model_copy(update={"input": (
+        *recent_command.input,
+        InputItem(role="user", content=(TextBlock(text="Another input in the same Turn."),)),
+    )}), CONTEXT)
+    await execute(runtime, recent, ScriptedModelProvider((ScriptedModelStep(events=(completed("Understood."),)),)))
+    current_text = "What was the release codename?"
+    current = await runtime.start_run(
+        command(current_text, "current", session_id=old.session_id, mode=mode), CONTEXT,
+    )
+    now += timedelta(minutes=10)
+
+    summary_requests = []
+
+    class Summarizer:
+        async def summarize(self, request):
+            summary_requests.append(request)
+            return "A recent discussion was retained."
+
+    memory = SessionMemoryService(SqliteBm25SessionMemoryProvider(tmp_path))
+    summary_store = InMemoryConversationSummaryStore()
+
+    def assembler():
+        return DefaultContextAssembler(
+            history_reader=runtime.session_store,
+            history_window=RecentRunHistoryWindow(**limits),
+            projection_observer=memory,
+            reducer=SummaryOnlyContextReducer(summary_store, summarizer=Summarizer(), protected_recent_units=1),
+        )
+
+    tool = DecoratedToolProvider(MemoryTools(cast("OfficialToolRuntime", SimpleNamespace(
+        session_memory_service=memory,
+    ))))
+    search_call = ModelToolCall(tool_call_id="find-old", name="search_memory", arguments={"query": "Saturn"})
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed(calls=(search_call,)),)),
+        ScriptedModelStep(events=(), error=RuntimeErrorInfo(
+            code="model.context_window_exceeded", message="request too long", category=ErrorCategory.VALIDATION,
+        )),
+        ScriptedModelStep(events=(completed("Saturn."),)),
+    ))
+    result = await AgentLoopEngine(
+        runtime=runtime, model=model, tool_catalog=tool.catalog,
+        tool_executor=tool.executor, context_assembler=assembler(),
+    ).execute(current.run_id, CONTEXT)
+
+    assert result.state.value == "completed"
+    first, second, recovered = model.requests
+    assert message_texts(first) == [
+        ("developer", trusted_instruction),
+        ("user", recent_text), ("user", "Another input in the same Turn."),
+        ("assistant", "Understood."), ("user", current_text),
+    ]
+    assert second.messages[:len(first.messages)] == first.messages
+    search_result = next(message for message in second.messages if message.role == "tool")
+    assert search_result.content[0].model_dump()["value"]["session_results"][0]["content"] == old_text
+    assert len(summary_requests) == 1
+    assert old_text not in str(summary_requests[0].messages)
+    assert ("developer", trusted_instruction) in message_texts(recovered)
+    assert any(text == current_text for _, text in message_texts(recovered))
+    assert any("A recent discussion was retained." in text for _, text in message_texts(recovered))
+
+    rebuilt = assembler()
+    stored_command = await runtime.session_store.get_start_command(current.run_id)
+    assert rebuilt.history is not None
+    ledger = await rebuilt.history.rebuild(stored_command, run_id=current.run_id)
+    projection = await rebuilt.prepare_projection(stored_command, ledger, run_id=current.run_id)
+    assert ledger[0].content[0] == TextBlock(text=old_text)
+    assert projection.historical_messages[0] == ledger[0]
+    assert all(message.role != "developer" for message in projection.historical_messages)
+    assert not await memory.recall(
+        run_id=current.run_id, session_id=result.session_id, text="Heliotrope", limit=5,
+    )
+    assert not await memory.recall(
+        run_id=current.run_id, session_id="unrelated-session", text="Saturn", limit=5,
+    )
+    assert len(summary_requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("index_unavailable", [False, True])
+async def test_window_indexes_history_before_automatic_recall(tmp_path, monkeypatch, index_unavailable):
+    runtime = ephemeral_runtime()
+    old_text = "The Saturn codename."
+    seed_model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("Noted."),)),
+        ScriptedModelStep(events=(completed("Good morning."),)),
+    ))
+    old = await runtime.start_run(command(old_text, "old"), CONTEXT)
+    await execute(runtime, old, seed_model)
+    recent = await runtime.start_run(command("Hello", "recent", session_id=old.session_id), CONTEXT)
+    await execute(runtime, recent, seed_model)
+    current = await runtime.start_run(command("Saturn", "current", session_id=old.session_id), CONTEXT)
+
+    provider = SqliteBm25SessionMemoryProvider(tmp_path)
+    if index_unavailable:
+        async def unavailable(_records):
+            raise OSError("test history index unavailable")
+
+        monkeypatch.setattr(provider, "sync", unavailable)
+
+    memory = SessionMemoryService(provider)
+    tool = DecoratedToolProvider(MemoryTools(cast("OfficialToolRuntime", SimpleNamespace(
+        session_memory_service=memory,
+    ))))
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("Done."),)),))
+    result = await AgentLoopEngine(
+        runtime=runtime, model=model, tool_catalog=tool.catalog, tool_executor=tool.executor,
+        automatic_memory_recall=True,
+        context_assembler=DefaultContextAssembler(
+            history_reader=runtime.session_store,
+            history_window=RecentRunHistoryWindow(max_turns=1),
+            projection_observer=memory,
+        ),
+    ).execute(current.run_id, CONTEXT)
+
+    if index_unavailable:
+        assert result.state.value == "failed"
+        error = (await runtime.get_run_result(current.run_id)).error
+        assert error is not None and error.code == "loop.preparation_failed"
+        assert not model.requests
+        return
+
+    assert result.state.value == "completed"
+    request = model.requests[0]
+    assert all(old_text not in text for role, text in message_texts(request) if role == "user")
+    result_message = next(message for message in request.messages if message.role == "tool")
+    assert old_text in str(result_message.content)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("summarized", [False, True])
+async def test_approved_history_search_restores_boundary_after_reopening_store(tmp_path, summarized):
+    summary_calls = []
+
+    class Summarizer:
+        async def summarize(self, request):
+            summary_calls.append(request)
+            return "The recent exchange recorded a second reference."
+
+    def make_loop(runtime, model):
+        memory = SessionMemoryService(SqliteBm25SessionMemoryProvider(tmp_path / "memory"))
+        tool = DecoratedToolProvider(MemoryTools(cast("OfficialToolRuntime", SimpleNamespace(
+            session_memory_service=memory,
+        ))))
+        return AgentLoopEngine(
+            runtime=runtime, model=model, tool_catalog=tool.catalog, tool_executor=tool.executor,
+            tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK),
+            context_assembler=DefaultContextAssembler(
+                history_reader=runtime.session_store,
+                history_window=RecentRunHistoryWindow(max_turns=1), projection_observer=memory,
+                reducer=SummaryOnlyContextReducer(
+                    SessionDerivedConversationSummaryStore(cast("DerivedStateStore", runtime.session_store)),
+                    summarizer=Summarizer(), protected_recent_units=1,
+                ),
+            ),
+        )
+
+    old_text = "The codename on file is Saturn."
+    second_reference = "Saturn also has a second reference."
+    recent_text = second_reference + " Supporting detail follows." * 50
+    store = FilesystemSessionStore(tmp_path / "sessions")
+    try:
+        runtime = HarnessRuntime(cast("SessionStore", store))
+        seed = ScriptedModelProvider((
+            ScriptedModelStep(events=(completed("Noted."),)),
+            ScriptedModelStep(events=(completed("Hello!"),)),
+        ))
+        old = await runtime.start_run(command(old_text, "old"), CONTEXT)
+        await execute(runtime, old, seed)
+        recent = await runtime.start_run(command(recent_text, "recent", session_id=old.session_id), CONTEXT)
+        await execute(runtime, recent, seed)
+        handle = await runtime.start_run(command("Find the old codename", "find", session_id=old.session_id), CONTEXT)
+        lookup = ModelToolCall(tool_call_id="find-old", name="search_memory", arguments={"query": "Saturn"})
+        model = ScriptedModelProvider((ScriptedModelStep(events=(completed(calls=(lookup,)),)),))
+        loop = make_loop(runtime, model)
+        if summarized:
+            cast(DefaultContextAssembler, loop.context_assembler).request_compression(handle.run_id)
+        run = await loop.execute(handle.run_id, CONTEXT)
+        assert run.state.value == "suspended"
+        assert old_text not in str(model.requests[0].messages)
+    finally:
+        await store.close()
+
+    store = FilesystemSessionStore(tmp_path / "sessions")
+    try:
+        runtime = HarnessRuntime(cast("SessionStore", store))
+        assert run.suspension_id is not None
+        suspension = await store.get_suspension(run.suspension_id)
+        assert suspension.interaction_id is not None
+        interaction = await store.get_interaction(suspension.interaction_id)
+        reply = await runtime.reply_interaction(ReplyInteraction(
+            run_id=run.run_id, suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id, expected_revision=run.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="approve_once", idempotency_key="allow-search",
+        ), CONTEXT)
+        assert reply.decision.value == "accepted"
+        model = ScriptedModelProvider((ScriptedModelStep(events=(completed("Done."),)),))
+        result = await make_loop(runtime, model).resume(run.run_id, CONTEXT)
+        assert result.state.value == "completed"
+        result_message = next(message for message in model.requests[0].messages if message.role == "tool")
+        assert old_text in str(result_message.content)
+        assert (second_reference in str(result_message.content)) == summarized
+        assert len(summary_calls) == int(summarized)
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_continuation_keeps_expired_original_request():
+    now = datetime.now(timezone.utc)
+    runtime = ephemeral_runtime(clock=lambda: now)
+    source = await runtime.start_run(command("Original task brief", "original"), CONTEXT)
+    original = await runtime.get_run(source.run_id)
+    await runtime.cancel_run(CancelRun(
+        run_id=source.run_id, expected_revision=original.revision,
+        idempotency_key="cancel-original", reason="user_cancelled",
+    ), CONTEXT)
+    now += timedelta(minutes=5)
+
+    request = StartRun(
+        session_id=source.session_id, agent_id="agent_1", input=(),
+        resolved_spec_hash="sha256:agent", idempotency_key="continue-original",
+        continuation_of_run_id=source.run_id, continuation_instruction="Finish the last scene.",
+    )
+    handle = await runtime.start_run(request, CONTEXT)
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("Done."),)),))
+    result = await AgentLoopEngine(
+        runtime=runtime, model=model, tool_catalog=InMemoryToolCatalog(()),
+        tool_executor=InMemoryToolExecutor({}, {}),
+        context_assembler=DefaultContextAssembler(
+            history_reader=runtime.session_store, providers=(RunMetadataContextProvider(),),
+            history_window=RecentRunHistoryWindow(max_age_seconds=60),
+        ),
+    ).execute(handle.run_id, CONTEXT)
+    assert result.state.value == "completed"
+    user_text = next(text for role, text in message_texts(model.requests[0]) if role == "user")
+    assert "Original task brief" in user_text
+    assert "Finish the last scene." in user_text
+
+
+@pytest.mark.asyncio
+async def test_time_window_expires_history_that_contains_only_a_questionnaire():
+    now = datetime.now(timezone.utc)
+    runtime = ephemeral_runtime(clock=lambda: now)
+    store = runtime.session_store
+    old_command = command("", "old").model_copy(update={"input": ()})
+    old = await runtime.start_run(old_command, CONTEXT)
+    original = await store.get_run(old.run_id)
+    await store.commit_run(
+        run_id=old.run_id, context=CONTEXT, expected_revision=original.revision,
+        expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED,
+        drafts=(EventDraft(type="continuation.decided", data=ContinuationEventData(
+            action="complete_run", reason_code="questionnaire", reason="test",
+            decision_hash="sha256:test", details={"questionnaire": {"title": "Old question"}},
+        )),), idempotency_key="record-questionnaire",
+    )
+    now += timedelta(minutes=5)
+    request = command("Hello", "current", session_id=old.session_id)
+    current = await runtime.start_run(request, CONTEXT)
+    assembler = DefaultContextAssembler(
+        history_reader=store, history_window=RecentRunHistoryWindow(max_age_seconds=60),
+    )
+    ledger = await assembler.initial_ledger(request, run_id=current.run_id)
+    projection = await assembler.prepare_projection(request, ledger, run_id=current.run_id)
+    assert "Old question" not in str(projection.messages)
+    assert "Old question" in str(projection.historical_messages)
 
 
 @pytest.mark.asyncio
@@ -335,6 +644,21 @@ async def test_fork_materializes_parent_history_at_its_stable_base_sequence():
         ("assistant", "parent answer"),
         ("user", "delegated question"),
     ]
+
+    late_parent = await runtime.start_run(command(
+        "late parent data", "parent-after-fork", session_id=parent.session_id,
+    ), CONTEXT)
+    await execute(runtime, late_parent, ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("Parent-only reply"),)),
+    )))
+    followup = command("Continue the child", "child-followup", session_id=child.session_id)
+    second = await runtime.start_run(followup, CONTEXT)
+    assembler = DefaultContextAssembler(history_reader=runtime.session_store,
+        history_window=RecentRunHistoryWindow(max_turns=1))
+    ledger = await assembler.initial_ledger(followup, run_id=second.run_id)
+    projection = await assembler.prepare_projection(followup, ledger, run_id=second.run_id)
+    assert "child answer" in str(projection.messages)
+    assert "late parent data" not in str(ledger)
 
 
 @pytest.mark.asyncio

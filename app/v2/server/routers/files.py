@@ -32,7 +32,7 @@ async def file_operation(function, *args, **kwargs):
         raise HTTPException(413, str(exc)) from exc
 
 
-def download_response(prepared):
+def download_response(prepared, *, media_type="application/octet-stream", cache_control="no-store"):
     stream, filename = prepared
     stream.seek(0, 2)
     size = stream.tell()
@@ -46,9 +46,9 @@ def download_response(prepared):
             stream.close()
 
     return StreamingResponse(
-        chunks(), media_type="application/octet-stream",
+        chunks(), media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename, safe='')}",
-                 "Content-Length": str(size), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+                 "Content-Length": str(size), "Cache-Control": cache_control, "X-Content-Type-Options": "nosniff"},
         background=BackgroundTask(stream.close),
     )
 

@@ -71,6 +71,8 @@ def test_admin_save_pending_reset_and_conflict(client):
     {"memory.provider": {"plugin": "sage.memory.noop", "config": {"root": "/tmp"}}},
     {"context.summarizer": {"plugin": "sage.context.summarizer.model", "config": {"model": {}}}},
     {"context.summarizer": {"plugin": "sage.context.summarizer.model", "config": {"timeout_seconds": 0}}},
+    {"context.history-window": {"plugin": "sage.context.reducer.window"}},
+    {"context.history-window": {"plugin": "sage.context.history-window.recent", "config": {"max_messages": 8}}},
     {"memory.provider": {"plugin": "sage.memory.noop", "scope": "run"}},
     {"session.store": {"plugin": "sage.session.ephemeral"}},
     {"model.provider": None},
@@ -102,12 +104,26 @@ async def test_startup_loads_durable_memory_and_agent_inherits_server_defaults(s
         from app.v2.server.catalog.records import AgentRecord
         agent = AgentRecord(id="configured", name="Configured")
         data = cast('AgentPackageBundle', agent.package).model_dump(mode="json")
-        data["manifest"]["runtime"]["capabilities"] = {"context.summarizer": {"plugin": "sage.context.summarizer.model", "config": {"max_source_tokens": 12000}}}
+        data["manifest"]["runtime"]["capabilities"] = {
+            "context.summarizer": {
+                "plugin": "sage.context.summarizer.model", "config": {"max_source_tokens": 12000},
+            },
+            "context.history-window": {
+                "plugin": "sage.context.history-window.recent",
+                "config": {"max_turns": 8, "max_age_seconds": 604800},
+            },
+        }
         from sagents.v2.agent.management import AgentPackageBundle
         agent = agent.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
         manifest = server_v2_run_manifest(service.settings, agent=agent)
         assert cast(CapabilitySelection, manifest.runtime.capabilities["memory.provider"]).plugin == provider.plugin_id
         assert cast(CapabilitySelection, manifest.runtime.capabilities["context.summarizer"]).config == {"timeout_seconds": 45, "model_binding": "primary", "max_source_tokens": 12000}
+        assert manifest.runtime.selections("context.history-window") == (
+            CapabilitySelection(
+                plugin="sage.context.history-window.recent",
+                config={"max_turns": 8, "max_age_seconds": 604800},
+            ),
+        )
         # A changed file cannot silently alter the running host or new Runs.
         store.save({"memory.provider": None}, revision(store.read()))
         assert cast(CapabilitySelection, server_v2_manifest(service.settings).runtime.capabilities["memory.provider"]).plugin == provider.plugin_id

@@ -13,6 +13,7 @@ from tests.app.v2.server.test_external_chat import make_host, setup_agent
     ("POST", "/runs/t/r/cancel", None),
     ("POST", "/runs/t/r/reply", {"interaction_id": "i", "decision": "approve_once"}),
     ("PUT", "/workspace/files", {"directory": "projects/p", "files": {}}),
+    ("GET", "/workspace/file?path=IDENTITY.md", None),
     ("DELETE", "/workspace/files?path=projects/p&recursive=true", None),
     ("DELETE", "/sessions/t", None),
 ])

@@ -14,8 +14,8 @@ const catalog = ref(null), error = ref(''), loading = ref(false), active = ref('
 const radioName = useId()
 let disposed = false
 const nodes = computed(() => capabilityNodes(catalog.value, props.modelLabel).map(node => ({ ...node,
-  choice: node.id === 'model.provider' ? props.modelLabel : pluginName(effective(node.id).definition || effective(node.id).id),
-  available: node.id === 'model.provider' || effective(node.id).available,
+  choice: node.id === 'model.provider' ? props.modelLabel : isDisabled(effective(node.id), node.id) ? '未启用' : pluginName(effective(node.id).definition || effective(node.id).id),
+  available: node.id === 'model.provider' || effective(node.id).available || isDisabled(effective(node.id), node.id),
   custom: Boolean(props.modelValue[node.id]), changed: changed(node.id),
 })))
 const currentNode = computed(() => nodes.value.find(node => node.id === active.value))
@@ -49,6 +49,7 @@ const changes = computed(() => {
   return rows
 })
 function effective(capability) { return effectivePlugin(catalog.value, props.modelValue, capability) }
+function isDisabled(selection, capability) { return capability === 'context.history-window' && !selection.id }
 function changed(capability) { return props.savedValue !== null && selectionChanged(props.modelValue[capability], props.savedValue[capability]) }
 function update(capability, plugin) {
   if (props.disabled || !catalog.value?.configurable?.includes(capability)) return
@@ -88,15 +89,15 @@ onUnmounted(() => { disposed = true })
         <template v-else-if="currentNode">
           <header class="inspector-head"><h2>{{ currentNode.name }}</h2><CapabilityContractHelp :capability="active" :inventory="catalog.contracts" /><span class="tag">{{ options.length }} 个可选方案</span></header>
           <div class="selection-source"><span>{{ modelValue[active] ? '智能体自定义' : '跟随 Server 默认' }}</span><button type="button" :disabled="disabled || !modelValue[active]" @click="update(active, '')">恢复默认</button></div>
-          <p v-if="!current.available" class="unavailable-warning" role="alert">当前实现未注册或不可用，请选择可用方案或恢复默认。</p>
+          <p v-if="!current.available && !isDisabled(current, active)" class="unavailable-warning" role="alert">当前实现未注册或不可用，请选择可用方案或恢复默认。</p>
           <div role="group" :aria-label="`${currentNode.name}可选方案`" class="plugin-options">
             <label v-for="plugin in options" :key="`${active}:${plugin.id}`" class="plugin-option" :class="{ selected: current.id === plugin.id, unavailable: plugin.available === false }">
               <input type="radio" :name="`${radioName}-${active}`" :value="plugin.id" :checked="current.id === plugin.id" :disabled="disabled || plugin.available === false" @change="update(active, plugin.id)" />
               <span class="option-body"><span class="option-heading"><span class="option-label"><strong>{{ pluginName(plugin) }}</strong><code class="plugin-code">{{ plugin.id }}</code></span><small>{{ plugin.available === false ? '不可用' : current.id === plugin.id ? '当前选择' : catalog.defaults?.[active] === plugin.id ? 'Server 默认' : '' }}</small></span><span class="option-description">{{ pluginExplanation(plugin).description }}</span></span>
             </label>
           </div>
-          <div class="effective-selection"><span>当前配置方案</span><strong>{{ pluginName(current.definition || current.id) }}</strong></div>
-          <section class="plugin-effects" aria-live="polite"><h3><AppIcon name="skill" />选择后的影响</h3><ul><li v-for="effect in explanation.effects" :key="effect">{{ effect }}</li></ul><p>配置推演 · 实际效果需试运行验证</p></section>
+          <div class="effective-selection"><span>当前配置方案</span><strong>{{ isDisabled(current, active) ? '未启用' : pluginName(current.definition || current.id) }}</strong></div>
+          <section v-if="current.id" class="plugin-effects" aria-live="polite"><h3><AppIcon name="skill" />选择后的影响</h3><ul><li v-for="effect in explanation.effects" :key="effect">{{ effect }}</li></ul><p>配置推演 · 实际效果需试运行验证</p></section>
           <section v-if="Object.keys(parameterSchema.properties).length" :key="`${active}:${current.id}`" class="plugin-parameters"><SchemaField :schema="parameterSchema" :root="current.definition.schema" :model-value="current.config" label="参数" :disabled="disabled || !current.available" @update:model-value="configure(active, $event)" /></section>
           <section v-if="changes.length" class="selection-changes"><h3>本次变更 · 未保存</h3><dl><div v-for="change in changes" :key="change.label"><dt>{{ change.label }}</dt><dd><span>{{ change.before }}</span><span aria-label="变更为"> → </span><strong>{{ change.after }}</strong></dd></div></dl></section>
           <p class="save-note">{{ disabled ? '当前为只读配置。' : '修改后请保存配置，用于后续新运行。' }}</p>

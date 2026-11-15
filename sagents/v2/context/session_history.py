@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Protocol
 
+from sagents.v2.context.contracts import RunHistoryWindow
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.events import ContinuationEventData, ItemEventData, RuntimeEvent
@@ -115,7 +117,10 @@ class SessionEventModelProjector:
                         content=(TextBlock(text="Questionnaire presented to the user:\n" + json.dumps(
                             data.details["questionnaire"], ensure_ascii=False,
                         )),),
-                        metadata={"source": "questionnaire", "run_id": event.run_id},
+                        metadata={
+                            "source": "questionnaire", "run_id": event.run_id,
+                            **self._metadata(event, event.event_id),
+                        },
                     ),
                     step_key=(event.run_id, event.turn_id, event.step_id),
                 ))
@@ -292,16 +297,22 @@ class SessionHistoryLedgerBuilder:
         self,
         reader: SessionHistoryReader,
         projector: SessionEventModelProjector | None = None,
+        *,
+        history_window: RunHistoryWindow | None = None,
     ) -> None:
         self.reader = reader
         self.projector = projector or SessionEventModelProjector()
+        self.history_window = history_window
+        self._window_starts: OrderedDict[str, int] = OrderedDict()
 
     async def build(
         self, command: StartRun, *, run_id: str
     ) -> tuple[ModelMessage, ...]:
         """Build the initial ledger, including only the current acceptance prefix."""
 
-        base_events = await self._base_events(run_id)
+        base_ledger = await self._build_base(
+            run_id, select_window=command.continuation_of_run_id is None,
+        )
         current_prefix = []
         for event in await self.reader.read_events(run_id):
             if event.type == "run.started":
@@ -317,7 +328,44 @@ class SessionHistoryLedgerBuilder:
                 )
                 for item in command.input
             )
-        return (*self.projector.project(base_events), *current_ledger)
+        return (*base_ledger, *current_ledger)
+
+    async def window_start(self, run_id: str) -> int:
+        if self.history_window is None:
+            return 0
+        if run_id not in self._window_starts:
+            await self._build_base(run_id)
+        self._window_starts.move_to_end(run_id)
+        return self._window_starts[run_id]
+
+    async def _build_base(
+        self, run_id: str, *, select_window: bool = True
+    ) -> tuple[ModelMessage, ...]:
+        run = await self.reader.get_run(run_id)
+        events = await self._base_events(run)
+        messages = self.projector.project(events)
+        if select_window and self.history_window is not None and run_id not in self._window_starts:
+            # Recovery recomputes from the same accepted base and timestamp.
+            item_times = {
+                event.data.item.item_id: event.occurred_at
+                for event in reversed(events)
+                if isinstance(event.data, ItemEventData)
+                and event.data.item is not None
+                and event.data.operation in {"completed", "snapshot"}
+            }
+            item_times.update(
+                (event.event_id, event.occurred_at)
+                for event in events if event.type == "continuation.decided"
+            )
+            start = self.history_window.history_start(
+                messages, accepted_at=run.created_at, item_times=item_times
+            )
+            if not 0 <= start <= len(messages):
+                raise ValueError("history window returned an invalid start index")
+            self._window_starts[run_id] = start
+            if len(self._window_starts) > 128:
+                self._window_starts.popitem(last=False)
+        return messages
 
     async def rebuild(
         self,
@@ -328,7 +376,7 @@ class SessionHistoryLedgerBuilder:
     ) -> tuple[ModelMessage, ...]:
         """Rebuild an active Run ledger through an exact checkpoint boundary."""
 
-        base_events = await self._base_events(run_id)
+        base_events = await self._base_events(await self.reader.get_run(run_id))
         current_events = await self.reader.read_events(run_id)
         if through_run_sequence is not None:
             current_events = tuple(
@@ -346,13 +394,12 @@ class SessionHistoryLedgerBuilder:
             )
         return (*self.projector.project(base_events), *current_ledger)
 
-    async def _base_events(self, run_id: str) -> tuple[RuntimeEvent, ...]:
-        run = await self.reader.get_run(run_id)
+    async def _base_events(self, run: RunSnapshot) -> tuple[RuntimeEvent, ...]:
         session = await self.reader.get_session(run.session_id)
         if run.concurrency_mode == SessionConcurrencyMode.FORK:
             if session.parent_session_id is None:
                 raise ValueError("fork Run requires a parent Session")
-            return await self.reader.read_fork_base_events(run_id)
+            return await self.reader.read_fork_base_events(run.run_id)
 
         history_session_id = run.session_id
 

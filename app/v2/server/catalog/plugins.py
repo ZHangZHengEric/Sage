@@ -15,6 +15,7 @@ AGENT_DEFAULTS = {
     "skill.loading": "sage.skill.loading.lazy",
     "memory.recall-query": "sage.memory.recall-query.llm",
 }
+AGENT_CONFIGURABLE = frozenset(AGENT_DEFAULTS) | {"context.history-window"}
 DEFAULT_CONFIG = {
     "context.summarizer": {"model_binding": "primary"},
     "agent.continuation-policy": {"model_binding": "fast"},
@@ -43,7 +44,7 @@ def plugin_options(registry=None) -> list[PluginOption]:
             schema=configuration_schema(d),
             scopes=[scope.value for scope in d.supported_scopes],
             configurable_capabilities=[
-                o.capability for o in d.provides if o.capability in AGENT_DEFAULTS
+                o.capability for o in d.provides if o.capability in AGENT_CONFIGURABLE
             ],
             available=d.availability.available,
         )
@@ -67,7 +68,7 @@ def validate_agent_plugins(selections, *, registry=None):
                 raise ValueError(f"{capability} 只允许一个默认绑定")
             if not isinstance(value, dict):
                 raise ValueError("插件配置必须是对象")
-            if capability not in AGENT_DEFAULTS:
+            if capability not in AGENT_CONFIGURABLE:
                 raise ValueError(
                     f"{capability} 由 Server 管理，不允许在 Agent Package 中修改"
                 )

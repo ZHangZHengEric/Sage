@@ -30,7 +30,7 @@ def relative_path(value: str) -> PurePosixPath:
 
 
 @contextmanager
-def open_entry(root: Path, path: PurePosixPath):
+def open_entry(root: Path, path: PurePosixPath, *, exact_prefix_parts: int = 0):
     """Open each component relative to its parent fd; reject symlink swaps."""
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -39,6 +39,21 @@ def open_entry(root: Path, path: PurePosixPath):
             if index < len(path.parts) - 1:
                 flags |= os.O_DIRECTORY
             child = os.open(part, flags, dir_fd=fd)
+            if index < exact_prefix_parts:
+                try:
+                    opened = os.fstat(child)
+                    with os.scandir(fd) as entries:
+                        # Case-insensitive filesystems may resolve a different
+                        # tenant's spelling. Verify the name and opened inode.
+                        if not any(
+                            entry.name == part
+                            and os.path.samestat(entry.stat(follow_symlinks=False), opened)
+                            for entry in entries
+                        ):
+                            raise FileNotFoundError("workspace identity not found")
+                except BaseException:
+                    os.close(child)
+                    raise
             os.close(fd)
             fd = child
         if not (stat.S_ISDIR(os.fstat(fd).st_mode) or stat.S_ISREG(os.fstat(fd).st_mode)):
@@ -148,12 +163,15 @@ def workspace_version(root: Path, value: str, *, max_bytes: int = MAX_ARCHIVE_BY
 
 def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
                      max_bytes: int = MAX_ARCHIVE_BYTES, max_entries: int = MAX_ARCHIVE_ENTRIES,
-                     exclude_root_entry: str | None = None):
+                     exclude_root_entry: str | None = None, file_only: bool = False,
+                     exact_prefix_parts: int = 0):
     path = relative_path(value)
     output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
     try:
-        with open_entry(root, path) as fd:
+        with open_entry(root, path, exact_prefix_parts=exact_prefix_parts) as fd:
             opened = os.fstat(fd)
+            if file_only and (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1):
+                raise ValueError("workspace path must name a regular file")
             if stat.S_ISREG(opened.st_mode):
                 if opened.st_size > max_bytes:
                     raise OverflowError("file is too large to download")

@@ -11,6 +11,25 @@ ref: v2-detail-sagents-v2-context-budget
 
 # v2 上下文压缩
 
+可在 Agent 的运行时配置 `capabilities` 中启用独立的历史窗口，默认关闭。SDK 调用 `load_agent` 时，可用 `runtime` 参数传入该配置。
+
+```yaml
+capabilities:
+  context.history-window:
+    plugin: sage.context.history-window.recent
+    config:
+      max_age_seconds: 604800
+      max_turns: 8
+```
+
+`max_age_seconds` 和 `max_turns` 可以单独设置，同时设置时取交集。两者都以完整的历史 Turn 为单位，时间从当前 Run 的接受时间回溯到各历史 Turn 的首条消息。窗口起点在 Run 开始时确定，当前输入和 Run 内新增内容照常追加。超长恢复由选定的 `context.reducer` 负责，默认走摘要。窗口外的原文保留在 Session 中，Agent 启用 `search_memory` 后可按需检索。
+
+窗口只筛选历史对话。受信任的 `developer` 指令继续生效，也不会作为窗口外的历史返回给 `search_memory`。
+
+显式继续已失败或已取消的 Run 时，保留原任务历史，确保续跑指令能与原始请求一起发给模型。超长时仍由上下文压缩器处理。
+
+当窗口起点在两个 Run 之间前移时，模型请求的历史前缀会改变，可能降低跨 Run 的缓存命中率。评估成本时，应分别按模型服务商的缓存命中价和未命中价计算输入费用。
+
 不再进行本地输入 token 估算、校准或估算预算拦截。模型配置的最大输入长度仍有效：API 返回的实际 input usage 达到配置上限减去显式输出/输入预留后，下一次请求前触发压缩。缓存输入属于 input usage 的子集，不会重复计数。
 
 API 直接返回超长时，立即压缩并重试；主请求每个未完成步骤最多恢复 6 次。首次请求或刚新增内容的精确 token 长度只能由 API 反馈得知。输出 token 配置仍通过 API 请求限制。

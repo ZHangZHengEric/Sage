@@ -132,6 +132,44 @@ async def run(app, agent, key, *, config=None, context=CONTEXT):
 
 
 @pytest.mark.asyncio
+async def test_agent_runtime_enables_history_window_alongside_default_reducer(tmp_path):
+    model = ScriptedModelProvider(tuple(response(text=f"Reply to message {i}.") for i in range(3)))
+    host_runtime = runtime(tmp_path)
+    app = await build(tmp_path, model, config=host_runtime)
+    agent_runtime = host_runtime.model_copy(update={"capabilities": {
+        **host_runtime.capabilities,
+        "context.history-window": CapabilitySelection(
+            plugin="sage.context.history-window.recent", config={"max_turns": 1},
+        ),
+    }})
+    try:
+        agent = await app.load_agent(package(), runtime=agent_runtime)
+        session_id = None
+        for index in range(3):
+            start = command(agent, f"history-{index}").model_copy(update={
+                "session_id": session_id,
+                "input": (InputItem(role="user", content=(TextBlock(text=f"Message {index}"),)),),
+            })
+            stream = await app.entrypoint().run_stream(start, CONTEXT, agent=agent)
+            async with asyncio.timeout(15):
+                async for _ in stream.events:
+                    pass
+                result = await stream.wait()
+            assert result.state.value == "completed", result
+            session_id = result.session_id
+
+        messages = model.requests[-1].messages
+        prior_replies = [
+            block.text
+            for message in messages if message.role == "assistant"
+            for block in message.content if isinstance(block, TextBlock)
+        ]
+        assert prior_replies == ["Reply to message 1."]
+    finally:
+        await app.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("disk_mb", [4096, 32768])
 async def test_registered_standard_driver_uses_accepted_policy_and_real_resources(tmp_path, disk_mb):
     model = ScriptedModelProvider((response(ModelToolCall(tool_call_id="write", name="file_write",

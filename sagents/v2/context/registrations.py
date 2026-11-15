@@ -14,6 +14,7 @@ from sagents.v2.context import (
 from sagents.v2.context.plugins.summarizer_model import (
     DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
 )
+from sagents.v2.context.plugins.run_history_window import RecentRunHistoryWindow
 from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.runtime.extensions.contracts import ExtensionDependency, ExtensionScope
 from sagents.v2.runtime.extensions.registration import register_plugin
@@ -21,6 +22,23 @@ from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 
 
 def register_context_plugins(registry: ExtensionRegistry) -> None:
+    register_plugin(
+        registry,
+        RecentRunHistoryWindow,
+        "context.history-window",
+        lambda context, dependencies: RecentRunHistoryWindow(
+            **{key: int(value) for key, value in context.config.items()}
+        ),
+        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema={
+            "type": "object",
+            "properties": {
+                "max_age_seconds": {"type": "integer", "minimum": 1, "title": "History age limit (seconds)"},
+                "max_turns": {"type": "integer", "minimum": 1, "title": "Maximum historical turns"},
+            },
+            "additionalProperties": False,
+        },
+    )
     register_plugin(
         registry,
         WindowContextReducer,

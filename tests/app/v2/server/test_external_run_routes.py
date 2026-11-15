@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 import base64
 from dataclasses import replace
 from io import BytesIO
+import os
 from zipfile import ZipFile
 
 import pytest
@@ -20,6 +21,99 @@ from tests.app.v2.server.test_external_chat import make_host, setup_agent
 
 def _headers(tenant="tenant-a"):
     return {"SAGE-TENANT-ID": tenant}
+
+
+@pytest.mark.parametrize("backend", ["local", "cube"])
+def test_external_workspace_get_returns_only_one_regular_file(tmp_path, monkeypatch, backend):
+    if backend == "cube":
+        from sagents.v2.runtime.execution.sandbox.plugins.cube import cube_volume_name
+        from tests.app.v2.server.test_cube_execution import cube_host
+        from tests.sagents.v2.cube_fakes import FakeCubeClient
+
+        remote = FakeCubeClient(tmp_path / "cube")
+        monkeypatch.setattr(
+            "sagents.v2.runtime.execution.sandbox.plugins.cube.CubeVolumeClient", lambda **_: remote,
+        )
+        host = cube_host(tmp_path / "sage")
+    else:
+        host = make_host(tmp_path / "sage")
+
+    with TestClient(create_app(host)) as client:
+        token = setup_agent(client)
+        del client.headers["Authorization"]
+        agent = client.headers["SAGE-AGENT-ID"]
+        console = {"Authorization": f"Bearer {token}"}
+        url = f"/api/agents/{agent}/workspace/file"
+
+        def workspace(tenant):
+            if backend == "cube":
+                return remote.root / cube_volume_name(tenant, agent)
+            return host.paths.workspace_path(tenant, agent)
+
+        body = "\ufeff# 身份\r\n".encode()
+        for tenant, content in (("tenant-a", body), ("tenant-b", b"other tenant")):
+            root = workspace(tenant)
+            root.mkdir(parents=True)
+            (root / "IDENTITY.md").write_bytes(content)
+        root = workspace("tenant-a")
+        (root / "directory").mkdir()
+        (root / "directory" / "nested.bin").write_bytes(b"\x00\xff")
+        (root / "link.md").symlink_to(workspace("tenant-b") / "IDENTITY.md")
+        (root / "linked-dir").symlink_to(workspace("tenant-b"), target_is_directory=True)
+        secret = workspace("tenant-b") / "secret.bin"
+        secret.write_bytes(b"other tenant's file")
+        os.link(secret, root / "hardlink.bin")
+
+        def credential(name, scope):
+            issued = client.post("/api/keys", headers=console, json={
+                "agent_id": agent, "name": name, "scopes": [scope],
+            })
+            assert issued.status_code == 200, issued.text
+            key = issued.json()["data"]
+            return {"Authorization": "Bearer " + key["api_key"]}, key["key_id"]
+
+        read_key, read_key_id = credential("read files", "a2a:read")
+        identity = {"path": "IDENTITY.md"}
+        headers = {**read_key, **_headers()}
+        response = client.get(url, params=identity, headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.content == body
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert response.headers["cache-control"] == "private, no-store"
+        # A trusted holder of this machine key selects the tenant for this Agent.
+        assert client.get(url, params=identity, headers={**read_key, **_headers("tenant-b")}).content == b"other tenant"
+        binary = client.get(url, params={"path": "directory/nested.bin"}, headers=headers)
+        assert binary.content == b"\x00\xff"
+        assert binary.headers["content-type"] == "application/octet-stream"
+        for tenant in ("missing", "TENANT-A", "../tenant-b", "tenant%2Db"):
+            assert client.get(url, params=identity, headers={**read_key, **_headers(tenant)}).status_code == 404, tenant
+        assert client.get(url, params={"path": "SOUL.md"}, headers=headers).status_code == 404
+        for invalid in ("", "directory", "link.md", "linked-dir/IDENTITY.md", "hardlink.bin",
+                        "../IDENTITY.md", "/workspace/IDENTITY.md", "directory\\nested.bin"):
+            assert client.get(url, params={"path": invalid}, headers=headers).status_code == 422, invalid
+        assert client.get(url + "?path=%2e%2e%2fIDENTITY.md", headers=headers).status_code == 422
+        victim = _headers("tenant-b")
+        for untrusted in (victim, {**console, **victim}, {**victim, "Authorization": "Bearer invalid"}):
+            assert client.get(url, params=identity, headers=untrusted).status_code == 401
+        duplicate_auth = [*headers.items(), ("Authorization", "Bearer invalid")]
+        assert client.get(url, params=identity, headers=duplicate_auth).status_code == 401
+        duplicate_tenant = [*headers.items(), *victim.items()]
+        assert client.get(url, params=identity, headers=duplicate_tenant).status_code == 422
+        assert client.get(url, params=identity, headers={**read_key, **_headers("tenant-a, tenant-b")}).status_code == 422
+        assert client.get(url, params=identity, headers={"Authorization": ""}).status_code == 401
+        assert client.get(url, params=identity, headers=read_key).status_code == 422
+        invoke_key, _ = credential("invoke only", "a2a:invoke")
+        assert client.get(url, params=identity, headers={**invoke_key, **victim}).status_code == 403
+        other_agent = client.post("/api/agents", headers=console, json={"name": "Other Agent"}).json()["data"]["id"]
+        assert client.get(f"/api/agents/{other_agent}/workspace/file", params=identity, headers=headers).status_code == 403
+        if backend == "local":
+            # An Agent-directory symlink must not escape the authorized root.
+            alias = workspace("alias").parent
+            alias.parent.mkdir()
+            alias.symlink_to(workspace("tenant-b").parent, target_is_directory=True)
+            assert client.get(url, params=identity, headers={**read_key, **_headers("alias")}).status_code == 422
+        assert client.delete(f"/api/keys/{read_key_id}", headers=console).status_code == 200
+        assert client.get(url, params=identity, headers={**read_key, **victim}).status_code == 401
 
 
 def _run(client, agent_id, run_id="run-a", tenant="tenant-a"):

@@ -84,11 +84,12 @@ class DefaultAgentStepRequestBuilder:
         catalog_tools = tools_for_invocation_mode(
             catalog_tools, command.invocation_mode
         )
+        window = getattr(self.context_assembler, "windowed_ledger", None)
         selection = self.tool_selection_policy.select(
             ToolSelectionRequest(
                 run_id=run_id,
                 tools=catalog_tools,
-                messages=messages,
+                messages=await window(command, messages, run_id=run_id) if window else messages,
             )
         )
         response_language = str(

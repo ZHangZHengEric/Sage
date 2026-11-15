@@ -526,12 +526,16 @@ class AgentLoopEngine:
             ToolSelectionPrepareContext(
                 run_id=run_id,
                 tools=catalog_tools,
-                messages=messages,
+                messages=await self._windowed_ledger(command, run_id, messages),
                 language=normalize_language(language),
                 model=self.tool_selection_model,
             )
         )
         self._prepared_tool_selection_runs.add(run_id)
+
+    async def _windowed_ledger(self, command, run_id, messages):
+        window = getattr(self.context_assembler, "windowed_ledger", None)
+        return await window(command, messages, run_id=run_id) if window else messages
 
     async def _run_automatic_memory_recall(
         self, run, state, command, context, tool_selection_task
@@ -570,6 +574,12 @@ class AgentLoopEngine:
             if exc.info.code == "tool.not_found":
                 return run, state
             raise
+
+        prepare_history_search = getattr(self.context_assembler, "prepare_history_search", None)
+        if prepare_history_search is not None:
+            await prepare_history_search(
+                command, state.messages, run_id=run.run_id, session_id=run.session_id,
+            )
 
         scope = command.config.metadata.get("memory_scope")
         configured_limit = scope.get("limit") if isinstance(scope, dict) else None
@@ -2073,7 +2083,7 @@ class AgentLoopEngine:
             step_number=state.step_number,
             max_steps=max_steps,
             response=response,
-            ledger=state.messages,
+            ledger=await self._windowed_ledger(command, run.run_id, state.messages),
             language=run_prompt_language(command.config.metadata),
             agent_system_requirements=system_requirements,
             available_tools=available_tools,
@@ -3141,7 +3151,7 @@ class AgentLoopEngine:
             run, call, context, turn_id, step_id=step_id, state=state
         )
 
-    async def _execute_tool_with_control(self, run, call, context) -> tuple[RunSnapshot, ToolExecutionResult | None]:
+    async def _execute_tool_with_control(self, run, call, context, *, state=None) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Interrupt only when both Tool metadata and Executor permit it."""
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
@@ -3150,6 +3160,10 @@ class AgentLoopEngine:
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
+        if call.tool_name == "search_memory" and state is not None and state.pending_response_step_id is not None:
+            restore_history_search = getattr(self.context_assembler, "restore_history_search", None)
+            if restore_history_search is not None:
+                await restore_history_search(command, state.messages, run_id=run.run_id)
         execution = asyncio.create_task(self.tool_executor.execute(call, context))
         cancellable = definition.cancel_semantics in {
             CancelSemantics.COOPERATIVE,
@@ -3326,7 +3340,7 @@ class AgentLoopEngine:
 
         async def execute(call):
             _, result = await self._capture_tool_execution(
-                run, call, context, turn_id, step_id
+                run, call, context, turn_id, step_id, state=state,
             )
             return call, result
 
@@ -3542,7 +3556,7 @@ class AgentLoopEngine:
         self, run, call, context, turn_id, step_id=None, state=None
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         try:
-            run, result = await self._execute_tool_with_control(run, call, context)
+            run, result = await self._execute_tool_with_control(run, call, context, state=state)
             if result is None and run.state in TERMINAL_RUN_STATES:
                 # A confirmed cancellation owns the terminal state.
                 return run, None
@@ -3642,7 +3656,7 @@ class AgentLoopEngine:
             run = await self._start_tool_execution(run, call, context, turn_id, step_id)
             try:
                 run, result = await self._capture_tool_execution(
-                    run, call, context, turn_id, step_id
+                    run, call, context, turn_id, step_id, state=state,
                 )
             except asyncio.CancelledError:
                 current = await self.runtime.get_run(run.run_id)

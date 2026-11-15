@@ -6,7 +6,7 @@ from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
 from app.v2.server.runtime.official import official_tool_catalog
 from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_servers
-from app.v2.server.catalog.plugins import AGENT_DEFAULTS, validate_agent_plugins
+from app.v2.server.catalog.plugins import AGENT_CONFIGURABLE, validate_agent_plugins
 from app.v2.server.catalog.packages import is_external_tool
 
 PACKAGE_COMPOSITION_CAPABILITIES = {"flow.node", "tool.provider"}
@@ -35,7 +35,7 @@ class ServerPackagePolicy:
         manifest = bundle.manifest
         if manifest.runtime.deployment_profile != "controlled_host":
             raise PermissionError("Server supports a single controlled host")
-        forbidden = sorted(set(manifest.runtime.capabilities) - set(AGENT_DEFAULTS) - PACKAGE_COMPOSITION_CAPABILITIES)
+        forbidden = sorted(set(manifest.runtime.capabilities) - AGENT_CONFIGURABLE - PACKAGE_COMPOSITION_CAPABILITIES)
         if forbidden:
             raise PermissionError(f"{', '.join(forbidden)} 由 Server 管理，不允许在 Agent Package 中修改")
         if manifest.runtime.required_guarantees:
@@ -46,7 +46,7 @@ class ServerPackagePolicy:
             )
         if manifest.interfaces:
             raise PermissionError("protocol interfaces are provided by Server")
-        validate_agent_plugins({key: value for key, value in manifest.runtime.capabilities.items() if key in AGENT_DEFAULTS}, registry=getattr(self.catalog, "extensions", None))
+        validate_agent_plugins({key: value for key, value in manifest.runtime.capabilities.items() if key in AGENT_CONFIGURABLE}, registry=getattr(self.catalog, "extensions", None))
         declared = {item.id for item in manifest.plugins}
         if any(
             selection.plugin not in declared

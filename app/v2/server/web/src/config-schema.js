@@ -26,6 +26,7 @@ export const labels = {
   model_binding: '模型绑定', timeout_seconds: '超时时间（秒）', idle_timeout_seconds: '流空闲超时（秒）',
   max_source_tokens: '摘要输入 Token 上限', summary_target_tokens: '摘要目标 Token', protected_recent_units: '保留近期消息组数',
   max_summary_calls: '单轮摘要调用上限', max_summary_source_tokens: '摘要输入 Token 上限', repeat_threshold: '重复检测阈值',
+  max_turns: '最多保留历史轮数', max_age_seconds: '历史时间窗口（秒）',
   max_visible_tools: '最多展示工具数', model_timeout_seconds: '筛选模型超时（秒）', max_concurrent_runs: '运行并发上限',
   max_concurrent_runs_per_tenant: '每用户运行并发上限', max_pending_items: '等待任务上限',
   root: '存储目录', directory: '日志目录', min_level: '日志级别', stream: '输出位置', format: '输出格式',

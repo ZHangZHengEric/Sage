@@ -14,7 +14,7 @@ from pathlib import Path
 
 from jsonschema import ValidationError, validate
 
-from app.v2.server.catalog.plugins import AGENT_DEFAULTS, configuration_schema
+from app.v2.server.catalog.plugins import AGENT_CONFIGURABLE, AGENT_DEFAULTS, configuration_schema
 from app.v2.server.observability.sql_provider import SQL_OBSERVABILITY_PLUGIN
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.contracts.errors import SageV2Error
@@ -22,7 +22,7 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 
 # Other process services are injected by ServerHost, or bound to host storage,
 # execution grants and tenant catalogs. A saved choice there would be ignored.
-SERVER_CONFIGURABLE = frozenset(AGENT_DEFAULTS) | {
+SERVER_CONFIGURABLE = AGENT_CONFIGURABLE | {
     "memory.provider",
     "session-memory.provider",
     "context.summary-store",

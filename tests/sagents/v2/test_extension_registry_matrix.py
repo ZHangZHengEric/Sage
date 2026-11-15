@@ -49,6 +49,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.agent.continuation.explicit-status",
         "sage.artifact.ephemeral",
         "sage.artifact.filesystem",
+        "sage.context.history-window.recent",
         "sage.context.reducer.persistent-summary",
         "sage.context.reducer.summary-only",
         "sage.context.reducer.window",

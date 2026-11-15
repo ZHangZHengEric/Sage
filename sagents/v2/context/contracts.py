@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Protocol
+from datetime import datetime
+from typing import Mapping, Protocol
 
 from pydantic import Field, model_validator
 
@@ -87,13 +88,11 @@ class ContextRequestReservation(StrictModel):
 
 
 class ContextProjection(StrictModel):
-    """The reducer-owned model request view and its searchable history boundary.
+    """The model request view and its searchable history boundary.
 
     ``historical_messages`` is authoritative: it contains canonical input
-    messages that this reducer intentionally removed or replaced in
-    ``messages``. Consumers must not infer history by diffing the two views.
-    Reducer plugins that leave it empty explicitly expose no searchable
-    history for this projection.
+    messages intentionally removed or replaced by the history window or
+    reducer. Consumers must not infer history by diffing the two views.
     """
 
     messages: tuple[ModelMessage, ...]
@@ -153,3 +152,15 @@ class ContextReducer(Protocol):
         *,
         scope: ContextReductionScope | None = None,
     ) -> ContextProjection: ...
+
+
+class RunHistoryWindow(Protocol):
+    """Choose the first retained message in an immutable Run base history."""
+
+    def history_start(
+        self,
+        messages: tuple[ModelMessage, ...],
+        *,
+        accepted_at: datetime,
+        item_times: Mapping[str, datetime],
+    ) -> int: ...

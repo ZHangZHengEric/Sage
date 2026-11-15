@@ -47,7 +47,7 @@ async def initialize_process(catalog):
     # These capabilities require an Agent definition or the actual Run binding.
     agent_capabilities = {"tool.provider", "tool.selection-policy", "tool.result-processor", "skill.provider",
         "skill.workspace", "skill.loading", "flow.node", "context.reducer", "context.summarizer",
-        "context.segment-provider", "agent.continuation-policy",
+        "context.segment-provider", "context.history-window", "agent.continuation-policy",
         "agent.self-configuration", "agent.output-checker", "memory.recall-query"}
     for capability in runtime.capabilities:
         if capability in services or capability in agent_capabilities or capability == "interface.protocol-adapter":

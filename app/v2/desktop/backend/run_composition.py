@@ -520,6 +520,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 settings.component_selections.get(capability, default_plugin),
             )
             for capability, default_plugin in _DESKTOP_COMPONENT_DEFAULTS.items()
+            if capability != "context.history-window" or capability in settings.component_selections
         }
         process_plugins = {
             "session.store": self.session_plugin_id,

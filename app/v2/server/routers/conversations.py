@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.conversations import external_runs as access
 from app.v2.server.conversations.agui.mapping import validate_agui_id
 from app.v2.server.conversations.records import require_owned_thread
+from app.v2.server.identity.external import authorize_external_agent
+from app.v2.server.identity.keys import ApiKeyRecord
 from app.v2.server.conversations.cleanup import (
     delete_external_session, finish_file_operation, require_idle, reject_local_workspace_drive,
 )
@@ -40,7 +42,7 @@ from app.v2.server.routers.schemas.conversations import (
     ThreadCancelBody,
     ThreadSteerBody,
 )
-from app.v2.server.storage.downloads import prepare_download, prepare_session_export, workspace_version
+from app.v2.server.storage.downloads import SnapshotChangedError, prepare_download, prepare_session_export, workspace_version
 from app.v2.server.storage.external_workspaces import (
     MAX_BINARY_BYTES,
     delete_workspace_path,
@@ -388,17 +390,40 @@ class Caller:
         self.api_key = api_key
 
 
-async def internal_caller(
-    request: Request,
-    host: HostDep,
-    agent_id: str,
-    tenant_id: Annotated[str, Header(alias="SAGE-TENANT-ID", min_length=1, max_length=128)],
-) -> Caller:
+async def external_agent_key(request: Request, host: HostDep, agent_id: str) -> ApiKeyRecord:
+    return await authorize_external_agent(request, host, agent_id)
+
+
+TenantHeader = Annotated[str, Header(alias="SAGE-TENANT-ID", min_length=1, max_length=128)]
+
+
+def _validate_tenant_id(tenant_id: str) -> None:
     if not tenant_id.strip():
         raise _error("invalid_tenant", ErrorCategory.VALIDATION,
                      "tenant ID is required")
-    from app.v2.server.identity.external import authorize_external_agent
-    key = await authorize_external_agent(request, host, agent_id)
+
+
+async def internal_caller(request: Request, host: HostDep, agent_id: str,
+                          tenant_id: TenantHeader) -> Caller:
+    _validate_tenant_id(tenant_id)
+    return Caller(tenant_id, agent_id, await external_agent_key(request, host, agent_id))
+
+
+async def workspace_file_key(request: Request, host: HostDep, agent_id: str) -> ApiKeyRecord:
+    if len(request.headers.getlist("authorization")) != 1:
+        raise _error("invalid_authorization", ErrorCategory.AUTHENTICATION,
+                     "exactly one Agent Authorization header is required")
+    return await external_agent_key(request, host, agent_id)
+
+
+async def workspace_file_caller(request: Request, agent_id: str,
+                               key: Annotated[ApiKeyRecord, Depends(workspace_file_key)],
+                               tenant_id: TenantHeader) -> Caller:
+    # Resolve the credential dependency before validating the tenant header.
+    _validate_tenant_id(tenant_id)
+    if len(request.headers.getlist("sage-tenant-id")) != 1 or "," in tenant_id:
+        raise _error("invalid_tenant", ErrorCategory.VALIDATION,
+                     "exactly one tenant ID is required")
     return Caller(tenant_id, agent_id, key)
 
 
@@ -479,6 +504,56 @@ async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: Ho
         raise _error("invalid_workspace", ErrorCategory.VALIDATION,
                      "invalid workspace files") from exc
     return success({"directory": body.directory, "file_count": count})
+
+
+@external_router.get(
+    "/workspace/file", response_class=StreamingResponse,
+    responses={
+        **AUTH_ERRORS,
+        200: {"content": {"text/plain": {}, "application/octet-stream": {}}},
+        403: {"model": ErrorBody, "description": "Agent or permission mismatch"},
+        404: {"model": ErrorBody, "description": "workspace file not found"},
+    },
+)
+async def get_workspace_file(caller: Annotated[Caller, Depends(workspace_file_caller)], host: HostDep,
+                             path: str = Query(min_length=1, max_length=4096)):
+    try:
+        workspace_parts(path)
+        if host.workspace_storage is not None:
+            prepared = await asyncio.to_thread(
+                host.workspace_storage.prepare_download,
+                caller.tenant_id, caller.agent_id, path, file_only=True,
+            )
+        else:
+            # Open the tenant and Agent directories with the same no-follow
+            # traversal as the file, starting at the server-owned root.
+            tenants = host.paths.tenants_root
+            workspace = host.paths.workspace_path(caller.tenant_id, caller.agent_id)
+            relative = (workspace.relative_to(tenants) / path).as_posix()
+            prepared = await asyncio.to_thread(
+                prepare_download, tenants, relative, file_only=True, exact_prefix_parts=2,
+            )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "workspace file not found") from exc
+    except SnapshotChangedError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except OverflowError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except OSError as exc:
+        if exc.errno in {errno.EACCES, errno.EPERM}:
+            raise HTTPException(403, "workspace file access denied") from exc
+        if exc.errno not in {errno.ELOOP, errno.ENOTDIR, errno.ENAMETOOLONG, errno.ENXIO} and not (
+            isinstance(exc, PermissionError) and exc.errno is None
+        ):
+            raise
+        raise HTTPException(422, "invalid workspace file path") from exc
+    except ValueError as exc:
+        raise HTTPException(422, "invalid workspace file path") from exc
+    return download_response(
+        prepared,
+        media_type="text/plain" if path.lower().endswith(".md") else "application/octet-stream",
+        cache_control="private, no-store",
+    )
 
 
 @external_router.put("/workspace/file")

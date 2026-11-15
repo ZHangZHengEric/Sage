@@ -36,6 +36,12 @@ DESKTOP_COMPONENTS = {
         "apply_mode": "next_run",
         "scope": "tenant",
     },
+    "context.history-window": {
+        "default": "sage.context.history-window.recent",
+        "selection_mode": "user",
+        "apply_mode": "next_run",
+        "scope": "agent",
+    },
     "context.summarizer": {
         "default": DEFAULT_COMPONENTS["context.summarizer"],
         "selection_mode": "user",
@@ -110,6 +116,7 @@ _MANIFEST_CAPABILITIES = (
     "session-memory.provider",
     "observability.provider",
     "context.reducer",
+    "context.history-window",
     "context.summarizer",
     "context.summary-store",
     "agent.continuation-policy",
@@ -138,6 +145,7 @@ def stable_component_id(capability: str, plugin_id: str) -> str:
         "skill.loading": "sage.skill.loading.",
         "agent.continuation-policy": "sage.agent.continuation.",
         "context.reducer": "sage.context.reducer.",
+        "context.history-window": "sage.context.history-window.",
         "context.summarizer": "sage.context.summarizer.",
         "context.summary-store": "sage.context.summary-store.",
         "memory.provider": "sage.memory.",
@@ -215,6 +223,8 @@ def _runtime_capabilities(
     }
     capabilities: dict[str, CapabilityBinding] = {}
     for capability in _MANIFEST_CAPABILITIES:
+        if capability == "context.history-window" and capability not in selections:
+            continue
         plugin_id = stable_component_id(
             capability,
             selections.get(capability, DESKTOP_COMPONENT_DEFAULTS[capability]),
@@ -288,5 +298,12 @@ def desktop_component_config_schema(
         properties.pop("model_timeout_seconds", None)
     if plugin_id == "sage.agent.continuation.llm-judge":
         properties.pop("repeat_threshold", None)
+    if plugin_id == "sage.context.history-window.recent" and language == "zh":
+        for key, title in {
+            "max_age_seconds": "历史时间窗口（秒）",
+            "max_turns": "最多保留历史轮数",
+        }.items():
+            if key in properties:
+                properties[key]["title"] = title
     result["properties"] = properties
     return result

@@ -675,7 +675,14 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             ).runtime
             identity_caps = {"session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime",
                              "observability.provider"}
-            capabilities = {**runtime.capabilities, **{
+            # The optional window must come from this Run's settings snapshot
+            # or the host override, even if the last Run had it enabled.
+            inherited = {
+                key: value
+                for key, value in runtime.capabilities.items()
+                if key != "context.history-window"
+            }
+            capabilities = {**inherited, **{
                 key: value for key, value in configured.capabilities.items() if key not in identity_caps
             }, **selections}
             official = CapabilitySelection(plugin="sage.tool.official")

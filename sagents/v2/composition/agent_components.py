@@ -38,7 +38,7 @@ class AgentComponents:
 
     def services(self) -> dict[str, Any]:
         """Expose the root Agent's providers for readiness and plan inspection."""
-        return {
+        services: dict[str, Any] = {
             "context.summary-store": self.context.summary_store,
             "context.summarizer": self.context.summarizer,
             "context.reducer": self.context.reducer,
@@ -46,6 +46,9 @@ class AgentComponents:
             "agent.continuation-policy": self.continuation_policy,
             "tool.result-processor": self.factory.tool_result_processor,
         }
+        if self.context.history_window is not None:
+            services["context.history-window"] = self.context.history_window
+        return services
 
     @classmethod
     async def compose(
@@ -54,6 +57,7 @@ class AgentComponents:
         open_capability: Callable[..., Awaitable[Any]],
         agent_id: str,
         runtime: RuntimePort,
+        history_window_plugin: str | None = None,
     ) -> AgentComponents:
         summary_store = await open_capability(
             capability="context.summary-store",
@@ -70,6 +74,13 @@ class AgentComponents:
             default_plugin=SummaryOnlyContextReducer.plugin_id,
             agent_id=agent_id,
         )
+        history_window = None
+        if history_window_plugin is not None:
+            history_window = await open_capability(
+                capability="context.history-window",
+                default_plugin=history_window_plugin,
+                agent_id=agent_id,
+            )
         skill_loading = await open_capability(
             capability="skill.loading",
             default_plugin=SkillLoadingPlugin.plugin_id,
@@ -84,6 +95,7 @@ class AgentComponents:
             summary_store=summary_store,
             summarizer=summarizer,
             reducer=context_reducer,
+            history_window=history_window,
         )
         result_processor = await open_capability(
             capability="tool.result-processor",

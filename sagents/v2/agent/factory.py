@@ -303,6 +303,7 @@ class AgentCompositionFactory:
             budget=context_budget,
             reducer=self.context_components.create_reducer(),
             history_reader=self.runtime.session_store,
+            history_window=self.context_components.history_window,
             projection_observer=session_memory_service,
             artifact_store=artifact_store,
         )

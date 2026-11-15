@@ -7,6 +7,7 @@ def build_plugin_catalog(host):
     from app.v2.server.catalog.plugins import (
         plugin_options,
         AGENT_DEFAULTS,
+        AGENT_CONFIGURABLE,
         DEFAULT_CONFIG,
     )
 
@@ -35,7 +36,7 @@ def build_plugin_catalog(host):
         if not isinstance(selection, CapabilitySelection):
             continue
         defaults[key] = selection.plugin
-        if key in AGENT_DEFAULTS:
+        if key in AGENT_CONFIGURABLE:
             default_config[key] = selection.config
     return {
         "plugins": options,
@@ -43,6 +44,6 @@ def build_plugin_catalog(host):
             host.extensions, host_registrations=server_registrations(host)
         ),
         "defaults": defaults,
-        "configurable": list(AGENT_DEFAULTS),
+        "configurable": sorted(AGENT_CONFIGURABLE),
         "default_config": default_config,
     }

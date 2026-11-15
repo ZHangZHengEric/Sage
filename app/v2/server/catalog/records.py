@@ -455,7 +455,7 @@ def upsert_agent(
         # Recompute the content version after updating canonical fields.
         record = record.with_configuration()
     if payload.get("plugins") is not None:
-        from app.v2.server.catalog.plugins import validate_agent_plugins, AGENT_DEFAULTS
+        from app.v2.server.catalog.plugins import validate_agent_plugins, AGENT_CONFIGURABLE
 
         plugins = payload["plugins"]
         validate_agent_plugins(plugins, registry=registry)
@@ -463,7 +463,7 @@ def upsert_agent(
         data = record.package_bundle.model_dump(mode="json")
         current = data["manifest"]["runtime"].get("capabilities", {})
         data["manifest"]["runtime"]["capabilities"] = {
-            k: v for k, v in current.items() if k not in AGENT_DEFAULTS
+            k: v for k, v in current.items() if k not in AGENT_CONFIGURABLE
         } | plugins
         record = record.model_copy(
             update={"package": AgentPackageBundle.model_validate(data)}
