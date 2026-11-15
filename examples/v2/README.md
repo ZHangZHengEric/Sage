@@ -28,6 +28,7 @@ source-plugin, multi-project and package-optimizer examples use temporary state.
 | [standard_host/](standard_host/README.md) | Standard file/Shell tools, FFmpeg, Skill, stdio MCP, nested Team and reopening state | Scripted model; real subprocesses, FFmpeg, Pillow, native macOS Seatbelt or Linux bubblewrap |
 | [tool_catalog.py](tool_catalog.py) | Built-in tool metadata by agent mode and language | Offline; no App or Run is started |
 | [parallel_search.py](PARALLEL_SEARCH.md) | MCP discovery, search/fetch and cleanup | Network access to the external Parallel MCP service; no LLM; service availability and limits are external prerequisites |
+| [keenable_search.py](KEENABLE_SEARCH.md) | MCP discovery, search/fetch, optional API key and cleanup | Network access to the external Keenable MCP service; no LLM; optional `KEENABLE_API_KEY`; service availability and limits are external prerequisites |
 | [agent_management.py](agent_management.py) | Agent creates and runs another Agent package; package listing and run status | Offline |
 | [source_plugin.py](source_plugin.py) | Host-authorized Python source extension | Offline; executes the example's fixed trusted Python bundle |
 | [multi_project.py](MULTI_PROJECT.md) | Concurrent Sessions and per-Run project routing through MCP | Offline, in-process MCP transport |
@@ -92,6 +93,7 @@ by regression tests, rather than a separate executable example.
 python -m pytest -q tests/sagents/v2/test_quickstart_example.py \
   tests/sagents/v2/test_host_starter_example.py \
   tests/sagents/v2/test_parallel_search_example.py \
+  tests/sagents/v2/test_keenable_search_example.py \
   tests/sagents/v2/test_multi_project_example.py
 ```
 
