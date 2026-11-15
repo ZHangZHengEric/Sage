@@ -654,52 +654,7 @@ class SAgent:
             self._drivers.pop(run_id, None)
 
     async def _fail_driver_crash(self, run_id, exc, context):
-        """Record a driver crash without overwriting a concurrent pause/cancel."""
-
-        require_execution_ownership()
-        if is_lease_loss(exc):
-            raise exc
-        LOGGER.exception("agent.execution.failed", "Run execution failed", exc, run_id=run_id)
-        error = (
-            exc.info
-            if isinstance(exc, SageV2Error)
-            else RuntimeErrorInfo(
-                code="agent.driver_crashed",
-                category=ErrorCategory.INTERNAL,
-                message=str(exc),
-                safe_to_resume=True,
-            )
-        )
-        current = await self.runtime.get_run(run_id)
-        if current.state in TERMINAL_RUN_STATES or current.state in {
-            RunState.SUSPENDED,
-            RunState.SUSPEND_REQUESTED,
-        }:
-            return current
-        try:
-            return await self.runtime.fail_run(
-                run_id=run_id,
-                expected_revision=current.revision,
-                error=error,
-                context=context,
-                idempotency_key=f"driver-crashed:{run_id}:{current.revision}",
-            )
-        except SageV2Error:
-            # One bounded reread/retry resolves the common race where the driver
-            # emitted a final delta while another actor paused or cancelled it.
-            latest = await self.runtime.get_run(run_id)
-            if latest.state in TERMINAL_RUN_STATES or latest.state in {
-                RunState.SUSPENDED,
-                RunState.SUSPEND_REQUESTED,
-            }:
-                return latest
-            return await self.runtime.fail_run(
-                run_id=run_id,
-                expected_revision=latest.revision,
-                error=error,
-                context=context,
-                idempotency_key=f"driver-crashed:{run_id}:{latest.revision}",
-            )
+        return await settle_driver_crash(self.runtime, run_id, exc, context)
 
     async def _terminal_stream(self, cursor, context: RequestContext):
         """Stop at a response boundary, not merely at terminal Run states."""
@@ -717,3 +672,54 @@ class SAgent:
                 "run.cancelled",
             }:
                 return
+
+
+async def settle_driver_crash(
+    runtime: RuntimePort, run_id: str, exc: Exception, context: RequestContext
+) -> RunSnapshot:
+    """Record a driver crash without overwriting a concurrent pause/cancel."""
+
+    require_execution_ownership()
+    if is_lease_loss(exc):
+        raise exc
+    LOGGER.exception("agent.execution.failed", "Run execution failed", exc, run_id=run_id)
+    error = (
+        exc.info
+        if isinstance(exc, SageV2Error)
+        else RuntimeErrorInfo(
+            code="agent.driver_crashed",
+            category=ErrorCategory.INTERNAL,
+            message=str(exc),
+            safe_to_resume=True,
+        )
+    )
+    current = await runtime.get_run(run_id)
+    if current.state in TERMINAL_RUN_STATES or current.state in {
+        RunState.SUSPENDED,
+        RunState.SUSPEND_REQUESTED,
+    }:
+        return current
+    try:
+        return await runtime.fail_run(
+            run_id=run_id,
+            expected_revision=current.revision,
+            error=error,
+            context=context,
+            idempotency_key=f"driver-crashed:{run_id}:{current.revision}",
+        )
+    except SageV2Error:
+        # One bounded reread/retry resolves the common race where the driver
+        # emitted a final delta while another actor paused or cancelled it.
+        latest = await runtime.get_run(run_id)
+        if latest.state in TERMINAL_RUN_STATES or latest.state in {
+            RunState.SUSPENDED,
+            RunState.SUSPEND_REQUESTED,
+        }:
+            return latest
+        return await runtime.fail_run(
+            run_id=run_id,
+            expected_revision=latest.revision,
+            error=error,
+            context=context,
+            idempotency_key=f"driver-crashed:{run_id}:{latest.revision}",
+        )

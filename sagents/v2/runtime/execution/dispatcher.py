@@ -29,6 +29,7 @@ from sagents.v2.contracts.run_state import (
 )
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.events import ToolEventData
 from sagents.v2.runtime.execution.scheduler import (
     LeaseReleaseReason,
     SchedulerClaimPolicy,
@@ -117,7 +118,7 @@ class LocalWorkerDispatcher:
         self._claim_error: Exception | None = None
 
     def attach_recovery_agent(self, agent: RecoveryAgent, *, replace: bool = False) -> None:
-        """Bind the Application Agent used for durable orphan WorkItems."""
+        """Bind the Application Agent used for interrupted and orphan WorkItems."""
 
         if (
             self._recovery_agent is not None
@@ -406,7 +407,7 @@ class LocalWorkerDispatcher:
                 self._requests[lease.work.run_id] = request
             request.claimed = True
             if lease.work.attempt > 1:
-                request.recovered = True
+                self._mark_recovered(request)
             ownership = ExecutionOwnership(
                 run_id=lease.work.run_id, supports_deferred_work=self._supports_deferred_work,
             )
@@ -494,23 +495,11 @@ class LocalWorkerDispatcher:
                                     if await self._defer_recovery_error(lease, request, exc):
                                         requeued = True
                                         continue
-                                    error = RuntimeErrorInfo(
-                                        code="execution.barrier_recovery_failed",
-                                        category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
-                                        message=(
-                                            "worker restarted after a possible side "
-                                            "effect and barrier recovery failed"
-                                        ),
-                                        safe_to_resume=False,
-                                        metadata={"recovery_error": str(exc)},
-                                    )
-                                    snapshot = (
-                                        await self._fail_recovered_execution_tree(
-                                            request.agent.runtime,
-                                            recovered,
-                                            request.context,
-                                            error,
-                                        )
+                                    snapshot = await self._fail_barrier_recovery(
+                                        request.agent.runtime,
+                                        recovered.run_id,
+                                        request.context,
+                                        exc,
                                     )
                             if snapshot is None:
                                 error = RuntimeErrorInfo(
@@ -548,17 +537,9 @@ class LocalWorkerDispatcher:
                             await asyncio.gather(execution, return_exceptions=True)
                             raise self._renewal_error(renewer)
                         snapshot = execution.result()
-                if snapshot.state == RunState.RUNNING and self._supports_deferred_work:
-                    wake_at = await self._automatic_resume_at(request.agent.runtime.session_store, snapshot.run_id)
-                    if wake_at is not None:
-                        request.recovered = True
-                        request.claimed = False
-                        requeued = True
-                        await self._release_lease(
-                            lease, LeaseReleaseReason.DEFERRED,
-                            requeue=True, available_at=wake_at,
-                        )
-                        continue
+                if await self._defer_running_checkpoint(lease, request, snapshot):
+                    requeued = True
+                    continue
                 reason = {
                     RunState.COMPLETED: LeaseReleaseReason.COMPLETED,
                     RunState.FAILED: LeaseReleaseReason.FAILED,
@@ -610,7 +591,7 @@ class LocalWorkerDispatcher:
                                     )
                                     renewal_error = self._renewal_error(renewer)
                                     raise renewal_error
-                                recovery.result()
+                                requeued = recovery.result()
                             finally:
                                 if not recovery.done():
                                     recovery.cancel()
@@ -708,6 +689,23 @@ class LocalWorkerDispatcher:
             if not request.result.done():
                 request.result.set_result(snapshot)
 
+    async def _defer_running_checkpoint(
+        self, lease: WorkerLease, request: _DispatchRequest, snapshot: RunSnapshot
+    ) -> bool:
+        if snapshot.state != RunState.RUNNING or not self._supports_deferred_work:
+            return False
+        wake_at = await self._automatic_resume_at(
+            request.agent.runtime.session_store, snapshot.run_id
+        )
+        if wake_at is None:
+            return False
+        self._mark_recovered(request)
+        request.claimed = False
+        await self._release_lease(
+            lease, LeaseReleaseReason.DEFERRED, requeue=True, available_at=wake_at,
+        )
+        return True
+
     async def _defer_recovery_error(self, lease: WorkerLease, request: _DispatchRequest, error: Exception) -> bool:
         if not (
             self._supports_deferred_work and isinstance(error, SageV2Error)
@@ -732,7 +730,7 @@ class LocalWorkerDispatcher:
         await self._release_lease(
             lease, LeaseReleaseReason.DEFERRED, requeue=True, available_at=due,
         )
-        request.recovered = True
+        self._mark_recovered(request)
         request.claimed = False
         _LOGGER.warning(
             "scheduler.recovery.retry", "recoverable resource failure; scheduled another attempt",
@@ -766,7 +764,7 @@ class LocalWorkerDispatcher:
             if not request.result.done():
                 request.result.set_exception(error)
             return False
-        request.recovered = True
+        self._mark_recovered(request)
         request.claimed = False
         try:
             await self._release_lease(
@@ -887,6 +885,55 @@ class LocalWorkerDispatcher:
             idempotency_key=f"worker-restarted:{root.run_id}:{root.revision}",
         )
 
+    async def _fail_barrier_recovery(
+        self, runtime: RuntimePort, run_id: str, context: RequestContext, exc: Exception
+    ) -> RunSnapshot:
+        current = await runtime.get_run(run_id)
+        if current.state in TERMINAL_RUN_STATES or current.state == RunState.SUSPENDED:
+            return current
+        uncertain: set[str] = set()
+        for event in await runtime.session_store.read_events(run_id):
+            data = event.data
+            if not isinstance(data, ToolEventData):
+                continue
+            operation = data.operation_id or data.tool_call_id
+            if event.type in {"tool.call.started", "tool.call.unknown"}:
+                uncertain.add(operation)
+            elif event.type in {
+                "tool.call.succeeded", "tool.call.failed", "tool.call.cancelled",
+                "tool.call.reconciled", "tool.call.received",
+            }:
+                if event.type == "tool.call.received" and data.execution_result is None:
+                    continue
+                receipt_error = (data.execution_result or {}).get("error")
+                error = data.error.model_dump(mode="json") if data.error else receipt_error or {}
+                if (
+                    error.get("category") == ErrorCategory.UNCERTAIN_SIDE_EFFECT.value
+                    or (error.get("metadata") or {}).get("side_effect_state") == "unknown"
+                ):
+                    uncertain.add(operation)
+                else:
+                    uncertain.discard(operation)
+        if uncertain:
+            error = RuntimeErrorInfo(
+                code="execution.barrier_recovery_failed",
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                message="execution recovery failed with an unresolved tool outcome",
+                safe_to_resume=False,
+                metadata={"recovery_error": str(exc)},
+            )
+        elif isinstance(exc, SageV2Error) and exc.info.category != ErrorCategory.UNCERTAIN_SIDE_EFFECT:
+            error = exc.info
+        else:
+            error = RuntimeErrorInfo(
+                code="execution.barrier_recovery_failed",
+                category=ErrorCategory.INTERNAL,
+                message="execution recovery failed",
+                safe_to_resume=False,
+                metadata={"recovery_error": str(exc)},
+            )
+        return await self._fail_recovered_execution_tree(runtime, current, context, error)
+
     @staticmethod
     async def _has_run_ancestor(session_store: SessionStore, run_id: str, ancestor: str) -> bool:
         candidate: str | None = run_id
@@ -923,6 +970,13 @@ class LocalWorkerDispatcher:
             result=result,
             recovered=True,
         )
+
+    def _mark_recovered(self, request: _DispatchRequest) -> None:
+        request.recovered = True
+        if self._recovery_agent is not None:
+            # Keep the original caller's Future while handing off the driver.
+            # The App recovery router resolves the admitted revision at wakeup.
+            request.agent = self._recovery_agent
 
     def _discard_request(self, run_id: str, request: _DispatchRequest) -> None:
         """Remove only this generation of a Run's in-process dispatch request."""
@@ -1018,7 +1072,7 @@ class LocalWorkerDispatcher:
         request: _DispatchRequest,
         *,
         lease: WorkerLease | None = None,
-    ) -> None:
+    ) -> bool:
         """Recover a live driver cancel instead of pretending the worker died.
 
         ``execution.result()`` raising ``CancelledError`` is not process
@@ -1034,6 +1088,7 @@ class LocalWorkerDispatcher:
             run_id=run_id,
         )
         snapshot = None
+        self._mark_recovered(request)
         recover = getattr(request.agent, "recover_interrupted_run", None) or getattr(
             request.agent, "_recover_interrupted_run", None
         )
@@ -1052,32 +1107,9 @@ class LocalWorkerDispatcher:
                 )
                 runtime = getattr(request.agent, "runtime", None)
                 if runtime is not None:
-                    try:
-                        current = await runtime.get_run(run_id)
-                    except Exception:
-                        current = None
-                    if current is not None and (
-                        current.state in TERMINAL_RUN_STATES
-                        or current.state == RunState.SUSPENDED
-                    ):
-                        snapshot = current
-                    elif current is not None:
-                        error = RuntimeErrorInfo(
-                            code="execution.barrier_recovery_failed",
-                            category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
-                            message=(
-                                "worker lost the driver after a possible side "
-                                "effect and barrier recovery failed"
-                            ),
-                            safe_to_resume=False,
-                            metadata={"recovery_error": str(exc)},
-                        )
-                        snapshot = await self._fail_recovered_execution_tree(
-                            runtime,
-                            current,
-                            request.context,
-                            error,
-                        )
+                    snapshot = await self._fail_barrier_recovery(
+                        runtime, run_id, request.context, exc
+                    )
         if snapshot is None:
             snapshot = await _agent_method(
                 request.agent, "fail_driver_crash", "_fail_driver_crash"
@@ -1086,6 +1118,8 @@ class LocalWorkerDispatcher:
                 self._shutdown_error(),
                 request.context,
             )
+        if lease is not None and await self._defer_running_checkpoint(lease, request, snapshot):
+            return True
         reason = {
             RunState.COMPLETED: LeaseReleaseReason.COMPLETED,
             RunState.FAILED: LeaseReleaseReason.FAILED,
@@ -1104,6 +1138,7 @@ class LocalWorkerDispatcher:
         self._discard_request(run_id, request)
         if not request.result.done():
             request.result.set_result(snapshot)
+        return False
 
     @staticmethod
     def _renewal_error(renewer: asyncio.Task[None]) -> BaseException:

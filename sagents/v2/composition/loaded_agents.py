@@ -34,7 +34,7 @@ from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.session_commit import (
     ProposeSessionCommit, PublishSessionCommit, RejectSessionCommit, SessionCommitProposal,
 )
-from sagents.v2.sagent import SAgentRunStream
+from sagents.v2.sagent import SAgentRunStream, settle_driver_crash
 
 from sagents.v2.composition.inputs import package_input
 from sagents.v2.composition.agent_graph import resolve_agent_graph
@@ -702,8 +702,8 @@ class RevisionRecovery:
         return asyncio.create_task(execute())
 
     async def fail_driver_crash(self, run_id, exc, context):
-        async with self.catalog.pin(await self._agent(run_id)) as agent:
-            return await self.catalog.implementation(agent).fail_driver_crash(run_id, exc, context)
+        # Settlement uses durable state and also runs while the App is closing.
+        return await settle_driver_crash(self.runtime, run_id, exc, context)
 
     async def recover_interrupted_run(self, run_id, context):
         async with self.catalog.pin(await self._agent(run_id)) as agent:

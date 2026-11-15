@@ -495,8 +495,11 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
 
 
 @pytest.mark.asyncio
-async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutdown():
+@pytest.mark.parametrize("recovery_fails", [False, True])
+async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutdown(recovery_fails):
     from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
+    from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
     from sagents.v2.contracts.items import UsageSummary
     from sagents.v2.model.contracts import (
         ModelEventKind,
@@ -521,16 +524,16 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
         dispatched.set()
         await asyncio.Event().wait()
 
-    read_tool = ToolDefinition(
-        name="read_value",
-        description="read a value",
+    write_tool = ToolDefinition(
+        name="write_value",
+        description="write a value",
         input_schema={
             "type": "object",
             "properties": {"key": {"type": "string"}},
             "required": ["key"],
             "additionalProperties": False,
         },
-        side_effect_level=SideEffectLevel.READ,
+        side_effect_level=SideEffectLevel.WRITE,
     )
     scheduler = InMemoryScheduler()
     store = EphemeralSessionStore()
@@ -550,7 +553,7 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
                                 tool_calls=(
                                     ModelToolCall(
                                         tool_call_id="call_1",
-                                        name="read_value",
+                                        name=write_tool.name,
                                         arguments={"key": "answer"},
                                     ),
                                 ),
@@ -562,10 +565,11 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
                 ),
             )
         )),
-        tool_catalog=InMemoryToolCatalog((read_tool,)),
+        tool_catalog=InMemoryToolCatalog((write_tool,)),
         tool_executor=InMemoryToolExecutor(
-            {"read_value": read_tool}, cast(Mapping[str, ToolHandler], {"read_value": hang})
+            {write_tool.name: write_tool}, cast(Mapping[str, ToolHandler], {write_tool.name: hang})
         ),
+        tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
         expected_resolved_spec_hash="sha256:test",
     )
 
@@ -577,6 +581,8 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
             return await loop.resume(run_id, context)
 
         async def recover_interrupted(self, run_id, context):
+            if recovery_fails:
+                raise RuntimeError("recovery interrupted before tool reconciliation")
             return await loop.recover_interrupted(run_id, context)
 
         async def close(self):
@@ -605,10 +611,18 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
     execution.cancel()
     result = await asyncio.wait_for(stream.wait(), timeout=2)
 
-    assert result.state == RunState.SUSPENDED
     events = await runtime.session_store.read_events(result.run_id)
-    assert any(event.type == "tool.call.unknown" for event in events)
-    assert any(event.type == "run.suspended" for event in events)
+    assert any(event.type == "tool.call.started" for event in events)
+    if recovery_fails:
+        assert result.state == RunState.FAILED
+        failed = await runtime.get_run_result(result.run_id)
+        assert failed.error is not None
+        assert failed.error.code == "execution.barrier_recovery_failed"
+        assert failed.error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+    else:
+        assert result.state == RunState.SUSPENDED
+        assert any(event.type == "tool.call.unknown" for event in events)
+        assert any(event.type == "run.suspended" for event in events)
     assert dispatcher._workers
     assert all(not worker.done() for worker in dispatcher._workers)
     await dispatcher.close()

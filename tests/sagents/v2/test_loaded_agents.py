@@ -798,6 +798,153 @@ async def test_idle_current_packages_release_resources_and_restore_old_handles(t
         await app.close()
 
 
+@pytest.mark.parametrize("outcome", ["completes", "model-error", "restore-error", "shutdown"])
+async def test_model_retry_restores_evicted_admitted_revision(tmp_path, monkeypatch, outcome):
+    from datetime import timedelta
+
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
+    from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+    from sagents.v2.contracts.common import utc_now
+    from sagents.v2.contracts.errors import ErrorCategory
+    from sagents.v2.contracts.items import ToolResultItemData
+    from sagents.v2.contracts.run_state import RunState
+    from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason
+    from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
+    from tests.sagents.v2.test_builder_matrix import (
+        _POLICY_WRITE_TOOL,
+        _policy_package,
+        _policy_tool_handler,
+        _tool_calling_model,
+    )
+
+    tool = _POLICY_WRITE_TOOL
+    scripted = _tool_calling_model(tool.name)
+    attempts = []
+    writes = []
+
+    class TimeoutModel(ScriptedModelProvider):
+        async def stream(self, request):
+            attempts.append(request)
+            if len(attempts) > 1:
+                assert any(
+                    message.role == "tool" and message.tool_call_id == "call_1"
+                    for message in request.messages
+                )
+                assert "NEW REVISION INSTRUCTIONS" not in str(request.messages)
+                if len(attempts) == 2 or outcome == "model-error":
+                    raise TimeoutError("model stream timed out")
+            async for event in scripted.stream(request):
+                yield event
+
+    async def write(call, request_context):
+        writes.append(call.operation_id)
+        return await _policy_tool_handler(call, request_context)
+
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.01)
+    app = await build_registered_app(
+        tmp_path, models=TEST_MODELS, model=TimeoutModel(()),
+        tools=(InMemoryToolCatalog((tool,)), InMemoryToolExecutor({tool.name: tool}, {tool.name: write})),
+        providers={"agent.tool-policy": DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)},
+    )
+    stream = None
+    try:
+        await app.load_agent(package())
+        manifest = _policy_package("test.evicted-retry")
+        admitted = await app.load_agent(manifest)
+        original_application = admitted._application
+        scheduler = app.service("execution.scheduler")
+        release = scheduler.release
+        deferred = asyncio.get_running_loop().create_future()
+
+        async def hold_first_retry(lease, reason, *, requeue=False, available_at=None):
+            if reason == LeaseReleaseReason.DEFERRED and not deferred.done():
+                await release(lease, reason, requeue=requeue, available_at=utc_now() + timedelta(hours=1))
+                deferred.set_result((lease.work.work_id, available_at))
+            else:
+                await release(lease, reason, requeue=requeue, available_at=available_at)
+
+        monkeypatch.setattr(scheduler, "release", hold_first_retry)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
+            command(admitted, "evicted-model-retry"), context(), agent=admitted,
+        )
+        run_id = stream.handle.run_id
+        work_id, retry_at = await asyncio.wait_for(deferred, 5)
+        store = app.runtime.session_store
+        events = await store.read_events(run_id)
+        assert (await app.runtime.get_run(run_id)).checkpoint_id is not None
+        assert [event.type for event in events if event.type in {"tool.call.succeeded", "step.retry_scheduled"}] == [
+            "tool.call.succeeded", "step.retry_scheduled",
+        ]
+
+        changed = manifest.model_copy(deep=True)
+        definition = changed.agents[changed.entrypoint.agent]
+        changed.agents[changed.entrypoint.agent] = definition.model_copy(update={
+            "instructions": definition.instructions.model_copy(update={"inline": "NEW REVISION INSTRUCTIONS"}),
+        })
+        latest = await app.update_agent(agent=admitted, package=changed)
+        catalog = cast("LoadedAgents", app._loaded_agents)
+        key = (admitted.package_id, admitted.version)
+        catalog._last_used[key] -= catalog.revision_idle_seconds + 1
+        await catalog.prune_revisions()
+        assert original_application._closed
+        assert key not in catalog.revisions
+        assert len(attempts) == 2
+        if outcome == "shutdown":
+            app.service("execution.dispatcher").preserve_runs_on_shutdown = False
+            await app.close()
+            run = await asyncio.wait_for(stream.wait(), 5)
+            assert run.state == RunState.FAILED
+            assert len(writes) == 1
+            return
+        if outcome == "restore-error":
+            def read_broken_archive(spec_hash):
+                assert spec_hash == admitted.composition_hash
+                raise OSError("archive read failed")
+
+            monkeypatch.setattr(catalog.store, "read", read_broken_archive)
+        assert retry_at is not None
+        assert await scheduler.reschedule_pending(work_id, max(utc_now(), retry_at))
+
+        run = await asyncio.wait_for(stream.wait(), 5)
+        result = await app.runtime.get_run_result(run_id)
+        assert run.state == (RunState.COMPLETED if outcome == "completes" else RunState.FAILED), result.error
+        assert run.run_id == run_id
+        assert run.resolved_spec_hash == admitted.composition_hash != latest.composition_hash
+        assert len(writes) == 1
+        assert {request.run_id for request in attempts} == {run_id}
+        assert len(attempts) == {"completes": 3, "model-error": 4, "restore-error": 2}[outcome]
+        if outcome != "restore-error":
+            restored = catalog.revisions[key]
+            assert restored is not admitted
+            assert restored.composition_hash == admitted.composition_hash
+        async with asyncio.timeout(5):
+            events = [event async for event in stream.events]
+        successes = [event.data for event in events if event.type == "tool.call.succeeded"]
+        assert len(successes) == 1
+        assert successes[0].operation_id == writes[0]
+        tool_result, = (item for item in result.final_items if item.item_id == successes[0].result_item_id)
+        assert isinstance(tool_result.data, ToolResultItemData)
+        assert tool_result.data.tool_call_id == "call_1"
+        assert tool_result.data.content[0].text == "ok"
+        assert not any(event.type == "tool.call.unknown" for event in events)
+        if outcome == "model-error":
+            assert result.error is not None
+            assert result.error.code == "model.provider_transient"
+            assert result.error.category == ErrorCategory.PROVIDER_TRANSIENT
+            assert result.error.metadata["model_failure"]["kind"] == "transport"
+            assert result.error.metadata["failure_summary"]["preserved_tool_call_ids"] == ["call_1"]
+        elif outcome == "restore-error":
+            assert result.error is not None
+            assert result.error.code == "execution.barrier_recovery_failed"
+            assert result.error.category == ErrorCategory.INTERNAL
+            assert result.error.metadata["recovery_error"] == "archive read failed"
+    finally:
+        if stream is not None:
+            await stream.detach()
+        await app.close()
+
+
 async def test_interface_projection_pins_revision_until_detach(tmp_path):
     app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
     stream = None
