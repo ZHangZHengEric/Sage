@@ -232,7 +232,8 @@ async def test_legacy_resume_uses_claimed_workspace_and_releases_its_drive(cance
         if cancel_prepare:
             await release.wait()
         return "loaded"
-    app = SimpleNamespace(runtime=SimpleNamespace(get_run=AsyncMock(return_value=SimpleNamespace(state=RunState.RESUMING))),
+    app = SimpleNamespace(runtime=SimpleNamespace(get_run=AsyncMock(
+        return_value=SimpleNamespace(state=RunState.RESUMING, revision=1))),
         agent_for_run=load, entrypoint=lambda: SimpleNamespace(continue_run=AsyncMock(return_value=future)))
     execution = ProcessExecution()
     service = RunService(application=app, session_access=SimpleNamespace(get_start_command=AsyncMock(return_value=command)),

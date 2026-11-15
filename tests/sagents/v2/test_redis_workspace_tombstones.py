@@ -36,6 +36,36 @@ async def test_deleted_tree_ignores_stale_archive_and_resident_tombstones(reside
         await state.close()
 
 
+async def test_strict_delete_waits_for_child_archive_after_root_was_acknowledged(monkeypatch):
+    redis, archive = fakeredis.aioredis.FakeRedis(decode_responses=True), Archive()
+    state = store(redis, archive)
+    try:
+        root = await state.create_run(command("root"), CONTEXT)
+        child = await state.create_run(command("child").model_copy(
+            update={"parent_run_id": root.handle.run_id}), CONTEXT)
+        root_id, child_id = root.handle.session_id, child.handle.session_id
+        await transition(state, child, RunState.CANCELLED, "child-cancelled")
+        await transition(state, root, RunState.CANCELLED, "root-cancelled")
+        await state.archive_pending()
+        assert {root_id, child_id} <= archive.states.keys()
+        await state.delete_session(root_id)
+        await state._archive_session(root_id)
+        assert root_id not in archive.states
+
+        with monkeypatch.context() as patch:
+            patch.setattr(archive, "delete_archived_sessions",
+                          AsyncMock(side_effect=OSError("archive offline")))
+            with pytest.raises(OSError, match="archive offline"):
+                await state.finish_session_deletions({root_id})
+        assert child_id in archive.states
+
+        await state.finish_session_deletions({root_id})
+        assert child_id not in archive.states
+        assert not await redis.sismember(state._key("pending"), child_id)
+    finally:
+        await state.close()
+
+
 @pytest.mark.parametrize('hot', [False, True])
 async def test_deleted_root_does_not_hide_a_live_descendant_through_cold_topology(hot):
     redis, archive = fakeredis.aioredis.FakeRedis(decode_responses=True), Archive()

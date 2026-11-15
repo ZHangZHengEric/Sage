@@ -801,7 +801,7 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 for deleted in deleted_session_ids:
                     pipe.hset(
                         self._session_key(deleted),
-                        mapping={"deleted": "1", "delete_id": delete_id},
+                        mapping={"deleted": "1", "delete_id": delete_id, "delete_root": sid},
                     )
                     pipe.persist(self._session_key(deleted))
                     pipe.sadd(self._key("pending"), deleted)

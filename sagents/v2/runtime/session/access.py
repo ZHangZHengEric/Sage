@@ -250,10 +250,19 @@ class AuthorizedSessionAccess:
         ):
             yield event
 
-    async def delete_session(self, session_id: str, context: RequestContext) -> None:
+    async def delete_session(self, session_id: str, context: RequestContext, *,
+                             require_derived_cleanup: bool = False) -> None:
         await self._authorize(session_id, context)
         descendants = await self._session_store.list_descendant_sessions(session_id)
         deleted_session_ids = (session_id, *(value.session_id for value in descendants))
+        if require_derived_cleanup:
+            # Keep the canonical tree discoverable until every external
+            # cleaner succeeds so an interrupted purge can retry all children.
+            for deleted_session_id in deleted_session_ids:
+                for cleaner in self._derived_state_cleaners:
+                    await cleaner.forget_session(deleted_session_id)
+            await self._session_store.delete_session(session_id)
+            return
         await self._session_store.delete_session(session_id)
         for deleted_session_id in deleted_session_ids:
             for cleaner in self._derived_state_cleaners:

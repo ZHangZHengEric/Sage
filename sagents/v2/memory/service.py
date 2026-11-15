@@ -172,7 +172,18 @@ class MemoryService:
             from sagents.v2.memory.identity import command_memory_scope
             command = await session_store.get_start_command(run.run_id)
             scope = command_memory_scope(command, context)
-            for record in await self.extractor.extract(run, events, scope):
+            records = await self.extractor.extract(run, events, scope)
+            root_workspace_id = None
+            if records and command.parent_run_id and scope.workspace_id and scope.workspace_id.startswith("private:"):
+                root = command
+                while root.parent_run_id:
+                    root = await session_store.get_start_command(root.parent_run_id)
+                root_workspace_id = command_memory_scope(root, context).workspace_id
+            for record in records:
+                if root_workspace_id is not None:
+                    record = record.model_copy(update={"source": {
+                        **record.source, "root_workspace_id": root_workspace_id,
+                    }})
                 await self.provider.remember(record)
         except Exception as exc:
             # Memory is downstream derived state. It must never roll back an

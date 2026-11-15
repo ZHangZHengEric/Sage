@@ -129,27 +129,35 @@ class DatabaseThreadIndex:
         claimed = []
         async with self.database.session() as session:
             if phase == 'claims':
-                statement = select(SessionBindingRow.session_id).where(
+                statement = select(
+                    SessionBindingRow.session_id, SessionBindingRow.owner_id,
+                    SessionBindingRow.tenant_id, SessionBindingRow.agent_id,
+                ).where(
                     SessionBindingRow.owner_id == owner_id, SessionBindingRow.tenant_id == tenant_id,
                     SessionBindingRow.agent_id == agent_id, SessionBindingRow.session_id > after,
                 ).order_by(SessionBindingRow.session_id).limit(limit + 1)
-                rows = list((await session.execute(statement)).scalars())
-                claimed = rows[:limit]
+                rows = (await session.execute(statement)).all()
+                # The SQL filter narrows the scan using the index. A database
+                # collation can still equate distinct workspace identities.
+                claimed = [row.session_id for row in rows[:limit]
+                           if (row.owner_id, row.tenant_id, row.agent_id) == (owner_id, tenant_id, agent_id)]
                 if len(rows) > limit:
-                    return WorkspaceSessionPage(claimed, [], 'claims:' + claimed[-1])
+                    return WorkspaceSessionPage(claimed, [], 'claims:' + rows[limit - 1].session_id)
                 after = ''
-                if len(claimed) == limit:
+                if len(rows) == limit:
                     return WorkspaceSessionPage(claimed, [], 'legacy:')
-            remaining = limit - len(claimed)
+                limit -= len(rows)
             bound = select(SessionBindingRow.session_id).where(
                 SessionBindingRow.session_id == ThreadRow.thread_id).exists()
-            statement = select(ThreadRow.thread_id, bound.label('bound')).where(
+            statement = select(ThreadRow.thread_id, ThreadRow.user_id, ThreadRow.agent_id, bound.label('bound')).where(
                 ThreadRow.user_id == owner_id, ThreadRow.agent_id == agent_id, ThreadRow.thread_id > after,
-            ).order_by(ThreadRow.thread_id).limit(remaining + 1)
+            ).order_by(ThreadRow.thread_id).limit(limit + 1)
             rows = list((await session.execute(statement)).all())
-        candidates = rows[:remaining]
-        return WorkspaceSessionPage(claimed, [row.thread_id for row in candidates if not row.bound],
-            'legacy:' + candidates[-1].thread_id if len(rows) > remaining else None)
+        candidates = rows[:limit]
+        legacy = [row.thread_id for row in candidates
+                  if not row.bound and (row.user_id, row.agent_id) == (owner_id, agent_id)]
+        return WorkspaceSessionPage(claimed, legacy,
+            'legacy:' + candidates[-1].thread_id if len(rows) > limit else None)
 
     async def list_all(self) -> list[ThreadRecord]:
         async with self.database.session() as session:

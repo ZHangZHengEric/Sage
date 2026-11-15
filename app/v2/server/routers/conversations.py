@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from ag_ui.core import RunAgentInput
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,8 +19,10 @@ from app.v2.server.conversations.records import require_owned_thread
 from app.v2.server.identity.external import authorize_external_agent
 from app.v2.server.identity.keys import ApiKeyRecord
 from app.v2.server.conversations.cleanup import (
-    delete_external_session, finish_file_operation, require_idle, reject_local_workspace_drive,
+    delete_external_session, delete_tenant_data, finish_file_operation, require_idle,
+    reject_local_workspace_drive,
 )
+from app.v2.server.observability.logging import get_logger
 from app.v2.server.routers.deps import (
     AdminUser,
     ChatCallerDep,
@@ -51,6 +53,10 @@ from app.v2.server.storage.external_workspaces import (
     workspace_parts,
 )
 from app.v2.server.storage.user_preferences import MAX_USER_PREFERENCES_BYTES, user_preferences
+from app.v2.server.storage.workspace_metadata import (
+    MAX_LIST_DEPTH, MAX_STAT_PATHS, directory_parts, inspect_parts,
+    list_workspace_files, stat_workspace_files,
+)
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
@@ -428,11 +434,41 @@ async def workspace_file_caller(request: Request, agent_id: str,
 
 
 CallerDep = Annotated[Caller, Depends(internal_caller)]
+WorkspaceCallerDep = Annotated[Caller, Depends(workspace_file_caller)]
 
 
 class WorkspaceImport(BaseModel):
     directory: str = Field(min_length=1, max_length=4096)
     files: dict[str, str] = Field(default_factory=dict)
+
+
+class WorkspaceFileInfo(BaseModel):
+    path: str
+    type: Literal["file", "directory"] | None
+    size: int | None
+
+
+class WorkspaceListing(BaseModel):
+    files: list[WorkspaceFileInfo]
+    truncated_by_depth: bool
+
+
+class WorkspaceStatRequest(BaseModel):
+    paths: list[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(
+        min_length=1, max_length=MAX_STAT_PATHS)
+
+
+class WorkspaceFileStat(WorkspaceFileInfo):
+    exists: bool
+    sha256: str | None
+
+
+class WorkspaceStats(BaseModel):
+    files: list[WorkspaceFileStat]
+
+
+class TenantDataDeletion(BaseModel):
+    deleted: Literal[True]
 
 
 class ExternalRunBody(AgentRunBody):
@@ -504,6 +540,81 @@ async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: Ho
         raise _error("invalid_workspace", ErrorCategory.VALIDATION,
                      "invalid workspace files") from exc
     return success({"directory": body.directory, "file_count": count})
+
+
+async def _workspace_metadata(caller, host, local, remote, *args):
+    identity = (caller.tenant_id, caller.agent_id)
+    try:
+        if host.workspace_storage is None:
+            return await asyncio.to_thread(local, host.paths, *identity, *args)
+        return await asyncio.to_thread(getattr(host.workspace_storage, remote), *identity, *args)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "workspace directory not found") from exc
+    except OverflowError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        if isinstance(exc, SnapshotChangedError) or str(exc) in {
+            "workspace file changed during stat", "workspace changed during listing",
+        }:
+            raise HTTPException(503, str(exc)) from exc
+        if isinstance(exc, OSError) and exc.errno in {errno.EACCES, errno.EPERM}:
+            raise HTTPException(403, "workspace file access denied") from exc
+        if isinstance(exc, ValueError) or getattr(exc, "errno", None) in {
+            errno.ELOOP, errno.ENOTDIR, errno.ENAMETOOLONG,
+        }:
+            raise HTTPException(422, "invalid workspace path") from exc
+        raise
+
+
+@external_router.get("/workspace/files", response_model=ApiResponse[WorkspaceListing],
+                     responses={**AUTH_ERRORS, 403: {"model": ErrorBody}, 404: {"model": ErrorBody},
+                                413: {"model": ErrorBody}, 503: {"model": ErrorBody}})
+async def list_agent_workspace_files(
+    caller: WorkspaceCallerDep, host: HostDep, response: Response,
+    path: str = Query(default="", max_length=4096),
+    depth: int = Query(default=1, ge=0, le=MAX_LIST_DEPTH),
+):
+    try:
+        directory_parts(path)
+    except ValueError as exc:
+        raise HTTPException(422, "invalid workspace path") from exc
+    result = await _workspace_metadata(caller, host, list_workspace_files, "list_files", path, depth)
+    response.headers["Cache-Control"] = "private, no-store"
+    return success(result)
+
+
+@external_router.post("/workspace/files/stat", response_model=ApiResponse[WorkspaceStats],
+                      responses={**AUTH_ERRORS, 403: {"model": ErrorBody},
+                                 413: {"model": ErrorBody}, 503: {"model": ErrorBody}})
+async def stat_agent_workspace_files(
+    body: WorkspaceStatRequest, caller: WorkspaceCallerDep, host: HostDep, response: Response,
+):
+    try:
+        for path in body.paths:
+            inspect_parts(path)
+    except ValueError as exc:
+        raise HTTPException(422, "invalid workspace path") from exc
+    result = await _workspace_metadata(caller, host, stat_workspace_files, "stat_files", body.paths)
+    response.headers["Cache-Control"] = "private, no-store"
+    return success({"files": result})
+
+
+@external_router.delete("/tenant-data", response_model=ApiResponse[TenantDataDeletion],
+                        responses={**AUTH_ERRORS, 403: {"model": ErrorBody}, 409: {"model": ErrorBody},
+                                   503: {"model": ErrorBody}})
+async def purge_agent_tenant_data(caller: WorkspaceCallerDep, host: HostDep, service: ConversationDep):
+    if caller.tenant_id != caller.tenant_id.strip() or "\0" in caller.tenant_id:
+        raise HTTPException(422, "invalid tenant ID")
+    try:
+        await delete_tenant_data(host, service, caller.tenant_id, caller.agent_id,
+                                 owner_id=caller.api_key.owner_user_id)
+    except Exception as exc:
+        if isinstance(exc, SageV2Error) and exc.info.code == "server.workspace.busy":
+            raise
+        get_logger(__name__).exception("server.tenant_data.cleanup_failed", "tenant data cleanup failed", exc)
+        return error_response(status_code=503, message="tenant data cleanup incomplete; retry the request",
+                              detail="tenant_data_cleanup_incomplete")
+    return success({"deleted": True})
 
 
 @external_router.get(

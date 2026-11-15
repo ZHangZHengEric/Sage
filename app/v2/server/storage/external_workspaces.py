@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import os
 import shutil
+from contextlib import ExitStack
 from pathlib import PurePosixPath
 import stat
 from uuid import uuid4
@@ -19,12 +20,12 @@ MAX_TOTAL_BYTES = 16 << 20
 MAX_BINARY_BYTES = 64 << 20
 
 
-def workspace_parts(value: str) -> tuple[str, ...]:
+def workspace_parts(value: str, *, max_parts: int = 12) -> tuple[str, ...]:
     if not isinstance(value, str) or not value or len(value) > 4096 or "\\" in value or "\0" in value:
         raise ValueError("invalid workspace path")
     path = PurePosixPath(value)
     parts = path.parts
-    if path.is_absolute() or not parts or len(parts) > 12 or any(
+    if path.is_absolute() or not parts or len(parts) > max_parts or any(
         part in {"", ".", ".."} or part.startswith(".") for part in parts
     ) or path.as_posix() != value:
         raise ValueError("invalid workspace path")
@@ -61,6 +62,30 @@ def ensure_workspace_directory(paths: ServerPaths, tenant_id: str, agent_id: str
         os.close(child)
     finally:
         os.close(fd)
+
+
+def clear_workspace(paths: ServerPaths, tenant_id: str, agent_id: str) -> None:
+    """Remove both the workspace and its sibling directory for private runs."""
+    from app.v2.server.storage.downloads import open_entry
+
+    parent = PurePosixPath(identity_segment(tenant_id), identity_segment(agent_id))
+    with ExitStack() as stack:
+        try:
+            fd = stack.enter_context(open_entry(paths.tenants_root, parent, exact_prefix_parts=2,
+                                                directory_only=True))
+        except FileNotFoundError:
+            return
+        for name in ("workspace", ".sage-private-workspaces"):
+            try:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                if not shutil.rmtree.avoids_symlink_attacks:
+                    raise RuntimeError("symlink-safe directory deletion is unavailable")
+                shutil.rmtree(name, dir_fd=fd)
+            else:
+                os.unlink(name, dir_fd=fd)
 
 
 def import_workspace_file(paths: ServerPaths, tenant_id: str, agent_id: str,

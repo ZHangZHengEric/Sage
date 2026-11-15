@@ -60,7 +60,10 @@ async def initialize_process(catalog):
     control = HarnessRuntime(store, job_runtime=services["execution.job-runtime"],
                              execution_binding_provider=binding, derived_state_store=derived,
                              runtime_skill_authorizations=builder._state.runtime_skill_authority)
-    access = AuthorizedSessionAccess(store, runtime=control, derived_state=derived if derived is not store else None)
+    access = AuthorizedSessionAccess(
+        store, runtime=control, derived_state=derived if derived is not store else None,
+        derived_state_cleaners=(services["session-memory.provider"],),
+    )
     scheduler = services["execution.scheduler"]
     capabilities = await scheduler.capabilities()
     from sagents.v2.runtime.session.fencing import validate_distributed_pair

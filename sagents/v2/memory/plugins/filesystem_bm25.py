@@ -27,7 +27,7 @@ from sagents.v2.memory.contracts import (
     MemoryWriteResult,
 )
 
-from sagents.v2.memory.indexing import scope_key, search_text
+from sagents.v2.memory.indexing import scope_key, search_text, workspace_delete_filter
 from sagents.v2.tokenization import tokenize_bm25
 
 
@@ -93,6 +93,19 @@ class FilesystemBm25MemoryProvider:
         return await bounded_to_thread(
             "memory-io", lambda: self._get(memory_id, scope), lock=self._lock
         )
+
+    async def forget_workspace(self, tenant_id, principal_id, workspace_id, *, private_scopes=()):
+        where, params = workspace_delete_filter(tenant_id, principal_id, workspace_id, private_scopes)
+
+        def delete():
+            with closing(self._connect()) as connection, connection:
+                connection.execute(
+                    "DELETE FROM memory_fts WHERE (scope_key, memory_id) IN "
+                    f"(SELECT scope_key, memory_id FROM memory_records WHERE {where})", params,
+                )
+                connection.execute(f"DELETE FROM memory_records WHERE {where}", params)
+
+        await bounded_to_thread("memory-io", delete, lock=self._lock)
 
     async def health(self) -> dict[str, object]:
         record_count = await bounded_to_thread(

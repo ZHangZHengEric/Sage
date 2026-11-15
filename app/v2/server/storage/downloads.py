@@ -30,13 +30,14 @@ def relative_path(value: str) -> PurePosixPath:
 
 
 @contextmanager
-def open_entry(root: Path, path: PurePosixPath, *, exact_prefix_parts: int = 0):
+def open_entry(root: Path, path: PurePosixPath, *, exact_prefix_parts: int = 0,
+               directory_only: bool = False):
     """Open each component relative to its parent fd; reject symlink swaps."""
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for index, part in enumerate(path.parts):
             flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-            if index < len(path.parts) - 1:
+            if directory_only or index < len(path.parts) - 1:
                 flags |= os.O_DIRECTORY
             child = os.open(part, flags, dir_fd=fd)
             if index < exact_prefix_parts:

@@ -111,6 +111,100 @@ def content_version(fd):
         digest.update(content)
     return {"version": digest.hexdigest(), "files": len(hashes), "bytes": total[1]}
 
+def visible(fd, name, path):
+    if name.startswith(".") or "\\" in name:
+        return None
+    try:
+        return info(fd, name, path)
+    except FileNotFoundError:
+        return None
+    except PermissionError as exc:
+        if exc.errno is not None: raise
+        return None
+
+def metadata(item):
+    return {"path": item["path"], "type": "file" if item["is_file"] else "directory",
+            "size": item["size"] if item["is_file"] else None}
+
+def metadata_list(fd):
+    rows, truncated, scanned = [], False, 0
+    def walk(parent, prefix, depth):
+        nonlocal truncated, scanned
+        with os.scandir(parent) as items:
+            for entry in items:
+                scanned += 1
+                if scanned > request["max_entries"]:
+                    raise OverflowError("workspace listing exceeds entry limit")
+                name = "/".join((*prefix, entry.name))
+                item = visible(parent, entry.name, name)
+                if item is None:
+                    continue
+                if depth == 0:
+                    truncated = True
+                    return
+                rows.append(metadata(item))
+                if item["is_directory"]:
+                    child = os.open(entry.name, flags, dir_fd=parent)
+                    try: walk(child, (*prefix, entry.name), depth - 1)
+                    finally: os.close(child)
+    try: walk(fd, parts, request["depth"])
+    except FileNotFoundError as exc:
+        raise ValueError("workspace changed during listing") from exc
+    return {"files": sorted(rows, key=lambda row: row["path"]), "truncated_by_depth": truncated}
+
+def metadata_stat():
+    remaining = request["max_bytes"]
+    rows = []
+    for path in request["paths"]:
+        parent_parts, _, name = path.rpartition("/")
+        missing = {"path": path, "exists": False, "type": None, "size": None, "sha256": None}
+        try:
+            fd = directory(parent_parts.split("/") if parent_parts else ())
+        except OSError as exc:
+            if exc.errno not in {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}: raise
+            rows.append(missing)
+            continue
+        try:
+            item = visible(fd, name, path)
+            if item is None:
+                rows.append(missing)
+                continue
+            row = {**metadata(item), "exists": True, "sha256": None}
+            if item["is_file"]:
+                size = item["size"]
+                remaining -= size
+                if remaining < 0:
+                    raise OverflowError("workspace stat exceeds hash byte limit")
+                def signature(st):
+                    return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+                def changed():
+                    return ValueError("workspace file changed during stat")
+                try:
+                    before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                    if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                            or (before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                            != (size, item["mtime_ns"], item["ctime_ns"])):
+                        raise changed()
+                    expected = signature(before)
+                    opened = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                    with os.fdopen(opened, "rb") as stream:
+                        if signature(os.fstat(stream.fileno())) != expected: raise changed()
+                        digest = hashlib.sha256()
+                        while size:
+                            chunk = stream.read(min(size, 1 << 20))
+                            if not chunk: raise changed()
+                            digest.update(chunk)
+                            size -= len(chunk)
+                        if (signature(os.fstat(stream.fileno())) != expected
+                                or signature(os.stat(name, dir_fd=fd, follow_symlinks=False)) != expected):
+                            raise changed()
+                except FileNotFoundError as exc:
+                    raise changed() from exc
+                row["sha256"] = digest.hexdigest()
+            rows.append(row)
+        finally: os.close(fd)
+    return rows
+
 try:
     operation = request["operation"]
     if operation in ("list", "walk"):
@@ -121,6 +215,12 @@ try:
         fd = directory(parts)
         try: result = content_version(fd)
         finally: os.close(fd)
+    elif operation == "metadata_list":
+        fd = directory(parts)
+        try: result = metadata_list(fd)
+        finally: os.close(fd)
+    elif operation == "metadata_stat":
+        result = metadata_stat()
     elif operation == "mkdir":
         fd = directory(parts, create=True)
         os.close(fd)
@@ -282,7 +382,7 @@ def relative_parts(path: str, *, root: str = "/workspace") -> tuple[str, ...]:
 
 def _file_call(sandbox, operation: str, path: str, *, root: str = "/workspace", **kwargs):
     payload = {"operation": operation, "root": root, "parts": relative_parts(path, root=root), **kwargs}
-    encoded = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
+    encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).decode()
     command = "python3 -I -c " + shlex.quote(_REMOTE) + " " + shlex.quote(encoded)
     result = sandbox.commands.run(command, cwd=root, timeout=60)
     if result.exit_code != 0:

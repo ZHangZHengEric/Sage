@@ -7,6 +7,7 @@ download buffers and immutable Skill sources touch the Sage host filesystem.
 from __future__ import annotations
 
 import base64
+import re
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from tempfile import SpooledTemporaryFile
@@ -30,15 +31,18 @@ from app.v2.server.storage.user_preferences import (
     USER_PREFERENCES_FILE,
     preferences_document,
 )
+from app.v2.server.storage.workspace_metadata import (
+    MAX_LIST_ENTRIES, MAX_STAT_BYTES, directory_parts, inspect_parts,
+)
 
 
 class CubeWorkspaceStorage:
     def __init__(self, host):
         self.host = host
 
-    def _operation(self, user, agent, function):
+    def _operation(self, user, agent, function, **options):
         client = self.host.execution.sandbox_provider.client
-        sandbox = client.create_sandbox(cube_volume_name(user, agent), timeout=300)
+        sandbox = client.create_sandbox(cube_volume_name(user, agent), timeout=300, **options)
         try:
             return function(sandbox)
         finally:
@@ -48,6 +52,50 @@ class CubeWorkspaceStorage:
                 close = getattr(sandbox, "close", None)
                 if close is not None:
                     close()
+
+    def list_files(self, user, agent, path, depth):
+        relative = "/".join(directory_parts(path))
+        try:
+            return self._operation(user, agent, lambda sandbox: cube_file_call(
+                sandbox, "metadata_list", relative, depth=depth, max_entries=MAX_LIST_ENTRIES),
+                existing_only=True)
+        except FileNotFoundError:
+            if relative:
+                raise
+            return {"files": [], "truncated_by_depth": False}
+
+    def stat_files(self, user, agent, paths):
+        unique = list(dict.fromkeys(paths))
+        for path in unique:
+            inspect_parts(path)
+
+        def read(sandbox):
+            results, remaining = {}, MAX_STAT_BYTES
+            # Bound the encoded shell argument even for long Unicode paths.
+            for offset in range(0, len(unique), 4):
+                rows = cube_file_call(sandbox, "metadata_stat", "",
+                                      paths=unique[offset:offset + 4], max_bytes=remaining)
+                for row in rows:
+                    results[row["path"]] = row
+                    if row["type"] == "file":
+                        remaining -= row["size"]
+            return [results[path] for path in paths]
+
+        try:
+            return self._operation(user, agent, read, existing_only=True)
+        except FileNotFoundError:
+            return [{"path": path, "exists": False, "type": None, "size": None, "sha256": None}
+                    for path in paths]
+
+    def clear_workspace(self, user, agent):
+        client = self.host.execution.sandbox_provider.client
+        base = cube_volume_name(user, agent)
+        owned = re.compile(re.escape(base) + r"(?:-[0-9a-f]{24})?")
+        # Private volumes have this same identity prefix, even after their
+        # source Session was independently removed.
+        for volume_id in client.list_volume_ids():
+            if owned.fullmatch(volume_id):
+                client.destroy_volume(volume_id)
 
     def list_directory(self, user, agent, value):
         path = relative_path(value).as_posix()

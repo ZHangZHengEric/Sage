@@ -6,6 +6,7 @@ import base64
 import json
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -18,10 +19,18 @@ class FakeCubeClient:
 
     def create_sandbox(self, name, **options):
         root = self.root / name
+        if options.get("existing_only") and not root.is_dir():
+            raise FileNotFoundError(name)
         root.mkdir(parents=True, exist_ok=True)
         sandbox = FakeSandbox(root, f"cube_{len(self.created)}")
         self.created.append(sandbox)
         return sandbox
+
+    def list_volume_ids(self):
+        return [path.name for path in self.root.iterdir()] if self.root.exists() else []
+
+    def destroy_volume(self, volume_id):
+        shutil.rmtree(self.root / volume_id)
 
 
 class FakeSandbox:

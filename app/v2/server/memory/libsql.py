@@ -12,7 +12,7 @@ from sagents.v2.memory.contracts import (
     MemoryCapabilities, MemoryDeleteResult, MemoryHit, MemoryQuery,
     MemoryRecord, MemoryScope, MemoryWriteResult,
 )
-from sagents.v2.memory.indexing import scope_key, search_text
+from sagents.v2.memory.indexing import scope_key, search_text, workspace_delete_filter
 from sagents.v2.session_memory.contracts import (
     SessionMemoryCapabilities, SessionMemoryHit, SessionMemoryQuery, SessionMemoryRecord,
 )
@@ -191,6 +191,10 @@ class LibSQLMemoryProvider:
             (scope_key(scope), memory_id),
         )
         return MemoryDeleteResult(memory_id=memory_id, deleted=bool(result.affected))
+
+    async def forget_workspace(self, tenant_id, principal_id, workspace_id, *, private_scopes=()):
+        where, params = workspace_delete_filter(tenant_id, principal_id, workspace_id, private_scopes)
+        await self.database.execute(f"DELETE FROM memory_records WHERE {where}", params)
 
     async def recall(self, query: MemoryQuery) -> tuple[MemoryHit, ...]:
         tokens = tokenize_bm25(query.text)

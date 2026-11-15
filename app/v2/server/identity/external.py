@@ -18,7 +18,10 @@ async def authorize_external_agent(request, host, agent_id):
             code="server.external.forbidden", category=ErrorCategory.AUTHORIZATION,
             message="API key is not authorized for this Agent",
         ))
-    scope = SCOPE_READ if request.method in {"GET", "HEAD"} else SCOPE_INVOKE
+    scope = SCOPE_READ if (
+        request.method in {"GET", "HEAD"}
+        or (request.method == "POST" and request.url.path.endswith("/workspace/files/stat"))
+    ) else SCOPE_INVOKE
     if request.url.path.endswith("/reply"):
         scope = SCOPE_APPROVE
     require_scope(key, scope)

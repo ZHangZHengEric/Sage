@@ -89,9 +89,22 @@ class CubeVolumeClient:
                 raise RuntimeError("Cube returned an unexpected Volume ID")
             return created
 
+    def list_volume_ids(self):
+        return [volume.volume_id for volume in self.volume_class.list(config=self.config)]
+
+    def destroy_volume(self, volume_id: str):
+        # The SDK returns False if the volume was already deleted.
+        self.volume_class.destroy(volume_id, config=self.config)
+
     def create_sandbox(self, name: str, *, timeout: int | None = None,
-                       read_only: bool = False, network: str = "none"):
-        volume = self.ensure_volume(name)
+                       read_only: bool = False, network: str = "none", existing_only: bool = False):
+        if existing_only:
+            try:
+                volume = self.volume_class.connect(name, config=self.config)
+            except self.volume_not_found as exc:
+                raise FileNotFoundError("Cube workspace volume does not exist") from exc
+        else:
+            volume = self.ensure_volume(name)
         if read_only:
             mount = importlib.import_module("cubesandbox").VolumeMount
             volume = mount(volume, read_only=True)

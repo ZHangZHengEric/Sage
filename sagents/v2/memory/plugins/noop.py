@@ -34,5 +34,8 @@ class NoopMemoryProvider:
     async def get(self, memory_id: str, *, scope: MemoryScope):
         return None
 
+    async def forget_workspace(self, tenant_id, principal_id, workspace_id, *, private_scopes=()):
+        return None
+
     async def health(self):
         return {"status": "disabled", "plugin": "sage.memory.noop"}

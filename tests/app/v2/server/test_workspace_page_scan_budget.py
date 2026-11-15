@@ -24,11 +24,21 @@ from tests.app.v2.server.fakes import MemoryThreadIndex
 
 
 @asynccontextmanager
-async def database_index():
+async def database_index(*, case_insensitive=False):
     engine = create_async_engine('sqlite+aiosqlite://')
     async with engine.begin() as connection:
-        await connection.run_sync(getattr(ThreadRow.__table__, 'create'))
-        await connection.run_sync(getattr(SessionBindingRow.__table__, 'create'))
+        if case_insensitive:
+            await connection.exec_driver_sql(
+                "CREATE TABLE threads (thread_id TEXT PRIMARY KEY, user_id TEXT COLLATE NOCASE, "
+                "agent_id TEXT COLLATE NOCASE, title TEXT, updated_at TEXT)"
+            )
+            await connection.exec_driver_sql(
+                "CREATE TABLE session_bindings (session_id TEXT PRIMARY KEY, owner_id TEXT COLLATE NOCASE, "
+                "tenant_id TEXT COLLATE NOCASE, agent_id TEXT COLLATE NOCASE)"
+            )
+        else:
+            await connection.run_sync(getattr(ThreadRow.__table__, 'create'))
+            await connection.run_sync(getattr(SessionBindingRow.__table__, 'create'))
     maker = async_sessionmaker(engine, expire_on_commit=False)
     class DB:
         @asynccontextmanager
@@ -115,3 +125,21 @@ async def test_workspace_cursor_preserves_owner_tenant_claim_only_and_legacy_sco
         claimed, legacy = await all_pages(index, limit=2)
         assert claimed == ['claim-only', 'own-claimed']
         assert legacy == ['legacy-a', 'legacy-z']
+
+
+@pytest.mark.asyncio
+async def test_workspace_pagination_excludes_case_folded_identities():
+    async with database_index(case_insensitive=True) as (index, _, maker):
+        async with maker.begin() as session:
+            session.add_all(SessionBindingRow(**vars(binding)) for binding in (
+                SessionBinding("a", "owner", "TENANT", "agent"),
+                SessionBinding("b", "owner", "tenant", "AGENT"),
+                SessionBinding("c", "OWNER", "tenant", "agent"),
+                SessionBinding("d", "owner", "tenant", "agent"),
+            ))
+            session.add_all(ThreadRow(**record.model_dump()) for record in (
+                ThreadRecord(thread_id="e", user_id="OWNER", agent_id="agent"),
+                ThreadRecord(thread_id="f", user_id="owner", agent_id="AGENT"),
+                ThreadRecord(thread_id="g", user_id="owner", agent_id="agent"),
+            ))
+        assert await all_pages(index, limit=1) == (["d"], ["g"])

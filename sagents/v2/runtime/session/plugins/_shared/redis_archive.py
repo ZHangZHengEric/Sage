@@ -59,6 +59,22 @@ class RedisArchiveProtocol:
                         attributes=self._failure_attributes(exc),
                     )
 
+    async def finish_session_deletions(self, roots):
+        """Wait for durable removal of tombstoned trees and their SQL archives."""
+        if not roots:
+            return
+        await self._ensure_ready()
+        async with self._archive_lock:
+            pending = self._key("pending")
+            # A child can remain pending after its root was already acknowledged.
+            # The root marker travels with every tombstone until its own ack.
+            for sid in await self._redis.smembers(pending):
+                deleted, root = await self._redis.hmget(self._session_key(sid), "deleted", "delete_root")
+                if deleted == "1" and (sid in roots or root in roots):
+                    await self._archive_session(sid)
+                    if await self._redis.sismember(pending, sid):
+                        raise self._storage_error(f"Session deletion is still pending: {sid}")
+
     async def _compact_hot(self, sid, fields):
         """Stage small immutable chunks, then atomically publish the new base."""
         payload = await asyncio.to_thread(self._decode_hot, fields)

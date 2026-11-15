@@ -335,7 +335,11 @@ CREATE INDEX sessions_parent_id ON sessions (parent_session_id);
 
 ### 外部 workspace 与会话清理
 
-内网业务接口使用 `SAGE-TENANT-ID`，Agent 取 URL 中的 `agent_id`，必须同时提供 `Authorization: Bearer <Agent API Key>`。所有运行、结果、回复、取消、文件和删除接口统一鉴权；GET 使用 `a2a:read`，调用和文件修改使用 `a2a:invoke`，回复交互使用 `a2a:approve`（沿用现有 API Key 权限名称）。Key 只能访问其绑定的 Agent，撤销后请求立即拒绝。业务后端必须从已验证的登录态提取用户 ID；Key 不应交给最终用户或前端。
+内网业务接口使用 `SAGE-TENANT-ID`，Agent 取 URL 中的 `agent_id`，必须同时提供 `Authorization: Bearer <Agent API Key>`。所有运行、结果、回复、取消、文件和删除接口统一鉴权；读取（包括 POST 批量 stat）使用 `a2a:read`，调用和删除使用 `a2a:invoke`，回复交互使用 `a2a:approve`。Key 只能访问其绑定的 Agent，撤销后请求立即拒绝。业务后端必须从已验证的登录态提取用户 ID；Key 不应交给最终用户或前端。
+
+- `GET /api/agents/{agent_id}/workspace/files?path=projects/site&depth=2`：列出目录内的文件和子目录。省略 `path` 或传 `.` 表示根目录；`depth` 默认 1（直接子项），允许 0–12。返回 `data: {"files":[{"path":"projects/site/index.html","type":"file","size":42}],"truncated_by_depth":false}`。路径均相对于 workspace 根目录，目录的 `size` 为 `null`。只有深度边界外还有可见条目时，`truncated_by_depth` 才为 true。未创建的根目录返回空列表，指定子目录不存在时返回 404。
+- `POST /api/agents/{agent_id}/workspace/files/stat`：请求体为 `{"paths":["projects/site/index.html","missing.txt"]}`，一次 1–128 个相对路径。返回 `data.files`，按输入顺序逐项给出 `path`、`exists`、`type`、`size`、`sha256`。文件 SHA-256 为 64 位小写十六进制；目录的大小和摘要均为 `null`，缺失项的类型、大小和摘要均为 `null`。列表和 stat 都不暴露隐藏路径、符号链接、硬链接或特殊文件。列表扫描超过 2000 个条目，或一次 stat 需哈希超过 1 GiB 时返回 413。
+- `DELETE /api/agents/{agent_id}/tenant-data`：清理当前租户在此 Agent 下的完整 workspace（含隐藏文件）、会话树和 thread 索引，以及长期记忆和会话检索索引。保留用于防止其他租户认领同一会话 ID 的归属记录。全部完成才返回 `data: {"deleted":true}`；重复调用仍成功。有未结束 Run 时返回 409 `workspace_busy`；清理中断或存储故障时返回 503 `tenant_data_cleanup_incomplete`。部分数据可能已删除，可用相同请求重试。历史数据如果没有可验证的租户归属，不会猜测归属并删除。
 
 - `PUT /api/agents/{agent_id}/workspace/file?path=projects/example/user-uploads/clip.mp4`：将请求体中的原始二进制写入当前租户和 Agent 的 workspace。每个请求单文件，最大 64 MiB；相同文件可幂等重试，路径已存在且内容不同时返回 409。
 - `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files?exclude=user-uploads`：下载当前 Run 的工作区归档，可选排除归档根下一个指定条目。
@@ -346,6 +350,83 @@ CREATE INDEX sessions_parent_id ON sessions (parent_session_id);
 - `DELETE /api/agents/{agent_id}/sessions/{session_id}`：独立清理该身份下的会话树和 thread 索引，重复调用成功，保留会话身份绑定及 workspace 文件；错误身份返回 404。有未结束任务时拒绝清理。是否与目录删除组合、调用顺序由业务后端决定。
 
 删除与 Run 创建、文件导入在当前 server 进程内互斥；请求取消时会等待文件线程退出后释放互斥。运行冲突保护适用于现有单进程 server v2，不提供多 worker、多实例或外部进程直接写 workspace 时的分布式文件租约。
+
+#### 机器接口 curl 示例
+
+在业务后端设置 `SAGE_READ_KEY` 和 `SAGE_INVOKE_KEY`。如果同一把 Agent Key 同时具有读和调用权限，两处可以使用同一个值。示例假设 `projects/site/hello.txt` 的内容是三个字节 `abc`。
+
+```sh
+SAGE_BASE='https://sage.example.com'
+SAGE_AGENT_ID='your-agent-id'
+SAGE_TENANT_ID='tenant-a'
+agent_url="${SAGE_BASE}/api/agents/${SAGE_AGENT_ID}"
+
+curl -sS -i --get "${agent_url}/workspace/files" \
+  -H "Authorization: Bearer ${SAGE_READ_KEY}" \
+  -H "SAGE-TENANT-ID: ${SAGE_TENANT_ID}" \
+  --data-urlencode 'path=projects/site' --data-urlencode 'depth=1'
+```
+
+HTTP 200
+
+```json
+{"code":0,"message":"success","data":{"files":[{"path":"projects/site/hello.txt","type":"file","size":3}],"truncated_by_depth":false},"request_id":"a8fa12bc34de"}
+```
+
+```sh
+curl -sS -i "${agent_url}/workspace/files/stat" \
+  -H "Authorization: Bearer ${SAGE_READ_KEY}" \
+  -H "SAGE-TENANT-ID: ${SAGE_TENANT_ID}" \
+  -H 'Content-Type: application/json' \
+  --data '{"paths":["projects/site/hello.txt","projects/site","projects/site/missing.txt"]}'
+```
+
+HTTP 200
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "files": [
+      {"path":"projects/site/hello.txt","exists":true,"type":"file","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+      {"path":"projects/site","exists":true,"type":"directory","size":null,"sha256":null},
+      {"path":"projects/site/missing.txt","exists":false,"type":null,"size":null,"sha256":null}
+    ]
+  },
+  "request_id": "b8fa12bc34de"
+}
+```
+
+```sh
+curl -sS -i -X DELETE "${agent_url}/tenant-data" \
+  -H "Authorization: Bearer ${SAGE_INVOKE_KEY}" \
+  -H "SAGE-TENANT-ID: ${SAGE_TENANT_ID}"
+```
+
+HTTP 200（清理完成，重复删除也返回此结构）
+
+```json
+{"code":0,"message":"success","data":{"deleted":true},"request_id":"c8fa12bc34de"}
+```
+
+HTTP 409
+
+```json
+{"code":409,"message":"workspace is used by an unfinished task","data":null,"error_detail":"workspace_busy","request_id":"d8fa12bc34de"}
+```
+
+HTTP 503
+
+```json
+{"code":503,"message":"tenant data cleanup incomplete; retry the request","data":null,"error_detail":"tenant_data_cleanup_incomplete","request_id":"e8fa12bc34de"}
+```
+
+业务端以 HTTP 状态和 `error_detail` 分支，仅在 HTTP 200 且 `data.deleted` 为 true 时标记完成。清理期间，暂停为同一租户和 Agent 提交新 Run 或写入 workspace，并将重复清理合并为同一任务。
+
+- **409 `workspace_busy`** 表示有未结束 Run 或执行仍在退出。等待自然完成，或者业务允许时对已知 Run 调用 `POST /api/agents/{agent_id}/runs/{thread_id}/{run_id}/cancel`。用同一租户头及 `a2a:read` 查询 `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}`。Run 到达终态后，重发原 DELETE。如果仍收到 409，延迟后再试，让执行和完成回调有时间退出。
+- **503 `tenant_data_cleanup_incomplete`** 表示清理尚未确认完成，部分数据可能已经删除。用相同的 Agent ID 和租户 ID 重发完整 DELETE。当前接口没有 `Retry-After`，业务端可采用带随机抖动的指数退避，例如 2 秒起步、上限 60 秒。请求超时或连接断开时，继续按结果未知处理并重试原请求。达到业务重试预算后保留待清理状态，并记录 `request_id` 供排查。
+- **401、403、422** 需要修正凭据、权限或请求参数，再发起请求。
 
 ## 技能版本管理
 
