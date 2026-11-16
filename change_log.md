@@ -1,3 +1,7 @@
+## 2026-11-16 17:20 同步 HTTP API 路由清单
+
+- 中英文 `HTTP_API_REFERENCE.md` 补上运行时并发、租户数据删除和工作区文件列表/stat 路由，修复文档校验 CI。
+
 ## 2026-11-16 15:30 模型流空闲超时与供应商响应 ID
 
 - 四种协议新增可选 `stream_idle_timeout_seconds`，只计上游等待时间，心跳不重置；`ModelResponse.response_id` 接受任意非空供应商 ID。
