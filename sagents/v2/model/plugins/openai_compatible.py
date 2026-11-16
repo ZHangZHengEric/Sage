@@ -327,6 +327,7 @@ class OpenAICompatibleModelProvider:
         refused = False
         reasoning = ""
         reasoning_details: Any = None
+        last_nonempty_reasoning_details: Any = None
         response_id = new_id("model_response")
         finish_reason = "unknown"
         usage = UsageSummary(models=(self.config.model,))
@@ -348,7 +349,7 @@ class OpenAICompatibleModelProvider:
                     **error.metadata, "request_bytes": request_bytes,
                 }}), provider=self.config.provider_id, usage=observed_usage,
                 response_id=response_id, terminal_received=terminal_event_received,
-                text=text, reasoning=reasoning,
+                text=text, reasoning=reasoning or last_nonempty_reasoning_details,
                 tools={index: fragment for index, fragment in tool_fragments.items()
                        if any(fragment.values())},
             ))
@@ -442,6 +443,12 @@ class OpenAICompatibleModelProvider:
                         # cumulative structure. Preserve the latest complete
                         # value rather than concatenating duplicate chunks.
                         reasoning_details = wire_json_value(latest_reasoning_details)
+                        if (
+                            reasoning_details
+                            and reasoning_details != last_nonempty_reasoning_details
+                        ):
+                            last_nonempty_reasoning_details = reasoning_details
+                            idle.progress()
                     content = self._first_wire_text(delta, "content", "text")
                     if not content and not text:
                         content = self._first_wire_text(choice, "text")

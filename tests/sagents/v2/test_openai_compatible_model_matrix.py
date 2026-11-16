@@ -1126,7 +1126,15 @@ def test_gateway_interrupted_response_retries_even_before_first_content(started,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "case", ["tool_progress", "first_chunk", "mid_stream", "terminal_tail"]
+    "case",
+    [
+        "tool_progress",
+        "reasoning_progress",
+        "repeated_reasoning",
+        "first_chunk",
+        "mid_stream",
+        "terminal_tail",
+    ],
 )
 async def test_sse_idle_deadline_tracks_model_progress(case):
     import asyncio
@@ -1167,6 +1175,9 @@ async def test_sse_idle_deadline_tracks_model_progress(case):
             }
         )
 
+    def reasoning_snapshot(text):
+        return [{"type": "reasoning.text", "text": text, "index": 0}]
+
     class StreamingBody(httpx.AsyncByteStream):
         heartbeat_count = 0
         closed = False
@@ -1175,6 +1186,8 @@ async def test_sse_idle_deadline_tracks_model_progress(case):
             yield sse({"role": "assistant"})
             if case == "terminal_tail":
                 yield sse({"content": "done"}, finish="stop")
+            elif case in {"reasoning_progress", "repeated_reasoning"}:
+                yield sse({"reasoning_details": reasoning_snapshot("a")})
             elif case != "first_chunk":
                 yield tool_part('{"q":', initial=True)
             if case == "tool_progress":
@@ -1183,14 +1196,24 @@ async def test_sse_idle_deadline_tracks_model_progress(case):
                     yield tool_part(part)
                 yield sse({}, finish="tool_calls")
                 yield b"data: [DONE]\n\n"
+            elif case == "reasoning_progress":
+                for length in range(2, 11):
+                    await asyncio.sleep(interval)
+                    yield sse({"reasoning_details": reasoning_snapshot("a" * length)})
+                yield sse({"content": "done"}, finish="stop")
+                yield b"data: [DONE]\n\n"
             else:
                 for _ in range(30):
                     await asyncio.sleep(interval)
                     self.heartbeat_count += 1
                     yield b": keepalive\n\n"
-                    if case != "terminal_tail":
+                    if case in {"first_chunk", "mid_stream"}:
                         yield tool_part("")
-                    yield sse({"content": "", "reasoning_content": ""})
+                    yield sse(
+                        {"content": "", "reasoning_content": "", "reasoning_details": []}
+                    )
+                    if case == "repeated_reasoning":
+                        yield sse({"reasoning_details": reasoning_snapshot("a")})
 
         async def aclose(self):
             self.closed = True
@@ -1232,12 +1255,20 @@ async def test_sse_idle_deadline_tracks_model_progress(case):
                     tool_call_id="call_1", name="lookup", arguments={"q": "abcdef"}
                 ),
             )
-        elif case == "terminal_tail":
+        elif case in {"reasoning_progress", "terminal_tail"}:
             events = [event async for event in provider.stream(request())]
             assert events[-1].kind == ModelEventKind.COMPLETED
-            assert events[-1].response is not None
-            assert events[-1].response.text == "done"
-            assert 0 < body.heartbeat_count < 30
+            response = events[-1].response
+            assert response is not None
+            assert response.text == "done"
+            if case == "reasoning_progress":
+                assert asyncio.get_running_loop().time() - started_at > idle_seconds
+                assert response.provider_state == make_provider_state(
+                    "openai_compatible",
+                    {"reasoning_details": reasoning_snapshot("a" * 10)},
+                )
+            else:
+                assert 0 < body.heartbeat_count < 30
         else:
             with pytest.raises(SageV2Error) as caught:
                 async for event in provider.stream(request()):
@@ -1246,10 +1277,13 @@ async def test_sse_idle_deadline_tracks_model_progress(case):
             assert info.code == "model.stream_idle_timeout"
             assert info.category == ErrorCategory.PROVIDER_TRANSIENT
             assert info.retryable and info.safe_to_resume
-            assert info.metadata["stream_idle_phase"] == case
+            assert info.metadata["stream_idle_phase"] == (
+                "first_chunk" if case == "first_chunk" else "mid_stream"
+            )
             failure = info.metadata["model_failure"]
             assert failure["kind"] == "stream"
-            assert failure["response_started"] is (case == "mid_stream")
+            assert failure["response_started"] is (case != "first_chunk")
+            assert failure["has_reasoning"] is (case == "repeated_reasoning")
             assert failure["has_tool_calls"] is (case == "mid_stream")
             assert 0 < body.heartbeat_count < 30
             assert events == []
