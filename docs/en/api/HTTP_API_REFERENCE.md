@@ -64,6 +64,8 @@ The Agent API key can select any tenant workspace for its bound Agent. The calli
 
 `POST /api/agents/{agent_id}/runs?workspace_path=...` accepts AG-UI input and optional `runtimeContext` for this Run without modifying shared configuration. Reads, replies, cancellation, and downloads identify the exact `thread_id` and `run_id` and check ownership; replies also require the expected interaction ID and revision.
 
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/recover` subscribes to an existing Run using the Agent key with `a2a:read` and the original tenant. The `text/event-stream` response sends up to 100 recent tool events followed by the current Run state, then follows new events. Each JSON payload contains `agentId`, `threadId`, `runId`, and `state`. Tool events also include `toolCallId` and `toolName`. Reconnect with the last SSE `id` from this endpoint as `Last-Event-ID` to receive later events. Replay skips suspensions superseded by a resume. The stream sends the stop state and closes on `completed`, `failed`, `cancelled`, or `suspended` (waiting to resume). The subscription reads recorded events and leaves execution to the existing Run.
+
 File downloads snapshot the Run-bound working directory, limited to 32 MiB and 512 entries. A directory superseded by a newer Run in the same Session returns 409; changes during packaging may return 503. Callers validate artifacts and Run identity. Sage does not interpret downstream business manifests or build customer projects.
 
 `GET /api/agents/{agent_id}/sessions/{session_id}/missing-history-images` returns the unique missing media IDs for legacy WishSeen user images in an authorized Session. It scans up to the initial Session sequence head. Only numeric tenants and `wishseen_w_<32 lowercase hex digits>` sessions are recognized. For matching `workspace_path=projects/w_<id>` Runs, existing feedback files under `user-uploads/feedback` replace matching signed image URLs in the final model request; missing files become a text placeholder. It never downloads signed URLs, follows symlinks, or rewrites canonical history or summary checkpoints.
@@ -134,6 +136,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/recover` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |

@@ -64,6 +64,8 @@ Agent API Key 可选择所绑定 Agent 的任一租户工作区。调用方后�
 
 `POST /api/agents/{agent_id}/runs?workspace_path=...` 接收 AG-UI 请求，并可用 `runtimeContext` 为本次运行提供上下文，不改写共享配置。运行读取、回复、取消和文件下载都以准确的 `thread_id`、`run_id` 定位，并核对归属；交互回复还需匹配交互 ID 和预期修订号。
 
+`GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/recover` 使用具有 `a2a:read` 权限的 Agent Key 和原租户订阅已有 Run。`text/event-stream` 响应先补发最近最多 100 条工具事件，再发送当前 Run 状态并持续推送新事件。每条 JSON 数据包含 `agentId`、`threadId`、`runId` 和 `state`，工具事件另含 `toolCallId` 和 `toolName`。重连时将本接口最后收到的 SSE `id` 放入 `Last-Event-ID` 请求头即可续传。续传跳过已被恢复的历史暂停。Run 进入 `completed`、`failed`、`cancelled` 或 `suspended`（等待恢复）时，流发送对应状态后关闭。订阅只读取已记录的事件。
+
 文件下载读取运行绑定的工作目录快照，上限 32 MiB、512 项；旧运行目录已被同会话的新运行替代时返回 409，打包期间文件变化可能返回 503。调用方应核对产物与运行身份；Sage 不解释下游业务清单或执行客户项目构建。
 
 `GET /api/agents/{agent_id}/sessions/{session_id}/missing-history-images` 返回已授权 Session 中旧版 WishSeen 用户图片缺失的媒体 ID，结果去重，扫描截止首次读取的会话序号上限。仅识别数字租户及 `wishseen_w_<32 位小写十六进制>` 会话。Run 的 `workspace_path=projects/w_<id>` 匹配时，从 `user-uploads/feedback` 中读取已有文件，仅在最终模型请求里替换对应签名图片 URL；缺失文件替换为文本提示。不下载签名 URL、不跟随符号链接，也不改写规范历史或摘要检查点。
@@ -134,6 +136,7 @@ Agent API Key 可选择所绑定 Agent 的任一租户工作区。调用方后�
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files/version` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/metrics` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/recover` | `conversations` |
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |

@@ -848,6 +848,27 @@ async def get_run_metrics(thread_id: str, run_id: str, caller: CallerDep,
                                             thread_id=thread_id, run_id=run_id))
 
 
+@external_router.get(
+    "/runs/{thread_id}/{run_id}/recover",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
+async def recover_run(
+    thread_id: str,
+    run_id: str,
+    caller: CallerDep,
+    service: ConversationDep,
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+):
+    stream = await access.recover_run(
+        service, tenant_id=caller.tenant_id, agent_id=caller.agent_id,
+        thread_id=thread_id, run_id=run_id, last_event_id=(last_event_id or "").strip(),
+    )
+    return StreamingResponse(stream, media_type="text/event-stream", headers={
+        "Cache-Control": "private, no-store", "X-Accel-Buffering": "no",
+    })
+
+
 @external_router.post("/runs/{thread_id}/{run_id}/reply")
 async def reply_run(thread_id: str, run_id: str, body: InteractionReply,
                     caller: CallerDep, service: ConversationDep):

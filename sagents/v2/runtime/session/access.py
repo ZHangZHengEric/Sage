@@ -229,8 +229,14 @@ class AuthorizedSessionAccess:
     ) -> AsyncIterator:
         run = await self._session_store.get_run(cursor.run_id)
         await self._authorize(run.session_id, context)
-        async for event in self._session_store.subscribe_events(cursor):
-            yield event
+        events = self._session_store.subscribe_events(cursor)
+        try:
+            async for event in events:
+                yield event
+        finally:
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                await close()
 
     async def subscribe_session_tree(
         self,

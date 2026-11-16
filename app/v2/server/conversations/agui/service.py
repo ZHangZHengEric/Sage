@@ -91,7 +91,8 @@ class ConversationService:
                     return found
         return None
 
-    async def _scope(self, user_id, agent_id, session_id, *, for_start=False):
+    async def _scope(self, user_id, agent_id, session_id, *, for_start=False,
+                     bind_legacy=True):
         if not user_id.strip() or not agent_id.strip():
             raise _error("invalid_identity", "user_id and agent_id are required")
         validate_agui_id(session_id, field="session_id")
@@ -125,7 +126,7 @@ class ConversationService:
                 if for_start:
                     require_binding(binding, expected)
                 raise _error("result_not_found", "run not found")
-            if binding is None and not for_start:
+            if binding is None and not for_start and bind_legacy:
                 await self.threads.bind(expected)
             return owner_id, candidate
         return owner_id, session_id

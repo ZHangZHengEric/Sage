@@ -5,14 +5,33 @@ This service resolves persisted Agent, tenant, thread and run bindings.
 
 from __future__ import annotations
 
+import re
+from collections.abc import AsyncIterator
+from contextlib import aclosing
+
+from app.v2.server.conversations.agui.sse import events_with_heartbeats, format_sse
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
+from sagents.v2.contracts.events import RunEventData, RuntimeEvent, ToolEventData
+from sagents.v2.contracts.run_state import EventCursor, RunSnapshot, RunState, TERMINAL_RUN_STATES
+
+
+_RECOVERY_PAGE_SIZE = 500
+_RECENT_TOOL_EVENTS = 100
+_RECOVERY_STOP_STATES = TERMINAL_RUN_STATES | {RunState.SUSPENDED}
+_RECOVERY_RUN_STATES = frozenset(RunState)
 
 
 def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:
     return SageV2Error(RuntimeErrorInfo(
         code="server.external_runs." + code, category=category, message=message,
     ))
+
+
+def _require_run_binding(command, agent_id: str, tenant_id: str) -> None:
+    if (command.agent_id != agent_id
+            or command.config.metadata.get("server_v2.workspace_user_id") != tenant_id):
+        raise _error("forbidden", ErrorCategory.AUTHORIZATION,
+                     "Run does not belong to the requested Agent and tenant")
 
 
 async def selected_run(service, *, tenant_id: str, agent_id: str,
@@ -30,11 +49,116 @@ async def selected_run(service, *, tenant_id: str, agent_id: str,
     context = service.context_for(owner)
     access = service.session_access
     command = await access.get_start_command(native_run_id, context)
-    if (command.agent_id != agent_id
-            or command.config.metadata.get("server_v2.workspace_user_id") != tenant_id):
-        raise _error("forbidden", ErrorCategory.AUTHORIZATION,
-                     "Run does not belong to the requested Agent and tenant")
+    _require_run_binding(command, agent_id, tenant_id)
     return payload, native_run_id, owner, internal_thread, context, access, command
+
+
+async def recover_run(service, *, tenant_id: str, agent_id: str, thread_id: str,
+                      run_id: str, last_event_id: str | None) -> AsyncIterator[str]:
+    """Authorize before opening an SSE response for the exact existing Run."""
+    owner, internal_thread = await service._scope(
+        tenant_id, agent_id, thread_id, bind_legacy=False,
+    )
+    context = service.context_for(owner)
+    found = await service._find_client_run(internal_thread, run_id, context, external=True)
+    if found is None:
+        raise _error("result_not_found", ErrorCategory.VALIDATION, "Run not found")
+    run, command = found
+    _require_run_binding(command, agent_id, tenant_id)
+
+    after = None
+    if last_event_id:
+        match = re.fullmatch(r"([0-9]{1,19})(:state)?", last_event_id)
+        if match is None or int(match[1]) > run.last_run_sequence:
+            raise _error("invalid_event_cursor", ErrorCategory.VALIDATION,
+                         "Invalid Last-Event-ID for this Run")
+        after = (int(match[1]), bool(match[2]))
+    return _recover_events(
+        service.session_access, context, run, after,
+        {"agentId": agent_id, "threadId": thread_id, "runId": run_id},
+    )
+
+
+def _recovery_event(event: RuntimeEvent, identity: dict[str, str]) -> str | None:
+    data = event.data
+    if isinstance(data, ToolEventData):
+        return format_sse(str(event.run_sequence), {
+            **identity, "toolCallId": data.tool_call_id, "toolName": data.tool_name,
+            "state": data.state,
+        })
+    if isinstance(data, RunEventData) and data.state in _RECOVERY_RUN_STATES:
+        return format_sse(f"{event.run_sequence}:state", {**identity, "state": data.state})
+    return None
+
+
+async def _recent_tool_frames(access, context, run: RunSnapshot, identity: dict[str, str]):
+    frames = []
+    end = run.last_run_sequence
+    while end:
+        start = max(0, end - _RECOVERY_PAGE_SIZE)
+        events = await access.read_events(run.run_id, context, after_sequence=start,
+                                          limit=end - start)
+        for event in reversed(events):
+            if event.run_sequence <= end and isinstance(event.data, ToolEventData):
+                frames.append(_recovery_event(event, identity))
+                if len(frames) == _RECENT_TOOL_EVENTS:
+                    return reversed(frames)
+        end = start
+    return reversed(frames)
+
+
+async def _recover_events(access, context, run: RunSnapshot,
+                          after: tuple[int, bool] | None,
+                          identity: dict[str, str]) -> AsyncIterator[str]:
+    head = run.last_run_sequence
+    stopped = run.state in _RECOVERY_STOP_STATES
+    head_state_delivered = after == (head, True)
+    if after is None:
+        for frame in await _recent_tool_frames(access, context, run, identity):
+            yield frame
+    else:
+        sequence, _ = after
+        while sequence < head:
+            events = await access.read_events(
+                run.run_id, context, after_sequence=sequence,
+                limit=min(_RECOVERY_PAGE_SIZE, head - sequence),
+            )
+            if not events:
+                break
+            for event in events:
+                sequence = event.run_sequence
+                if sequence > head:
+                    break
+                # A previous suspension can have been superseded by a resume.
+                # Send the stop state from the authorized snapshot below.
+                if (isinstance(event.data, RunEventData)
+                        and event.data.state in _RECOVERY_STOP_STATES):
+                    continue
+                frame = _recovery_event(event, identity)
+                if frame is not None:
+                    if sequence == head and isinstance(event.data, RunEventData):
+                        head_state_delivered = True
+                    yield frame
+    if not head_state_delivered:
+        yield format_sse(f"{head}:state", {**identity, "state": run.state.value})
+    if stopped:
+        return
+
+    # The durable cursor bridges the snapshot read and subscription setup.
+    events = access.subscribe_events(EventCursor(run_id=run.run_id, run_sequence=head), context)
+    async with aclosing(events_with_heartbeats(events, heartbeat_seconds=20)) as stream:
+        async for event in stream:
+            if event is None:
+                yield ": heartbeat\n\n"
+                continue
+            if event.preview_sequence is not None:
+                continue
+            frame = _recovery_event(event, identity)
+            if frame is not None:
+                yield frame
+            if (isinstance(event.data, RunEventData)
+                    and event.data.state in _RECOVERY_STOP_STATES):
+                return
 
 
 async def run_details(service, *, tenant_id: str, agent_id: str,
@@ -112,10 +236,7 @@ async def current_run_workspace(service, *, tenant_id: str, agent_id: str,
     if found is None:
         raise _error("result_not_found", ErrorCategory.VALIDATION, "Run not found")
     _, command = found
-    if (command.agent_id != agent_id
-            or command.config.metadata.get("server_v2.workspace_user_id") != tenant_id):
-        raise _error("forbidden", ErrorCategory.AUTHORIZATION,
-                     "Run does not belong to the requested Agent and tenant")
+    _require_run_binding(command, agent_id, tenant_id)
     latest = await access.latest_session_start_command(internal_thread, context)
     if latest is None or latest.idempotency_key != command.idempotency_key:
         raise _error("stale_workspace", ErrorCategory.CONFLICT,

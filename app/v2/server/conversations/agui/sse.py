@@ -151,7 +151,7 @@ async def canonical_agui_sse(
     opened = False
     first_text_logged = False
     assistant_messages: set[str] = set()
-    async for event in _events_with_heartbeats(
+    async for event in events_with_heartbeats(
         events, heartbeat_seconds=heartbeat_seconds
     ):
         if event is None:
@@ -221,7 +221,7 @@ async def canonical_agui_sse(
             return
 
 
-async def _events_with_heartbeats(
+async def events_with_heartbeats(
     events: AsyncIterator[RuntimeEvent], *, heartbeat_seconds: float
 ) -> AsyncIterator[RuntimeEvent | None]:
     iterator = events.__aiter__()
