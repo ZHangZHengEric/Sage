@@ -40,6 +40,7 @@ from sagents.v2.model.contracts import (
     ModelResponse,
     ModelStreamEvent,
 )
+from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
 from sagents.v2.model.plugins._shared.wire import (
     compact_json,
     minimum_reasoning_control,
@@ -82,6 +83,9 @@ class GeminiGenerateContentConfig(StrictModel):
     thinking_budget: int | None = Field(default=None, ge=-1)
     include_thoughts: bool = True
     timeout_seconds: float = Field(default=120, gt=0)
+    stream_idle_timeout_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -323,7 +327,10 @@ class GeminiGenerateContentModelProvider:
         calls = []
         text = reasoning = ""
         provider_usage: dict[str, Any] = {}
-        terminal = started = False
+        terminal = False
+        idle = StreamIdleTimeout(
+            self.config.stream_idle_timeout_seconds, provider=self.config.provider_id
+        )
         finish_reason = "completed"
         def stream_failure(error):
             thoughts = self._counter(provider_usage, "thoughtsTokenCount")
@@ -356,7 +363,7 @@ class GeminiGenerateContentModelProvider:
                         request=response.request,
                         response=response,
                     )
-                async for event in self._events(response):
+                async for event in idle.iterate(self._events(response)):
                     record_wire_event(event)
                     if event.get("error"):
                         error = event["error"]
@@ -402,8 +409,9 @@ class GeminiGenerateContentModelProvider:
                                     "unsupported Gemini output Part",
                                 )
                             parts.append(copy.deepcopy(part))
-                            started = True
                             value = part.get("text") or ""
+                            if value or part.get("thoughtSignature") or part.get("functionCall"):
+                                idle.progress()
                             if value:
                                 thought = bool(part.get("thought"))
                                 if thought:
@@ -435,6 +443,7 @@ class GeminiGenerateContentModelProvider:
                                 if reason in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY"}:
                                     finish_reason = "refusal"
                                     terminal = True
+                                    idle.finish()
                                     continue
                                 if reason in {"MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL"}:
                                     raise SageV2Error(RuntimeErrorInfo(
@@ -446,16 +455,17 @@ class GeminiGenerateContentModelProvider:
                                                   "native_finish_reason": reason}))
                                 raise self._error("model.response_unknown", str(reason))
                             terminal = True
+                            idle.finish()
                             finish_reason = (
                                 "max_tokens" if reason == "MAX_TOKENS" else "completed"
                             )
         except SageV2Error as exc:
             raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise stream_failure(provider_error(exc, response_started=started, provider=self.config.provider_id).info) from exc
+            raise stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info) from exc
         if not terminal:
             raise stream_failure(stream_incomplete_error(
-                provider=self.config.provider_id, response_started=started
+                provider=self.config.provider_id, response_started=idle.response_started
             ).info)
         thoughts = self._counter(provider_usage, "thoughtsTokenCount")
         cached = self._counter(provider_usage, "cachedContentTokenCount")

@@ -51,6 +51,7 @@ from sagents.v2.contracts.provider_state import (
     make_provider_state,
     read_provider_state,
 )
+from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
 from sagents.v2.model.plugins._shared.wire import (
     parse_tool_arguments,
     provider_error,
@@ -105,6 +106,9 @@ class OpenAICompatibleConfig(StrictModel):
         "auto"
     )
     timeout_seconds: float = Field(default=120, gt=0)
+    stream_idle_timeout_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
     max_request_bytes: int | None = Field(default=None, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
     max_inline_images: int = Field(default=OPENAI_MAX_IMAGES, ge=0, le=OPENAI_MAX_IMAGES)
     max_inline_image_bytes: int = Field(default=OPENAI_INLINE_IMAGE_BYTES, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
@@ -332,8 +336,10 @@ class OpenAICompatibleModelProvider:
         observed_choice_fields: set[str] = set()
         observed_delta_fields: set[str] = set()
         observed_delta_field_types: dict[str, set[str]] = {}
-        response_started = False
         terminal_event_received = False
+        idle = StreamIdleTimeout(
+            self.config.stream_idle_timeout_seconds, provider=self.config.provider_id
+        )
         compatibility_fallback: dict[str, Any] | None = None
         def stream_failure(error):
             observed_usage = usage
@@ -342,7 +348,9 @@ class OpenAICompatibleModelProvider:
                     **error.metadata, "request_bytes": request_bytes,
                 }}), provider=self.config.provider_id, usage=observed_usage,
                 response_id=response_id, terminal_received=terminal_event_received,
-                text=text, reasoning=reasoning, tools=tool_fragments,
+                text=text, reasoning=reasoning,
+                tools={index: fragment for index, fragment in tool_fragments.items()
+                       if any(fragment.values())},
             ))
 
         try:
@@ -369,7 +377,7 @@ class OpenAICompatibleModelProvider:
                 kwargs, allow_negotiation=allow_negotiation,
                 retry_images=retry_images, prepare_attempt=prepare_attempt,
             )
-            async for chunk in upstream:
+            async for chunk in idle.iterate(upstream):
                 record_wire_event(chunk)
                 failure = wire_value(chunk, "error")
                 if failure:
@@ -388,6 +396,7 @@ class OpenAICompatibleModelProvider:
                     choice_finish_reason = wire_value(choice, "finish_reason")
                     if choice_finish_reason:
                         finish_reason = str(choice_finish_reason)
+                        idle.finish()
                         terminal_event_received = True
                     delta = wire_value(choice, "delta")
                     if delta is None:
@@ -418,7 +427,7 @@ class OpenAICompatibleModelProvider:
                             reasoning, reasoning_content
                         )
                         if reasoning_delta:
-                            response_started = True
+                            idle.progress()
                             yield ModelStreamEvent(
                                 kind=ModelEventKind.REASONING_DELTA,
                                 delta=reasoning_delta,
@@ -444,13 +453,12 @@ class OpenAICompatibleModelProvider:
                         content = self._first_wire_text(delta, "refusal")
                         refused = refused or bool(content)
                     if content:
-                        response_started = True
+                        idle.progress()
                         text += content
                         yield ModelStreamEvent(
                             kind=ModelEventKind.TEXT_DELTA, delta=content
                         )
                     for tool_delta in wire_value(delta, "tool_calls", ()) or ():
-                        response_started = True
                         index = int(wire_value(tool_delta, "index", 0) or 0)
                         accumulator = tool_fragments.setdefault(
                             index, {"id": "", "name": "", "arguments": ""}
@@ -475,27 +483,22 @@ class OpenAICompatibleModelProvider:
                                     )
                                 # Signatures are opaque snapshots, not text deltas.
                                 tool_signatures[index] = signature
-                        tool_id = wire_value(tool_delta, "id")
-                        if tool_id:
-                            accumulator["id"], _ = self._merge_stream_text(
-                                accumulator["id"], str(tool_id)
-                            )
                         function = wire_value(tool_delta, "function")
-                        if function is not None:
-                            name = wire_value(function, "name")
-                            arguments = wire_value(function, "arguments")
-                            if name:
-                                accumulator["name"], _ = self._merge_stream_text(
-                                    accumulator["name"], str(name)
+                        for field, incoming in (
+                            ("id", wire_value(tool_delta, "id")),
+                            ("name", wire_value(function, "name")),
+                            ("arguments", wire_value(function, "arguments")),
+                        ):
+                            if incoming:
+                                accumulator[field], added = self._merge_stream_text(
+                                    accumulator[field], str(incoming)
                                 )
-                            if arguments:
-                                accumulator["arguments"], _ = self._merge_stream_text(
-                                    accumulator["arguments"], str(arguments)
-                                )
+                                if added:
+                                    idle.progress()
         except SageV2Error as exc:
             raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
+            raise stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info) from exc
         finally:
             if upstream is not None:
                 closer = getattr(upstream, "close", None) or getattr(
@@ -509,7 +512,7 @@ class OpenAICompatibleModelProvider:
         if not terminal_event_received:
             raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
-                response_started=response_started,
+                response_started=idle.response_started,
             ).info)
 
         tool_calls: list[ModelToolCall] = []

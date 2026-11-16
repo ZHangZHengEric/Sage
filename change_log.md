@@ -1,3 +1,7 @@
+## 2026-11-16 15:30 模型流空闲超时与供应商响应 ID
+
+- 四种协议新增可选 `stream_idle_timeout_seconds`，只计上游等待时间，心跳不重置；`ModelResponse.response_id` 接受任意非空供应商 ID。
+
 ## 2026-11-12 V2 支持按 Run 的 Skill 提供者
 
 - 新增 `RunSkillProvider`。宿主选用该提供者时，`search_skills` 由提供者按当前 Run 确定搜索范围，Agent Package 的 Skill 名单为空也可搜索。默认提供者仍按包内声明与 Run 的名称授权搜索。

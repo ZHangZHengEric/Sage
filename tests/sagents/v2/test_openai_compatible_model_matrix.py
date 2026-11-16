@@ -1122,3 +1122,136 @@ def test_gateway_interrupted_response_retries_even_before_first_content(started,
     error = ProviderStreamFailure('response stream could not be completed',
         code='invalid_provider_response', status_code=status)
     assert provider_error(error, response_started=started).info.retryable is retryable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case", ["tool_progress", "first_chunk", "mid_stream", "terminal_tail"]
+)
+async def test_sse_idle_deadline_tracks_model_progress(case):
+    import asyncio
+    import json
+
+    import httpx
+    from openai import AsyncOpenAI
+
+    idle_seconds = 0.15
+    interval = 0.025
+    model = "chat-test"
+    base_url = "https://example.invalid/v1"
+    received_body = {}
+
+    def sse(delta, *, finish=None):
+        value = {
+            "id": "response_1",
+            "model": model,
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+        }
+        return b"data: " + json.dumps(value).encode() + b"\n\n"
+
+    def tool_part(arguments, *, initial=False):
+        return sse(
+            {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        **({"id": "call_1", "type": "function"} if initial else {}),
+                        "function": {
+                            **({"name": "lookup"} if initial else {}),
+                            "arguments": arguments,
+                        },
+                    }
+                ]
+            }
+        )
+
+    class StreamingBody(httpx.AsyncByteStream):
+        heartbeat_count = 0
+        closed = False
+
+        async def __aiter__(self):
+            yield sse({"role": "assistant"})
+            if case == "terminal_tail":
+                yield sse({"content": "done"}, finish="stop")
+            elif case != "first_chunk":
+                yield tool_part('{"q":', initial=True)
+            if case == "tool_progress":
+                for part in ('"', "a", "b", "c", "d", "e", "f", '"', "}"):
+                    await asyncio.sleep(interval)
+                    yield tool_part(part)
+                yield sse({}, finish="tool_calls")
+                yield b"data: [DONE]\n\n"
+            else:
+                for _ in range(30):
+                    await asyncio.sleep(interval)
+                    self.heartbeat_count += 1
+                    yield b": keepalive\n\n"
+                    if case != "terminal_tail":
+                        yield tool_part("")
+                    yield sse({"content": "", "reasoning_content": ""})
+
+        async def aclose(self):
+            self.closed = True
+
+    body = StreamingBody()
+
+    def respond(request):
+        received_body.update(json.loads(request.content))
+        return httpx.Response(
+            200, headers={"Content-Type": "text/event-stream"}, stream=body
+        )
+
+    route = ModelRoute.model_validate(
+        {
+            "provider": "openai-chat-completions",
+            "model": model,
+            "base_url": base_url,
+            "request": {"extra": {"stream_idle_timeout_seconds": idle_seconds}},
+        }
+    )
+    async with AsyncOpenAI(
+        api_key="test",
+        base_url=base_url,
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    ) as client:
+        provider = create_registered_model_provider(route, client=client)
+        events = []
+        started_at = asyncio.get_running_loop().time()
+        if case == "tool_progress":
+            async for event in provider.stream(request()):
+                events.append(event)
+            assert asyncio.get_running_loop().time() - started_at > idle_seconds
+            assert [event.kind for event in events] == [ModelEventKind.COMPLETED]
+            response = events[0].response
+            assert response is not None
+            assert response.tool_calls == (
+                ModelToolCall(
+                    tool_call_id="call_1", name="lookup", arguments={"q": "abcdef"}
+                ),
+            )
+        elif case == "terminal_tail":
+            events = [event async for event in provider.stream(request())]
+            assert events[-1].kind == ModelEventKind.COMPLETED
+            assert events[-1].response is not None
+            assert events[-1].response.text == "done"
+            assert 0 < body.heartbeat_count < 30
+        else:
+            with pytest.raises(SageV2Error) as caught:
+                async for event in provider.stream(request()):
+                    events.append(event)
+            info = caught.value.info
+            assert info.code == "model.stream_idle_timeout"
+            assert info.category == ErrorCategory.PROVIDER_TRANSIENT
+            assert info.retryable and info.safe_to_resume
+            assert info.metadata["stream_idle_phase"] == case
+            failure = info.metadata["model_failure"]
+            assert failure["kind"] == "stream"
+            assert failure["response_started"] is (case == "mid_stream")
+            assert failure["has_tool_calls"] is (case == "mid_stream")
+            assert 0 < body.heartbeat_count < 30
+            assert events == []
+    assert body.closed
+    assert "stream_idle_timeout_seconds" not in received_body

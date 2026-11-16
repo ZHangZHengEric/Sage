@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel, ToolName, VerbatimText
 from sagents.v2.contracts.items import ContentBlock, UsageSummary
@@ -109,8 +109,13 @@ class ModelRequest(StrictModel):
         return self
 
 
+ProviderResponseId = Annotated[
+    str, StringConstraints(strict=True, min_length=1, strip_whitespace=False)
+]
+
+
 class ModelResponse(StrictModel):
-    response_id: Identifier
+    response_id: ProviderResponseId
     text: str = ""
     reasoning: str = ""
     tool_calls: tuple[ModelToolCall, ...] = ()

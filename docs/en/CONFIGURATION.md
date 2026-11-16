@@ -54,6 +54,21 @@ When `base_url` is omitted, the route uses the same OrcaRouter endpoint.
 This preset supports the existing chat protocol; it does not add image or
 video generation APIs.
 
+## Model stream idle timeout
+
+Set `models.<binding>.request.extra.stream_idle_timeout_seconds` to a positive
+number of seconds on an `openai-chat-completions`, `openai-responses`,
+`anthropic-messages`, or `gemini-generate-content` model route. Omit it or set it
+to `null` to leave the idle check disabled. Python callers can set the same
+field on the corresponding adapter config.
+
+After the response stream opens, Sage counts only time spent waiting for
+upstream events. Processing and delivering events does not consume this budget.
+New text, reasoning, and tool call fragments reset the budget. Heartbeats, empty
+deltas, and usage-only frames do not. Idle failures use `model.stream_idle_timeout`
+and the existing retry budget. The `stream_idle_phase` diagnostic is `first_chunk` before any
+progress or `mid_stream` after progress. Connection and Run deadlines still apply.
+
 ## Gemini tool calls through OpenAI compatibility
 
 For a Gemini model using `openai-chat-completions`, Sage retains the documented
