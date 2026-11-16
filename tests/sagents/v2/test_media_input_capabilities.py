@@ -25,6 +25,7 @@ from sagents.v2.model.plugins.gemini_generate_content import (
     GeminiGenerateContentConfig,
     GeminiGenerateContentModelProvider,
 )
+from sagents.v2.model.plugins.openai_compatible import REMOTE_AUDIO_OMITTED_TEXT
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture
 from sagents.v2.package.manifest.models import ModelCapabilityDeclaration, ModelRoute
@@ -607,6 +608,26 @@ def test_chat_completions_maps_mpeg_audio_to_mp3_format():
     content = provider.diagnostic_request(request)["messages"][0]["content"]
 
     assert content[0]["input_audio"] == {"data": "SUQz", "format": "mp3"}
+
+
+def test_chat_completions_omits_remote_audio_urls():
+    provider = OpenAIChatCompletionsModelProvider(
+        OpenAIChatCompletionsConfig(
+            base_url="https://gw.invalid/v1",
+            model="gpt-audio",
+            capabilities=_caps(supports_audio_input=True),
+        ),
+        client=object(),
+    )
+    request = _request().model_copy(update={"messages": (
+        ModelMessage(role="user", content=(
+            AudioBlock(uri="https://cdn.example.com/a.mp3", mime_type="audio/mpeg"),
+        )),
+    )})
+
+    content = provider.diagnostic_request(request)["messages"][0]["content"]
+
+    assert content == REMOTE_AUDIO_OMITTED_TEXT
 
 
 class _CapabilityModel:

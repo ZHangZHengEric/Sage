@@ -93,6 +93,11 @@ _HOST_OWNED_REQUEST_FIELDS = frozenset(
     }
 )
 _AUDIO_FORMATS = {"mpeg": "mp3", "x-wav": "wav", "wave": "wav", "x-m4a": "m4a"}
+# Chat Completions `input_audio.data` only accepts base64 bytes, never a URL.
+REMOTE_AUDIO_OMITTED_TEXT = (
+    "[Audio attachment omitted: this model protocol cannot read remote audio URLs. "
+    "Download the audio into the workspace and attach the file instead.]"
+)
 
 
 def default_chat_completion_token_field(
@@ -1176,9 +1181,10 @@ class OpenAICompatibleModelProvider:
                 return {"type": field, field: {"url": block.uri}}
             data = block.uri
             mime_type = block.mime_type or ""
-            if data.startswith("data:") and ";base64," in data:
-                header, data = data.split(",", 1)
-                mime_type = header[5:].split(";", 1)[0] or mime_type
+            if not (data.startswith("data:") and ";base64," in data):
+                return {"type": "text", "text": REMOTE_AUDIO_OMITTED_TEXT}
+            header, data = data.split(",", 1)
+            mime_type = header[5:].split(";", 1)[0] or mime_type
             subtype = mime_type.partition("/")[2].lower()
             audio_format = _AUDIO_FORMATS.get(subtype, subtype)
             return {
