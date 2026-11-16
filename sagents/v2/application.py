@@ -284,7 +284,10 @@ class SAgentApplication:
                 package, config_text=config_text, base_path=base_path, subagents=subagents,
                 runtime=runtime, models=models,
             )
+            had_recovery_issues = bool(self._loaded_agents.recovery_issues)
             await self._loaded_agents.restore_pending()
+            if not self._closing and (self._loaded_agents.runtime.start_workers or had_recovery_issues):
+                await self.service("execution.dispatcher").refresh_recovery()
             return agent
 
     async def update_agent(
@@ -305,14 +308,18 @@ class SAgentApplication:
         """
         if self._loaded_agents is None:
             raise RuntimeError("update_agent requires build() without a Package")
-        return await self._loaded_agents.load(
-            package,
-            config_text=config_text,
-            base_path=base_path,
-            previous=agent,
-            subagents=subagents,
-            runtime=runtime, models=models,
-        )
+        async with self._assembly_operation():
+            updated = await self._loaded_agents.load(
+                package,
+                config_text=config_text,
+                base_path=base_path,
+                previous=agent,
+                subagents=subagents,
+                runtime=runtime, models=models,
+            )
+            if not self._closing and updated is not agent and self._loaded_agents.runtime.start_workers:
+                await self.service("execution.dispatcher").refresh_recovery()
+            return updated
 
     async def agent_for_run(self, run_id: str, context: RequestContext) -> LoadedAgent:
         """Authorize a durable Run and retrieve its exact loaded revision."""

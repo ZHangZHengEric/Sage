@@ -55,6 +55,14 @@ deploy/compose_v2.sh run --rm --no-deps --entrypoint python sage-server -m app.v
 
 数据与日志分别持久化到 `${SAGE_ROOT}/sage-server/data`、`${SAGE_ROOT}/sage-server/logs`；相对路径以 `deploy/standalone/` 为基准。只运行单个后端进程，并发额度通过 `SAGE_SERVER_MAX_CONCURRENT_RUNS` 等变量设置。
 
+默认的进程内调度器支持管理员通过 `GET /api/admin/runtime/concurrency` 查看当前并发，并通过 `PUT /api/admin/runtime/concurrency` 在线修改。
+
+```json
+{"max_concurrent_runs": 16, "max_concurrent_runs_per_user": 4}
+```
+
+修改后立即应用到 Run 调度和全局模型调用配额。调低时，在途工作自然完成，排队任务随额度释放继续执行。新值写入数据卷的 `config/run-concurrency.json`，后续启动优先使用该文件。Redis 分布式调度的并发额度由部署配置管理，接口返回 `hot_reload_supported: false`。
+
 V2 镜像自动创建 `sage-sandbox` 用户（UID/GID `10001:10001`），服务主进程继续以 root 运行，沙箱命令降权后执行。镜像默认设置 `SAGE_SERVER_LINUX_EXECUTION_UID/GID`，已有 `.env` 无需补充即可生效。服务仅调整各用户 `workspace` 及子 Agent 工作目录的属主，不递归修改挂载目录、已有文件、数据库或日志；拒绝通过符号链接调整目录。宿主机无需创建同名账号。如需匹配已有非 root 目录，可在 `.env` 同时覆盖这两个数字 ID；已有文件的读写权限仍需与该身份匹配。NFS root-squash 等禁止 root 修改属主的挂载需由宿主机管理员预先设置工作目录权限。
 
 后端 Compose 的 `systempaths=unconfined` 允许内层 bubblewrap 在独立 PID/user namespace 中挂载 `/proc`，否则 Docker 默认遮蔽的 proc 子挂载会触发 `bwrap: Can't mount proc on /proc: Operation not permitted`。该设置取消外层容器的默认系统路径遮蔽/只读限制；内层沙箱仍保留非 root 身份、独立命名空间、能力清除和 seccomp，不使用 privileged 或宿主机 PID namespace。修改后需要 `deploy/compose_v2.sh up -d --force-recreate sage-server` 重建容器，仅 restart 不会应用新的权限设置。

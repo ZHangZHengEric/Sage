@@ -30,6 +30,7 @@ from app.v2.server.identity.context import RequestContexts
 from app.v2.server.identity.service import IdentityService
 from app.v2.server.identity.federation import DatabaseExternalIdentityStore
 from app.v2.server.identity.sessions import DatabaseLoginSessionStore
+from app.v2.server.config.concurrency import RunConcurrency, RunConcurrencyConfig
 from app.v2.server.config.manifest import server_v2_manifest
 from app.v2.server.runtime.official import install_sandbox
 from app.v2.server.conversations.runs import RunService
@@ -47,6 +48,7 @@ from app.v2.server.catalog.repository import CatalogStore, DatabaseCatalogStore
 from app.v2.server.skills.repository import DatabaseSkillStore, SkillStore
 from app.v2.server.conversations.repository import DatabaseThreadIndex, ThreadIndex
 from app.v2.server.storage import prepare_server_v2_storage
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 LOGGER = get_logger(__name__)
 
@@ -102,6 +104,8 @@ class ServerHost:
             linux_execution_uid=settings.linux_execution_uid,
             linux_execution_gid=settings.linux_execution_gid,
         )
+        self._concurrency_config = RunConcurrencyConfig(self.paths.data_root)
+        self._run_quota: SchedulerQuotaGroup | None = None
 
         self.users = users if users is not None else DatabaseUserStore(database)
         self.catalog_store = (
@@ -181,6 +185,37 @@ class ServerHost:
     def diagnostics(self):
         return self.observability.diagnostics if self.observability is not None else None
 
+    @property
+    def supports_concurrency_hot_reload(self) -> bool:
+        return self.settings.scheduler_plugin == "sage.scheduler.ephemeral"
+
+    @property
+    def run_concurrency(self) -> RunConcurrency:
+        quota = self._run_quota
+        if quota is None:
+            raise RuntimeError("Server v2 runtime is not started")
+        return RunConcurrency(
+            max_concurrent_runs=quota.max_active,
+            max_concurrent_runs_per_user=quota.max_per_tenant,
+        )
+
+    async def update_run_concurrency(self, limits: RunConcurrency) -> None:
+        if not self.supports_concurrency_hot_reload:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="server.concurrency.distributed_scheduler",
+                category=ErrorCategory.CONFLICT,
+                message="Hot reload requires the process-local scheduler.",
+            ))
+        quota, budget = self._run_quota, self.execution.model_budget
+        if quota is None or budget is None:
+            raise RuntimeError("Server v2 runtime is not started")
+        async with quota.condition:
+            # Serialize persistence with claims and other updates. Once the
+            # rename succeeds, publish both limits without a cancellation point.
+            self._concurrency_config.save(limits)
+            quota.set_concurrency(limits.max_concurrent_runs, limits.max_concurrent_runs_per_user)
+            budget.set_limit(limits.max_concurrent_runs)
+
     async def start(self) -> None:
         if self._application is not None:
             return
@@ -192,6 +227,10 @@ class ServerHost:
             self.settings,
             plugin_overrides=ServerPluginConfig(self.paths.data_root, registry=self.extensions).read(),
         )
+        # Keep live limits out of composed Agent revisions and their hashes.
+        limits = RunConcurrency.from_settings(self.settings)
+        if self.supports_concurrency_hot_reload:
+            limits = self._concurrency_config.read(limits)
         if self.log_sink is None:
             from app.v2.server.observability.logging import LoggingSettings, init_logging
 
@@ -215,13 +254,14 @@ class ServerHost:
             self.settings.admin_username, self.settings.admin_password
         )
         model_budget = ModelConcurrencyBudget(
-            self.settings.max_concurrent_runs,
+            limits.max_concurrent_runs,
             max_waiting=self.settings.max_pending_runs,
         )
         run_quota = SchedulerQuotaGroup(
-            self.settings.max_concurrent_runs,
-            self.settings.max_concurrent_runs_per_user,
+            limits.max_concurrent_runs,
+            limits.max_concurrent_runs_per_user,
             self.settings.max_pending_runs,
+            live_concurrency=self.supports_concurrency_hot_reload,
         )
         scheduler = InMemoryScheduler(
             quota_group=run_quota,
@@ -229,6 +269,7 @@ class ServerHost:
         )
         host_models: ServerModelClients | None = None
         try:
+            self._run_quota = run_quota
             self.execution.model_budget = model_budget
             host_models = ServerModelClients(max_clients=self.settings.max_model_clients)
             self.execution.model_pool = host_models
@@ -318,7 +359,6 @@ class ServerHost:
                 context_for=self.contexts.for_user,
                 language=self.settings.language,
             )
-            self._track(asyncio.create_task(self._expire_approvals(runs), name="approval-expiration"))
             self.admin = AdminService(
                 users=self.users,
                 threads=self.threads,
@@ -367,8 +407,12 @@ class ServerHost:
             self.rsi = ServerRsiService(self, run_quota)
             from app.v2.server.im.service import IMService
             self.im = IMService(self)
-            await self.im.start()
+            await self.im.initialize()
+            # Restore archived Agents with the host services above before any
+            # background intake can submit work to the dispatcher.
             await self.application.service("execution.dispatcher").start()
+            self.im.start_worker()
+            self._track(asyncio.create_task(self._expire_approvals(runs), name="approval-expiration"))
             self._track(
                 asyncio.create_task(
                     recover_pending_packages(
@@ -434,6 +478,7 @@ class ServerHost:
         self.a2a_plugins.clear()
         self.execution.model_pool = None
         self.execution.model_budget = None
+        self._run_quota = None
 
     async def _expire_approvals(self, runs):
         while True:

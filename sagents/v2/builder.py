@@ -135,7 +135,6 @@ class SAgentBuilder:
         try:
             from sagents.v2.composition.bootstrap import initialize_process
             await initialize_process(application._loaded_agents)
-            await application._loaded_agents.restore_pending()
             if runtime.start_workers:
                 await application.service("execution.dispatcher").start()
         except BaseException as exc:

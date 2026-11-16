@@ -6,7 +6,11 @@ import asyncio
 import heapq
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, TYPE_CHECKING
+from weakref import WeakSet
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.dispatcher import LocalWorkerDispatcher
 
 from sagents.v2.runtime.execution.scheduler.plugins._shared.fencing import finish_fence
 from sagents.v2.runtime.execution.scheduler.contracts import (
@@ -30,13 +34,22 @@ _T = TypeVar("_T")
 class SchedulerQuotaGroup:
     """Shared single-loop quotas; member queues remain separately routed."""
 
-    def __init__(self, max_active=8, max_per_tenant=2, max_pending=1024):
-        import weakref
+    def __init__(self, max_active=8, max_per_tenant=2, max_pending=1024, *, live_concurrency=False):
         if min(max_active, max_per_tenant, max_pending) < 1:
             raise ValueError("scheduler group limits must be positive")
         self.max_active, self.max_per_tenant, self.max_pending = max_active, max_per_tenant, max_pending
         self.condition = asyncio.Condition()
-        self.members = weakref.WeakSet()
+        self.members = WeakSet()
+        self.live_concurrency = live_concurrency
+        self.dispatchers: WeakSet[LocalWorkerDispatcher] = WeakSet()
+
+    def set_concurrency(self, max_active: int, max_per_tenant: int) -> None:
+        """Publish limits while holding the shared Scheduler condition."""
+        self.max_active = max_active
+        self.max_per_tenant = max_per_tenant
+        for dispatcher in self.dispatchers:
+            dispatcher._apply_quota_concurrency(self)
+        self.condition.notify_all()
 
     def leases(self):
         return [lease for member in self.members if not member._closed
@@ -98,6 +111,10 @@ class SchedulerQueue:
             restored = state_store.load()
             if restored is not None:
                 self._load_state(restored)
+
+    @property
+    def quota_group(self) -> SchedulerQuotaGroup | None:
+        return self._quota_group
 
     async def capabilities(self) -> SchedulerCapabilities:
         return SchedulerCapabilities(

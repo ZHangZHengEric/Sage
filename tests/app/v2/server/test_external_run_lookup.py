@@ -46,7 +46,7 @@ def _service(store):
         admission=SimpleNamespace(prepare=AsyncMock(return_value=SimpleNamespace(
             skills=(), enabled_skills=(), metadata={"new-admission": True}, agent_id="agent", max_steps=3,
             model_ready=True))),
-        application=SimpleNamespace(composition_hash="sha256:new-spec"),
+        application=SimpleNamespace(composition_hash="sha256:new-spec", recovery_issues=()),
         session_access=access, log_sink=NoopLogSink(),
         context_for=lambda user, **_: RequestContexts("en").for_user(user), language="en",
     )

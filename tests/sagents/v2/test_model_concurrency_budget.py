@@ -219,6 +219,36 @@ async def test_zero_queue_allows_available_slot_but_rejects_waiting():
         assert budget.active == 1
 
 
+@pytest.mark.asyncio
+async def test_live_limit_rechecks_signalled_waiters_and_drains_active_calls():
+    budget = ModelConcurrencyBudget(1)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def wait_for_model():
+        async with budget.lease():
+            entered.set()
+            await release.wait()
+
+    async with asyncio.timeout(2):
+        async with budget.lease():
+            waiter = asyncio.create_task(wait_for_model())
+            await asyncio.sleep(0)
+            budget.set_limit(2)
+            budget.set_limit(1)
+            await asyncio.sleep(0)
+            assert not entered.is_set()
+            budget.set_limit(2)
+            await entered.wait()
+            assert budget.active == 2
+            budget.set_limit(1)
+            assert budget.active == 2
+            release.set()
+            await waiter
+            assert budget.active == 1
+    assert budget.active == budget.waiting == 0
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

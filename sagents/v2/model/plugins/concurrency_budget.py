@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections import deque
 from contextlib import asynccontextmanager
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -36,7 +37,17 @@ class ModelConcurrencyBudget:
         self.waiting = 0
         self.rejected = 0
         self.timed_out = 0
-        self._slots = asyncio.Semaphore(limit)
+        self._waiters: deque[asyncio.Event] = deque()
+
+    def set_limit(self, limit: int) -> None:
+        if type(limit) is not int or limit < 1:
+            raise ValueError("model concurrency limit must be a positive integer")
+        self.limit = limit
+        self._wake_waiter()
+
+    def _wake_waiter(self) -> None:
+        if self._waiters and self.active < self.limit:
+            self._waiters[0].set()
 
     def _error(self, code, message):
         return SageV2Error(
@@ -52,35 +63,41 @@ class ModelConcurrencyBudget:
 
     @asynccontextmanager
     async def lease(self):
-        # No await between checking capacity and registering a waiter. The
-        # semaphore also reserves released slots for older waiters (FIFO).
-        if self._slots.locked():
+        # Queue head rechecks the live limit before using capacity. A limit
+        # reduction can race an already signalled waiter.
+        if self.active >= self.limit or self._waiters:
             if self.waiting >= self.max_waiting:
                 self.rejected += 1
                 raise self._error(
                     "model.queue_full", "Model request queue is full; retry later."
                 )
             self.waiting += 1
+            ready = asyncio.Event()
+            self._waiters.append(ready)
             try:
                 try:
                     async with asyncio.timeout(self.wait_timeout_seconds):
-                        await self._slots.acquire()
+                        while self._waiters[0] is not ready or self.active >= self.limit:
+                            await ready.wait()
+                            ready.clear()
                 except TimeoutError as exc:
                     self.timed_out += 1
                     raise self._error(
                         "model.queue_timeout",
                         "Model request timed out waiting for capacity; retry later.",
                     ) from exc
+                self.active += 1
             finally:
+                self._waiters.remove(ready)
                 self.waiting -= 1
+                self._wake_waiter()
         else:
-            await self._slots.acquire()
-        self.active += 1
+            self.active += 1
         try:
             yield
         finally:
             self.active -= 1
-            self._slots.release()
+            self._wake_waiter()
 
     def snapshot(self):
         return {

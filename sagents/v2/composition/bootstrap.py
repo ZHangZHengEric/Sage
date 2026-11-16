@@ -79,6 +79,7 @@ async def initialize_process(catalog):
         max_concurrent_runs_per_tenant=int(values.get("max_concurrent_runs_per_tenant", 2)),
         lease_seconds=float(values.get("lease_seconds", getattr(scheduler, "default_lease_seconds", DEFAULT_LEASE_SECONDS))),
         distributed_claims=capabilities.supports_distributed_claims,
+        restore_revisions=catalog.restore_pending,
         lease_scope_factory=LeaseFencedSessionStore(store, scheduler).lease_scope,
         preserve_runs_on_shutdown=bool(values.get("preserve_runs_on_shutdown", True)))
     services.update({"runtime.kernel": control, "session.access": access, "execution.dispatcher": dispatcher})

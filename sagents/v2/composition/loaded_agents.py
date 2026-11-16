@@ -490,9 +490,6 @@ class LoadedAgents:
             dispatcher.attach_recovery_agent(RevisionRecovery(self), replace=True)
             dispatcher.recovery_filter = lambda run: (self.store.contains(run.resolved_spec_hash)
                 and all(issue.resolved_spec_hash != run.resolved_spec_hash for issue in self.recovery_issues))
-            if not self.builder._state.manual_dispatcher_start:
-                await dispatcher.start()
-                await dispatcher.refresh_recovery()
             return handle
 
     async def prune_revisions(self, *, protected=None, suppress_errors=False):

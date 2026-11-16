@@ -48,7 +48,7 @@ class IMService:
         self._tick_lock = asyncio.Lock()
         self._last_cleanup = 0
 
-    async def start(self):
+    async def initialize(self):
         connections = await self.store.list_connections()
         try:
             self.credentials = IMCredentials.load(
@@ -96,6 +96,8 @@ class IMService:
             ExtensionScopeContext(scope=ExtensionScope.PROCESS, scope_id="server-im"),
             plan,
         )
+
+    def start_worker(self) -> None:
         self._task = asyncio.create_task(self._run(), name="server-im-recovery")
 
     def pause(self):

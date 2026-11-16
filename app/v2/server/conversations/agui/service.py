@@ -184,6 +184,17 @@ class ConversationService:
                         if text.strip():
                             payload["text"] = text
                             break
+        else:
+            issue = next((issue for issue in self.application.recovery_issues
+                          if issue.run_id == selected.run_id), None)
+            if issue is not None:
+                payload["state"] = "recovery_blocked"
+                payload["error"] = RuntimeErrorInfo(
+                    code=issue.code,
+                    category=ErrorCategory.RESOURCE_LOST,
+                    message="Recovery requires the original Agent revision.",
+                    metadata={"resolved_spec_hash": issue.resolved_spec_hash},
+                ).model_dump(mode="json")
         return payload, selected.run_id
 
     async def list_threads(self, user_id: str, *, limit=50, cursor=None, search="", agent_id=""):

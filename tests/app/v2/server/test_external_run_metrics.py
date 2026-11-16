@@ -27,7 +27,7 @@ async def test_run_metrics_excludes_queue_and_suspension(monkeypatch, timeline, 
                                provider_usage={"private": "must not leave Sage"}))),
         read_events=AsyncMock(side_effect=[events, ()]),
     )
-    selected = AsyncMock(return_value=({}, "native", None, None, "context", access, None))
+    selected = AsyncMock(return_value=({"state": "completed"}, "native", None, None, "context", access, None))
     monkeypatch.setattr(external_runs, "selected_run", selected)
     result = await external_runs.run_metrics(None, tenant_id="tenant", agent_id="agent", thread_id="thread", run_id="run")
     assert result["activeMilliseconds"] == expected
@@ -37,9 +37,13 @@ async def test_run_metrics_excludes_queue_and_suspension(monkeypatch, timeline, 
     assert access.read_events.await_args_list[1].kwargs["after_sequence"] == len(events)
 
 
-async def test_running_metrics_remain_unknown(monkeypatch):
+@pytest.mark.parametrize("status", ["running", "recovery_blocked"])
+async def test_incomplete_run_metrics_remain_unknown(monkeypatch, status):
     access = SimpleNamespace(get_run=AsyncMock(return_value=SimpleNamespace(
         state=RunState.RUNNING, created_at=datetime.now(timezone.utc))))
-    monkeypatch.setattr(external_runs, "selected_run", AsyncMock(return_value=({}, "native", None, None, "context", access, None)))
+    monkeypatch.setattr(external_runs, "selected_run", AsyncMock(return_value=(
+        {"state": status}, "native", None, None, "context", access, None,
+    )))
     result = await external_runs.run_metrics(None, tenant_id="tenant", agent_id="agent", thread_id="thread", run_id="run")
+    assert result["state"] == status
     assert result["usage"] is None and result["activeMilliseconds"] is None and result["completedAt"] is None

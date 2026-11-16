@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from app.v2.server.routers.deps import AdminDep, ConversationDep, AdminUser
+from app.v2.server.config.concurrency import RunConcurrency
+from app.v2.server.routers.deps import AdminDep, ConversationDep, AdminUser, HostDep
 from app.v2.server.routers.schemas.common import ADMIN_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.admin import (
     AdminAgentSummary, AdminModelPublic, AdminThreadPublic,
@@ -12,6 +13,24 @@ from app.v2.server.routers.schemas.identity import UserPublic
 from app.v2.server.routers.render import success
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], responses=ADMIN_ERRORS)
+
+
+class RunConcurrencyStatus(RunConcurrency):
+    hot_reload_supported: bool
+
+
+@router.get("/runtime/concurrency", response_model=ApiResponse[RunConcurrencyStatus])
+async def get_run_concurrency(_: AdminUser, host: HostDep):
+    return success(RunConcurrencyStatus(
+        **host.run_concurrency.model_dump(),
+        hot_reload_supported=host.supports_concurrency_hot_reload,
+    ))
+
+
+@router.put("/runtime/concurrency", response_model=ApiResponse[RunConcurrencyStatus])
+async def put_run_concurrency(limits: RunConcurrency, user: AdminUser, host: HostDep):
+    await host.update_run_concurrency(limits)
+    return await get_run_concurrency(user, host)
 
 
 @router.get("/users", response_model=ApiResponse[list[UserPublic]])

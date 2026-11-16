@@ -137,8 +137,11 @@ async def run_metrics(service, *, tenant_id: str, agent_id: str,
         thread_id=thread_id, run_id=run_id,
     )
     run = await access.get_run(native_id, context)
+    state = run.state.value
+    if run.state not in TERMINAL_RUN_STATES and payload["state"] == "recovery_blocked":
+        state = payload["state"]
     metrics = {"threadId": thread_id, "runId": run_id,
-               "state": run.state.value, "acceptedAt": run.created_at.isoformat(),
+               "state": state, "acceptedAt": run.created_at.isoformat(),
                "completedAt": None, "activeMilliseconds": None, "usage": None}
     if run.state not in TERMINAL_RUN_STATES:
         return metrics

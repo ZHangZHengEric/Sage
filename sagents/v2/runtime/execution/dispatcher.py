@@ -18,6 +18,7 @@ from sagents.v2.runtime.session.contracts import SessionStore
 
 if TYPE_CHECKING:
     from sagents.v2.sagent import RecoveryAgent
+    from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import SchedulerQuotaGroup
 
 from sagents.v2.contracts.commands import CancelRun
 from sagents.v2.contracts.principals import RequestContext
@@ -90,6 +91,7 @@ class LocalWorkerDispatcher:
         lease_scope_factory: Callable[[WorkerLease], AbstractAsyncContextManager[object]] | None = None,
         preserve_runs_on_shutdown: bool = True,
         distributed_claims: bool = False,
+        restore_revisions: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if max_concurrent_runs < 1 or max_concurrent_runs_per_tenant < 1:
             raise ValueError("dispatcher concurrency limits must be positive")
@@ -102,12 +104,13 @@ class LocalWorkerDispatcher:
         self.lease_scope_factory = lease_scope_factory
         self.preserve_runs_on_shutdown = preserve_runs_on_shutdown
         self.distributed_claims = distributed_claims
+        self._restore_revisions = restore_revisions
         self._supports_deferred_work = "available_at" in inspect.signature(scheduler.release).parameters
         self._requests: dict[str, _DispatchRequest] = {}
         self._run_gates: dict[str, tuple[asyncio.Lock, int]] = {}
         self._cleanup_requests: dict[str, _CleanupRequest] = {}
         self._workers: list[asyncio.Task[None]] = []
-        self._claim_policy = SchedulerClaimPolicy(
+        self._claim_policy: SchedulerClaimPolicy | None = SchedulerClaimPolicy(
             max_active_per_tenant=max_concurrent_runs_per_tenant
         )
         self.recovery_filter: Callable[[RunSnapshot], bool] | None = None
@@ -116,6 +119,29 @@ class LocalWorkerDispatcher:
         self._submissions_inflight = 0
         self._closed = False
         self._claim_error: Exception | None = None
+        quota: SchedulerQuotaGroup | None = getattr(scheduler, "quota_group", None)
+        if quota is not None and quota.live_concurrency is True:
+            # The shared queue enforces the latest limit even for a claim
+            # that began waiting before a capacity update.
+            self._claim_policy = None
+            self._apply_quota_concurrency(quota)
+            quota.dispatchers.add(self)
+
+    def _apply_quota_concurrency(self, quota: SchedulerQuotaGroup) -> None:
+        self.max_concurrent_runs = quota.max_active
+        self.max_concurrent_runs_per_tenant = quota.max_per_tenant
+        if self._workers and not self._closed and self._claim_error is None:
+            self._fill_worker_pool()
+
+    def _fill_worker_pool(self) -> None:
+        for index in range(self.max_concurrent_runs):
+            if index < len(self._workers) and not self._workers[index].done():
+                continue
+            worker = asyncio.create_task(self._worker(index), name=f"sage-worker:{index}")
+            if index < len(self._workers):
+                self._workers[index] = worker
+            else:
+                self._workers.append(worker)
 
     def attach_recovery_agent(self, agent: RecoveryAgent, *, replace: bool = False) -> None:
         """Bind the Application Agent used for interrupted and orphan WorkItems."""
@@ -137,20 +163,19 @@ class LocalWorkerDispatcher:
             raise RuntimeError("local worker dispatcher is closed")
         if self._claim_error is not None:
             raise self._claim_error
-        self._workers = [worker for worker in self._workers if not worker.done()]
-        if self._workers:
+        if any(not worker.done() for worker in self._workers):
             return
         if recover:
+            if self._restore_revisions is not None:
+                await self._restore_revisions()
             await self._restore_dispatchable_work()
-        self._workers = [
-            asyncio.create_task(self._worker(index), name=f"sage-worker:{index}")
-            for index in range(self.max_concurrent_runs)
-        ]
+        self._fill_worker_pool()
 
     async def refresh_recovery(self) -> None:
-        """Restore newly available Agent revisions under the dispatcher lock."""
+        """Re-enqueue newly available revisions for a running dispatcher."""
         async with self._lifecycle:
-            await self._restore_dispatchable_work()
+            if any(not worker.done() for worker in self._workers):
+                await self._restore_dispatchable_work()
 
     async def _restore_dispatchable_work(self) -> None:
         """Rebuild missing Scheduler entries from authoritative Run intents."""
@@ -333,7 +358,7 @@ class LocalWorkerDispatcher:
         worker_id = f"local-{index}"
         retry_delay = 0.1
         next_recovery_scan = 0.0
-        while self._claim_error is None:
+        while self._claim_error is None and index < self.max_concurrent_runs:
             try:
                 if self.distributed_claims and index == 0 and time.monotonic() >= next_recovery_scan:
                     # Repair acceptance-before-enqueue crashes without needing
