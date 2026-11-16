@@ -2,6 +2,14 @@
 
 - 中英文 `HTTP_API_REFERENCE.md` 补上运行时并发、租户数据删除和工作区文件列表/stat 路由，修复文档校验 CI。
 
+## 2026-11-16 16:20 视频经对象存储签名 URL 传给模型
+
+- Chat 与原生 Gemini 共用 `video_storage`：内联视频传私有 S3 后发签名 URL，只传保留的视频；历史视频上传失败降级为省略说明，仅当前轮失败报错。
+
+## 2026-11-16 15:45 音视频工具按模型能力暴露
+
+- 新增 `audio_input`/`video_input` 能力声明，`analyze_audio`/`analyze_video` 仅对支持的模型可见；不支持的协议把历史音视频降级为省略说明。附件上限降为 12 MiB，Gemini 超预算时音频同视频降级为引用，不再报错。
+
 ## 2026-11-16 15:30 模型流空闲超时与供应商响应 ID
 
 - 四种协议新增可选 `stream_idle_timeout_seconds`，只计上游等待时间，心跳不重置；`ModelResponse.response_id` 接受任意非空供应商 ID。

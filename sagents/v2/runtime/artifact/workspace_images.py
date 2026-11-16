@@ -18,6 +18,16 @@ _EXTENSIONS = {
     "image/gif": ".gif", "image/webp": ".webp",
 }
 _IMAGE_DIRECTORY = ".sage-model-images"
+_MEDIA_EXTENSIONS = {
+    "video/mp4": ".mp4", "video/mpeg": ".mpeg", "video/mov": ".mov",
+    "video/quicktime": ".mov", "video/avi": ".avi", "video/x-msvideo": ".avi",
+    "video/x-flv": ".flv", "video/mpg": ".mpg", "video/webm": ".webm",
+    "video/wmv": ".wmv", "video/x-ms-wmv": ".wmv", "video/3gpp": ".3gp",
+    "audio/wav": ".wav", "audio/mpeg": ".mp3", "audio/aac": ".aac",
+    "audio/aiff": ".aiff", "audio/flac": ".flac", "audio/ogg": ".ogg",
+    "audio/m4a": ".m4a", "audio/opus": ".opus",
+}
+_MEDIA_DIRECTORIES = {"video": ".sage-model-videos", "audio": ".sage-model-audio"}
 
 
 def workspace_image_path(digest: str, extension: str) -> str:
@@ -77,23 +87,54 @@ async def materialize_image_source(source: dict) -> str:
             raise ValueError("Image data is missing or has an unsupported format.")
         digest = hashlib.sha256(content).hexdigest()
         relative = workspace_image_path(digest, extension)
-        path = sandbox.filesystem.normalize_path(relative)
-        try:
-            existing = await sandbox.filesystem.read_bytes(path, **authorization("read", path=path))
-        except FileNotFoundError:
-            try:
-                await sandbox.filesystem.write_bytes(
-                    path, content, overwrite=False, **authorization("create", path=path),
-                )
-            except FileExistsError:
-                existing = await sandbox.filesystem.read_bytes(path, **authorization("read", path=path))
-            else:
-                existing = content
-        if existing != content:
-            raise ValueError("Workspace image content does not match its reference.")
+        await _store_content(sandbox, relative, content, authorization)
         return relative
     except (SageV2Error, OSError, ValueError, OverflowError) as exc:
         raise _unavailable("Could not store an image in the Run workspace.") from exc
+
+
+async def materialize_inline_media(data: str, mime_type: str) -> str | None:
+    runtime = _workspace.get()
+    directory = _MEDIA_DIRECTORIES.get(mime_type.partition("/")[0])
+    if runtime is None or directory is None:
+        return None
+    sandbox = runtime.sandbox
+
+    def authorization(operation, *, path):
+        intent = OperationIntent(
+            operation=operation, run_id=sandbox.ref.owner_run_id,
+            tool_call_id="model-media-reference", sandbox_id=sandbox.ref.sandbox_id,
+            path=path,
+        )
+        return {"intent": intent, "grant": runtime.grant_issuer.issue(
+            ref=sandbox.ref, intent=intent, allowed_operations=frozenset({operation}),
+        )}
+
+    try:
+        content = base64.b64decode(data, validate=True)
+        digest = hashlib.sha256(content).hexdigest()
+        extension = _MEDIA_EXTENSIONS.get(mime_type, ".bin")
+        relative = f"{directory}/{digest}{extension}"
+        await _store_content(sandbox, relative, content, authorization)
+    except (SageV2Error, OSError, ValueError, OverflowError):
+        return None
+    return relative
+
+
+async def _store_content(sandbox, relative, content, authorization):
+    path = sandbox.filesystem.normalize_path(relative)
+    try:
+        existing = await sandbox.filesystem.read_bytes(path, **authorization("read", path=path))
+    except FileNotFoundError:
+        try:
+            await sandbox.filesystem.write_bytes(
+                path, content, overwrite=False, **authorization("create", path=path),
+            )
+            return
+        except FileExistsError:
+            existing = await sandbox.filesystem.read_bytes(path, **authorization("read", path=path))
+    if existing != content:
+        raise ValueError("Workspace file content does not match its reference.")
 
 
 def _unavailable(message: str) -> SageV2Error:

@@ -1,4 +1,4 @@
-"""Decorator-backed V2 image context Tool."""
+"""Decorator-backed tools that attach media to the next model turn."""
 
 from __future__ import annotations
 
@@ -12,8 +12,9 @@ from PIL import Image, ImageOps
 from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import JsonBlock
+from sagents.v2.contracts.items import AudioBlock, FileBlock, JsonBlock, TextBlock
 from sagents.v2.runtime.artifact.images import snapshot_image
+from sagents.v2.runtime.artifact.media import MAX_INLINE_MEDIA_BYTES, snapshot_media
 from sagents.v2.tool import SideEffectLevel, ToolExecutionResult, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
@@ -26,6 +27,14 @@ _TARGET_IMAGE_BYTES = 4 * 1024 * 1024
 _JPEG_QUALITY = 85
 _MIN_JPEG_QUALITY = 60
 _FALLBACK_IMAGE_EDGES = (1280, 1024, 768, 512)
+_MEDIA_TYPES = {
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".aac": "audio/aac",
+    ".aiff": "audio/aiff", ".aif": "audio/aiff", ".flac": "audio/flac",
+    ".ogg": "audio/ogg", ".m4a": "audio/m4a", ".opus": "audio/opus",
+    ".mp4": "video/mp4", ".mpeg": "video/mpeg", ".mpg": "video/mpg",
+    ".mov": "video/mov", ".avi": "video/avi", ".flv": "video/x-flv",
+    ".webm": "video/webm", ".wmv": "video/wmv", ".3gp": "video/3gpp",
+}
 
 
 def _normalize_image_for_jpeg(image: Image.Image) -> Image.Image:
@@ -82,6 +91,147 @@ def compress_image_to_jpeg_bytes_for_llm(
 class MediaTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
+
+    @tool(
+        description=(
+            "Attach a workspace video file or provider-accessible URL "
+            "to the next model turn for analysis. Requires native video input."
+        ),
+        side_effect_level=SideEffectLevel.READ,
+        required_model_inputs=("video",),
+    )
+    async def analyze_video(
+        self,
+        video_path: str,
+        session_id: str,
+        invocation: ToolInvocation,
+        prompt: str | None = None,
+    ) -> ToolExecutionResult:
+        return await self._attach_media("video", video_path, prompt, invocation)
+
+    @tool(
+        description=(
+            "Attach a workspace audio file or provider-accessible URL "
+            "to the next model turn for analysis. Requires native audio input."
+        ),
+        side_effect_level=SideEffectLevel.READ,
+        required_model_inputs=("audio",),
+    )
+    async def analyze_audio(
+        self,
+        audio_path: str,
+        session_id: str,
+        invocation: ToolInvocation,
+        prompt: str | None = None,
+    ) -> ToolExecutionResult:
+        return await self._attach_media("audio", audio_path, prompt, invocation)
+
+    async def _attach_media(
+        self, kind: str, path: str, prompt: str | None, invocation: ToolInvocation
+    ) -> ToolExecutionResult:
+        path_key = f"{kind}_path"
+
+        def result(status, message, *, reason=None, followup=None):
+            data = {path_key: path}
+            if reason is not None:
+                data["reason"] = reason
+            return ToolExecutionResult(
+                tool_call_id=invocation.call.tool_call_id,
+                operation_id=invocation.call.operation_id,
+                content=(
+                    JsonBlock(
+                        value={"status": status, "message": message, "data": data}
+                    ),
+                ),
+                metadata={"native_multimodal": True, "followup_user_message": followup}
+                if followup is not None
+                else {},
+            )
+
+        capability = self.runtime.supports_multimodal_input
+        if callable(capability):
+            capability = capability(invocation.call.owner_agent_id)
+        if capability is False:
+            return result(
+                "error",
+                f"The current model does not support {kind} input.",
+                reason="multimodal_unsupported",
+            )
+
+        try:
+            parsed = urlparse(path)
+        except ValueError:
+            return result(
+                "error", f"Invalid {kind} path or URL.", reason="invalid_path"
+            )
+        remote = parsed.scheme in {"http", "https", "gs"} and bool(parsed.netloc)
+        name = PurePosixPath(parsed.path if remote else path).name
+        mime_type = _MEDIA_TYPES.get(PurePosixPath(name).suffix.lower(), "")
+        if not mime_type.startswith(kind + "/"):
+            return result(
+                "error", f"Unsupported {kind} file type.", reason="unsupported_type"
+            )
+
+        uri = path
+        size = None
+        if not remote:
+            store = self.runtime.artifact_store
+            if store is None:
+                return result(
+                    "error",
+                    "Attachment storage is unavailable.",
+                    reason="attachment_store_unavailable",
+                )
+            try:
+                stat = await self.runtime.stat(path, invocation)
+                if not stat.is_file or not 0 < stat.size <= MAX_INLINE_MEDIA_BYTES:
+                    return result(
+                        "error",
+                        "Expected a nonempty media file of at most "
+                        f"{MAX_INLINE_MEDIA_BYTES // (1024 * 1024)} MiB.",
+                        reason="invalid_size",
+                    )
+                payload = await self.runtime.read_bytes(path, invocation)
+                size = len(payload)
+                uri = await snapshot_media(store, payload, mime_type)
+            except FileNotFoundError:
+                return result(
+                    "error", f"{kind.capitalize()} file not found.", reason="not_found"
+                )
+            except (SageV2Error, OSError, ValueError):
+                return result(
+                    "error",
+                    f"Could not attach {kind} from the workspace.",
+                    reason="attachment_failed",
+                )
+
+        media = (
+            AudioBlock(uri=uri, mime_type=mime_type)
+            if kind == "audio"
+            else FileBlock(uri=uri, name=name, mime_type=mime_type, size=size)
+        )
+        guidance = TextBlock(
+            text=(prompt or "").strip() or f"Analyze the attached {kind}."
+        )
+        return result(
+            "success",
+            f"{kind.capitalize()} attached to the next model turn.",
+            followup={
+                "role": "user",
+                "content": [
+                    guidance.model_dump(mode="json"),
+                    media.model_dump(mode="json"),
+                ],
+                "metadata": {
+                    "tool_source": f"analyze_{kind}",
+                    "tool_context": True,
+                    "source_tool_call_id": invocation.call.tool_call_id,
+                    path_key: path,
+                    "hidden_from_chat": True,
+                    "sse_visible": False,
+                },
+            },
+        )
 
     def _error_result(
         self,

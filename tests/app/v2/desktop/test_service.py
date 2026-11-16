@@ -2440,7 +2440,6 @@ async def test_tool_catalog_does_not_hide_in_process_sage_mcp_tools(tmp_path: Pa
         "generate_image",
         "search_web_page",
         "search_image_from_web",
-        "analyze_video",
         "list_tasks",
         "add_task",
         "delete_task",
@@ -2453,6 +2452,7 @@ async def test_tool_catalog_does_not_hide_in_process_sage_mcp_tools(tmp_path: Pa
         "send_message_through_im",
     }
     assert expected.isdisjoint(by_name)
+    assert by_name["analyze_video"]["type"] == "basic"
     assert "file_read" in by_name
     assert by_name["file_read"]["type"] == "basic"
     assert by_name["file_read"]["category"] == "files"

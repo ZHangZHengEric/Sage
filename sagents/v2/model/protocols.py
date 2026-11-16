@@ -188,6 +188,8 @@ def create_registered_model_provider(
         supports_parallel_tool_calls=bool(declaration.parallel_tool_calls),
         supports_reasoning=bool(declaration.reasoning),
         supports_multimodal_input=bool(declaration.multimodal),
+        supports_audio_input=declaration.audio_input,
+        supports_video_input=declaration.video_input,
         supports_structured_output=bool(declaration.structured_output),
         max_input_tokens=route.limits.context_window,
         max_output_tokens=route.limits.max_output_tokens,
@@ -234,6 +236,8 @@ def create_registered_model_provider(
             reasoning_parameter_fallback=bool(
                 extra.pop("reasoning_parameter_fallback", False)
             ),
+            video_url_format=extra.pop("video_url_format", "video_url"),
+            video_storage=extra.pop("video_storage", None),
             extra_body=extra,
         )
         if capability_profile is not None:
@@ -254,12 +258,16 @@ def create_registered_model_provider(
             config = implementation.apply_capability_profile(config, capability_profile)
         return OpenAIResponsesModelProvider(config, credential, client=client)
     if protocol == BuiltinModelProtocol.GEMINI_GENERATE_CONTENT:
+        request_limits = {"max_request_bytes": extra.pop("max_request_bytes")} if "max_request_bytes" in extra else {}
         config = GeminiGenerateContentConfig(
             **common,
+            **request_limits,
             reasoning_effort=route.request.reasoning_effort,
             thinking_control=extra.pop("thinking_control", "auto"),
             thinking_budget=extra.pop("thinking_budget", None),
             include_thoughts=extra.pop("include_thoughts", True),
+            max_inline_videos=extra.pop("max_inline_videos", 10),
+            video_storage=extra.pop("video_storage", None),
             extra_body=extra,
         )
         if capability_profile is not None:

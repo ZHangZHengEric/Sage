@@ -10,13 +10,14 @@ if TYPE_CHECKING:
 from sagents.v2.runtime.extensions import CapabilityKey, ProviderSet
 
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from pydantic import SecretStr
 
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock
+from sagents.v2.contracts.items import FileBlock, ImageBlock, JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import read_provider_state
 from sagents.v2.model import (
     GeminiGenerateContentConfig,
@@ -108,6 +109,72 @@ async def test_native_stream_accepts_opaque_or_missing_response_id(response_id):
     else:
         assert response.response_id == response_id
         assert any(event.get("responseId") == response_id for event in capture.events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_workspace", [True, False])
+async def test_video_limit_preserves_newest_parts_and_original_history(
+    tmp_path, has_workspace
+):
+    from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
+    from tests.sagents.v2.test_local_workspace_sandbox_matrix import provision
+
+    old_uri = "https://example.invalid/old.mp4"
+    inline = FileBlock(
+        name="old-inline.mp4", mime_type="video/mp4", uri="data:video/mp4;base64,YWJj"
+    )
+    newest = tuple(
+        FileBlock(
+            name=f"clip-{index}.mp4",
+            mime_type="video/mp4",
+            uri=f"https://example.invalid/clip-{index}.mp4",
+        )
+        for index in range(10)
+    )
+    messages = (
+        ModelMessage(
+            role="user",
+            content=(
+                FileBlock(name="old.mp4", mime_type="video/mp4", uri=old_uri),
+                inline,
+            ),
+        ),
+        ModelMessage(role="assistant", content=(TextBlock(text="Earlier reply"),)),
+        ModelMessage(role="user", content=(TextBlock(text="Compare these"), *newest)),
+    )
+    model_request = request(messages=messages)
+    original = model_request.model_dump()
+    provider, client, captured = provider_for(
+        [event([{"text": "done"}], finish="STOP")]
+    )
+    handle = runtime = None
+    if has_workspace:
+        issuer, handle = await provision(tmp_path, process_enabled=False)
+        runtime = SimpleNamespace(sandbox=handle, grant_issuer=issuer)
+    try:
+        async with client:
+            with bind_image_workspace(runtime):
+                events = [item async for item in provider.stream(model_request)]
+    finally:
+        if handle is not None:
+            await handle.destroy()
+
+    assert events[-1].response is not None
+    contents = json.loads(captured[0].content)["contents"]
+    assert contents[0]["parts"][0] == {"text": f"[Video reference: {old_uri}]"}
+    inline_text = contents[0]["parts"][1]["text"]
+    if has_workspace:
+        path = inline_text.removeprefix("[Workspace video: ").removesuffix("]")
+        assert path.startswith(".sage-model-videos/")
+        assert (tmp_path / path).read_bytes() == b"abc"
+    else:
+        assert "omitted from this model request" in inline_text
+    assert contents[1]["parts"] == [{"text": "Earlier reply"}]
+    assert contents[2]["parts"][0] == {"text": "Compare these"}
+    assert [part["fileData"]["fileUri"] for part in contents[2]["parts"][1:]] == [
+        block.uri for block in newest
+    ]
+    assert model_request.model_dump() == original
 
 
 @pytest.mark.asyncio
@@ -640,3 +707,117 @@ async def test_failed_stream_preserves_usage_and_progress(error_frame):
         assert failure["terminal_received"] is False
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_video_byte_budget_downgrades_oldest_below_count_limit(tmp_path):
+    import base64
+    from sagents.v2.model.protocols import create_registered_model_provider
+    from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
+    from tests.sagents.v2.test_local_workspace_sandbox_matrix import provision
+
+    originals = [bytes([index]) * 512 for index in (1, 2, 3)]
+    videos = tuple(
+        FileBlock(
+            name=f"clip-{index}.mp4",
+            mime_type="video/mp4",
+            uri="data:video/mp4;base64," + base64.b64encode(data).decode(),
+        )
+        for index, data in enumerate(originals)
+    )
+    model_request = request(
+        messages=(
+            ModelMessage(role="system", content=(TextBlock(text="场景说明" * 20),)),
+            ModelMessage(role="user", content=(TextBlock(text="Compare"), *videos)),
+        )
+    )
+    _, client, captured = provider_for([event([{"text": "done"}], finish="STOP")])
+    provider = create_registered_model_provider(
+        ModelRoute.model_validate(
+            {
+                "provider": "gemini-generate-content",
+                "model": "gemini-test",
+                "request": {"extra": {"max_request_bytes": 1_500}},
+                "capabilities": {"multimodal": True},
+            }
+        ),
+        client=client,
+    )
+    issuer, handle = await provision(tmp_path, process_enabled=False)
+    try:
+        async with client:
+            with bind_image_workspace(
+                SimpleNamespace(sandbox=handle, grant_issuer=issuer)
+            ):
+                events = [item async for item in provider.stream(model_request)]
+    finally:
+        await handle.destroy()
+    assert events[-1].response is not None
+    assert len(captured[0].content) <= 1_500
+    body = json.loads(captured[0].content)
+    assert "max_request_bytes" not in body
+    parts = body["contents"][0]["parts"]
+    assert parts[0] == {"text": "Compare"}
+    for part, original in zip(parts[1:3], originals[:2], strict=True):
+        path = part["text"].removeprefix("[Workspace video: ").removesuffix("]")
+        assert path.startswith(".sage-model-videos/")
+        assert (tmp_path / path).read_bytes() == original
+    assert base64.b64decode(parts[3]["inlineData"]["data"]) == originals[-1]
+    assert model_request.messages[-1].content[1:] == videos
+
+
+@pytest.mark.asyncio
+async def test_request_too_large_rejected_before_sending_when_no_videos_can_be_trimmed():
+    provider, client, captured = provider_for([], max_request_bytes=300)
+    model_request = request(
+        messages=(ModelMessage(role="user", content=(TextBlock(text="长文本" * 100),)),)
+    )
+    async with client:
+        with pytest.raises(SageV2Error) as caught:
+            _ = [item async for item in provider.stream(model_request)]
+    assert caught.value.info.code == "model.request_too_large"
+    assert caught.value.info.metadata["request_bytes"] > 300
+    assert not captured
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_workspace", [True, False])
+async def test_byte_budget_downgrades_inline_audio_instead_of_failing(
+    tmp_path, has_workspace
+):
+    import base64
+    from sagents.v2.contracts.items import AudioBlock
+    from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
+    from tests.sagents.v2.test_local_workspace_sandbox_matrix import provision
+
+    original = b"\x01" * 512
+    audio = AudioBlock(
+        uri="data:audio/wav;base64," + base64.b64encode(original).decode(),
+        mime_type="audio/wav",
+    )
+    model_request = request(
+        messages=(ModelMessage(role="user", content=(TextBlock(text="Listen"), audio)),)
+    )
+    provider, client, captured = provider_for(
+        [event([{"text": "done"}], finish="STOP")], max_request_bytes=500
+    )
+    handle = runtime = None
+    if has_workspace:
+        issuer, handle = await provision(tmp_path, process_enabled=False)
+        runtime = SimpleNamespace(sandbox=handle, grant_issuer=issuer)
+    try:
+        async with client:
+            with bind_image_workspace(runtime):
+                events = [item async for item in provider.stream(model_request)]
+    finally:
+        if handle is not None:
+            await handle.destroy()
+
+    assert events[-1].response is not None
+    text = json.loads(captured[0].content)["contents"][0]["parts"][1]["text"]
+    if has_workspace:
+        path = text.removeprefix("[Workspace audio: ").removesuffix("]")
+        assert path.startswith(".sage-model-audio/") and path.endswith(".wav")
+        assert (tmp_path / path).read_bytes() == original
+    else:
+        assert text == "[Audio omitted from this model request because of the request limits.]"

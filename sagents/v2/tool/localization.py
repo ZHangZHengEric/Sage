@@ -111,6 +111,16 @@ _TOOL_DESCRIPTIONS: dict[str, ToolText] = {
         "Attach an image to the next multimodal model turn so the Agent can inspect it natively.",
         "Anexar uma imagem ao próximo turno multimodal para análise nativa pelo Agent.",
     ),
+    "analyze_audio": _text(
+        "将工作区音频文件或模型供应商可读取的 URL 加入下一轮上下文。模型须支持原生音频输入。",
+        "Attach a workspace audio file or provider-accessible URL to the next turn. Requires native audio input.",
+        "Anexar um arquivo de áudio do workspace ou uma URL acessível ao provedor ao próximo turno. Requer entrada nativa de áudio.",
+    ),
+    "analyze_video": _text(
+        "将工作区视频文件或模型供应商可读取的 URL 加入下一轮上下文。模型须支持原生视频输入。",
+        "Attach a workspace video file or provider-accessible URL to the next turn. Requires native video input.",
+        "Anexar um arquivo de vídeo do workspace ou uma URL acessível ao provedor ao próximo turno. Requer entrada nativa de vídeo.",
+    ),
     "read_lints": _text(
         "检查 HTML、CSS（含内联样式）语法，并运行已安装的 Python、JavaScript/TypeScript 检查器。仅 passed=true 表示所有检查完成且无诊断；未完成或不可用不是通过。",
         "Check HTML/CSS syntax including inline CSS and run installed Python/JavaScript/TypeScript linters. Only passed=true confirms complete checks with no diagnostics; incomplete checks are not passes.",
@@ -370,10 +380,20 @@ _FIELD_DESCRIPTIONS: dict[str, ToolText] = {
         "Image virtual path or HTTP/HTTPS URL",
         "Caminho virtual ou URL HTTP/HTTPS da imagem",
     ),
+    "audio_path": _text(
+        "工作区音频路径或模型供应商可读取的音频 URL",
+        "Workspace audio path or provider-accessible audio URL",
+        "Caminho de áudio no workspace ou URL de áudio acessível ao provedor",
+    ),
+    "video_path": _text(
+        "工作区视频路径或模型供应商可读取的视频 URL",
+        "Workspace video path or provider-accessible video URL",
+        "Caminho de vídeo no workspace ou URL de vídeo acessível ao provedor",
+    ),
     "prompt": _text(
-        "指导模型如何观察图片的可选提示词",
-        "Optional prompt guiding how the model should inspect the image",
-        "Prompt opcional para orientar a análise da imagem",
+        "指导模型如何分析素材的可选提示词",
+        "Optional prompt guiding how the model should analyze the media",
+        "Prompt opcional para orientar a análise da mídia",
     ),
     "paths": _text(
         "要检查的文件虚拟路径列表",

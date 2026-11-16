@@ -44,6 +44,7 @@ from sagents.v2.agent.step_request import (
     AgentStepRequestBuilder,
     DefaultAgentStepRequestBuilder,
     tools_for_invocation_mode,
+    tools_for_model_inputs,
 )
 from sagents.v2.context import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.system_context import with_session_context
@@ -127,6 +128,8 @@ from sagents.v2.contracts.interactions import (
     InteractionType,
 )
 from sagents.v2.contracts.items import (
+    AudioBlock,
+    FileBlock,
     ImageBlock,
     ItemSnapshot,
     ItemStatus,
@@ -296,6 +299,7 @@ class AgentLoopEngine:
                 tool_catalog=self.tool_catalog,
                 tool_selection_policy=self.tool_selection_policy,
                 context_budget=getattr(self.context_assembler, "budget", None),
+                model=model,
             )
         )
         self.ledger_rebuilder = ledger_rebuilder or SessionHistoryLedgerBuilder(
@@ -522,6 +526,11 @@ class AgentLoopEngine:
         catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
         catalog_tools = tools_for_invocation_mode(
             catalog_tools, command.invocation_mode
+        )
+        catalog_tools = await tools_for_model_inputs(
+            catalog_tools,
+            self.model,
+            command.config.model_bindings.get("primary", "primary"),
         )
         await self.tool_selection_policy.prepare(
             ToolSelectionPrepareContext(
@@ -5352,6 +5361,13 @@ class AgentLoopEngine:
                         alt=block.get("alt"),
                     )
                 )
+            elif kind == "audio" and block.get("uri") and block.get("mime_type"):
+                blocks.append(AudioBlock(uri=block["uri"], mime_type=block["mime_type"]))
+            elif kind == "file" and block.get("uri") and block.get("name"):
+                blocks.append(FileBlock(
+                    uri=block["uri"], name=block["name"], mime_type=block.get("mime_type"),
+                    size=block.get("size"),
+                ))
         if not blocks:
             return ()
         metadata = raw.get("metadata")

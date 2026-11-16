@@ -213,3 +213,156 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         assert cast(ImageBlock, restored_messages[0].content[0]).uri == images[0].uri
     finally:
         await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path):
+    import base64
+    import json
+
+    from sagents.v2.model import (
+        GeminiGenerateContentConfig,
+        GeminiGenerateContentModelProvider,
+    )
+    from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    # The codec is handled upstream. The test checks preservation and wire placement.
+    (workspace / "speech.wav").write_bytes(b"audio fixture")
+    (workspace / "clip.mp4").write_bytes(b"video fixture")
+    tools = ("analyze_audio", "analyze_video")
+    calls = (
+        ModelToolCall(
+            tool_call_id="audio_call",
+            name="analyze_audio",
+            arguments={"audio_path": "speech.wav", "prompt": "Transcribe"},
+        ),
+        ModelToolCall(
+            tool_call_id="video_call",
+            name="analyze_video",
+            arguments={"video_path": "clip.mp4", "prompt": "Describe"},
+        ),
+    )
+    model = ScriptedModelProvider(
+        tuple(
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response),
+                )
+            )
+            for response in (
+                ModelResponse(
+                    response_id="attach", finish_reason="tool_calls", tool_calls=calls
+                ),
+                ModelResponse(response_id="done", finish_reason="stop", text="done"),
+            )
+        ),
+        capabilities=FULL_MODEL_CAPABILITIES.model_copy(
+            update={"supports_audio_input": True, "supports_video_input": True}
+        ),
+    )
+    package = BuiltinPackageFactory.create("assistant", package_id="test.durable-media")
+    agent_id = package.entrypoint.agent
+    package = package.model_copy(
+        update={
+            "agents": {
+                agent_id: package.agents[agent_id].model_copy(update={"tools": tools})
+            },
+            "runtime": package.runtime.model_copy(
+                update={
+                    "capabilities": {
+                        **package.runtime.capabilities,
+                        "tool.provider": CapabilitySelection(
+                            plugin="sage.tool.official", name="official"
+                        ),
+                        "tool.selection-policy": CapabilitySelection(
+                            plugin="sage.tool-selection.direct"
+                        ),
+                        "agent.continuation-policy": CapabilitySelection(
+                            plugin="sage.agent.continuation.deterministic"
+                        ),
+                        "execution.binding": CapabilitySelection(
+                            plugin="sage.execution.binding.local-workspace",
+                            config={
+                                "workspace": str(workspace),
+                                "policy": {"process": {"enabled": False}},
+                            },
+                        ),
+                    }
+                }
+            ),
+        }
+    )
+    application = await build_registered_package(
+        tmp_path / "sessions", models=TEST_MODELS, model=model, package=package
+    )
+    try:
+        agent = application.loaded_agents[-1]
+        entrypoint = cast(ApplicationEntrypoint, application.entrypoint())
+        context = RequestContext(
+            actor=ActorRef(
+                principal_id="owner",
+                principal_type=PrincipalType.USER,
+                tenant_id="tenant",
+            )
+        )
+        stream = await entrypoint.run_stream(
+            StartRun(
+                agent_id=agent.id,
+                input=(
+                    InputItem(
+                        role="user", content=(TextBlock(text="Analyze the media"),)
+                    ),
+                ),
+                resolved_spec_hash=agent.composition_hash,
+                idempotency_key="media-run",
+            ),
+            context,
+            agent=agent,
+        )
+        run = await stream.wait()
+        assert run.state == RunState.COMPLETED
+        assert set(tools) <= {tool.name for tool in model.requests[0].tools}
+        next_request = model.requests[-1]
+        assert [message.role for message in next_request.messages[-4:]] == [
+            "tool",
+            "tool",
+            "user",
+            "user",
+        ]
+        assert all(
+            message.metadata["tool_context"] for message in next_request.messages[-2:]
+        )
+
+        gemini = GeminiGenerateContentModelProvider(
+            GeminiGenerateContentConfig(
+                model="gemini-test", capabilities=FULL_MODEL_CAPABILITIES
+            ),
+            client=object(),
+        )
+        user_content = gemini.diagnostic_request(next_request)["contents"][-1]
+        assert user_content["role"] == "user"
+        parts = user_content["parts"]
+        assert [part["functionResponse"]["name"] for part in parts[:2]] == list(tools)
+        assert [{"text": "Transcribe"}, {"text": "Describe"}] == parts[2::2]
+        assert [part["inlineData"]["mimeType"] for part in parts[3::2]] == [
+            "audio/wav",
+            "video/mp4",
+        ]
+        assert [
+            base64.b64decode(part["inlineData"]["data"]) for part in parts[3::2]
+        ] == [b"audio fixture", b"video fixture"]
+        serialized = json.dumps(
+            [
+                item.model_dump(mode="json")
+                for item in await entrypoint.runtime.session_store.read_events(
+                    run.run_id
+                )
+            ]
+        )
+        assert serialized.count("sage-media:") >= 2
+        assert "data:audio" not in serialized
+        assert "data:video" not in serialized
+    finally:
+        await application.close()

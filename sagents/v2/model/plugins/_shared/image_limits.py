@@ -177,7 +177,7 @@ def _reference_block(image, text_type, path):
 
 async def limit_openai_images(
     payload, config, *, responses: bool, original_sources=None, retry_below=None,
-    already_compressed=False,
+    already_compressed=False, excluded_image_ids=(),
 ) -> int:
     field, image_type, text_type = (
         ("input", "input_image", "input_text") if responses
@@ -190,6 +190,7 @@ async def limit_openai_images(
         if isinstance(message.get(key), list)
         for part in message[key]
         if isinstance(part, dict) and part.get("type") == image_type
+        and id(part) not in excluded_image_ids
     ]
     body = _openai_request_body(payload)
     limit = config.max_request_bytes
@@ -239,13 +240,16 @@ async def limit_openai_images(
     return size
 
 
-async def retry_openai_image_payload(payload, config, *, responses, original_sources, rejected_bytes, error):
+async def retry_openai_image_payload(
+    payload, config, *, responses, original_sources, rejected_bytes, error,
+    excluded_image_ids=(),
+):
     """Reserve at most one retry and only when the request actually shrank."""
     from sagents.v2.model.recovery_scope import reserve_additional_request
 
     smaller_bytes = await limit_openai_images(
         payload, config, responses=responses, original_sources=original_sources,
-        retry_below=rejected_bytes,
+        retry_below=rejected_bytes, excluded_image_ids=excluded_image_ids,
     )
     if smaller_bytes >= rejected_bytes:
         return None

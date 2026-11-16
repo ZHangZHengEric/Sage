@@ -22,6 +22,7 @@ from sagents.v2.model.contracts import (
     ModelResponse,
     ModelToolDefinition,
 )
+from sagents.v2.model.provider import ModelProvider
 from sagents.v2.tool.contracts import ToolDefinition
 from sagents.v2.tool.localization import localize_tool_definition
 from sagents.v2.tool.provider import ToolCatalog
@@ -63,11 +64,13 @@ class DefaultAgentStepRequestBuilder:
         tool_catalog: ToolCatalog,
         tool_selection_policy: ToolSelectionPolicy,
         context_budget: ContextBudget | None = None,
+        model: ModelProvider | None = None,
     ) -> None:
         self.context_assembler = context_assembler
         self.tool_catalog = tool_catalog
         self.tool_selection_policy = tool_selection_policy
         self.context_budget = context_budget
+        self.model = model
 
     async def prepare(
         self,
@@ -83,6 +86,10 @@ class DefaultAgentStepRequestBuilder:
         catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
         catalog_tools = tools_for_invocation_mode(
             catalog_tools, command.invocation_mode
+        )
+        model_binding = command.config.model_bindings.get("primary", "primary")
+        catalog_tools = await tools_for_model_inputs(
+            catalog_tools, self.model, model_binding
         )
         window = getattr(self.context_assembler, "windowed_ledger", None)
         selection = self.tool_selection_policy.select(
@@ -131,7 +138,7 @@ class DefaultAgentStepRequestBuilder:
         request = ModelRequest(
             request_id=new_id("model_request"),
             run_id=run_id,
-            model_binding=command.config.model_bindings.get("primary", "primary"),
+            model_binding=model_binding,
             messages=prepared_messages,
             tools=request_tools,
             max_output_tokens=(
@@ -248,9 +255,38 @@ def tools_for_invocation_mode(
     )
 
 
+async def tools_for_model_inputs(
+    tools: tuple[ToolDefinition, ...],
+    model: ModelProvider | None,
+    model_binding: str,
+) -> tuple[ToolDefinition, ...]:
+    """Hide Tools whose required media inputs the bound model cannot accept."""
+
+    if model is None or not any(tool.required_model_inputs for tool in tools):
+        return tools
+    try:
+        capabilities = await model.capabilities(model_binding)
+    except Exception:
+        # Tool projection must not fail the step; hide inputs we cannot confirm.
+        accepted: set[str] = set()
+    else:
+        accepted = {
+            kind
+            for kind, value in (
+                ("audio", capabilities.supports_audio_input),
+                ("video", capabilities.supports_video_input),
+            )
+            if value is True
+        }
+    return tuple(
+        tool for tool in tools if accepted.issuperset(tool.required_model_inputs)
+    )
+
+
 __all__ = [
     "AgentStepRequestBuilder",
     "DefaultAgentStepRequestBuilder",
     "PreparedAgentStep",
     "tools_for_invocation_mode",
+    "tools_for_model_inputs",
 ]

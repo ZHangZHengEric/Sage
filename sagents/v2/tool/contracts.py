@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -79,6 +79,8 @@ class ToolDefinition(StrictModel):
     # Ordinary write tools remain forbidden in Plan mode even after approval.
     plan_safe: bool = False
     required_scopes: tuple[Identifier, ...] = ()
+    # Hidden from the model when the bound model cannot accept these inputs.
+    required_model_inputs: tuple[Literal["audio", "video"], ...] = ()
 
 
 class ToolCall(StrictModel):

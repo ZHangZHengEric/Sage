@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Mapping
 from typing import cast, Any, Literal
 
 from openai import AsyncOpenAI
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.model.contracts import (
@@ -38,7 +38,6 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.contracts.items import (
-    AudioBlock,
     FileBlock,
     ImageBlock,
     JsonBlock,
@@ -51,7 +50,21 @@ from sagents.v2.contracts.provider_state import (
     make_provider_state,
     read_provider_state,
 )
+from sagents.v2.model.plugins._shared.media import (
+    accepts_media,
+    media_kind,
+    omitted_media_text,
+    resolve_media_capabilities,
+)
 from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
+from sagents.v2.model.plugins._shared.video_storage import (
+    STORAGE_OMITTED_TEXT,
+    S3VideoStorageConfig,
+    current_turn_start,
+    publish_videos,
+    redact_error_info,
+    redact_signed_urls,
+)
 from sagents.v2.model.plugins._shared.wire import (
     parse_tool_arguments,
     provider_error,
@@ -79,6 +92,7 @@ _HOST_OWNED_REQUEST_FIELDS = frozenset(
         "response_format",
     }
 )
+_AUDIO_FORMATS = {"mpeg": "mp3", "x-wav": "wav", "wave": "wav", "x-m4a": "m4a"}
 
 
 def default_chat_completion_token_field(
@@ -116,6 +130,14 @@ class OpenAICompatibleConfig(StrictModel):
     extra_body: dict[str, Any] = Field(default_factory=dict)
     reasoning_parameter_fallback: bool = False
     image_detail_mode: Literal["include", "omit"] = "include"
+    video_url_format: Literal["video_url", "image_url"] = "video_url"
+    video_storage: S3VideoStorageConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_video_storage(self):
+        if self.video_storage is not None and self.video_url_format != "image_url":
+            raise ValueError("video_storage requires video_url_format=image_url")
+        return self
 
 
 class OpenAICompatibleModelProvider:
@@ -193,7 +215,13 @@ class OpenAICompatibleModelProvider:
         return self._resolved_max_output_tokens_field
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self.config.capabilities
+        return self._effective_capabilities()
+
+    def _effective_capabilities(self) -> ModelCapabilities:
+        # Audio/video support depends on the model behind the gateway.
+        return resolve_media_capabilities(
+            self.config.capabilities, native=True, default=False
+        )
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
@@ -206,7 +234,7 @@ class OpenAICompatibleModelProvider:
         )
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
-        """Return the exact non-secret payload passed to the OpenAI SDK."""
+        """Build the payload template before upload and request sizing."""
         kwargs: dict[str, Any] = {
             "model": self.config.model,
             "messages": [self._message(message) for message in request.messages],
@@ -317,9 +345,51 @@ class OpenAICompatibleModelProvider:
 
         self._validate_request(request)
         kwargs = self.diagnostic_request(request)
+        video_parts = {}
+        current_videos = set()
+        if self.config.video_url_format == "image_url":
+            turn_start = current_turn_start(
+                [message.role for message in request.messages], "assistant"
+            )
+            for index, (message, wire) in enumerate(
+                zip(request.messages, kwargs["messages"], strict=True)
+            ):
+                parts = wire["content"]
+                if not isinstance(parts, list):
+                    continue
+                for block, part in zip(message.content, parts, strict=True):
+                    if part["type"] == "image_url" and media_kind(block) == "video":
+                        video_parts[id(part)] = (part, block.mime_type)
+                        if index >= turn_start:
+                            current_videos.add(part["image_url"]["url"])
+        signed_urls = frozenset()
+        if self.config.video_storage is not None:
+            inline_videos = {
+                part["image_url"]["url"]: mime_type
+                for part, mime_type in video_parts.values()
+                if part["image_url"]["url"].startswith("data:")
+            }
+            signed = await publish_videos(
+                self.config.video_storage, inline_videos, required=current_videos
+            )
+            signed_urls = frozenset(signed.values())
+            omitted = 0
+            for part, _ in video_parts.values():
+                url = part["image_url"]["url"]
+                if url in signed:
+                    part["image_url"]["url"] = signed[url]
+                elif url in inline_videos:
+                    part.clear()
+                    part.update(type="text", text=STORAGE_OMITTED_TEXT)
+                    omitted += 1
+            if omitted:
+                record_wire_event(
+                    {"diagnostic_event": "video_storage_omitted", "videos": omitted}
+                )
         original_sources = {}
         request_bytes = await limit_openai_images(
             kwargs, self.config, responses=False, original_sources=original_sources,
+            excluded_image_ids=video_parts,
         )
 
         upstream = None
@@ -344,6 +414,7 @@ class OpenAICompatibleModelProvider:
         compatibility_fallback: dict[str, Any] | None = None
         def stream_failure(error):
             observed_usage = usage
+            error = redact_error_info(error, signed_urls)
             return SageV2Error(annotate_stream_failure(
                 error.model_copy(update={"metadata": {
                     **error.metadata, "request_bytes": request_bytes,
@@ -361,6 +432,7 @@ class OpenAICompatibleModelProvider:
                 smaller = await retry_openai_image_payload(
                     current, self.config, responses=False, original_sources=original_sources,
                     rejected_bytes=request_bytes, error=provider_error(exc).info,
+                    excluded_image_ids=video_parts,
                 )
                 if smaller is None:
                     return False
@@ -372,14 +444,19 @@ class OpenAICompatibleModelProvider:
                 request_bytes = await limit_openai_images(
                     current, self.config, responses=False, original_sources=original_sources,
                     already_compressed=True,
+                    excluded_image_ids=video_parts,
                 )
 
             upstream, compatibility_fallback = await self._create_with_compatibility_negotiation(
                 kwargs, allow_negotiation=allow_negotiation,
                 retry_images=retry_images, prepare_attempt=prepare_attempt,
+                signed_video_urls=signed_urls,
             )
             async for chunk in idle.iterate(upstream):
-                record_wire_event(chunk)
+                record_wire_event(
+                    redact_signed_urls(wire_json_value(chunk), signed_urls)
+                    if signed_urls else chunk
+                )
                 failure = wire_value(chunk, "error")
                 if failure:
                     raise ProviderStreamFailure(
@@ -505,7 +582,10 @@ class OpenAICompatibleModelProvider:
         except SageV2Error as exc:
             raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info) from exc
+            info = provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info
+            if signed_urls:
+                raise stream_failure(info) from None
+            raise stream_failure(info) from exc
         finally:
             if upstream is not None:
                 closer = getattr(upstream, "close", None) or getattr(
@@ -588,6 +668,7 @@ class OpenAICompatibleModelProvider:
         self,
         kwargs: dict[str, Any],
         *, allow_negotiation: bool = True, retry_images=None, prepare_attempt=None,
+        signed_video_urls=frozenset(),
     ) -> tuple[Any, dict[str, Any] | None]:
         """Create one stream with bounded pre-stream dialect negotiation."""
 
@@ -603,11 +684,14 @@ class OpenAICompatibleModelProvider:
                 if prepare_attempt is not None:
                     await prepare_attempt(current)
             try:
+                diagnostic_payload = (
+                    redact_signed_urls(current, signed_video_urls) if signed_video_urls else current
+                )
                 await record_wire_request(
-                    current, model=self.config.model, provider=self.config.provider_id,
+                    diagnostic_payload, model=self.config.model, provider=self.config.provider_id,
                 )
                 record_wire_event(
-                    {"diagnostic_event": "request_attempt", "payload": current}
+                    {"diagnostic_event": "request_attempt", "payload": diagnostic_payload}
                 )
                 upstream = await self._client.chat.completions.create(**current)
                 self._learn_output_token_field(current)
@@ -625,7 +709,10 @@ class OpenAICompatibleModelProvider:
                 record_wire_event(
                     {
                         "diagnostic_event": "request_error",
-                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                        "error": {
+                            "type": type(exc).__name__,
+                            "message": redact_signed_urls(str(exc), signed_video_urls),
+                        },
                     }
                 )
                 if not allow_negotiation:
@@ -948,7 +1035,7 @@ class OpenAICompatibleModelProvider:
     def _validate_request(self, request: ModelRequest) -> None:
         capabilities = self.config.capabilities
         if not capabilities.supports_multimodal_input and any(
-            isinstance(block, (ImageBlock, AudioBlock))
+            isinstance(block, ImageBlock)
             for message in request.messages
             for block in message.content
         ):
@@ -1080,8 +1167,24 @@ class OpenAICompatibleModelProvider:
                 "type": "image_url",
                 "image_url": image_url,
             }
-        if isinstance(block, AudioBlock):
-            return {"type": "input_audio", "input_audio": {"data": block.uri}}
+        kind = media_kind(block)
+        if kind is not None:
+            if not accepts_media(self._effective_capabilities(), kind):
+                return {"type": "text", "text": omitted_media_text(kind)}
+            if kind == "video":
+                field = self.config.video_url_format
+                return {"type": field, field: {"url": block.uri}}
+            data = block.uri
+            mime_type = block.mime_type or ""
+            if data.startswith("data:") and ";base64," in data:
+                header, data = data.split(",", 1)
+                mime_type = header[5:].split(";", 1)[0] or mime_type
+            subtype = mime_type.partition("/")[2].lower()
+            audio_format = _AUDIO_FORMATS.get(subtype, subtype)
+            return {
+                "type": "input_audio",
+                "input_audio": {"data": data, "format": audio_format},
+            }
         if isinstance(block, FileBlock):
             return {"type": "file", "file": {"file_id": block.uri}}
         if isinstance(block, JsonBlock):
