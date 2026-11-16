@@ -78,6 +78,13 @@ MCP 调用默认时限为 7200 秒（2 小时），可通过每个服务的 `cal
 使用 Parallel Search MCP，在不提供 Parallel API Key 的情况下，经 v2 桥接发现并调用
 网页搜索和页面抓取工具。示例由宿主显式调用；接入 Agent 时，请按上面的授权步骤配置。
 
+## 免 Key 的 Keenable 搜索示例
+
+[Keenable 示例](../../examples/v2/KEENABLE_SEARCH.md)以同样方式通过 Streamable HTTP
+使用 Keenable 的 MCP 服务：未设置 `KEENABLE_API_KEY` 时使用公共端点且不发送任何凭据；
+设置后改用带 `X-API-Key` 请求头的密钥端点。该示例同样由宿主显式调用。示例页面说明了
+会发送到托管服务的内容，并链接了该服务的速率限制与隐私说明。
+
 ### 嵌入式宿主可选的会话复用
 
 宿主可以显式将 `McpSessionPool` 注入桥接层的 `session_factory`。

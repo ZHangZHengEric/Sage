@@ -86,6 +86,14 @@ Parallel Search MCP over Streamable HTTP to discover and execute web search and
 page fetch through the v2 bridge without a Parallel API key. It demonstrates
 explicit host-side calls; see the authorization steps above when wiring an Agent.
 
+## Keyless Keenable search example
+
+The [Keenable example](../../examples/v2/KEENABLE_SEARCH.md) uses Keenable's MCP
+server over Streamable HTTP the same way: the public endpoint without credentials,
+or the keyed endpoint with an `X-API-Key` header when `KEENABLE_API_KEY` is set.
+It is also an explicit host-side call demo. Its page lists what is sent to the
+hosted service and links the service's rate limits and privacy information.
+
 ### Optional session reuse for embedded hosts
 
 Hosts can explicitly inject `McpSessionPool` as the bridge's `session_factory`.
