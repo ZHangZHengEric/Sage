@@ -6,6 +6,7 @@ from typing import Literal
 
 from sagents.v2.contracts.items import AudioBlock, FileBlock
 from sagents.v2.model.contracts import ModelCapabilities
+from sagents.v2.runtime.artifact.workspace_images import materialize_inline_media
 
 MediaKind = Literal["audio", "video"]
 
@@ -35,6 +36,19 @@ def omitted_media_text(kind: MediaKind) -> str:
         f"[{kind.capitalize()} attachment omitted: "
         f"the current model does not accept {kind} input.]"
     )
+
+
+async def media_reference_text(
+    kind: MediaKind, mime_type: str, *, data: str | None = None, uri: str | None = None
+) -> str:
+    """Replace media that does not fit the request with a short text reference."""
+    label = kind.capitalize()
+    if data is None:
+        return f"[{label} reference: {uri}]"
+    path = await materialize_inline_media(data, mime_type.lower())
+    if path:
+        return f"[Workspace {kind}: {path}]"
+    return f"[{label} omitted from this model request because of the request limits.]"
 
 
 def resolve_media_capabilities(

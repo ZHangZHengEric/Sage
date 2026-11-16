@@ -238,6 +238,7 @@ def create_registered_model_provider(
             ),
             video_url_format=extra.pop("video_url_format", "video_url"),
             video_storage=extra.pop("video_storage", None),
+            max_inline_videos=extra.pop("max_inline_videos", 10),
             extra_body=extra,
         )
         if capability_profile is not None:

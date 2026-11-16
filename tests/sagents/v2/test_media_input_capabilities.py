@@ -273,6 +273,115 @@ async def test_chat_video_storage_publishes_local_media_and_keeps_each_prompt(mo
     assert "first.mp4?[redacted]" in captured
 
 
+def _chat_media_provider(extra, sent):
+    async def create(**kwargs):
+        sent.append(kwargs)
+
+        async def chunks():
+            yield {"id": "_test", "choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    return create_registered_model_provider(
+        ModelRoute.model_validate({
+            "provider": "openai-chat-completions",
+            "base_url": "https://gw.example/v1",
+            "model": "gemini-4-argon",
+            "capabilities": {"multimodal": True, "video_input": True, "audio_input": True},
+            "request": {"extra": extra},
+        }),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+    )
+
+
+async def test_chat_video_storage_skips_videos_evicted_by_the_inline_cap(monkeypatch):
+    import base64
+
+    from sagents.v2.model.plugins import openai_compatible
+
+    videos = [
+        VIDEO.model_copy(update={
+            "uri": "data:video/mp4;base64," + base64.b64encode(f"clip-{index}".encode()).decode()
+        })
+        for index in range(3)
+    ]
+
+    async def publish(config, inline, *, required=()):
+        if videos[0].uri in inline:
+            raise AssertionError("evicted video must not be uploaded")
+        return {uri: f"https://storage.example/{index}.mp4?signature=s" for index, uri in enumerate(inline)}
+
+    monkeypatch.setattr(openai_compatible, "publish_videos", publish)
+    sent = []
+    provider = _chat_media_provider({
+        "video_url_format": "image_url",
+        "video_storage": {"bucket": "private-video"},
+        "max_inline_videos": 2,
+        "max_inline_images": 0,
+    }, sent)
+    request = _request().model_copy(update={"messages": (
+        ModelMessage(role="user", content=(TextBlock(text="Compare"), *videos)),
+    )})
+
+    events = [event async for event in provider.stream(request)]
+
+    assert events[-1].kind == ModelEventKind.COMPLETED
+    parts = sent[0]["messages"][0]["content"]
+    assert parts[1]["type"] == "text" and parts[1]["text"].startswith("[Video ")
+    assert [part["image_url"]["url"] for part in parts[2:]] == [
+        "https://storage.example/0.mp4?signature=s",
+        "https://storage.example/1.mp4?signature=s",
+    ]
+
+
+async def test_chat_request_budget_turns_history_audio_into_references():
+    import base64
+
+    clip = base64.b64encode(b"\0" * 150_000).decode()
+    history = AudioBlock(uri=f"data:audio/wav;base64,{clip}", mime_type="audio/wav")
+    current = AudioBlock(uri=f"data:audio/mpeg;base64,{clip}", mime_type="audio/mpeg")
+    sent = []
+
+    async def create(**kwargs):
+        sent.append(kwargs)
+
+        async def chunks():
+            yield {"id": "_test", "choices": [{"delta": {"content": "{}"}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    provider = OpenAIChatCompletionsModelProvider(
+        OpenAIChatCompletionsConfig(
+            base_url="https://gw.invalid/v1",
+            model="gemini-4-argon",
+            capabilities=_caps(supports_audio_input=True),
+            max_request_bytes=300_000,
+            invocation_strategy={"structured_output_format": "json_object"},
+        ),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+    )
+    request = _request().model_copy(update={
+        "response_schema": {"type": "object"},
+        "messages": (
+            ModelMessage(role="user", content=(TextBlock(text="First"), history)),
+            ModelMessage(role="assistant", content=(TextBlock(text="{}"),)),
+            ModelMessage(role="user", content=(TextBlock(text="Second"), current)),
+        ),
+    })
+
+    events = [event async for event in provider.stream(request)]
+
+    assert events[-1].kind == ModelEventKind.COMPLETED
+    assert len(sent[0]["messages"]) == 4
+    first, _, second = sent[0]["messages"][1:]
+    assert first["content"][1]["type"] == "text"
+    assert first["content"][1]["text"].startswith("[Audio omitted")
+    assert second["content"][1] == {
+        "type": "input_audio", "input_audio": {"data": clip, "format": "mp3"},
+    }
+    assert request.messages[0].content[1] == history
+
+
 async def test_gemini_video_storage_sends_signed_file_data_and_redacts_diagnostics(monkeypatch):
     import httpx
 

@@ -111,6 +111,11 @@ request:
 Sage 将文件存入私有桶，在每轮请求时签发临时读取 URL。会话保留原始附件引用，所选桶可
 通过生命周期规则清理副本。工作区工具的单文件上限仍为 12 MiB。
 
+Chat Completions 同样先按 `max_inline_videos`（默认 10）把较早的视频替换为文字引用，
+再在请求体超过 `max_request_bytes` 时，按从早到晚的顺序把内联音频和视频替换为文字
+引用。网关转发到 Gemini 时，建议把 `max_request_bytes` 设为 `20000000`。
+`input_audio` 只接受 base64 数据，远程音频 URL 会替换为一行省略说明。
+
 ### Gemini 视频存储
 
 `gemini-generate-content` 路由使用相同的 `request.extra.video_storage` 配置，

@@ -28,7 +28,10 @@ from sagents.v2.model.plugins._shared.image_limits import (
     OPENAI_INLINE_IMAGE_EDGE,
     OPENAI_MAX_IMAGES,
     OPENAI_MAX_REQUEST_BYTES,
+    json_bytes,
     limit_openai_images,
+    openai_request_bytes,
+    openai_request_limit,
     retry_openai_image_payload,
 )
 from sagents.v2.contracts.common import StrictModel, new_id
@@ -53,6 +56,7 @@ from sagents.v2.contracts.provider_state import (
 from sagents.v2.model.plugins._shared.media import (
     accepts_media,
     media_kind,
+    media_reference_text,
     omitted_media_text,
     resolve_media_capabilities,
 )
@@ -137,6 +141,7 @@ class OpenAICompatibleConfig(StrictModel):
     image_detail_mode: Literal["include", "omit"] = "include"
     video_url_format: Literal["video_url", "image_url"] = "video_url"
     video_storage: S3VideoStorageConfig | None = None
+    max_inline_videos: int = Field(default=10, ge=1)
 
     @model_validator(mode="after")
     def validate_video_storage(self):
@@ -350,47 +355,14 @@ class OpenAICompatibleModelProvider:
 
         self._validate_request(request)
         kwargs = self.diagnostic_request(request)
-        video_parts = {}
-        current_videos = set()
-        if self.config.video_url_format == "image_url":
-            turn_start = current_turn_start(
-                [message.role for message in request.messages], "assistant"
-            )
-            for index, (message, wire) in enumerate(
-                zip(request.messages, kwargs["messages"], strict=True)
-            ):
-                parts = wire["content"]
-                if not isinstance(parts, list):
-                    continue
-                for block, part in zip(message.content, parts, strict=True):
-                    if part["type"] == "image_url" and media_kind(block) == "video":
-                        video_parts[id(part)] = (part, block.mime_type)
-                        if index >= turn_start:
-                            current_videos.add(part["image_url"]["url"])
-        signed_urls = frozenset()
-        if self.config.video_storage is not None:
-            inline_videos = {
-                part["image_url"]["url"]: mime_type
-                for part, mime_type in video_parts.values()
-                if part["image_url"]["url"].startswith("data:")
-            }
-            signed = await publish_videos(
-                self.config.video_storage, inline_videos, required=current_videos
-            )
-            signed_urls = frozenset(signed.values())
-            omitted = 0
-            for part, _ in video_parts.values():
-                url = part["image_url"]["url"]
-                if url in signed:
-                    part["image_url"]["url"] = signed[url]
-                elif url in inline_videos:
-                    part.clear()
-                    part.update(type="text", text=STORAGE_OMITTED_TEXT)
-                    omitted += 1
-            if omitted:
-                record_wire_event(
-                    {"diagnostic_event": "video_storage_omitted", "videos": omitted}
-                )
+        media = self._wire_media(request, kwargs)
+        videos = [item for item in media if item[1] == "video"]
+        # Older videos beyond the inline cap become text references without uploading.
+        for part, kind, mime_type, _ in videos[: max(0, len(videos) - self.config.max_inline_videos)]:
+            await self._replace_with_reference(part, kind, mime_type)
+        signed_urls = await self._publish_videos(videos)
+        await self._limit_media_bytes(kwargs, media)
+        video_parts = {id(part): part for part, *_ in videos}
         original_sources = {}
         request_bytes = await limit_openai_images(
             kwargs, self.config, responses=False, original_sources=original_sources,
@@ -1074,6 +1046,87 @@ class OpenAICompatibleModelProvider:
                 safe_to_resume=True,
             )
         )
+
+    @staticmethod
+    def _wire_media(request: ModelRequest, kwargs: dict[str, Any]) -> list[tuple[dict, str, str, bool]]:
+        """Pair audio/video wire parts with their MIME type and current-turn flag."""
+        turn_start = current_turn_start(
+            [message.role for message in request.messages], "assistant"
+        )
+        # Structured-output fallbacks may prepend system messages.
+        wire_messages = kwargs["messages"][len(kwargs["messages"]) - len(request.messages):]
+        media = []
+        for index, (message, wire) in enumerate(
+            zip(request.messages, wire_messages, strict=True)
+        ):
+            parts = wire.get("content")
+            if not isinstance(parts, list):
+                continue
+            for block, part in zip(message.content, parts, strict=True):
+                kind = media_kind(block)
+                if kind is not None and part["type"] != "text":
+                    media.append((part, kind, block.mime_type or "", index >= turn_start))
+        return media
+
+    @staticmethod
+    def _media_source(part: dict[str, Any]) -> tuple[str | None, str | None]:
+        """Return the inline base64 payload or the remote URL of one wire part."""
+        if part["type"] == "input_audio":
+            return part["input_audio"]["data"], None
+        url = part[part["type"]]["url"]
+        header, _, data = url.partition(",")
+        if header.startswith("data:") and header.endswith(";base64"):
+            return data, None
+        return None, url
+
+    async def _replace_with_reference(self, part: dict[str, Any], kind, mime_type: str) -> None:
+        data, uri = self._media_source(part)
+        text = await media_reference_text(kind, mime_type, data=data, uri=uri)
+        part.clear()
+        part.update(type="text", text=text)
+
+    async def _publish_videos(self, videos) -> frozenset[str]:
+        if self.config.video_storage is None:
+            return frozenset()
+        parts = [
+            (part, mime_type, current)
+            for part, _, mime_type, current in videos
+            if part["type"] == "image_url"
+        ]
+        inline = {
+            part["image_url"]["url"]: mime_type
+            for part, mime_type, _ in parts
+            if part["image_url"]["url"].startswith("data:")
+        }
+        signed = await publish_videos(
+            self.config.video_storage, inline,
+            required={part["image_url"]["url"] for part, _, current in parts if current},
+        )
+        omitted = 0
+        for part, _, _ in parts:
+            url = part["image_url"]["url"]
+            if url in signed:
+                part["image_url"]["url"] = signed[url]
+            elif url in inline:
+                part.clear()
+                part.update(type="text", text=STORAGE_OMITTED_TEXT)
+                omitted += 1
+        if omitted:
+            record_wire_event({"diagnostic_event": "video_storage_omitted", "videos": omitted})
+        return frozenset(signed.values())
+
+    async def _limit_media_bytes(self, kwargs: dict[str, Any], media) -> None:
+        """Turn the oldest inline audio/video into references until the request fits."""
+        limit = openai_request_limit(self.config)
+        size = openai_request_bytes(kwargs)
+        for part, kind, mime_type, _ in media:
+            if size <= limit:
+                return
+            if part["type"] == "text" or self._media_source(part)[0] is None:
+                continue
+            before = json_bytes(part)
+            await self._replace_with_reference(part, kind, mime_type)
+            size -= before - json_bytes(part)
 
     def _message(self, message: ModelMessage) -> dict[str, Any]:
         value: dict[str, Any] = {

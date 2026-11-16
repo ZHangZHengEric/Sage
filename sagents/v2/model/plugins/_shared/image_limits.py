@@ -38,6 +38,17 @@ def _openai_request_body(payload):
     return body
 
 
+def openai_request_bytes(payload) -> int:
+    return json_bytes(_openai_request_body(payload))
+
+
+def openai_request_limit(config) -> int:
+    if config.max_request_bytes is not None:
+        return config.max_request_bytes
+    direct = urlsplit(config.base_url).hostname == "api.openai.com"
+    return OPENAI_MAX_REQUEST_BYTES if direct else COMPATIBLE_MAX_REQUEST_BYTES
+
+
 def request_too_large(size: int, limit: int) -> SageV2Error:
     return SageV2Error(RuntimeErrorInfo(
         code="model.request_too_large",
@@ -193,10 +204,7 @@ async def limit_openai_images(
         and id(part) not in excluded_image_ids
     ]
     body = _openai_request_body(payload)
-    limit = config.max_request_bytes
-    if limit is None:
-        direct = urlsplit(config.base_url).hostname == "api.openai.com"
-        limit = OPENAI_MAX_REQUEST_BYTES if direct else COMPATIBLE_MAX_REQUEST_BYTES
+    limit = openai_request_limit(config)
     if retry_below is not None:
         limit = min(limit, retry_below // 2)
 

@@ -44,6 +44,7 @@ from sagents.v2.model.plugins._shared.image_limits import request_too_large
 from sagents.v2.model.plugins._shared.media import (
     accepts_media,
     media_kind,
+    media_reference_text,
     omitted_media_text,
     resolve_media_capabilities,
 )
@@ -65,7 +66,6 @@ from sagents.v2.model.plugins._shared.wire import (
     validate_extra_body,
 )
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
-from sagents.v2.runtime.artifact.workspace_images import materialize_inline_media
 
 
 _HOST_OWNED_FIELDS = frozenset(
@@ -638,14 +638,8 @@ class GeminiGenerateContentModelProvider:
     async def _media_reference(
         media: dict[str, Any], mime_type: str, kind: str
     ) -> dict[str, str]:
-        label = kind.capitalize()
-        if "fileUri" in media:
-            return {"text": f"[{label} reference: {media['fileUri']}]"}
-        path = await materialize_inline_media(media["data"], mime_type.lower())
-        return {"text": (
-            f"[Workspace {kind}: {path}]"
-            if path
-            else f"[{label} omitted from this model request because of the request limits.]"
+        return {"text": await media_reference_text(
+            kind, mime_type, data=media.get("data"), uri=media.get("fileUri"),
         )}
 
     def _contents(self, messages: tuple[ModelMessage, ...]):

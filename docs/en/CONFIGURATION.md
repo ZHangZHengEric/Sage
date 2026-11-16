@@ -123,6 +123,13 @@ model request. The Session keeps the original attachment reference. Use the
 bucket lifecycle policy to expire hosted copies. The workspace tool still
 accepts files up to 12 MiB each.
 
+Chat Completions also replaces older videos beyond `max_inline_videos`
+(default 10) with text references. When the body exceeds `max_request_bytes`,
+it then replaces the oldest inline audio and video with text references. For a
+gateway that forwards to Gemini, set `max_request_bytes` to `20000000`.
+`input_audio` accepts only base64 data, so remote audio URLs are replaced with a
+one-line omission notice.
+
 ### Gemini video storage
 
 `gemini-generate-content` routes accept the same `request.extra.video_storage`
