@@ -26,6 +26,7 @@ from sagents.v2.model import (
     ModelToolDefinition,
 )
 from sagents.v2.model.protocols import resolve_model_protocol
+from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture
 from sagents.v2.runtime.credentials import CredentialMaterial
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
@@ -79,6 +80,34 @@ def provider_for(events, **config):
         client=client,
     )
     return provider, client, captured
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_id", ["_provider-response-01", None])
+async def test_native_stream_accepts_opaque_or_missing_response_id(response_id):
+    identity = {"responseId": response_id} if response_id is not None else {}
+    provider, client, _ = provider_for(
+        [
+            event([{"text": "answer"}], **identity),
+            event(finish="STOP"),
+        ]
+    )
+    capture = WireCapture()
+    token = wire_capture.set(capture)
+    try:
+        async with client:
+            events = [value async for value in provider.stream(request())]
+    finally:
+        wire_capture.reset(token)
+
+    response = events[-1].response
+    assert response is not None
+    assert response.text == "answer"
+    if response_id is None:
+        assert response.response_id.startswith("model_response_")
+    else:
+        assert response.response_id == response_id
+        assert any(event.get("responseId") == response_id for event in capture.events)
 
 
 @pytest.mark.asyncio

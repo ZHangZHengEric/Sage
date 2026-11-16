@@ -9,6 +9,7 @@ _CODES = {
     "model.empty_response": Kind.EMPTY,
     "model.reasoning_only": Kind.REASONING_ONLY,
     "model.stream_incomplete": Kind.STREAM,
+    "model.stream_idle_timeout": Kind.STREAM,
     "model.context_window_exceeded": Kind.CONTEXT,
     "model.request_too_large": Kind.PAYLOAD,
     "model.response_blocked": Kind.REFUSED,

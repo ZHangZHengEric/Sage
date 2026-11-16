@@ -206,6 +206,7 @@ def create_registered_model_provider(
         # max_tokens) when a catalog/manifest leaves the request limit unset.
         common.pop("default_max_output_tokens")
     extra = dict(route.request.extra)
+    common["stream_idle_timeout_seconds"] = extra.pop("stream_idle_timeout_seconds", None)
     image_limits = {}
     if protocol in {BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS, BuiltinModelProtocol.OPENAI_RESPONSES}:
         image_limits = {

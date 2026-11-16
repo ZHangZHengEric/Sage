@@ -51,6 +51,20 @@ models:
 省略 `base_url` 时，路由使用同一 OrcaRouter 地址。该预设支持现有聊天协议，
 不新增图像或视频生成 API。
 
+## 模型流空闲超时
+
+在 `openai-chat-completions`、`openai-responses`、`anthropic-messages` 或
+`gemini-generate-content` 路由中，将
+`models.<binding>.request.extra.stream_idle_timeout_seconds` 设为正数（秒）。
+省略或设为 `null` 时关闭空闲检查。Python 调用方也可以直接在对应适配器的
+配置对象上设置同名字段。
+
+响应流建立后，Sage 只累计等待上游事件的时间，处理和转发事件的时间不计入。
+新增正文、推理和工具调用分片会重置预算，心跳、空增量和仅含用量的帧不会。
+空闲超时使用 `model.stream_idle_timeout`，
+并进入现有重试预算。诊断字段 `stream_idle_phase` 在首次有效分片前为
+`first_chunk`，已有进展后为 `mid_stream`。连接和 Run 时限仍然生效。
+
 ## 通过 OpenAI 兼容接口调用 Gemini 工具
 
 Gemini 模型使用 `openai-chat-completions` 时，Sage 会将文档定义的

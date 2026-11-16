@@ -94,6 +94,8 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/admin/agents` | `admin` |
 | `GET` | `/api/admin/mcp` | `admin` |
 | `GET` | `/api/admin/models` | `admin` |
+| `GET` | `/api/admin/runtime/concurrency` | `admin` |
+| `PUT` | `/api/admin/runtime/concurrency` | `admin` |
 | `GET` | `/api/admin/skills` | `admin` |
 | `GET` | `/api/admin/threads` | `admin` |
 | `GET` | `/api/admin/threads/{thread_id}` | `admin` |
@@ -135,10 +137,13 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/sessions/{session_id}` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/missing-history-images` | `conversations` |
-| `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
+| `DELETE` | `/api/agents/{agent_id}/tenant-data` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
+| `PUT` | `/api/agents/{agent_id}/workspace/file` | `conversations` |
 | `DELETE` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
+| `POST` | `/api/agents/{agent_id}/workspace/files/stat` | `conversations` |
 | `GET` | `/api/agents/{agent_id}/workspace/user-preferences` | `conversations` |
 | `PUT` | `/api/agents/{agent_id}/workspace/user-preferences` | `conversations` |
 | `GET` | `/api/approvals` | `conversations` |

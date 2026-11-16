@@ -24,6 +24,7 @@ from sagents.v2.contracts.items import (
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
 from sagents.v2.model.plugins._shared.wire import (
     compact_json,
     minimum_reasoning_control,
@@ -85,6 +86,9 @@ class OpenAIResponsesConfig(StrictModel):
     reasoning_effort: str | None = None
     invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
+    stream_idle_timeout_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
     max_request_bytes: int | None = Field(default=None, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
     max_inline_images: int = Field(default=OPENAI_MAX_IMAGES, ge=0, le=OPENAI_MAX_IMAGES)
     max_inline_image_bytes: int = Field(default=OPENAI_INLINE_IMAGE_BYTES, gt=0, le=OPENAI_MAX_REQUEST_BYTES)
@@ -328,8 +332,11 @@ class OpenAIResponsesModelProvider:
         usage = UsageSummary(models=(self.config.model,))
         tool_fragments: dict[str, dict[str, str]] = {}
         reasoning_items: dict[str, dict[str, Any]] = {}
-        response_started = False
         terminal_event_received = False
+        idle = StreamIdleTimeout(
+            self.config.stream_idle_timeout_seconds, provider=self.config.provider_id
+        )
+
         compatibility_fallback: dict[str, Any] | None = None
         def stream_failure(error):
             observed_usage = usage
@@ -392,7 +399,7 @@ class OpenAIResponsesModelProvider:
                     }
             if compatibility_fallback is not None:
                 self._reasoning_control_rejected = True
-            async for event in upstream:
+            async for event in idle.iterate(upstream):
                 record_wire_event(event)
                 event_type = str(wire_value(event, "type", "") or "")
                 if event_type == "response.refusal.delta":
@@ -400,13 +407,13 @@ class OpenAIResponsesModelProvider:
                     value = str(wire_value(event, "delta", "") or "")
                     text += value
                     if value:
-                        response_started = True
+                        idle.progress()
                         yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=value)
                     continue
                 if event_type == "response.output_text.delta":
                     delta = str(wire_value(event, "delta", "") or "")
                     if delta:
-                        response_started = True
+                        idle.progress()
                         text += delta
                         yield ModelStreamEvent(
                             kind=ModelEventKind.TEXT_DELTA, delta=delta
@@ -418,7 +425,7 @@ class OpenAIResponsesModelProvider:
                 }:
                     delta = str(wire_value(event, "delta", "") or "")
                     if delta:
-                        response_started = True
+                        idle.progress()
                         reasoning += delta
                         yield ModelStreamEvent(
                             kind=ModelEventKind.REASONING_DELTA, delta=delta
@@ -430,28 +437,35 @@ class OpenAIResponsesModelProvider:
                         raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
                             category=ErrorCategory.PROVIDER_PERMANENT,
                             message="Unsupported Responses output item", safe_to_resume=True))
-                    if wire_value(item, "type") in {"function_call", "reasoning"}:
-                        response_started = True
-                    self._record_reasoning_item(reasoning_items, item)
-                    self._record_tool_item(tool_fragments, item, replace=False)
+                    reasoning_changed = self._record_reasoning_item(reasoning_items, item)
+                    tool_changed = self._record_tool_item(tool_fragments, item, replace=False)
+                    if reasoning_changed or tool_changed:
+                        idle.progress()
                     continue
                 if event_type == "response.function_call_arguments.delta":
+                    delta = str(wire_value(event, "delta", "") or "")
+                    if not delta:
+                        continue
+                    idle.progress()
                     key = self._tool_key(event)
                     fragment = tool_fragments.setdefault(
                         key, {"id": key, "name": "", "arguments": ""}
                     )
-                    fragment["arguments"] += str(wire_value(event, "delta", "") or "")
+                    fragment["arguments"] += delta
                     continue
                 if event_type == "response.output_item.done":
-                    self._record_reasoning_item(
+                    reasoning_changed = self._record_reasoning_item(
                         reasoning_items, wire_value(event, "item")
                     )
-                    self._record_tool_item(
+                    tool_changed = self._record_tool_item(
                         tool_fragments, wire_value(event, "item"), replace=True
                     )
+                    if reasoning_changed or tool_changed:
+                        idle.progress()
                     continue
                 if event_type in {"response.completed", "response.incomplete"}:
                     terminal_event_received = True
+                    idle.finish()
                     response = wire_value(event, "response")
                     response_id = str(
                         wire_value(response, "id", response_id) or response_id
@@ -522,7 +536,7 @@ class OpenAIResponsesModelProvider:
         except Exception as exc:
             if isinstance(exc, SageV2Error):
                 raise stream_failure(exc.info) from exc
-            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
+            raise stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info) from exc
         finally:
             if upstream is not None:
                 await self._close_stream(upstream)
@@ -530,7 +544,7 @@ class OpenAIResponsesModelProvider:
         if not terminal_event_received:
             raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
-                response_started=response_started,
+                response_started=idle.response_started,
             ).info)
 
         calls = tuple(
@@ -762,11 +776,13 @@ class OpenAIResponsesModelProvider:
         item: Any,
         *,
         replace: bool,
-    ) -> None:
+    ) -> bool:
         if wire_value(item, "type") != "function_call":
-            return
+            return False
         key = cls._tool_key(item)
+        originally_present = key in fragments
         current = fragments.setdefault(key, {"id": key, "name": "", "arguments": ""})
+        previous = current.copy()
         call_id = str(wire_value(item, "call_id", "") or "")
         name = str(wire_value(item, "name", "") or "")
         arguments = str(wire_value(item, "arguments", "") or "")
@@ -776,22 +792,26 @@ class OpenAIResponsesModelProvider:
             current["name"] = name
         if arguments and (replace or not current["arguments"]):
             current["arguments"] = arguments
+        return current != previous or (bool(call_id) and not originally_present)
 
     @classmethod
     def _record_reasoning_item(
         cls, items: dict[str, dict[str, Any]], item: Any
-    ) -> None:
+    ) -> bool:
         if wire_value(item, "type") != "reasoning":
-            return
+            return False
         normalized = wire_json_value(item)
         if not isinstance(normalized, dict):
-            return
+            return False
         key = str(
             wire_value(item, "id", None)
             or wire_value(item, "output_index", None)
             or len(items)
         )
-        items[key] = {**items.get(key, {}), **normalized}
+        previous = items.get(key, {})
+        items[key] = {**previous, **normalized}
+        return any(normalized.get(field) and normalized[field] != previous.get(field)
+                   for field in ("summary", "content", "encrypted_content"))
 
     @staticmethod
     def _tool_key(value: Any) -> str:

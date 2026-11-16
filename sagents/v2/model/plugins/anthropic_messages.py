@@ -36,6 +36,7 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
 )
 from sagents.v2.model.plugins._shared.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
 from sagents.v2.model.plugins._shared.wire import (
     ProviderStreamFailure,
     compact_json,
@@ -89,6 +90,9 @@ class AnthropicMessagesConfig(StrictModel):
     reasoning_effort: str | None = None
     invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
+    stream_idle_timeout_seconds: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
     max_request_bytes: int | None = Field(default=None, gt=0, le=_CLAUDE_MAX_REQUEST_BYTES)
     max_inline_images: int = Field(default=_INLINE_IMAGE_LIMIT, ge=0, le=_INLINE_IMAGE_LIMIT)
     max_inline_image_bytes: int = Field(default=_CLAUDE_MAX_IMAGE_BYTES, gt=0, le=_CLAUDE_MAX_IMAGE_BYTES)
@@ -516,8 +520,11 @@ class AnthropicMessagesModelProvider:
         thinking_blocks: dict[int, dict[str, Any]] = {}
         content_blocks: dict[int, dict[str, Any]] = {}
         input_transformations = None
-        response_started = False
         terminal_event_received = False
+        idle = StreamIdleTimeout(
+            self.config.stream_idle_timeout_seconds, provider=self.config.provider_id
+        )
+
         def stream_failure(error):
             normalized = canonical_token_usage(provider_usage, input_mode="disjoint")
             observed_usage = UsageSummary(
@@ -571,7 +578,7 @@ class AnthropicMessagesModelProvider:
                 raise_for_status = getattr(response, "raise_for_status", None)
                 if raise_for_status is not None:
                     raise_for_status()
-                async for event in self._events(response):
+                async for event in idle.iterate(self._events(response)):
                     record_wire_event(event)
                     event_type = str(event.get("type") or "")
                     if event_type == "message_start":
@@ -598,13 +605,14 @@ class AnthropicMessagesModelProvider:
                         if block.get("type") == "text":
                             value = str(block.get("text") or "")
                             if value:
-                                response_started = True
+                                idle.progress()
                                 text += value
                                 yield ModelStreamEvent(
                                     kind=ModelEventKind.TEXT_DELTA, delta=value
                                 )
                         elif block.get("type") == "tool_use":
-                            response_started = True
+                            if block.get("id") or block.get("name") or block.get("input"):
+                                idle.progress()
                             tools[index] = {
                                 "id": str(block.get("id") or new_id("tool_call")),
                                 "name": str(block.get("name") or ""),
@@ -614,7 +622,8 @@ class AnthropicMessagesModelProvider:
                             "thinking",
                             "redacted_thinking",
                         }:
-                            response_started = True
+                            if any(block.get(key) for key in ("thinking", "signature", "data")):
+                                idle.progress()
                             thinking_blocks[index] = copy.deepcopy(block)
                     elif event_type == "content_block_delta":
                         index = int(event.get("index") or 0)
@@ -629,7 +638,7 @@ class AnthropicMessagesModelProvider:
                             )
                             value = str(delta.get("text") or "")
                             if value:
-                                response_started = True
+                                idle.progress()
                                 text += value
                                 yield ModelStreamEvent(
                                     kind=ModelEventKind.TEXT_DELTA, delta=value
@@ -639,10 +648,12 @@ class AnthropicMessagesModelProvider:
                             if block.get("citations") is None:
                                 block["citations"] = []
                             block["citations"].append(copy.deepcopy(delta["citation"]))
+                            if delta["citation"]:
+                                idle.progress()
                         elif delta_type == "thinking_delta":
                             value = str(delta.get("thinking") or "")
                             if value:
-                                response_started = True
+                                idle.progress()
                                 reasoning += value
                                 yield ModelStreamEvent(
                                     kind=ModelEventKind.REASONING_DELTA, delta=value
@@ -652,13 +663,20 @@ class AnthropicMessagesModelProvider:
                             )
                             block["thinking"] = str(block.get("thinking") or "") + value
                         elif delta_type == "signature_delta":
+                            signature = str(delta.get("signature") or "")
+                            if signature:
+                                idle.progress()
                             block = thinking_blocks.setdefault(
                                 index, {"type": "thinking", "thinking": ""}
                             )
                             block["signature"] = str(
                                 block.get("signature") or ""
-                            ) + str(delta.get("signature") or "")
+                            ) + signature
                         elif delta_type == "input_json_delta":
+                            partial_json = str(delta.get("partial_json") or "")
+                            if not partial_json:
+                                continue
+                            idle.progress()
                             fragment = tools.setdefault(
                                 index,
                                 {
@@ -670,9 +688,7 @@ class AnthropicMessagesModelProvider:
                             # A tool-use start block carries `{}` before deltas.
                             if fragment["arguments"] == "{}":
                                 fragment["arguments"] = ""
-                            fragment["arguments"] += str(
-                                delta.get("partial_json") or ""
-                            )
+                            fragment["arguments"] += partial_json
                     elif event_type == "message_delta":
                         delta = event.get("delta") or {}
                         finish_reason = str(delta.get("stop_reason") or finish_reason)
@@ -684,6 +700,7 @@ class AnthropicMessagesModelProvider:
                                 provider_usage.update(normalized_usage)
                     elif event_type == "message_stop":
                         terminal_event_received = True
+                        idle.finish()
                     elif event_type == "error":
                         error = event.get("error") or {}
                         message = (
@@ -698,12 +715,12 @@ class AnthropicMessagesModelProvider:
         except SageV2Error as exc:
             raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise stream_failure(provider_error(exc, response_started=response_started, provider=self.config.provider_id).info) from exc
+            raise stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info) from exc
 
         if not terminal_event_received:
             raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id,
-                response_started=response_started,
+                response_started=idle.response_started,
             ).info)
 
         usage = canonical_token_usage(provider_usage, input_mode="disjoint")

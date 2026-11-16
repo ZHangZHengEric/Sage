@@ -25,6 +25,7 @@ from sagents.v2.model import (
     ModelEventKind,
     ModelMessage,
     ModelRequest,
+    ModelResponse,
     ModelToolCall,
     ModelToolDefinition,
     OpenAIChatCompletionsConfig,
@@ -36,6 +37,7 @@ from sagents.v2.model import (
 from sagents.v2.contracts.items import ImageBlock, JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.credentials import CredentialMaterial
@@ -112,6 +114,111 @@ class FakeResponses:
     async def create(self, **kwargs):
         self.calls.append(kwargs)
         return self.stream
+
+
+def test_model_response_id_is_nonempty_and_verbatim():
+    opaque = " \t_opaque+/=响应 " + "x" * 200 + "\n"
+    response = ModelResponse(response_id=opaque, finish_reason="stop")
+    assert (
+        ModelResponse.model_validate_json(response.model_dump_json()).response_id
+        == opaque
+    )
+    with pytest.raises(ValueError, match="response_id"):
+        ModelResponse(response_id="", finish_reason="stop")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["text", "tool", "missing_id"])
+async def test_chat_stream_accepts_opaque_response_ids(case):
+    import httpx
+    from openai import AsyncOpenAI
+
+    base_url = "https://example.invalid/v1"
+    response_id = "_provider-response-01"
+    is_tool = case == "tool"
+    delta = {"content": "answer"}
+    if is_tool:
+        delta = {
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": "call_lookup",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": '{"q":"answer"}'},
+                }
+            ]
+        }
+    body = (
+        "".join(
+            "data: " + json.dumps(chunk) + "\n\n"
+            for chunk in (
+                {
+                    **({"id": response_id} if case != "missing_id" else {}),
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "gemini-4-argon",
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                },
+                {
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "gemini-4-argon",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "tool_calls" if is_tool else "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        + "data: [DONE]\n\n"
+    )
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    capture = WireCapture()
+    token = wire_capture.set(capture)
+    try:
+        async with AsyncOpenAI(
+            api_key="test",
+            base_url=base_url,
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=transport),
+        ) as client:
+            provider = OpenAIChatCompletionsModelProvider(
+                OpenAIChatCompletionsConfig(
+                    base_url=base_url, model="gemini-4-argon", capabilities=CAPABILITIES
+                ),
+                client=client,
+            )
+            events = [event async for event in provider.stream(request())]
+    finally:
+        wire_capture.reset(token)
+
+    assert events[-1].kind == ModelEventKind.COMPLETED
+    response = events[-1].response
+    assert response is not None
+    if case == "missing_id":
+        assert response.response_id.startswith("model_response_")
+    else:
+        assert response.response_id == response_id
+        assert any(event.get("id") == response_id for event in capture.events)
+    if is_tool:
+        assert response.tool_calls == (
+            ModelToolCall(
+                tool_call_id="call_lookup",
+                name="lookup",
+                arguments={"q": "answer"},
+            ),
+        )
+    else:
+        assert response.text == "answer"
 
 
 class SequencedResponses:
