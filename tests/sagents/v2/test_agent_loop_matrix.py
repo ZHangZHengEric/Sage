@@ -2657,6 +2657,96 @@ async def test_read_tool_generic_failure_remains_a_known_failure():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("parallel", [False, True])
+async def test_read_tool_disappears_during_execution_and_run_continues(parallel):
+    screenshot = READ_TOOL.model_copy(update={"name": "mcp_wishseen_screenshot_draft"})
+    screenshot_call = tool_call(screenshot.name, {"key": "draft"})
+    calls = (screenshot_call,)
+    if parallel:
+        calls += (tool_call().model_copy(update={"tool_call_id": "sibling"}),)
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done without a screenshot"),)),
+        )
+    )
+
+    async def take_screenshot(call, context):
+        loop.tool_catalog = InMemoryToolCatalog(())
+        await loop.tool_catalog.get_tool(call.tool_name, run_id=call.owner_run_id)
+        pytest.fail("the screenshot tool should be unavailable during execution")
+
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(screenshot, READ_TOOL),
+        handlers={screenshot.name: take_screenshot, READ_TOOL.name: tool_handler},
+    )
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+
+    assert result.state == RunState.COMPLETED
+    failed = [event for event in events if event.type == "tool.call.failed"]
+    assert len(failed) == 1
+    assert isinstance(failed[0].data, ToolEventData)
+    assert failed[0].data.tool_call_id == screenshot_call.tool_call_id
+    assert failed[0].data.error is not None
+    assert failed[0].data.error.code == "tool.not_found"
+    assert not any(event.type == "tool.call.unknown" for event in events)
+    assert len(model.requests) == 2
+    feedback = next(
+        message
+        for message in model.requests[1].messages
+        if message.role == "tool" and message.tool_call_id == screenshot_call.tool_call_id
+    )
+    assert "tool.not_found" in cast(TextBlock, feedback.content[0]).text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supports_reconciliation", [False, True])
+async def test_unknown_write_outcome_is_settled_safely_when_tool_disappears(
+    supports_reconciliation,
+):
+    class ResponseLostExecutor(UncertainToolExecutor):
+        async def execute(self, call, context):
+            self.calls.append(call)
+            loop.tool_catalog = InMemoryToolCatalog(())
+            raise ConnectionError("response lost after remote write")
+
+    executor = ResponseLostExecutor((ReconcileState.SUCCEEDED,))
+    definition = WRITE_TOOL.model_copy(
+        update={"supports_reconciliation": supports_reconciliation}
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(tool_call(definition.name),)),)),
+            ScriptedModelStep(events=(completed("write verified"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tools=(definition,),
+        tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
+    )
+    loop.tool_executor = executor
+
+    result = await loop.execute(handle.run_id, CONTEXT)
+    types = [event.type for event in await runtime.session_store.read_events(handle.run_id)]
+
+    assert len(executor.calls) == 1
+    assert types.count("tool.call.unknown") == 1
+    assert "tool.call.failed" not in types
+    if supports_reconciliation:
+        assert result.state == RunState.COMPLETED
+        assert executor.reconciliations == [executor.calls[0].operation_id]
+        assert types.index("tool.call.unknown") < types.index("tool.call.reconciled")
+    else:
+        assert result.state == RunState.SUSPENDED
+        assert executor.reconciliations == []
+        assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
 async def test_pending_reconciliation_suspends_and_resume_reconciles_without_retry():
     definition = READ_TOOL.model_copy(update={"supports_reconciliation": True})
     executor = UncertainToolExecutor((ReconcileState.PENDING, ReconcileState.SUCCEEDED))

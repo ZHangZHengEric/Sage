@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, cast
 from sagents.v2.contracts.common import utc_now
 
@@ -31,6 +32,7 @@ from sagents.v2.runtime.observability.traces import (
     new_trace_id,
     current_trace_context,
 )
+from sagents.v2.tool.contracts import ToolDefinition
 
 
 def _run_outcome_observation(
@@ -336,7 +338,8 @@ class ObservedRunDriver(AgentLoopEngine):
 
 
     async def _capture_tool_execution(
-        self, run, call, context, turn_id, step_id=None, state=None
+        self, run, call, context, turn_id, step_id=None, state=None, *,
+        definition: ToolDefinition,
     ):
         return await self._observe_tool_call(
             run,
@@ -345,7 +348,7 @@ class ObservedRunDriver(AgentLoopEngine):
             turn_id,
             step_id=step_id,
             state=state,
-            body=super()._capture_tool_execution,
+            body=partial(super()._capture_tool_execution, definition=definition),
         )
 
     async def _observe_tool_call(

@@ -27,6 +27,7 @@ from sagents.v2.session_memory import (
     SqliteBm25SessionMemoryProvider,
 )
 from sagents.v2.memory import FilesystemBm25MemoryProvider
+from sagents.v2.tool.contracts import ToolDefinition
 
 
 def record(index, content="deployment canary release"):
@@ -320,10 +321,6 @@ async def test_failed_control_lookup_does_not_launch_an_unobserved_tool():
 
     calls = []
 
-    class Catalog:
-        async def get_tool(self, name, *, run_id):
-            return object()
-
     class Store:
         async def get_start_command(self, run_id):
             raise RuntimeError("control state unavailable")
@@ -335,7 +332,6 @@ async def test_failed_control_lookup_does_not_launch_an_unobserved_tool():
     from sagents.v2.contracts.common import utc_now
     engine = SimpleNamespace(
         clock=utc_now,
-        tool_catalog=Catalog(),
         tool_executor=Executor(),
         runtime=SimpleNamespace(session_store=Store()),
     )
@@ -345,6 +341,7 @@ async def test_failed_control_lookup_does_not_launch_an_unobserved_tool():
             SimpleNamespace(run_id="run"),
             SimpleNamespace(tool_name="write"),
             None,
+            definition=ToolDefinition(name="write", description="", input_schema={}),
         )
     await asyncio.sleep(0)
     assert calls == []

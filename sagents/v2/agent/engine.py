@@ -83,6 +83,7 @@ from sagents.v2.tool.contracts import (
     ToolCall,
     ToolCancellationState,
     ToolCancellationResult,
+    ToolDefinition,
     ToolExecutionResult,
 )
 from sagents.v2.tool.arguments import apply_system_context_overrides
@@ -661,7 +662,7 @@ class AgentLoopEngine:
         )
         if policy.action == ToolPolicyAction.ALLOW:
             run, result = await self._dispatch_tool(
-                run, call, context, state.turn_id, step_id, state
+                run, call, context, state.turn_id, step_id, state, definition=definition
             )
             if result is None:
                 return run, state
@@ -1052,6 +1053,7 @@ class AgentLoopEngine:
                 started.step_id,
                 state,
                 uncertainty,
+                definition=definition,
             )
             if result is None:
                 return run
@@ -1345,6 +1347,7 @@ class AgentLoopEngine:
                         state.turn_id,
                         state.pending_tool_step_id,
                         state,
+                        definition=definition,
                     )
                     if result is None:
                         return run
@@ -1844,6 +1847,7 @@ class AgentLoopEngine:
                 for message in self._pending_response_results(state)
             }
             prepared_calls: list[ToolCall] = []
+            prepared_definitions: dict[str, ToolDefinition] = {}
             approval_calls: list[tuple[ToolCall, ToolPolicyDecision]] = []
             crossed = await self._crossed_tool_calls(run, step_id)
             for model_call in response.tool_calls:
@@ -1977,9 +1981,11 @@ class AgentLoopEngine:
                     approval_calls.append((tool_call, policy))
                 else:
                     prepared_calls.append(tool_call)
+                    prepared_definitions[tool_call.tool_call_id] = definition
 
             run, state, batch_results = await self._execute_tool_batch(
-                run, prepared_calls, crossed, context, state, step_id
+                run, prepared_calls, crossed, context, state, step_id,
+                definitions=prepared_definitions,
             )
             completed_tool_results.extend(batch_results.values())
             questionnaire_completed = state.pending_questionnaire_completed
@@ -1989,7 +1995,8 @@ class AgentLoopEngine:
                 if tool_call.tool_call_id in batch_results:
                     continue
                 run, result = await self._dispatch_tool(
-                    run, tool_call, context, state.turn_id, step_id, state
+                    run, tool_call, context, state.turn_id, step_id, state,
+                    definition=prepared_definitions.get(tool_call.tool_call_id),
                 )
                 if result is None:
                     return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
@@ -3145,19 +3152,22 @@ class AgentLoopEngine:
         )
 
     async def _dispatch_tool(
-        self, run, call, context, turn_id, step_id=None, state=None
+        self, run, call, context, turn_id, step_id=None, state=None, *,
+        definition: ToolDefinition | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         return await self.dispatch_tool_call(
-            run, call, context, turn_id, step_id=step_id, state=state
+            run, call, context, turn_id, step_id=step_id, state=state,
+            definition=definition,
         )
 
-    async def _execute_tool_with_control(self, run, call, context, *, state=None) -> tuple[RunSnapshot, ToolExecutionResult | None]:
+    async def _execute_tool_with_control(
+        self, run, call, context, *, definition: ToolDefinition, state=None
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Interrupt only when both Tool metadata and Executor permit it."""
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
 
         budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
-        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
         if call.tool_name == "search_memory" and state is not None and state.pending_response_step_id is not None:
@@ -3315,7 +3325,10 @@ class AgentLoopEngine:
                 return bool(result.metadata.get("delegation_deferred_until"))
         return False
 
-    async def _execute_tool_batch(self, run, calls, crossed, context, state, step_id) -> tuple[RunSnapshot, AgentLoopCheckpointState, dict[str, ToolExecutionResult]]:
+    async def _execute_tool_batch(
+        self, run, calls, crossed, context, state, step_id, *,
+        definitions: dict[str, ToolDefinition],
+    ) -> tuple[RunSnapshot, AgentLoopCheckpointState, dict[str, ToolExecutionResult]]:
         """Execute siblings concurrently; one owner serializes durable receipts.
 
         All receipts are durable before any result can suspend the whole Run.
@@ -3341,6 +3354,7 @@ class AgentLoopEngine:
         async def execute(call):
             _, result = await self._capture_tool_execution(
                 run, call, context, turn_id, step_id, state=state,
+                definition=definitions[call.tool_call_id],
             )
             return call, result
 
@@ -3464,6 +3478,7 @@ class AgentLoopEngine:
         turn_id: str,
         step_id: str | None,
         state: AgentLoopCheckpointState | None,
+        definition: ToolDefinition,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None] | None:
         command = await self.runtime.session_store.get_start_command(run.run_id)
         if not command.config.autonomous_error_recovery:
@@ -3475,7 +3490,6 @@ class AgentLoopEngine:
         )
         if not pending:
             return None
-        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         if definition.side_effect_level in {SideEffectLevel.NONE, SideEffectLevel.READ}:
             return None
         for proposal, unknown in pending:
@@ -3505,6 +3519,7 @@ class AgentLoopEngine:
                         category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
                         message="Tool outcome is unknown",
                     ),
+                    definition=definition,
                     reconcile_identity=original.model_copy(
                         update={"tool_call_id": proposal.tool_call_id}
                     ),
@@ -3553,10 +3568,13 @@ class AgentLoopEngine:
         )
 
     async def _capture_tool_execution(
-        self, run, call, context, turn_id, step_id=None, state=None
+        self, run, call, context, turn_id, step_id=None, state=None, *,
+        definition: ToolDefinition,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         try:
-            run, result = await self._execute_tool_with_control(run, call, context, state=state)
+            run, result = await self._execute_tool_with_control(
+                run, call, context, definition=definition, state=state
+            )
             if result is None and run.state in TERMINAL_RUN_STATES:
                 # A confirmed cancellation owns the terminal state.
                 return run, None
@@ -3606,7 +3624,8 @@ class AgentLoopEngine:
         return run, result
 
     async def dispatch_tool_call(
-        self, run, call, context, turn_id, step_id=None, state=None
+        self, run, call, context, turn_id, step_id=None, state=None, *,
+        definition: ToolDefinition | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Cross the tool side-effect barrier and settle or reconcile its result.
 
@@ -3648,8 +3667,10 @@ class AgentLoopEngine:
                 )
             result = receipt
         else:
+            if definition is None:
+                definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
             guarded = await self._guard_unresolved_effect(
-                run, call, context, turn_id, step_id, state
+                run, call, context, turn_id, step_id, state, definition
             )
             if guarded is not None:
                 return guarded
@@ -3657,6 +3678,7 @@ class AgentLoopEngine:
             try:
                 run, result = await self._capture_tool_execution(
                     run, call, context, turn_id, step_id, state=state,
+                    definition=definition,
                 )
             except asyncio.CancelledError:
                 current = await self.runtime.get_run(run.run_id)
@@ -3674,7 +3696,7 @@ class AgentLoopEngine:
                 return run, None
         if result.error is not None:
             localized = localize_error(result.error, context.language)
-            if await self._tool_failure_is_uncertain(run, call, localized):
+            if await self._tool_failure_is_uncertain(run, call, localized, definition):
                 uncertainty = self._as_uncertain_tool_error(localized)
                 run = await self._record_tool_unknown(
                     run, call, uncertainty, context, turn_id, step_id
@@ -3687,6 +3709,7 @@ class AgentLoopEngine:
                     step_id,
                     state,
                     uncertainty,
+                    definition=definition,
                 )
             if self._unsafe_tool_runtime_error(localized):
                 # An unsafe runtime/storage failure must never become ordinary
@@ -3808,7 +3831,9 @@ class AgentLoopEngine:
             ErrorCategory.RESOURCE_LOST,
         }
 
-    async def _tool_failure_is_uncertain(self, run, call, error) -> bool:
+    async def _tool_failure_is_uncertain(
+        self, run, call, error: RuntimeErrorInfo, definition: ToolDefinition | None
+    ) -> bool:
         """Classify post-dispatch failures without assuming a write was rolled back."""
 
         if self._unsafe_tool_runtime_error(error):
@@ -3833,7 +3858,9 @@ class AgentLoopEngine:
             return False
         if error.metadata.get("side_effect_state") == "not_applied":
             return False
-        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
+        # Receipts restored after an interruption may lack an in-memory definition.
+        if definition is None:
+            definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         return definition.side_effect_level in {
             SideEffectLevel.WRITE,
             SideEffectLevel.REVERSIBLE,
@@ -4018,11 +4045,13 @@ class AgentLoopEngine:
         state,
         uncertainty,
         *,
+        definition: ToolDefinition | None = None,
         reconcile_identity: ToolCall | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Resolve an uncertain side effect without executing the call again."""
 
-        definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
+        if definition is None:
+            definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         command = await self.runtime.session_store.get_start_command(run.run_id)
         autonomous = command.config.autonomous_error_recovery
         if definition.supports_reconciliation:
