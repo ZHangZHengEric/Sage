@@ -173,6 +173,8 @@ class ServerHost:
     async def ready(self) -> bool:
         if self._application is None or self.agent_management is None:
             return False
+        if not self._application.service("execution.dispatcher").ready:
+            return False
         try:
             async with asyncio.timeout(1.0):
                 if self.memory_database is not None:
