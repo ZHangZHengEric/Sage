@@ -240,6 +240,13 @@ def test_health(client: TestClient):
     assert client.get("/readyz").status_code == 200
 
 
+def test_readiness_tracks_dispatcher(client: TestClient, service, monkeypatch):
+    dispatcher = service.application.service("execution.dispatcher")
+    monkeypatch.setattr(type(dispatcher), "ready", property(lambda _: False))
+    assert client.get("/health").status_code == 200
+    assert client.get("/readyz").status_code == 503
+
+
 def test_request_id_echoes_incoming_header(client: TestClient):
     response = client.get("/health", headers={"X-Request-ID": "req-test-12"})
     assert response.status_code == 200

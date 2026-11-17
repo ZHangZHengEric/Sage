@@ -14,6 +14,7 @@ from contextlib import AbstractAsyncContextManager
 from types import TracebackType
 
 from sagents.v2.runtime.contracts import RuntimePort
+from sagents.v2.runtime.distributed.redis_coordination import is_redis_transport_error
 from sagents.v2.runtime.session.contracts import SessionStore
 
 if TYPE_CHECKING:
@@ -119,6 +120,7 @@ class LocalWorkerDispatcher:
         self._submissions_inflight = 0
         self._closed = False
         self._claim_error: Exception | None = None
+        self._claim_retrying = False
         quota: SchedulerQuotaGroup | None = getattr(scheduler, "quota_group", None)
         if quota is not None and quota.live_concurrency is True:
             # The shared queue enforces the latest limit even for a claim
@@ -126,6 +128,15 @@ class LocalWorkerDispatcher:
             self._claim_policy = None
             self._apply_quota_concurrency(quota)
             quota.dispatchers.add(self)
+
+    @property
+    def ready(self) -> bool:
+        return (
+            not self._closed
+            and self._claim_error is None
+            and not self._claim_retrying
+            and any(not worker.done() for worker in self._workers)
+        )
 
     def _apply_quota_concurrency(self, quota: SchedulerQuotaGroup) -> None:
         self.max_concurrent_runs = quota.max_active
@@ -363,20 +374,22 @@ class LocalWorkerDispatcher:
                 if self.distributed_claims and index == 0 and time.monotonic() >= next_recovery_scan:
                     # Repair acceptance-before-enqueue crashes without needing
                     # a whole-fleet restart. submit remains globally idempotent.
-                    next_recovery_scan = time.monotonic() + 1.0
                     await self._restore_dispatchable_work()
+                    next_recovery_scan = time.monotonic() + 1.0
                 lease = await self.scheduler.claim(
                     worker_id,
                     lease_duration=self.lease_duration,
                     policy=self._claim_policy,
                     wait_timeout=1.0,
                 )
+                if lease is None:
+                    await self._settle_deferred_controls()
             except Exception as exc:
                 transient = isinstance(exc, (OSError, TimeoutError)) or (
                     isinstance(exc, SageV2Error)
                     and exc.info.retryable
                     and exc.info.code != "scheduler.persistence_failed"
-                )
+                ) or is_redis_transport_error(exc)
                 if not transient:
                     # A dead worker must not leave accepted callers waiting
                     # forever when the scheduler requires operator recovery.
@@ -394,17 +407,19 @@ class LocalWorkerDispatcher:
                         exc,
                     )
                     return
+                self._claim_retrying = True
                 _LOGGER.warning(
                     "scheduler.claim.retry",
                     "scheduler claim failed; retrying",
                     retry_delay_seconds=retry_delay,
+                    error_type=type(exc).__name__,
                 )
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 5.0)
                 continue
             retry_delay = 0.1
+            self._claim_retrying = False
             if lease is None:
-                await self._settle_deferred_controls()
                 continue
             cleanup = self._cleanup_requests.get(lease.work.work_id)
             if cleanup is not None:

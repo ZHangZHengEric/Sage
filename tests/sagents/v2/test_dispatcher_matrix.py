@@ -217,6 +217,64 @@ async def test_execution_survives_lease_renewal_and_worker_remains_available():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_location", ["claim", "recovery_scan"])
+async def test_dispatcher_resumes_after_redis_transport_failure(monkeypatch, failure_location):
+    from fakeredis.aioredis import FakeRedis
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    from sagents.v2.runtime.execution.scheduler.plugins.redis_distributed import RedisDistributedScheduler
+
+    scheduler = RedisDistributedScheduler(redis_url="redis://unused", max_concurrent_runs=1)
+    redis = FakeRedis(decode_responses=True)
+    scheduler._redis = redis
+    agent = FakeAgent()
+    redis_failed = asyncio.Event()
+    redis_available = asyncio.Event()
+    redis_time = redis.time
+
+    async def time_with_outage():
+        if failure_location == "claim" and not redis_available.is_set():
+            redis_failed.set()
+            raise RedisTimeoutError("Timeout reading from socket")
+        return await redis_time()
+
+    async def list_dispatchable_runs():
+        if failure_location == "recovery_scan" and not redis_available.is_set():
+            redis_failed.set()
+            raise RedisConnectionError("connection unavailable")
+        return ()
+
+    monkeypatch.setattr(redis, "time", time_with_outage)
+    agent.runtime = SimpleNamespace(
+        session_store=SimpleNamespace(list_dispatchable_runs=list_dispatchable_runs)
+    )
+    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1, distributed_claims=True)
+    dispatcher.attach_recovery_agent(cast('RecoveryAgentPort', agent))
+    try:
+        await dispatcher.start(recover=False)
+        worker, = dispatcher._workers
+        async with asyncio.timeout(2):
+            await redis_failed.wait()
+            while dispatcher.ready:
+                await asyncio.sleep(0.01)
+        assert not worker.done()
+
+        redis_available.set()
+        result = await dispatcher.submit(
+            cast('RecoveryAgentPort', agent),
+            cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="after-redis-outage", run_revision=0)),
+            CONTEXT,
+        )
+        assert (await asyncio.wait_for(result, timeout=2)).state == RunState.COMPLETED
+        assert dispatcher.ready
+        assert dispatcher._workers == [worker]
+    finally:
+        await dispatcher.close()
+        await scheduler.close()
+
+
+@pytest.mark.asyncio
 async def test_tenant_quota_does_not_claim_and_requeue_in_a_spin_loop():
     scheduler = CountingScheduler()
     dispatcher = LocalWorkerDispatcher(

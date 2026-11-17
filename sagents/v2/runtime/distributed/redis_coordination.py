@@ -13,6 +13,20 @@ from anyio import CancelScope
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 
+def is_redis_transport_error(error: Exception) -> bool:
+    # Redis is an optional backend. Its transport errors do not inherit from
+    # the built-in ConnectionError or TimeoutError.
+    try:
+        from redis import exceptions
+    except ModuleNotFoundError as exc:
+        if exc.name != "redis":
+            raise
+        return False
+    return isinstance(error, (exceptions.ConnectionError, exceptions.TimeoutError)) and not isinstance(
+        error, (exceptions.AuthenticationError, exceptions.AuthorizationError),
+    )
+
+
 def coordination_error(message, *, code="scheduler.fence_rejected", retryable=False):
     return SageV2Error(
         RuntimeErrorInfo(
