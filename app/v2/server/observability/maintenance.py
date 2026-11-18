@@ -83,7 +83,11 @@ async def main(args):
             count = await migrate_legacy(database, sink, limit=10)
             total += count
             print(f"Verified legacy diagnostic records migrated: {total}", flush=True)
-            if count < 10:
+            async with database.session() as db:
+                remaining = await db.scalar(select(func.count()).select_from(models).outerjoin(
+                    expiry, and_(*(models.c[n] == expiry.c[n] for n in MODEL_KEY)),
+                ).where(expiry.c.request_id.is_(None)))
+            if not remaining:
                 break
             await asyncio.sleep(0.1)
         while await sink.prune():
