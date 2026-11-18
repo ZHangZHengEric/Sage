@@ -348,7 +348,12 @@ class DatabaseDiagnostics(DiagnosticCapture):
         usage = defaultdict(int)
         for path in self.storage.root.glob("*/*/*"):
             if path.is_file():
-                usage[str(path.parent)] += path.stat().st_size
+                try:
+                    size = path.stat().st_size
+                except FileNotFoundError:
+                    # Another Server process may have collected this orphan.
+                    continue
+                usage[str(path.parent)] += size
         return usage
 
     def _remove_expired_files(self, payloads):
@@ -361,5 +366,9 @@ class DatabaseDiagnostics(DiagnosticCapture):
         for path in self.storage.root.glob("*/*/*"):
             # Grace protects parts staged by other processes before SQL commit,
             # as well as readers that opened an older SQL snapshot.
-            if path not in referenced and path.is_file() and path.stat().st_mtime < cutoff:
-                path.unlink(missing_ok=True)
+            if path not in referenced and path.is_file():
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+                except FileNotFoundError:
+                    continue

@@ -478,3 +478,36 @@ async def test_batch_migration_does_not_publish_before_every_record_is_verified(
         assert await migrate_legacy(database, sink) == 0
     finally:
         await sink.close()
+
+
+async def test_gc_tolerates_another_process_collecting_the_same_file(database, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    key = (uuid4().hex, "r", "m")
+    digest = sink.storage.put(key, {"orphan": True})
+    victim = sink.storage.path(key, digest)
+    stat = Path.stat
+    calls = 0
+    def concurrent_stat(path, *args, **kwargs):
+        nonlocal calls
+        if path == victim:
+            calls += 1
+            if calls == 2:
+                victim.unlink()
+                raise FileNotFoundError(str(path))
+        return stat(path, *args, **kwargs)
+    try:
+        monkeypatch.setattr(Path, "stat", concurrent_stat)
+        assert not sink._file_usage()
+        assert not victim.exists()
+        monkeypatch.setattr(Path, "stat", stat)
+        digest = sink.storage.put(key, {"second orphan": True})
+        victim = sink.storage.path(key, digest)
+        calls = 0
+        monkeypatch.setattr(Path, "stat", concurrent_stat)
+        sink._remove_expired_files([])
+        assert not victim.exists()
+    finally:
+        monkeypatch.setattr(Path, "stat", stat)
+        await sink.close()
