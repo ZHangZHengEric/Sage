@@ -17,7 +17,7 @@ import pytest
 from pydantic import SecretStr
 
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import FileBlock, ImageBlock, JsonBlock, TextBlock
+from sagents.v2.contracts.items import AudioBlock, FileBlock, ImageBlock, JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import read_provider_state
 from sagents.v2.model import (
     GeminiGenerateContentConfig,
@@ -245,6 +245,28 @@ async def test_native_parallel_calls_and_signatures_are_replayed_with_results():
                         "response": {"result": 1},
                     }
                 },
+            ],
+        }
+        audio_messages = tuple(
+            ModelMessage(
+                role="user",
+                content=(
+                    TextBlock(text=prompt),
+                    AudioBlock(uri=f"data:audio/mpeg;base64,{data}", mime_type="audio/mpeg"),
+                ),
+            )
+            for prompt, data in (("Transcribe the first", "SUQz"), ("Summarize the second", "SUQ0"))
+        )
+        _ = [value async for value in provider.stream(request(messages=(*messages, *audio_messages)))]
+        wire_turns = json.loads(captured[-1].content)["contents"]
+        assert wire_turns[:-1] == replay
+        assert wire_turns[-1] == {
+            "role": "user",
+            "parts": [
+                {"text": "Transcribe the first"},
+                {"inlineData": {"mimeType": "audio/mpeg", "data": "SUQz"}},
+                {"text": "Summarize the second"},
+                {"inlineData": {"mimeType": "audio/mpeg", "data": "SUQ0"}},
             ],
         }
     finally:

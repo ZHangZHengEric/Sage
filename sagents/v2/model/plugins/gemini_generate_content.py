@@ -646,6 +646,7 @@ class GeminiGenerateContentModelProvider:
         system: list[dict[str, Any]] = []
         contents: list[dict[str, Any]] = []
         call_map: dict[str, dict[str, Any]] = {}
+        previous_role = None
         for message in messages:
             if message.role in {"system", "developer"}:
                 if any(
@@ -720,11 +721,12 @@ class GeminiGenerateContentModelProvider:
             if not parts:
                 continue
             role = "model" if message.role == "assistant" else "user"
-            # Batch parallel results into one user Content, after all model calls.
-            if role == "user" and contents and contents[-1]["role"] == role:
+            # Batch parallel results, but keep their Content separate from user input.
+            if role == "user" and message.role == previous_role:
                 contents[-1]["parts"].extend(parts)
             else:
                 contents.append({"role": role, "parts": parts})
+            previous_role = message.role
         return system, contents
 
     def _request_part(self, block) -> dict[str, Any]:

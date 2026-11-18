@@ -341,17 +341,17 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
             ),
             client=object(),
         )
-        user_content = gemini.diagnostic_request(next_request)["contents"][-1]
-        assert user_content["role"] == "user"
+        tool_content, user_content = gemini.diagnostic_request(next_request)["contents"][-2:]
+        assert tool_content["role"] == user_content["role"] == "user"
+        assert [part["functionResponse"]["name"] for part in tool_content["parts"]] == list(tools)
         parts = user_content["parts"]
-        assert [part["functionResponse"]["name"] for part in parts[:2]] == list(tools)
-        assert [{"text": "Transcribe"}, {"text": "Describe"}] == parts[2::2]
-        assert [part["inlineData"]["mimeType"] for part in parts[3::2]] == [
+        assert [{"text": "Transcribe"}, {"text": "Describe"}] == parts[::2]
+        assert [part["inlineData"]["mimeType"] for part in parts[1::2]] == [
             "audio/wav",
             "video/mp4",
         ]
         assert [
-            base64.b64decode(part["inlineData"]["data"]) for part in parts[3::2]
+            base64.b64decode(part["inlineData"]["data"]) for part in parts[1::2]
         ] == [b"audio fixture", b"video fixture"]
         serialized = json.dumps(
             [
