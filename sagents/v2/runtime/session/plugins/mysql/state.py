@@ -189,6 +189,7 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
             pool = await aiomysql.create_pool(
                 minsize=0,
                 maxsize=self._connection_budget.max_connections,
+                init_command="SET SESSION binlog_row_image = 'MINIMAL'",
                 **self._connect_kwargs,
             )
             try:

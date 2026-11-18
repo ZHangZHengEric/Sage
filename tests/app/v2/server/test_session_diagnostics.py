@@ -367,8 +367,12 @@ def test_web_export_captures_image_tool_exception_stack(tmp_path, monkeypatch, t
             assert not manifest["tool_failures_without_stack_trace"]
             assert not manifest["logs_missing_for_runs"]
             assert "thread-1/state.json" not in archive.namelist()
+            # Raw model requests intentionally retain exactly what was sent to
+            # the provider. Structured logs and tool failure evidence redact it.
+            assert manifest["model_evidence_redacted_on_export"] is False
             assert b"diagnostic-secret" not in b"".join(
-                archive.read(name) for name in archive.namelist()
+                archive.read("thread-1/" + name)
+                for name in ("logs.json", "tools.json", "failures.json", "manifest.json")
             )
 
 

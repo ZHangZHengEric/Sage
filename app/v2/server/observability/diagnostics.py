@@ -7,13 +7,16 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from hashlib import sha256
 import json
+from pathlib import Path
+import time
 
-from sqlalchemy import cast, delete, func, select, text, tuple_, update
+from sqlalchemy import cast, delete, func, or_, select, text, tuple_, update
 from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.v2.server.database.upsert import upsert
-from .orm import dropped, logs, models
+from .orm import dropped, logs, models, expiry, events, timings
+from .evidence_storage import EvidenceStorage
 from .writer import ObservationWriter
 from sagents.v2.runtime.observability.evidence.capture import DiagnosticCapture
 from sagents.v2.runtime.observability.evidence.raw import retained_size
@@ -39,14 +42,17 @@ def _earlier(observed, existing):
 class DatabaseDiagnostics(DiagnosticCapture):
     max_pending_writes = 4096
     max_pending_evidence_bytes = 64 * 1024 * 1024
+    max_storage_bytes = 4 * 1024 * 1024 * 1024
 
-    def __init__(self, database):
+    def __init__(self, database, evidence_root: Path):
         self.database = database
+        self.storage = EvidenceStorage(evidence_root)
         self.available = True
         self._evidence_writer = ObservationWriter(
             self._write_evidence, batch_size=64, max_bytes=self.max_pending_evidence_bytes,
             batch_bytes=8 * 1024 * 1024,
         )
+        self._maintenance = asyncio.create_task(self._maintain())
 
     @property
     def capture_failures(self):
@@ -56,6 +62,8 @@ class DatabaseDiagnostics(DiagnosticCapture):
         return await self._evidence_writer.flush()
 
     async def close(self):
+        self._maintenance.cancel()
+        await asyncio.gather(self._maintenance, return_exceptions=True)
         await self._evidence_writer.close()
 
     def write(self, record):
@@ -95,6 +103,8 @@ class DatabaseDiagnostics(DiagnosticCapture):
         for key, patches in changes.items():
             payload = previous.get(key, "{}")
             record = json.loads(payload)
+            if record.get("evidence_expired"):
+                continue
             changed = False
             for patch in patches:
                 terminal = record.get("status") in {"completed", "failed"}
@@ -114,7 +124,8 @@ class DatabaseDiagnostics(DiagnosticCapture):
             if changed:
                 token = sha256(payload.encode()).hexdigest() if digest else payload
                 record.setdefault("capture_mode", "raw" if payload == "{}" else "legacy")
-                rows[key] = self._encode({**record, **_model_scope(key)}, redact_content=False), token
+                record = self.storage.pack(key, {**record, **_model_scope(key)})
+                rows[key] = self._encode(record, redact_content=False), token
         return rows
 
     async def _write_evidence(self, batch):
@@ -157,6 +168,17 @@ class DatabaseDiagnostics(DiagnosticCapture):
                     ).values(payload=payload))
                     if not result.rowcount:
                         conflicts[key] = changes[key]
+                    else:
+                        record = json.loads(payload)
+                        observed = timestamp(record.get("completed_at")) or timestamp(record.get("started_at")) or time.time()
+                        days = 3 if record.get("status") == "completed" else 7
+                        await upsert(db, expiry, [{
+                            **_model_scope(key), "expires_at": observed + days * 86400,
+                            "summary_expires_at": observed + 30 * 86400,
+                        }], key=MODEL_KEY, merge=lambda incoming: {
+                            "expires_at": incoming.expires_at,
+                            "summary_expires_at": incoming.summary_expires_at,
+                        })
                 if log_rows:
                     await self._write_logs(db, log_rows)
                 return conflicts
@@ -220,12 +242,23 @@ class DatabaseDiagnostics(DiagnosticCapture):
                     ))
                     dropped_count += int(batch_dropped or 0)
             return await asyncio.to_thread(self._evidence, model_rows, log_rows, dropped_count, flushed)
-        except (SQLAlchemyError, ValueError):
+        except (SQLAlchemyError, ValueError, OSError):
             return {"models": [], "logs": [], "unavailable": True,
                     "capture_failures_since_start": self.capture_failures}
 
     def _evidence(self, model_rows, log_rows, dropped_count, flushed):
-        model_rows = [json.loads(row) for row in model_rows]
+        restored = []
+        for encoded in model_rows:
+            row = json.loads(encoded)
+            key = tuple(row[name] for name in MODEL_KEY)
+            try:
+                restored.append(self.storage.unpack(key, row))
+            except (OSError, ValueError):
+                row.pop("_parts", None)
+                row.pop("_storage", None)
+                row["evidence_unavailable"] = True
+                restored.append(row)
+        model_rows = restored
         log_rows = [json.loads(row) for row in log_rows]
         model_rows.sort(key=lambda row: (row.get("started_at", ""), row.get("request_id", "")))
         for index, row in enumerate(model_rows, 1):
@@ -237,3 +270,96 @@ class DatabaseDiagnostics(DiagnosticCapture):
         if not flushed:
             result["pending_writes"] = True
         return result
+
+    async def _maintain(self):
+        from .logging import get_logger
+
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await self.prune()
+            except Exception as exc:
+                get_logger(__name__).exception(
+                    "diagnostics.retention.failed", "Diagnostic retention will retry", exc,
+                )
+
+    async def prune(self, *, now=None):
+        now = time.time() if now is None else now
+        removed = []
+        usage = await asyncio.to_thread(self._file_usage)
+        budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
+
+        async def write(db):
+            nonlocal budget_excess
+            identity = tuple_(*(models.c[n] for n in MODEL_KEY))
+            retention_identity = tuple_(*(expiry.c[n] for n in MODEL_KEY))
+            rows = (await db.execute(select(models).join(
+                expiry, identity == retention_identity,
+            ).where(expiry.c.expires_at > 0, or_(expiry.c.expires_at < now, budget_excess > 0))
+              .order_by(expiry.c.expires_at).limit(100).with_for_update())).mappings().all()
+            for row in rows:
+                key = tuple(row[n] for n in MODEL_KEY)
+                record = json.loads(row["payload"])
+                expired = now >= (await db.scalar(select(expiry.c.expires_at).where(retention_identity == key)))
+                if not expired and (budget_excess <= 0 or record.get("status") not in {"completed", "failed"}):
+                    continue
+                record.pop("_parts", None)
+                record.pop("_storage", None)
+                for name in ("request", "response", "stream", "error", "metadata", "request_metadata"):
+                    record.pop(name, None)
+                record["evidence_expired"] = True
+                record["evidence_expired_reason"] = "retention" if expired else "storage_budget"
+                result = await db.execute(update(models).where(
+                    identity == key, models.c.payload == row["payload"],
+                ).values(payload=json.dumps(record, ensure_ascii=False)))
+                if result.rowcount:
+                    await db.execute(update(expiry).where(retention_identity == key).values(expires_at=-1))
+                    removed.append(key)
+                    budget_excess -= usage.get(str(self.storage.directory(key)), 0)
+            summaries = (await db.execute(select(expiry).where(
+                expiry.c.summary_expires_at < now,
+            ).limit(100).with_for_update())).mappings().all()
+            for row in summaries:
+                key = tuple(row[n] for n in MODEL_KEY)
+                await db.execute(delete(models).where(identity == key))
+                await db.execute(delete(expiry).where(retention_identity == key))
+                if not await db.scalar(select(models.c.request_id).where(*_scope(models, *key[:2])).limit(1)):
+                    await db.execute(delete(logs).where(*_scope(logs, *key[:2])))
+                    await db.execute(delete(dropped).where(*_scope(dropped, *key[:2])))
+                removed.append(key)
+            cutoff = now - 30 * 86400
+            for table, column, key_columns in (
+                (events, events.c.at, (events.c.id,)),
+                (timings, timings.c.started_at, tuple(timings.c[n] for n in MODEL_KEY)),
+            ):
+                old = (await db.execute(select(*key_columns).where(column < cutoff).limit(500))).all()
+                if old:
+                    await db.execute(delete(table).where(tuple_(*key_columns).in_(old)))
+
+        await self.database.run_transaction(write)
+        async with self.database.session() as db:
+            payloads = list(await db.scalars(select(models.c.payload).join(
+                expiry, tuple_(*(models.c[n] for n in MODEL_KEY)) == tuple_(*(expiry.c[n] for n in MODEL_KEY)),
+            )))
+        await asyncio.to_thread(self._remove_expired_files, payloads)
+        return len(removed)
+
+    def _file_usage(self):
+        usage = defaultdict(int)
+        for path in self.storage.root.glob("*/*/*"):
+            if path.is_file():
+                usage[str(path.parent)] += path.stat().st_size
+        return usage
+
+    def _remove_expired_files(self, payloads):
+        referenced = set()
+        for payload in payloads:
+            row = json.loads(payload)
+            key = tuple(row[n] for n in MODEL_KEY)
+            referenced.update(self.storage.path(key, digest) for digest in row.get("_parts", {}).values())
+        cutoff = time.time() - 3600
+        for path in self.storage.root.glob("*/*/*"):
+            # Grace protects parts staged by other processes before SQL commit,
+            # as well as readers that opened an older SQL snapshot.
+            if path not in referenced and path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
