@@ -443,3 +443,38 @@ async def test_expired_diagnostics_export_explains_retention(database, tmp_path)
             assert index[0]["evidence_expired"]
     finally:
         await sink.close()
+
+
+async def test_batch_migration_does_not_publish_before_every_record_is_verified(database, tmp_path, monkeypatch):
+    import json
+    from app.v2.server.observability.maintenance import migrate_legacy
+    from app.v2.server.observability.orm import models, expiry
+
+    session, run = uuid4().hex, uuid4().hex
+    rows = []
+    for index in range(3):
+        record = {"session_id": session, "run_id": run, "request_id": str(index),
+                  "status": "completed", "started_at": utc_now().isoformat(),
+                  "request": {"messages": ["完整正文" * 1000]}}
+        rows.append({key: record[key] for key in ("session_id", "run_id", "request_id")} | {"payload": json.dumps(record)})
+    async with database.transaction() as db:
+        await db.execute(models.insert(), rows)
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    unpack = sink.storage.unpack
+    def fail_second(key, record):
+        if key[2] == "1":
+            raise ValueError("injected verification failure")
+        return unpack(key, record)
+    try:
+        monkeypatch.setattr(sink.storage, "unpack", fail_second)
+        with pytest.raises(ValueError, match="injected verification failure"):
+            await migrate_legacy(database, sink)
+        async with database.session() as db:
+            assert not list(await db.scalars(select(expiry.c.request_id).where(expiry.c.session_id == session)))
+            payloads = list(await db.scalars(select(models.c.payload).where(models.c.session_id == session)))
+            assert set(payloads) == {row["payload"] for row in rows}
+        monkeypatch.setattr(sink.storage, "unpack", unpack)
+        assert await migrate_legacy(database, sink) == 3
+        assert await migrate_legacy(database, sink) == 0
+    finally:
+        await sink.close()

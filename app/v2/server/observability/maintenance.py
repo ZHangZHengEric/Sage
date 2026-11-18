@@ -18,18 +18,21 @@ from .orm import models, expiry
 from sagents.v2.runtime.observability.performance.aggregation import timestamp
 
 
-async def migrate_legacy(database, sink, *, limit=100):
-    migrated = 0
-    for _ in range(limit):
+async def migrate_legacy(database, sink, *, limit=10):
+    async with database.session() as db:
+        identity = and_(*(models.c[n] == expiry.c[n] for n in MODEL_KEY))
+        keys = (await db.execute(select(*(models.c[n] for n in MODEL_KEY)).outerjoin(
+            expiry, identity,
+        ).where(expiry.c.request_id.is_(None)).limit(limit))).all()
+        mysql = db.get_bind().dialect.name == "mysql"
+    prepared = []
+    for key in keys:
         async with database.session() as db:
-            identity = tuple(models.c[n] == expiry.c[n] for n in MODEL_KEY)
-            row = (await db.execute(select(models).outerjoin(expiry, and_(*identity)).where(
-                expiry.c.request_id.is_(None),
-            ).limit(1))).mappings().first()
-        if row is None:
-            break
-        key = tuple(row[n] for n in MODEL_KEY)
-        original = row["payload"]
+            original = await db.scalar(select(models.c.payload).where(
+                *(models.c[n] == key[i] for i, n in enumerate(MODEL_KEY)),
+            ))
+        if original is None:
+            continue
         record = json.loads(original)
         compact = await asyncio.to_thread(sink.storage.pack, key, record)
         restored = await asyncio.to_thread(sink.storage.unpack, key, compact)
@@ -38,13 +41,17 @@ async def migrate_legacy(database, sink, *, limit=100):
         encoded = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
         observed = timestamp(record.get("completed_at")) or timestamp(record.get("started_at")) or time.time()
         days = 3 if record.get("status") == "completed" else 7
+        token = sha256(original.encode()).hexdigest() if mysql else original
+        prepared.append((tuple(key), encoded, token, observed, days))
 
-        async def write(db):
-            version = models.c.payload
-            token = original
-            if db.get_bind().dialect.name == "mysql":
-                version = func.sha2(cast(version, CHAR(charset="utf8mb4")), 256)
-                token = sha256(original.encode()).hexdigest()
+    async def write(db):
+        migrated = 0
+        version = models.c.payload
+        if mysql:
+            version = func.sha2(cast(version, CHAR(charset="utf8mb4")), 256)
+        # Commit small references together. Bodies were durably written and
+        # verified first, and the CAS still protects every concurrent change.
+        for key, encoded, token, observed, days in prepared:
             changed = await db.execute(update(models).where(
                 *(models.c[n] == key[i] for i, n in enumerate(MODEL_KEY)), version == token,
             ).values(payload=encoded))
@@ -53,10 +60,10 @@ async def migrate_legacy(database, sink, *, limit=100):
                     **_model_scope(key), "expires_at": observed + days * 86400,
                     "summary_expires_at": observed + 30 * 86400,
                 }], key=MODEL_KEY)
-            return bool(changed.rowcount)
+                migrated += 1
+        return migrated
 
-        migrated += await database.run_transaction(write)
-    return migrated
+    return await database.run_transaction(write) if prepared else 0
 
 
 async def main(args):
