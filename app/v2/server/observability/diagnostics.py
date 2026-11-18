@@ -295,21 +295,36 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 maintenance_lock.c.id == "retention",
             ).with_for_update())
             removed.clear()
-            payloads = list(await db.scalars(select(models.c.payload).join(
+            evidence = (await db.execute(select(models.c.payload, expiry.c.expires_at).join(
                 expiry, tuple_(*(models.c[n] for n in MODEL_KEY)) == tuple_(*(expiry.c[n] for n in MODEL_KEY)),
-            )))
-            usage = await asyncio.to_thread(self._file_usage, payloads)
+            ))).all()
+            usage = await asyncio.to_thread(self._file_usage, [row.payload for row in evidence])
             budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
             identity = tuple_(*(models.c[n] for n in MODEL_KEY))
             retention_identity = tuple_(*(expiry.c[n] for n in MODEL_KEY))
-            rows = (await db.execute(select(models).join(
+            # Filter before the batch limit. Protected in-flight records must
+            # not occupy all 100 slots forever. Reuse the small SQL snapshot
+            # already read for accounting; no dialect-specific JSON queries or
+            # locks on the protected prefix are needed.
+            candidates = []
+            for payload, expires_at in evidence:
+                if expires_at <= 0:
+                    continue
+                record = json.loads(payload)
+                if expires_at <= now or (budget_excess > 0 and record.get("status") in {"completed", "failed"}):
+                    candidates.append((expires_at, *(record[n] for n in MODEL_KEY)))
+            candidates.sort()
+            keys = [candidate[1:] for candidate in candidates[:100]]
+            rows = (await db.execute(select(models, expiry.c.expires_at).join(
                 expiry, identity == retention_identity,
-            ).where(expiry.c.expires_at > 0, or_(expiry.c.expires_at < now, budget_excess > 0))
-              .order_by(expiry.c.expires_at).limit(100).with_for_update())).mappings().all()
+            ).where(identity.in_(keys), expiry.c.expires_at > 0,
+                    or_(expiry.c.expires_at <= now, budget_excess > 0))
+              .order_by(expiry.c.expires_at, *(models.c[n] for n in MODEL_KEY))
+              .with_for_update())).mappings().all()
             for row in rows:
                 key = tuple(row[n] for n in MODEL_KEY)
                 record = json.loads(row["payload"])
-                expired = now >= (await db.scalar(select(expiry.c.expires_at).where(retention_identity == key)))
+                expired = now >= row["expires_at"]
                 if not expired and (budget_excess <= 0 or record.get("status") not in {"completed", "failed"}):
                     continue
                 record.pop("_parts", None)
