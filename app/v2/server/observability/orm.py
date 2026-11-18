@@ -22,6 +22,16 @@ models = Table(
     *scope(primary_key=True), Column("request_id", identifier, primary_key=True),
     Column("payload", payload, nullable=False),
 )
+expiry = Table(
+    "diagnostic_model_expiry", metadata,
+    *scope(primary_key=True), Column("request_id", identifier, primary_key=True),
+    Column("expires_at", Double, nullable=False, index=True),
+    Column("summary_expires_at", Double, nullable=False, index=True),
+)
+maintenance_lock = Table(
+    "diagnostic_maintenance", metadata,
+    Column("id", String(64), primary_key=True),
+)
 logs = Table(
     "diagnostic_logs", metadata,
     Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True),

@@ -88,7 +88,7 @@ class ServerHost:
             self.memory_database = LibSQLClient(settings.libsql_url, settings.libsql_auth_token)
             memory_registrations = tuple(libsql_memory_registrations(self.memory_database))
         self._registrations = (
-            *memory_registrations, sql_observability_registration(database), *extensions,
+            *memory_registrations, sql_observability_registration(database, settings.data_root / "diagnostic-evidence"), *extensions,
         )
         from sagents.v2.runtime.extensions.official import builtin_extension_registry
         self.extensions = builtin_extension_registry()
@@ -320,7 +320,7 @@ class ServerHost:
             if not self.settings.diagnostics_enabled:
                 self.observability.install_diagnostics(UnavailableEvidence())
             elif not isinstance(self.observability.diagnostics, DatabaseDiagnostics):
-                self.observability.install_diagnostics(DatabaseDiagnostics(self.database))
+                self.observability.install_diagnostics(DatabaseDiagnostics(self.database, self.settings.data_root / "diagnostic-evidence"))
             store = self._application.service("session.store")
             self.observability.business_report_reader = getattr(store, "report_business_events", None)
             if not self.observability.performance_available:

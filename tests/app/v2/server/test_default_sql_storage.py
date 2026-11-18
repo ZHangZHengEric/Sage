@@ -75,7 +75,7 @@ async def test_diagnostics_import_and_async_capture_keep_large_evidence_and_run_
     assert await import_diagnostics(database, directory / "evidence.sqlite3") == 1
     assert await import_diagnostics(database, directory / "evidence.sqlite3") == 1
 
-    sink = DatabaseDiagnostics(database)
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
     try:
         await sink.begin_model_request(
             session_id=session, request=request, provider={},
@@ -115,12 +115,12 @@ async def test_diagnostics_import_and_async_capture_keep_large_evidence_and_run_
         await sink.close()
 
 
-async def test_sql_timings_survive_a_saturated_evidence_queue(database):
+async def test_sql_timings_survive_a_saturated_evidence_queue(database, tmp_path):
     from app.v2.server.observability.performance import DatabasePerformance
     from sagents.v2.runtime.observability.performance.recording import ModelTiming, RunTimingStage
 
     session, run = uuid4().hex, uuid4().hex
-    evidence = DatabaseDiagnostics(database)
+    evidence = DatabaseDiagnostics(database, tmp_path / "evidence")
     performance = DatabasePerformance(database)
     evidence.max_pending_writes = 1
     now = utc_now()
@@ -153,10 +153,10 @@ async def test_sql_timings_survive_a_saturated_evidence_queue(database):
         await evidence.close()
 
 
-async def test_pending_model_updates_share_one_evidence_slot(database):
+async def test_pending_model_updates_share_one_evidence_slot(database, tmp_path):
     session, run = uuid4().hex, uuid4().hex
     request = SimpleNamespace(run_id=run, request_id="model", metadata={})
-    sink = DatabaseDiagnostics(database)
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
     sink.max_pending_writes = 1
     args = dict(session_id=session, request=request)
     try:
@@ -176,11 +176,11 @@ async def test_pending_model_updates_share_one_evidence_slot(database):
         await sink.close()
 
 
-async def test_coalesced_evidence_respects_memory_budget(database, monkeypatch):
+async def test_coalesced_evidence_respects_memory_budget(database, tmp_path, monkeypatch):
     monkeypatch.setattr(DatabaseDiagnostics, "max_pending_evidence_bytes", 16 * 1024)
     session, run = uuid4().hex, uuid4().hex
     request = SimpleNamespace(run_id=run, request_id="model", metadata={})
-    sink = DatabaseDiagnostics(database)
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
     args = dict(session_id=session, request=request)
     try:
         await sink.begin_model_request(**args, provider={}, wire_request={"model": "test"})
@@ -196,10 +196,10 @@ async def test_coalesced_evidence_respects_memory_budget(database, monkeypatch):
         await sink.close()
 
 
-async def test_concurrent_model_patches_preserve_observed_times_and_terminal(database, monkeypatch):
+async def test_concurrent_model_patches_preserve_observed_times_and_terminal(database, tmp_path, monkeypatch):
     session, run = uuid4().hex, uuid4().hex
     args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id="model", metadata={}))
-    first, second = DatabaseDiagnostics(database), DatabaseDiagnostics(database)
+    first, second = DatabaseDiagnostics(database, tmp_path / "evidence"), DatabaseDiagnostics(database, tmp_path / "evidence")
     start = utc_now() - timedelta(seconds=4)
     token = start + timedelta(seconds=1)
     end = start + timedelta(seconds=3)
@@ -242,12 +242,12 @@ async def test_concurrent_model_patches_preserve_observed_times_and_terminal(dat
         await asyncio.gather(first.close(), second.close())
 
 
-async def test_tool_payload_is_available_in_sql_evidence_without_trace(database):
+async def test_tool_payload_is_available_in_sql_evidence_without_trace(database, tmp_path):
     from sagents.v2.runtime.observability.logs import ObservationLogs
     from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
     from tests.sagents.v2.test_agent_loop_matrix import CONTEXT, READ_TOOL, completed, setup_loop, tool_call
 
-    evidence = DatabaseDiagnostics(database)
+    evidence = DatabaseDiagnostics(database, tmp_path / "evidence")
     output = []
 
     class LogOutput:
@@ -278,3 +278,286 @@ async def test_tool_payload_is_available_in_sql_evidence_without_trace(database)
         assert "execution_result" not in log.attributes
     finally:
         await evidence.close()
+
+
+async def test_compressed_evidence_keeps_sql_small_and_preserves_all_parts(database, tmp_path):
+    import json
+    from app.v2.server.observability.orm import models
+
+    session, run = uuid4().hex, uuid4().hex
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    request = SimpleNamespace(run_id=run, request_id="big", metadata={})
+    args = dict(session_id=session, request=request)
+    wire = {"messages": [{"role": "user", "content": "你好🌟" * 100000}]}
+    stream = {"wire_events": [{"delta": "stream" * 100000}], "normalized_events": [{"delta": "out"}]}
+    try:
+        await sink.begin_model_request(**args, provider={}, wire_request=wire)
+        assert await sink._flush()
+        original_files = {p: p.stat().st_mtime_ns for p in sink.storage.root.glob("*/*/*.gz")}
+        await sink.record_model_first_token(**args, observed_at=utc_now())
+        assert await sink._flush()
+        assert original_files == {p: p.stat().st_mtime_ns for p in original_files}
+        await sink.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}))
+        assert await sink._flush()
+        await sink.record_model_stream(**args, evidence=stream)
+        evidence = await sink.export_evidence(session, {run})
+        record, = evidence["models"]
+        assert record["request"] == wire
+        assert record["stream"] == stream
+        assert record["response"] == {"text": "done"}
+        async with database.session() as db:
+            payload = await db.scalar(select(models.c.payload).where(models.c.session_id == session))
+        assert len(payload.encode()) < 2048
+        assert "messages" not in json.loads(payload)
+        assert sum(p.stat().st_size for p in sink.storage.root.glob("*/*/*.gz")) < 20000
+    finally:
+        await sink.close()
+
+
+async def test_legacy_migration_is_verified_idempotent_and_keeps_export(database, tmp_path):
+    import json
+    from app.v2.server.observability.maintenance import migrate_legacy
+    from app.v2.server.observability.orm import models
+
+    session, run = uuid4().hex, uuid4().hex
+    original = {"session_id": session, "run_id": run, "request_id": "old", "status": "completed",
+                "started_at": utc_now().isoformat(), "request": {"messages": ["original" * 10000]},
+                "response": {"text": "done"}, "stream": {"wire_events": [{"delta": "hello"}]}}
+    async with database.transaction() as db:
+        await db.execute(models.insert().values(session_id=session, run_id=run, request_id="old", payload=json.dumps(original)))
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    try:
+        before, = (await sink.export_evidence(session, {run}))["models"]
+        assert await migrate_legacy(database, sink) == 1
+        assert await migrate_legacy(database, sink) == 0
+        after, = (await sink.export_evidence(session, {run}))["models"]
+        assert before == after
+    finally:
+        await sink.close()
+
+
+async def test_evidence_retention_preserves_failure_and_timing_until_30_days(database, tmp_path):
+    from app.v2.server.observability.orm import models, expiry
+
+    session, run = uuid4().hex, uuid4().hex
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    now = utc_now()
+    try:
+        for request_id, failed in (("success", False), ("failure", True)):
+            args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id=request_id, metadata={}))
+            await sink.begin_model_request(**args, provider={}, wire_request={"message": "keep me"}, observed_at=now)
+            if failed:
+                await sink.fail_model_request(**args, error=RuntimeError("failed"), observed_at=now)
+            else:
+                await sink.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "ok"}), observed_at=now)
+        await sink._flush()
+        assert await sink.prune(now=now.timestamp() + 4 * 86400) == 1
+        records = {r["request_id"]: r for r in (await sink.export_evidence(session, {run}))["models"]}
+        assert records["success"]["evidence_expired"]
+        assert "request" not in records["success"]
+        assert records["failure"]["request"]["message"] == "keep me"
+        assert await sink.prune(now=now.timestamp() + 8 * 86400) == 1
+        records = (await sink.export_evidence(session, {run}))["models"]
+        assert all(r["evidence_expired"] for r in records)
+        assert await sink.prune(now=now.timestamp() + 31 * 86400) == 2
+        async with database.session() as db:
+            assert not list(await db.scalars(select(models.c.payload).where(models.c.session_id == session)))
+            assert not list(await db.scalars(select(expiry.c.request_id).where(expiry.c.session_id == session)))
+    finally:
+        await sink.close()
+
+
+async def test_budget_eviction_and_missing_blob_are_explicit(database, tmp_path):
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    session, run = uuid4().hex, uuid4().hex
+    args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id="one", metadata={}))
+    try:
+        await sink.begin_model_request(**args, provider={}, wire_request={"message": "full"})
+        await sink.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}))
+        assert (await sink.export_evidence(session, {run}))["models"][0]["response"]["text"] == "done"
+        for path in sink.storage.root.glob("*/*/*.gz"):
+            path.unlink()
+        assert (await sink.export_evidence(session, {run}))["models"][0]["evidence_unavailable"]
+        await sink.begin_model_request(**args, provider={}, wire_request={"message": "retry"}, observed_at=utc_now() - timedelta(seconds=60))
+        await sink._flush()
+        sink.max_storage_bytes = 0
+        assert await sink.prune() == 1
+        record, = (await sink.export_evidence(session, {run}))["models"]
+        assert record["evidence_expired_reason"] == "storage_budget"
+    finally:
+        await sink.close()
+
+
+async def test_compressed_evidence_survives_restart_and_gc_protects_current_parts(database, tmp_path):
+    import os
+    from app.v2.server.observability.evidence_storage import EvidenceStorage
+
+    session, run = uuid4().hex, uuid4().hex
+    root = tmp_path / "evidence"
+    args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id="durable", metadata={}))
+    first = DatabaseDiagnostics(database, root)
+    await first.begin_model_request(**args, provider={}, wire_request={"messages": ["complete"]})
+    await first.record_model_stream(**args, evidence={"wire_events": [{"delta": "partial before crash"}]})
+    before = await first.export_evidence(session, {run})
+    await first.close()
+    storage = EvidenceStorage(root)
+    orphan = storage.path((session, run, "unpublished"), storage.put((session, run, "unpublished"), {"old": True}))
+    recent = storage.path((session, run, "staging"), storage.put((session, run, "staging"), {"new": True}))
+    old = (utc_now() - timedelta(hours=2)).timestamp()
+    os.utime(orphan, (old, old))
+    for path in root.glob("*/*/*.gz"):
+        if path != recent:
+            os.utime(path, (old, old))
+    second = DatabaseDiagnostics(database, root)
+    try:
+        assert await second.export_evidence(session, {run}) == before
+        await second.prune()
+        assert not orphan.exists()
+        assert recent.exists()
+        assert await second.export_evidence(session, {run}) == before
+    finally:
+        await second.close()
+
+
+async def test_expired_diagnostics_export_explains_retention(database, tmp_path):
+    import json
+    from zipfile import ZipFile
+    from app.v2.server.storage.downloads import prepare_session_export
+
+    session, run = uuid4().hex, uuid4().hex
+    now = utc_now()
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id="expired", metadata={}))
+    try:
+        await sink.begin_model_request(**args, provider={}, wire_request={"prompt": "hello"}, observed_at=now)
+        await sink.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}), observed_at=now)
+        await sink._flush()
+        await sink.prune(now=now.timestamp() + 4 * 86400)
+        evidence = await sink.export_evidence(session, {run})
+        output, _ = prepare_session_export(session, {run}, evidence)
+        with output, ZipFile(output) as archive:
+            manifest = json.loads(archive.read(session + "/manifest.json"))
+            index = json.loads(archive.read(session + "/requests/index.json"))
+            assert manifest["expired_model_request_ids"] == ["expired"]
+            assert "expired" in manifest["evidence_availability"]["models"]["reason"]
+            assert index[0]["evidence_expired"]
+    finally:
+        await sink.close()
+
+
+async def test_batch_migration_does_not_publish_before_every_record_is_verified(database, tmp_path, monkeypatch):
+    import json
+    from app.v2.server.observability.maintenance import migrate_legacy
+    from app.v2.server.observability.orm import models, expiry
+
+    session, run = uuid4().hex, uuid4().hex
+    rows = []
+    for index in range(3):
+        record = {"session_id": session, "run_id": run, "request_id": str(index),
+                  "status": "completed", "started_at": utc_now().isoformat(),
+                  "request": {"messages": ["完整正文" * 1000]}}
+        rows.append({key: record[key] for key in ("session_id", "run_id", "request_id")} | {"payload": json.dumps(record)})
+    async with database.transaction() as db:
+        await db.execute(models.insert(), rows)
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    unpack = sink.storage.unpack
+    def fail_second(key, record):
+        if key[2] == "1":
+            raise ValueError("injected verification failure")
+        return unpack(key, record)
+    try:
+        monkeypatch.setattr(sink.storage, "unpack", fail_second)
+        with pytest.raises(ValueError, match="injected verification failure"):
+            await migrate_legacy(database, sink)
+        async with database.session() as db:
+            assert not list(await db.scalars(select(expiry.c.request_id).where(expiry.c.session_id == session)))
+            payloads = list(await db.scalars(select(models.c.payload).where(models.c.session_id == session)))
+            assert set(payloads) == {row["payload"] for row in rows}
+        monkeypatch.setattr(sink.storage, "unpack", unpack)
+        assert await migrate_legacy(database, sink) == 3
+        assert await migrate_legacy(database, sink) == 0
+    finally:
+        await sink.close()
+
+
+async def test_gc_tolerates_another_process_collecting_the_same_file(database, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    key = (uuid4().hex, "r", "m")
+    digest = sink.storage.put(key, {"orphan": True})
+    victim = sink.storage.path(key, digest)
+    stat = Path.stat
+    calls = 0
+    def concurrent_stat(path, *args, **kwargs):
+        nonlocal calls
+        if path == victim:
+            calls += 1
+            if calls == 2:
+                victim.unlink()
+                raise FileNotFoundError(str(path))
+        return stat(path, *args, **kwargs)
+    try:
+        monkeypatch.setattr(Path, "stat", concurrent_stat)
+        assert not sink._file_usage()
+        assert not victim.exists()
+        monkeypatch.setattr(Path, "stat", stat)
+        digest = sink.storage.put(key, {"second orphan": True})
+        victim = sink.storage.path(key, digest)
+        calls = 0
+        monkeypatch.setattr(Path, "stat", concurrent_stat)
+        sink._remove_expired_files([])
+        assert not victim.exists()
+    finally:
+        monkeypatch.setattr(Path, "stat", stat)
+        await sink.close()
+
+
+async def test_budget_does_not_repeatedly_count_evicted_files_during_grace(database, tmp_path):
+    from app.v2.server.observability.orm import models
+
+    sink = DatabaseDiagnostics(database, tmp_path / "evidence")
+    session, run = uuid4().hex, uuid4().hex
+    try:
+        for i in range(2):
+            args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id=str(i), metadata={}))
+            now = utc_now() - timedelta(seconds=60 - i)
+            await sink.begin_model_request(**args, provider={}, wire_request={"message": str(i) * 10000}, observed_at=now)
+            await sink.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}), observed_at=now)
+        await sink._flush()
+        async with database.session() as db:
+            payloads = list(await db.scalars(select(models.c.payload)))
+        usage = sink._file_usage(payloads)
+        sink.max_storage_bytes = sum(usage.values()) - 1
+        assert await sink.prune() == 1
+        assert list(sink.storage.root.glob("*/*/*.gz")), "GC grace keeps files temporarily"
+        assert await sink.prune() == 0
+        records = (await sink.export_evidence(session, {run}))["models"]
+        assert sum(bool(r.get("evidence_expired")) for r in records) == 1
+        assert next(r for r in records if not r.get("evidence_expired"))["request"]
+    finally:
+        await sink.close()
+
+
+async def test_two_server_instances_share_one_eviction_budget(database, tmp_path):
+    from app.v2.server.observability.orm import models
+
+    first = DatabaseDiagnostics(database, tmp_path / "evidence")
+    second = DatabaseDiagnostics(database, tmp_path / "evidence")
+    session, run = uuid4().hex, uuid4().hex
+    try:
+        for i in range(2):
+            args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id=str(i), metadata={}))
+            now = utc_now() - timedelta(seconds=60 - i)
+            await first.begin_model_request(**args, provider={}, wire_request={"message": str(i) * 10000}, observed_at=now)
+            await first.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}), observed_at=now)
+        await first._flush()
+        async with database.session() as db:
+            payloads = list(await db.scalars(select(models.c.payload)))
+        first.max_storage_bytes = second.max_storage_bytes = sum(first._file_usage(payloads).values()) - 1
+        assert sum(await asyncio.gather(first.prune(), second.prune())) == 1
+        records = (await first.export_evidence(session, {run}))["models"]
+        assert sum(bool(r.get("evidence_expired")) for r in records) == 1
+    finally:
+        await first.close()
+        await second.close()

@@ -294,7 +294,8 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                 write_json(path, row)
                 requests_index.append({key: row.get(key) for key in (
                     "sequence", "run_id", "request_id", "step_id", "purpose", "started_at", "completed_at", "status",
-                    "evidence_source", "request_format", "truncated"
+                    "evidence_source", "request_format", "truncated", "evidence_expired",
+                    "evidence_expired_reason", "evidence_unavailable"
                 )} | {"path": path})
             write_json("requests/index.json", requests_index)
             captured_ids = {row.get("request_id") for row in models}
@@ -303,6 +304,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
             expected_ids.update(evidence.get("model_request_ids", []))
             missing_requests = sorted(expected_ids - captured_ids)
             projected = [row["request_id"] for row in models if row.get("evidence_source") in {"trace_projection", "mixed"}]
+            expired = [row["request_id"] for row in models if row.get("evidence_expired")]
             missing_streams = [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")]
             logs = evidence.get("logs", [])
             incomplete_requests = [
@@ -319,7 +321,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
             availability = {
                 "models": {"status":"not_captured" if not models else "partial" if partial_models else "available",
                            "trace_projected_request_ids":projected,
-                           "reason":"Normalized trace content is exported when dedicated diagnostics were not captured; it is not a raw provider request." if projected else None},
+                           "reason":"Full diagnostic content expired under the retention or storage budget policy." if expired else "Normalized trace content is exported when dedicated diagnostics were not captured; it is not a raw provider request." if projected else None},
                 "logs": {"status":"not_captured" if not logs else "partial" if partial_logs else "available",
                          "reason":None if logs else "No full diagnostic log records were captured for this Session; timing spans are not full logs."},
                 "raw_model_streams": {"status":"not_captured" if not models or len(missing_streams) == len(models) else "partial" if missing_streams or dropped_streams or incomplete_streams or pending_writes else "available",
@@ -354,6 +356,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                     ),
                     "run_ids": sorted(run_ids),
                     "model_records": len(models),
+                    "expired_model_request_ids": expired,
                     "model_request_ids_missing": missing_requests,
                     "model_request_coverage": "external_traces_only" if "traces" in evidence else ("incomplete" if not models or partial_models or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs"),
                     "unfinished_model_request_ids": [row.get("request_id") for row in models if row.get("status") == "started"],

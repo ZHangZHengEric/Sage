@@ -43,9 +43,12 @@ class FakeSandbox:
         self.killed = True
 
     def run(self, command, *, cwd, timeout, **kwargs):
-        parts = shlex.split(command)
+        # The bridge's final argument is unquoted base64. Avoid shlex's
+        # character-by-character concatenation over multi-megabyte payloads.
+        prefix, encoded = command.rsplit(" ", 1)
+        parts = shlex.split(prefix)
         script = parts[parts.index("-c") + 1]
-        payload = json.loads(base64.b64decode(parts[-1]))
+        payload = json.loads(base64.b64decode(encoded, validate=True))
         for key in ("root", "cwd"):
             if payload.get(key, "").startswith("/workspace"):
                 payload[key] = str(self.root) + payload[key][len("/workspace") :]

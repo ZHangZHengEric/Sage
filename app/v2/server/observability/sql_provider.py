@@ -8,7 +8,7 @@ from sagents.v2.runtime.observability.provider import ObservabilityConfig, creat
 SQL_OBSERVABILITY_PLUGIN = "com.sage.server.observability-sql"
 
 
-def sql_observability_registration(database):
+def sql_observability_registration(database, evidence_root):
     from .diagnostics import DatabaseDiagnostics
     from .performance import DatabasePerformance
 
@@ -30,7 +30,7 @@ def sql_observability_registration(database):
         }),
         factory=lambda context, deps: create_observability_provider(
             SQL_OBSERVABILITY_PLUGIN, context.config,
-            local_diagnostics_factory=lambda: DatabaseDiagnostics(database),
+            local_diagnostics_factory=lambda: DatabaseDiagnostics(database, evidence_root),
             local_performance_factory=lambda: DatabasePerformance(database),
         ),
     )

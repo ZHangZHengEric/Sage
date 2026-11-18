@@ -549,3 +549,7 @@ python -m pytest tests/sagents/v2/test_postgres_session_store.py tests/sagents/v
 SDK Redis/PostgreSQL 使用 `pip install '.[postgres,redis]'`，插件配置 `dsn`、`redis_url`、可选 `table_prefix` / `key_prefix`、归档/保留/协调/预览参数与 Redis/MySQL 一致。Redis 必须启用 AOF 和 `noeviction`。PostgreSQL 归档用连接级 advisory lock 跨多次事务固定同一 Session 的归档所有权，锁释放结果不确定时丢弃连接。显式备份恢复先校验每个 Session 的所有者，再在拓扑/Session 锁内恢复；普通旧写入者仍不能越过删除标记。
 
 业务对齐由 `test_sql_backend_feature_parity.py`、两种后端共同执行的 `test_redis_mysql_session_store.py` / `test_distributed_redis_mysql_session_store.py` 和 `test_mysql_incremental_archive.py` 验证；CI 同时提供 MySQL、PostgreSQL、启用 AOF 的 Redis，运行实库归档、重启、并发订阅、旧执行者隔离和远程调度。现有 MySQL 数据或历史 PostgreSQL 表不会自动迁移。
+
+模型诊断正文使用共享数据目录下的 `diagnostic-evidence/` 保存不可变 gzip 文件，SQL 仅保存小型记录与引用。部署与备份应一起保留数据库和该目录。查询及诊断包下载按需还原完整请求、响应和流式事件。成功请求正文保留 3 天，失败及未完成请求保留 7 天，诊断摘要和 SQL 性能指标保留 30 天。压缩正文默认预算为 4 GiB，超限时优先淘汰最早到期的终态记录，导出会标记正文过期原因。后台每分钟分批执行保留策略，未引用文件留出一小时宽限后回收。预算按当前有效引用计算，多实例通过 SQL 事务锁串行清理，避免滚动发布期间重复淘汰。
+
+旧版内联诊断可以运行 `python -m app.v2.server.observability.maintenance` 分批无损迁移。受控维护连接可加 `--disable-binlog`，该选项仅关闭本次维护进程连接的 binlog，并要求相应 MySQL 权限。应先完成新版切流并排空旧实例，再迁移旧正文，迁移后逐条校验后才能安排表文件空间回收。Sage 的 MySQL SessionStore 连接使用会话级 `binlog_row_image=MINIMAL`，以避免会话版本号更新重复记录未变的快照字段。

@@ -71,7 +71,8 @@ def test_agui_run_writes_correlated_json_sagents_logs_to_stdout(tmp_path, capsys
         "model.request.started",
         "model.request.completed",
         "agui.first_text",
-        "model.first_text",
+        # The SQL performance projection records model.first_text when enabled.
+        # The middleware emits a duplicate stdout event only without that sink.
         "agent.preparation.completed",
         "agent.state.commit",
         "server.run.agent_load",
