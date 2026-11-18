@@ -537,3 +537,27 @@ async def test_budget_does_not_repeatedly_count_evicted_files_during_grace(datab
         assert next(r for r in records if not r.get("evidence_expired"))["request"]
     finally:
         await sink.close()
+
+
+async def test_two_server_instances_share_one_eviction_budget(database, tmp_path):
+    from app.v2.server.observability.orm import models
+
+    first = DatabaseDiagnostics(database, tmp_path / "evidence")
+    second = DatabaseDiagnostics(database, tmp_path / "evidence")
+    session, run = uuid4().hex, uuid4().hex
+    try:
+        for i in range(2):
+            args = dict(session_id=session, request=SimpleNamespace(run_id=run, request_id=str(i), metadata={}))
+            now = utc_now() - timedelta(seconds=60 - i)
+            await first.begin_model_request(**args, provider={}, wire_request={"message": str(i) * 10000}, observed_at=now)
+            await first.complete_model_request(**args, response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}), observed_at=now)
+        await first._flush()
+        async with database.session() as db:
+            payloads = list(await db.scalars(select(models.c.payload)))
+        first.max_storage_bytes = second.max_storage_bytes = sum(first._file_usage(payloads).values()) - 1
+        assert sum(await asyncio.gather(first.prune(), second.prune())) == 1
+        records = (await first.export_evidence(session, {run}))["models"]
+        assert sum(bool(r.get("evidence_expired")) for r in records) == 1
+    finally:
+        await first.close()
+        await second.close()

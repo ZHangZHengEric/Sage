@@ -15,7 +15,7 @@ from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.v2.server.database.upsert import upsert
-from .orm import dropped, logs, models, expiry, events, timings
+from .orm import dropped, logs, models, expiry, events, timings, maintenance_lock
 from .evidence_storage import EvidenceStorage
 from .writer import ObservationWriter
 from sagents.v2.runtime.observability.evidence.capture import DiagnosticCapture
@@ -286,15 +286,20 @@ class DatabaseDiagnostics(DiagnosticCapture):
     async def prune(self, *, now=None):
         now = time.time() if now is None else now
         removed = []
-        async with self.database.session() as db:
+        async def write(db):
+            # Re-evaluate the budget after acquiring the shared SQL lock. During
+            # rolling deployment two processes must not spend the same eviction
+            # budget against different records.
+            await upsert(db, maintenance_lock, [{"id": "retention"}], key="id")
+            await db.execute(select(maintenance_lock.c.id).where(
+                maintenance_lock.c.id == "retention",
+            ).with_for_update())
+            removed.clear()
             payloads = list(await db.scalars(select(models.c.payload).join(
                 expiry, tuple_(*(models.c[n] for n in MODEL_KEY)) == tuple_(*(expiry.c[n] for n in MODEL_KEY)),
             )))
-        usage = await asyncio.to_thread(self._file_usage, payloads)
-        budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
-
-        async def write(db):
-            nonlocal budget_excess
+            usage = await asyncio.to_thread(self._file_usage, payloads)
+            budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
             identity = tuple_(*(models.c[n] for n in MODEL_KEY))
             retention_identity = tuple_(*(expiry.c[n] for n in MODEL_KEY))
             rows = (await db.execute(select(models).join(

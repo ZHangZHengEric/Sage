@@ -28,6 +28,10 @@ expiry = Table(
     Column("expires_at", Double, nullable=False, index=True),
     Column("summary_expires_at", Double, nullable=False, index=True),
 )
+maintenance_lock = Table(
+    "diagnostic_maintenance", metadata,
+    Column("id", String(64), primary_key=True),
+)
 logs = Table(
     "diagnostic_logs", metadata,
     Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True),
