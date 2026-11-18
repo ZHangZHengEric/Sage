@@ -286,7 +286,11 @@ class DatabaseDiagnostics(DiagnosticCapture):
     async def prune(self, *, now=None):
         now = time.time() if now is None else now
         removed = []
-        usage = await asyncio.to_thread(self._file_usage)
+        async with self.database.session() as db:
+            payloads = list(await db.scalars(select(models.c.payload).join(
+                expiry, tuple_(*(models.c[n] for n in MODEL_KEY)) == tuple_(*(expiry.c[n] for n in MODEL_KEY)),
+            )))
+        usage = await asyncio.to_thread(self._file_usage, payloads)
         budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
 
         async def write(db):
@@ -344,9 +348,19 @@ class DatabaseDiagnostics(DiagnosticCapture):
         await asyncio.to_thread(self._remove_expired_files, payloads)
         return len(removed)
 
-    def _file_usage(self):
+    def _file_usage(self, payloads=None):
         usage = defaultdict(int)
-        for path in self.storage.root.glob("*/*/*"):
+        if payloads is None:
+            paths = self.storage.root.glob("*/*/*")
+        else:
+            # Files awaiting the orphan grace period have already been evicted.
+            # Counting them again would evict another set on every maintenance pass.
+            paths = set()
+            for payload in payloads:
+                record = json.loads(payload)
+                key = tuple(record[n] for n in MODEL_KEY)
+                paths.update(self.storage.path(key, digest) for digest in record.get("_parts", {}).values())
+        for path in paths:
             if path.is_file():
                 try:
                     size = path.stat().st_size
