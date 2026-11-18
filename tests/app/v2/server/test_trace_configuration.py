@@ -183,7 +183,7 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
         links = response.json()["data"]
         assert links == [
             *([{"id": "performance", "label": "运行性能", "href": "/performance", "external": False}]
-              if cast('Any', service.diagnostics).available else []),
+              if service.observability.performance_available else []),
             *([{"id": "traces", "label": "调用链", "href": "/traces", "external": False}]
               if options.get("trace_backend") == "phoenix" else []),
             *([{"id": console[0], "label": console[1], "href": console[2], "external": True}]
@@ -196,8 +196,10 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
                 assert redirect.headers["location"] == "/traces"
             else:
                 assert redirect.status_code == 404
-        # Availability is live; failed diagnostic capture must not be advertised.
+        # Model evidence and lightweight SQL timing have independent availability.
         cast('Any', service.diagnostics).available = False
+        assert any(link["id"] == "performance" for link in client.get("/api/observability/services").json()["data"])
+        service.observability._performance_query.available = False
         assert all(link["id"] != "performance" for link in client.get("/api/observability/services").json()["data"])
 
 
@@ -214,7 +216,7 @@ def test_observability_uses_started_plugin_and_rejects_non_admin(tmp_path):
     with TestClient(create_app(service=service)) as client:
         client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"})
         links = client.get("/api/observability/services").json()["data"]
-        assert links == []
+        assert links == [{"id": "performance", "label": "运行性能", "href": "/performance", "external": False}]
         assert client.get("/api/observability/console", follow_redirects=False).status_code == 404
         client.post("/api/auth/register", json={"username": "viewer", "password": "viewer12345"})
         client.post("/api/auth/login", json={"username": "viewer", "password": "viewer12345"})
