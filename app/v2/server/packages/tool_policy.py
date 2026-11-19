@@ -46,6 +46,10 @@ def server_tool_policy(management, *, execution_policy=None, current_policy=None
         return None
 
     class ServerToolPolicy(DefaultToolPolicy):
+        @property
+        def batch_proposal_with_decision(self) -> bool:
+            return True
+
         async def decide(self, context):
             effective = configured
             if current_policy is not None and run_policy is not None:

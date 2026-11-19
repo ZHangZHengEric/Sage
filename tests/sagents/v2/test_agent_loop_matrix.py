@@ -321,6 +321,49 @@ async def setup_loop(
     return runtime, handle, loop, executor
 
 
+def test_incremental_checkpoint_hash_and_request_size_match_legacy_serialization():
+    import hashlib
+    import json
+
+    messages = (
+        ModelMessage(role="user", content=(TextBlock(text="检查 🧪\n"),),
+                     metadata={"source_run_id": "old", "source_item_id": "item", "nested": {"b": 1e-7, "a": "é"}}),
+        ModelMessage(role="assistant", tool_calls=(tool_call(),)),
+    )
+    payload = [message.model_dump(mode="json") for message in messages]
+    assert AgentLoopEngine._request_characters(messages) == len(json.dumps(payload))
+    for message in payload:
+        for field in ("source_session_id", "source_run_id", "source_item_id"):
+            message["metadata"].pop(field, None)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    assert AgentLoopEngine._ledger_digest(messages) == f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+    assert AgentLoopEngine._ledger_digest(()) == f"sha256:{hashlib.sha256(b'[]').hexdigest()}"
+
+
+@pytest.mark.asyncio
+async def test_default_policy_and_continuation_commit_adjacent_events_atomically(monkeypatch):
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
+        ScriptedModelStep(events=(completed(),)),
+    ))
+    runtime, handle, loop, _ = await setup_loop(model)
+    transactions = []
+    commit = loop.lifecycle.commit
+
+    async def record(run, **kwargs):
+        transactions.append(tuple(draft.type for draft in kwargs["drafts"]))
+        return await commit(run, **kwargs)
+
+    monkeypatch.setattr(loop.lifecycle, "commit", record)
+    assert (await loop.execute(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+    assert (
+        "tool.call.proposed", "policy.decision.recorded", "tool.call.dispatching", "tool.call.started",
+    ) in transactions
+    assert ("continuation.decided", "step.completed", "checkpoint.committed") in transactions
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert sum(event.type == "tool.call.succeeded" for event in events) == 1
+
+
 @pytest.mark.asyncio
 async def test_loop_rejects_run_from_a_different_resolved_spec():
     model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))

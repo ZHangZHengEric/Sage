@@ -1357,22 +1357,23 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
     def _write_snapshot(self, path: Path, state: dict[str, Any]) -> None:
         current_revision = int(state["sessions"][0]["revision"])
-        typed_state = SessionAggregateSnapshotV2.model_validate(state)
-        # Hash and persist the same normalization, including the ordering of
-        # any collections serialized from sets.
-        normalized = SessionSnapshotEnvelope(
-            format=self.format_version,
-            write_id=new_id("session_write"),
-            current_session_revision=current_revision,
-            state=typed_state,
-            checksum="pending",
-        ).model_dump(mode="json", exclude={"checksum"})
-        payload = {
-            **normalized,
-            "checksum": self._checksum(normalized),
+        # The mutation path has already validated and normalized state. Use
+        # that same JSON representation for both the checksum and the file.
+        normalized = {
+            "format": self.format_version,
+            "write_id": new_id("session_write"),
+            "current_session_revision": current_revision,
+            "state": state,
         }
-        self._atomic_json_write(path, payload)
-        if typed_state.sessions[0].owner is not None:
+        encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256()
+        for part in encoder.iterencode(normalized):
+            digest.update(part.encode("utf-8"))
+        payload = {**normalized, "checksum": f"sha256:{digest.hexdigest()}"}
+        self._atomic_chunks_write(
+            path, (part.encode("utf-8") for part in encoder.iterencode(payload)),
+        )
+        if state["sessions"][0].get("owner") is not None:
             record_owner(path, self._atomic_json_write)
 
     @classmethod

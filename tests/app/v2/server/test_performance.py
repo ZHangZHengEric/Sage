@@ -178,6 +178,18 @@ def test_auxiliary_llms_are_counted_but_not_user_first_text():
     assert row["purposes"]["conversation_summary"] == {"calls": 1, "ms": 2000}
 
 
+def test_work_after_unobserved_automatic_resume_remains_framework_not_cleanup():
+    events = [
+        event(1, "server.run.performance.accepted", start=0),
+        event(1, "agent.run.started"),
+        event(5, "agent.run.deferred"),
+        event(13, "server.run.performance.finished", state="completed"),
+    ]
+    row = build_run(events, [model(1, 4), model(8, 12, identity="retry", first=9)], include_timeline=True)
+    assert row["framework_ms"] == 6000
+    assert not any(item["kind"] == "cleanup" for item in row["timeline"]["entries"])
+
+
 def insert_sample(db, *, run="r", agent="agent", shift=0):
     events, models = sample()
     for e in events:

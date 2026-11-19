@@ -436,7 +436,15 @@ def build_run(events, models, *, include_timeline=False):
                 (start, starts[0]["at"]),
                 *((entry, body) for (entry, _), (body, _) in zip(active_segments, spans) if entry < body),
             ])
-            cleanup = [(spans[-1][1], end)]
+            # A scheduler deferral may continue through the recovered driver
+            # without a second observed Agent span. Its gaps are unclassified.
+            cleanup = (
+                [(spans[-1][1], end)]
+                if finish_events[-1]["event"] in {
+                    "agent.run.completed", "agent.run.failed", "agent.run.cancelled",
+                }
+                else []
+            )
             framework = preparation, cleanup, busy_ranges
         result["timeline"] = run_timeline(
             start, end, active, model_ranges, tool_ranges, framework,

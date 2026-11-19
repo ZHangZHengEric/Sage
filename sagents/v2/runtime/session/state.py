@@ -3004,6 +3004,18 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
     ) -> SteerClaimResult:
         """Atomically mark pending steering as applied at a model safe point."""
 
+        # Most steps have no steering. Check under the normal read lock before
+        # allocating a rollback snapshot for the Session. Recheck under the
+        # write lock when there is work to claim.
+        async with self._run_session_read(run_id):
+            row = self._runs[run_id]
+            self._authorize_session_actor_locked(row.session_id, context)
+            if not any(
+                entry.status == SteerInboxStatus.PENDING and entry.expected_turn_id == turn_id
+                for entry in self._steer_inbox.get(run_id, ())
+            ):
+                return SteerClaimResult(run=self._run_snapshot(row), entries=(), events=())
+
         async with self._run_session_operation(run_id):
             row = self._runs.get(run_id)
             if row is None:
