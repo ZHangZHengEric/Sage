@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
+from contextvars import Context, ContextVar
 from functools import wraps
 from typing import Any
 
@@ -42,6 +42,9 @@ class IdleSessionCache:
         self.entries = OrderedDict()
         self.users = {}
         self.evicted_suspended = set()
+        self._timer: asyncio.TimerHandle | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._closed = False
         self._current: ContextVar[tuple[asyncio.Task[Any] | None, set[str]] | None] = (
             ContextVar("durable_session_cache_operation", default=None)
         )
@@ -92,9 +95,42 @@ class IdleSessionCache:
             time.monotonic(),
             size if size is not None else previous + charge,
         )
+        self._schedule_prune()
+
+    def _schedule_prune(self):
+        if self._closed or self._timer is not None or self._task is not None or not self.entries:
+            return
+        interval = min(30, max(0.05, self.idle_seconds / 2))
+        # A timer may outlive the writer that scheduled it. Its context must
+        # not retain that operation's undo state or request-scoped resources.
+        self._timer = asyncio.get_running_loop().call_later(
+            interval, self._start_prune, context=Context()
+        )
+
+    def _start_prune(self):
+        self._timer = None
+        self._task = asyncio.create_task(self._prune_and_reschedule())
+
+    async def _prune_and_reschedule(self):
+        try:
+            await self.prune()
+        finally:
+            self._task = None
+            self._schedule_prune()
+
+    async def close(self):
+        self._closed = True
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        if self._task is not None:
+            await self._task
 
     def forget(self, sid):
         self.entries.pop(sid, None)
+        if not self.entries and self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
 
     async def prune(self):
         state = self.state
@@ -123,6 +159,8 @@ class IdleSessionCache:
                     continue
                 lock = state._session_locks.get(sid)
                 if self.users.get(sid) or (lock is not None and lock.locked()):
+                    continue
+                if sid in getattr(state, "_recovery_required", ()):
                     continue
                 if self.eligible is not None and not self.eligible(sid):
                     continue

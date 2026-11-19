@@ -553,6 +553,7 @@ class RedisSessionCoordination:
     async def close(self):
         if self._closed:
             return
+        await self._session_cache.close()
         if self._worker is not None:
             self._worker.cancel()
             await asyncio.gather(self._worker, return_exceptions=True)

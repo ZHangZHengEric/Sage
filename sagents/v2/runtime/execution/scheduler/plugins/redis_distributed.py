@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timezone
 import heapq
 import json
+import random
 import time
 
 from sagents.v2.runtime.distributed.redis_coordination import (
@@ -45,6 +46,7 @@ class RedisDistributedScheduler:
         self.queue_id = queue_id
         self._redis = None
         self._closed = False
+        self._mutation_lock = asyncio.Lock()
 
     async def _client(self):
         if self._closed:
@@ -77,66 +79,69 @@ class RedisDistributedScheduler:
         from redis.exceptions import WatchError
         redis = await self._client()
         state_key = self.key_prefix + ":state"
+        async def attempt():
+            nonlocal blocked_run
+            # Rebuild at most one in-flight queue snapshot per instance.
+            async with self._mutation_lock, redis.pipeline() as pipe:
+                await pipe.watch(state_key)
+                raw = await pipe.get(state_key)
+                state = json.loads(raw) if raw else None
+                limits = [self.max_pending_items, self.max_retained_terminal_items,
+                          self.max_concurrent_runs, self.max_concurrent_runs_per_tenant]
+                if state is not None and state.get("_limits", limits) != limits:
+                    raise ValueError("Distributed Scheduler instances must use identical shared limits")
+                queues = dict(state.get("_queues", {})) if state else {}
+                seconds, microseconds = await redis.time()
+                now = datetime.fromtimestamp(seconds + microseconds / 1e6, timezone.utc)
+                reference = self._reference(now, state)
+                runs = {lease.work.run_id for lease in reference._leases.values()}
+                if blocked_run:
+                    runs.add(blocked_run)
+                if blocked_work and blocked_work in reference._items:
+                    blocked_run = reference._items[blocked_work].run_id
+                    runs.add(blocked_run)
+                keys = [self._guard_key(rid) for rid in sorted(runs)]
+                if keys:
+                    await pipe.watch(*keys)
+                    guards = await pipe.mget(keys)
+                    reference._fenced_runs = {rid for rid, guard in zip(sorted(runs), guards) if guard}
+                if blocked_run and blocked_run in reference._fenced_runs:
+                    return True, None
+                other_queues = []
+                if claim_queue:
+                    reference._reap_expired_locked()
+                    other_queues = [entry for entry in reference._pending
+                        if queues.get(entry[3], "default") != self.queue_id]
+                    reference._pending = [entry for entry in reference._pending
+                        if queues.get(entry[3], "default") == self.queue_id]
+                    heapq.heapify(reference._pending)
+                result = await operation(reference)
+                if submitted_work is not None and result:
+                    queues[submitted_work.work_id] = self.queue_id
+                for entry in other_queues:
+                    heapq.heappush(reference._pending, entry)
+                snapshot = reference._dump_state_locked()
+                snapshot["_queues"] = {wid: queue for wid, queue in queues.items() if wid in reference._items}
+                snapshot["_limits"] = limits
+                if state == snapshot:
+                    return False, result
+                encoded = json.dumps(snapshot, separators=(",", ":"))
+                pipe.multi()
+                pipe.set(state_key, encoded)
+                await pipe.execute()
+                return False, result
+
         collisions = 0
         while collisions < 100:
-            blocked = False
-            async with redis.pipeline() as pipe:
-                try:
-                    await pipe.watch(state_key)
-                    raw = await pipe.get(state_key)
-                    state = json.loads(raw) if raw else None
-                    limits = [self.max_pending_items, self.max_retained_terminal_items,
-                              self.max_concurrent_runs, self.max_concurrent_runs_per_tenant]
-                    if state is not None and state.get("_limits", limits) != limits:
-                        raise ValueError("Distributed Scheduler instances must use identical shared limits")
-                    queues = dict(state.get("_queues", {})) if state else {}
-                    seconds, microseconds = await redis.time()
-                    now = datetime.fromtimestamp(seconds + microseconds / 1e6, timezone.utc)
-                    reference = self._reference(now, state)
-                    runs = {lease.work.run_id for lease in reference._leases.values()}
-                    if blocked_run:
-                        runs.add(blocked_run)
-                    if blocked_work and blocked_work in reference._items:
-                        blocked_run = reference._items[blocked_work].run_id
-                        runs.add(blocked_run)
-                    keys = [self._guard_key(rid) for rid in sorted(runs)]
-                    if keys:
-                        await pipe.watch(*keys)
-                        guards = await pipe.mget(keys)
-                        reference._fenced_runs = {rid for rid, guard in zip(sorted(runs), guards) if guard}
-                    if blocked_run and blocked_run in reference._fenced_runs:
-                        blocked = True
-                    else:
-                        other_queues = []
-                        if claim_queue:
-                            reference._reap_expired_locked()
-                            other_queues = [entry for entry in reference._pending
-                                if queues.get(entry[3], "default") != self.queue_id]
-                            reference._pending = [entry for entry in reference._pending
-                                if queues.get(entry[3], "default") == self.queue_id]
-                            heapq.heapify(reference._pending)
-                        result = await operation(reference)
-                        if submitted_work is not None and result:
-                            queues[submitted_work.work_id] = self.queue_id
-                        for entry in other_queues:
-                            heapq.heappush(reference._pending, entry)
-                        snapshot = reference._dump_state_locked()
-                        snapshot["_queues"] = {wid: queue for wid, queue in queues.items() if wid in reference._items}
-                        snapshot["_limits"] = limits
-                        if state == snapshot:
-                            return result
-                        encoded = json.dumps(snapshot, separators=(",", ":"))
-                        pipe.multi()
-                        pipe.set(state_key, encoded)
-                        await pipe.execute()
-                        return result
-                except WatchError:
-                    pass
-            if blocked:
-                await asyncio.sleep(self.poll_seconds)
-            else:
+            try:
+                blocked, result = await attempt()
+            except WatchError:
                 collisions += 1
-                await asyncio.sleep(0)
+                await asyncio.sleep(random.uniform(0, min(0.025, collisions * 0.001)))
+            else:
+                if not blocked:
+                    return result
+                await asyncio.sleep(self.poll_seconds)
             if self._closed:
                 await self._client()
         raise coordination_error("Distributed scheduler was repeatedly modified; retry the operation",

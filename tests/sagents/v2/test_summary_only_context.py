@@ -57,11 +57,11 @@ def batch(index, results):
 async def test_summary_only_persists_coverage_without_references(
     selection, pressure, results, monkeypatch,
 ):
-    async def unexpected_reference_compaction(unit):
+    async def unexpected_reference_compaction(units):
         pytest.fail("summary-only must never invoke tool reference compaction")
 
     monkeypatch.setattr(
-        "sagents.v2.context.plugins._shared.persistent_summary.compact_unit_to_references",
+        "sagents.v2.context.plugins._shared.persistent_summary.compact_units_to_references",
         unexpected_reference_compaction,
     )
     store, summary = InMemoryConversationSummaryStore(), RecordingSummary()

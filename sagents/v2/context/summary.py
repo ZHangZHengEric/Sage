@@ -32,6 +32,9 @@ _DATA_URL_PATTERN = re.compile(
 
 
 def _redact_data_urls(value: str) -> str:
+    if "data:" not in value.lower():
+        return value
+
     def replacement(match: re.Match[str]) -> str:
         return (
             f"<redacted data URL; mime={match.group(1)}; "
@@ -160,17 +163,19 @@ def message_digest(
 
 
 async def message_digests_async(messages, *, include_source_metadata: bool = False):
-    from copy import deepcopy
     from sagents.v2.concurrency import bounded_to_thread
 
-    def prepare():
-        snapshot = deepcopy(messages)
-        return lambda: tuple(
+    # Capture the ledger order. Each digest serializes its frozen ModelMessage
+    # into a private JSON value, without cloning the whole prefix first.
+    snapshot = tuple(messages)
+
+    def digest_snapshot():
+        return tuple(
             message_digest(message, include_source_metadata=include_source_metadata)
             for message in snapshot
         )
 
-    return await bounded_to_thread("context-cpu", None, prepare=prepare)
+    return await bounded_to_thread("context-cpu", digest_snapshot)
 
 
 def create_summary(

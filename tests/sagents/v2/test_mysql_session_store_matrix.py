@@ -629,3 +629,45 @@ async def test_mysql_export_reads_cold_durable_aggregate_without_loading_other_s
     cursor.fetchone.return_value = None
     with pytest.raises(SageV2Error):
         await store.export_session_state("missing")
+
+
+async def test_mysql_timer_prunes_without_requests_and_drops_writer_context():
+    from contextvars import ContextVar
+
+    source = SessionStoreCoordinator()
+    created = await source.create_run(command(), CONTEXT)
+    handle = created.handle
+    running = await source.commit_run(
+        run_id=handle.run_id, expected_revision=handle.run_revision,
+        expected_states={RunState.QUEUED}, new_state=RunState.RUNNING,
+        drafts=(), context=CONTEXT, idempotency_key="start",
+    )
+    await source.commit_run(
+        run_id=handle.run_id, expected_revision=running.run.revision,
+        expected_states={RunState.RUNNING}, new_state=RunState.COMPLETED,
+        drafts=(), context=CONTEXT, idempotency_key="finish",
+    )
+    state = _MysqlSessionState("mysql://unused/test", cache_idle_seconds=0.01)
+    assert state._session_cache.max_bytes == 1024**3
+    request_context = ContextVar("test_cache_request", default=None)
+    timer_contexts = []
+    prune = state._session_cache.prune
+
+    async def record_prune():
+        timer_contexts.append(request_context.get())
+        await prune()
+
+    state._session_cache.prune = record_prune
+    token = request_context.set("writer undo state")
+    try:
+        state._install_session_locked(source._dump_state_locked())
+    finally:
+        request_context.reset(token)
+    try:
+        async with asyncio.timeout(2):
+            while handle.session_id in state._loaded_session_ids:
+                await asyncio.sleep(0.01)
+        assert timer_contexts == [None]
+        assert not state._session_cache.entries
+    finally:
+        await state.close()

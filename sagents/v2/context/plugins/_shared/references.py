@@ -1,11 +1,45 @@
 """Pure durable-reference projection shared by context implementations."""
 
 import json
-from sagents.v2.contracts.items import TextBlock
+
+from sagents.v2.concurrency import bounded_to_thread
+from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.model.contracts import ModelMessage
 
 
-async def compact_unit_to_references(
+async def compact_units_to_references(
+    units: list[tuple[ModelMessage, ...]],
+) -> tuple[tuple[ModelMessage, ...] | None, ...]:
+    if not any(
+        message.role == "tool"
+        and isinstance(message.metadata.get("context_reference"), (dict, str))
+        for unit in units
+        for message in unit
+    ):
+        return ()
+
+    def project():
+        return tuple(_compact_references(unit) for unit in units)
+
+    return await bounded_to_thread("context-cpu", project)
+
+
+def _content_exceeds(message: ModelMessage, length: int) -> bool:
+    # JSON string encoding can add escapes, but cannot make the encoded
+    # string shorter than its source. Skip serializing an oversized body.
+    for block in message.content:
+        if isinstance(block, TextBlock) and len(block.text) > length:
+            return True
+        if isinstance(block, JsonBlock) and isinstance(block.value, dict):
+            if any(
+                isinstance(value, str) and len(value) > length
+                for value in block.value.values()
+            ):
+                return True
+    return False
+
+
+def _compact_references(
     unit: tuple[ModelMessage, ...],
 ) -> tuple[ModelMessage, ...] | None:
     result = []
@@ -36,7 +70,10 @@ async def compact_unit_to_references(
                 },
             }
         )
-        if len(replacement.model_dump_json()) < len(message.model_dump_json()):
+        replacement_length = len(replacement.model_dump_json())
+        if _content_exceeds(message, replacement_length) or replacement_length < len(
+            message.model_dump_json()
+        ):
             result.append(replacement)
             changed = True
         else:

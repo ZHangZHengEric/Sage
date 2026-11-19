@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+from functools import partial
 from typing import Any, cast
+
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.context.summary import (
     SummarizationRequest,
@@ -211,14 +214,11 @@ def bounded_snapshot(
         result: dict[str, Any] = {k: v for k, v in result.items() if v and k != "summary"} | (
             {"summary": result["summary"]} if request.previous_summary else {}
         )
-        source_chars = sum(
-            len(summary_safe_block_text(b)) for m in request.messages for b in m.content
-        )
         if (
             not request.previous_summary
-            and source_chars < 128
             and not result.get("files_touched")
             and not result.get("todo_state_at_compaction_boundary")
+            and _short_source(request)
         ):
             return (
                 "\n".join(
@@ -267,3 +267,17 @@ def bounded_snapshot(
             # Do not silently truncate task snapshots; let the reducer enforce its budget.
             break
     return encode()
+
+
+def _short_source(request: SummarizationRequest) -> bool:
+    characters = 0
+    for message in request.messages:
+        for block in message.content:
+            characters += len(summary_safe_block_text(block))
+            if characters >= 128:
+                return False
+    return True
+
+
+async def extract_snapshot(request: SummarizationRequest) -> str:
+    return await bounded_to_thread("context-cpu", partial(bounded_snapshot, request))

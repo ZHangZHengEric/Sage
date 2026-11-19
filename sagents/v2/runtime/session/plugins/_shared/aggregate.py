@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from copy import deepcopy
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -18,6 +17,9 @@ from sagents.v2.runtime.session.journal import (
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from .cache import IdleSessionCache
+
+
+DEFAULT_DURABLE_CACHE_BYTES = 1024**3
 
 
 def _principal_lookup_key(principal_type: str, principal_id: str) -> str:
@@ -113,7 +115,7 @@ class DurableAggregateCache:
         self,
         *,
         max_cached_sessions=256,
-        max_cached_bytes=1024 * 1024**2,
+        max_cached_bytes=DEFAULT_DURABLE_CACHE_BYTES,
         cache_idle_seconds=300,
         **kwargs,
     ):
@@ -247,10 +249,12 @@ class DurableAggregateCache:
     @staticmethod
     def _compact_state(state: dict[str, Any]) -> dict[str, Any]:
         compact = {"session_format_version": state["session_format_version"]}
+        # The SQL writer and archive immediately serialize this projection.
+        # Reuse the source rows so large checkpoints are not duplicated.
         for key in _COMPACT_LISTS:
-            compact[key] = deepcopy(state.get(key, []))
+            compact[key] = state.get(key, [])
         for key in _COMPACT_MAPS:
-            compact[key] = deepcopy(state.get(key, {}))
+            compact[key] = state.get(key, {})
         return compact
 
     @staticmethod

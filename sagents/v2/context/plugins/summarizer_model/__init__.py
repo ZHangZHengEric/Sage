@@ -4,8 +4,9 @@ from __future__ import annotations
 from sagents.v2.model.recovery_scope import scoped_recovery
 
 import asyncio
+from functools import partial
 from sagents.v2.prompt_i18n import prompt_text
-from sagents.v2.concurrency import auxiliary_capacity
+from sagents.v2.concurrency import auxiliary_capacity, bounded_to_thread
 import json
 
 import httpx
@@ -96,7 +97,7 @@ class ModelConversationSummarizer:
     async def summarize(self, request: SummarizationRequest) -> str:
         # The complete source, including the previous checkpoint, participates
         # in splitting. Never drop a prefix or commit a partial successful half.
-        source = self._source(request)
+        source = await bounded_to_thread("context-cpu", partial(self._source, request))
         first = True
 
         async def summarize_fragment(fragment):
@@ -120,6 +121,12 @@ class ModelConversationSummarizer:
             result = await adaptive_summary(
                 source, summarize_fragment, merge=self._merge_payloads
             )
+        return await bounded_to_thread(
+            "context-cpu", partial(self._with_task_evidence, request, result)
+        )
+
+    @staticmethod
+    def _with_task_evidence(request: SummarizationRequest, result: str) -> str:
         # Fragment requests carry serialized text; attach authoritative Tool/Todo
         # evidence from the original complete request only after all parts finish.
         try:
@@ -266,7 +273,7 @@ class ModelConversationSummarizer:
 
     async def _summarize(self, request: SummarizationRequest, progress) -> str:
         capabilities = await self.model.capabilities(self.model_binding)
-        source = self._source(request)
+        source = await bounded_to_thread("context-cpu", partial(self._source, request))
         last_error = ""
         for attempt in range(2):
             progress["attempt"] = attempt + 1

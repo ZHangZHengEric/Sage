@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from functools import partial
+
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.context.contracts import ContextProjection
 from sagents.v2.context.partition import conversation_units, current_turn_boundary
-from sagents.v2.context.plugins._shared.references import compact_unit_to_references
-from sagents.v2.context.plugins._shared.progress_summary import bounded_snapshot
+from sagents.v2.context.plugins._shared.references import compact_units_to_references
+from sagents.v2.context.plugins._shared.progress_summary import extract_snapshot
 from sagents.v2.context.summary import (
     create_summary,
     message_digests_async,
@@ -23,9 +26,13 @@ from sagents.v2.runtime.observability.logs import get_logger
 LOGGER = get_logger(__name__)
 
 
+def _serialized_characters(*groups):
+    return tuple(sum(len(message.model_dump_json()) for message in group) for group in groups)
+
+
 class _ExtractiveConversationSummarizer:
     async def summarize(self, request):
-        return bounded_snapshot(request)
+        return await extract_snapshot(request)
 
 
 class PersistentSummaryReducerBase:
@@ -173,32 +180,17 @@ class PersistentSummaryReducerBase:
                 for unit in units[:selected_count] for message in unit
             ):
                 selected_count = 0
-        compacted = []
-        changed = []
-        # A durable reference does not mean the model has consumed the result.
-        # Keep recent complete batches readable, including parallel tool results.
-        reference_boundary = max(0, len(units) - self.protected_recent_units)
-        for index, unit in enumerate(units if scope.allow_reference_compaction else ()):
-            replacement = (
-                await compact_unit_to_references(unit)
-                if index < reference_boundary
-                else None
-            )
-            compacted.extend(replacement if replacement is not None else unit)
-            if replacement is not None:
-                changed.extend(
-                    original
-                    for original, projected in zip(unit, replacement, strict=True)
-                    if original != projected
+        if scope.allow_reference_compaction:
+            projection = await self._reference_projection(units)
+            if projection is not None:
+                compacted, changed = projection
+                return ContextProjection(
+                    messages=(*systems, *prefix, *anchor, *compacted),
+                    historical_messages=(*canonical[:canonical_covered], *changed),
+                    source_message_count=len(messages),
+                    dropped_message_count=canonical_covered + len(changed),
+                    strategy="reference_compaction",
                 )
-        if changed:
-            return ContextProjection(
-                messages=(*systems, *prefix, *anchor, *compacted),
-                historical_messages=(*canonical[:canonical_covered], *changed),
-                source_message_count=len(messages),
-                dropped_message_count=canonical_covered + len(changed),
-                strategy="reference_compaction",
-            )
         if not selected_count and units:
             latest = units[-1]
             expected = {c.tool_call_id for c in latest[0].tool_calls}
@@ -228,10 +220,14 @@ class PersistentSummaryReducerBase:
                     "Compression would cover unprocessed canonical messages",
                 )
             retained = tuple(m for unit in units[selected_count:] for m in unit)
+            previous_anchor = anchor
             anchor = (
                 (payload[request_index],)
                 if request_index is not None and request_index < end
                 else ()
+            )
+            selected_characters, retained_characters = await bounded_to_thread(
+                "context-cpu", partial(_serialized_characters, selected, retained)
             )
             LOGGER.bind(session_id=scope.session_id, run_id=scope.run_id).info(
                 "context.summary.selection",
@@ -241,9 +237,9 @@ class PersistentSummaryReducerBase:
                     "previous_revision": previous.revision if previous else 0,
                     "covered_message_count": canonical_covered,
                     "selected_message_count": len(selected),
-                    "selected_characters": sum(len(m.model_dump_json()) for m in selected),
+                    "selected_characters": selected_characters,
                     "retained_message_count": len(retained),
-                    "retained_characters": sum(len(m.model_dump_json()) for m in retained),
+                    "retained_characters": retained_characters,
                 },
             )
             with model_call_budget() as quota:
@@ -260,7 +256,7 @@ class PersistentSummaryReducerBase:
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-            source_characters = sum(len(m.model_dump_json()) for m in selected) + (
+            source_characters = selected_characters + (
                 len(previous.text) if previous else 0
             )
             if len(text.strip()) >= source_characters:
@@ -278,19 +274,26 @@ class PersistentSummaryReducerBase:
             )
             if stored is not None and previous is None:
                 summary = summary.model_copy(update={"revision": stored.revision + 1})
-            candidate = (*systems, self._summary_message(summary), *anchor, *retained)
             fewer_messages = (
                 budget is not None
                 and budget.max_messages is not None
-                and len(candidate) < len(current)
+                and 1 + len(anchor) < len(selected) + len(prefix) + len(previous_anchor)
             )
-            if not fewer_messages and sum(
-                len(m.model_dump_json()) for m in candidate
-            ) >= sum(len(m.model_dump_json()) for m in current):
-                raise self._error(
-                    "context.summary_no_progress",
-                    "Summarizer did not reduce the complete request view",
+            if not fewer_messages:
+                # The same system and retained messages appear in both views.
+                # Compare only the portions that differ.
+                new_chars, old_chars = await bounded_to_thread(
+                    "context-cpu", partial(
+                        _serialized_characters,
+                        (self._summary_message(summary), *anchor),
+                        (*prefix, *previous_anchor),
+                    )
                 )
+                if new_chars >= old_chars + selected_characters:
+                    raise self._error(
+                        "context.summary_no_progress",
+                        "Summarizer did not reduce the complete request view",
+                    )
             try:
                 saved = await self.store.save(
                     summary, expected_revision=stored.revision if stored else None
@@ -332,6 +335,24 @@ class PersistentSummaryReducerBase:
             "context.no_reducible_history",
             "The API rejected mandatory instructions, the current request or latest Tool batch; no completed history remains to compress",
         )
+
+    async def _reference_projection(self, units):
+        # Keep the newest complete batches readable, including parallel results.
+        boundary = max(0, len(units) - self.protected_recent_units)
+        replacements = await compact_units_to_references(units[:boundary])
+        if not any(replacement is not None for replacement in replacements):
+            return None
+        compacted = []
+        changed = []
+        for unit, replacement in zip(units[:boundary], replacements, strict=True):
+            compacted.extend(unit if replacement is None else replacement)
+            if replacement is not None:
+                changed.extend(
+                    original for original, projected in zip(unit, replacement, strict=True)
+                    if original is not projected
+                )
+        compacted.extend(message for unit in units[boundary:] for message in unit)
+        return compacted, changed
 
     @staticmethod
     async def _validated_previous(

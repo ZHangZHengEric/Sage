@@ -113,3 +113,73 @@ async def test_summary_capacity_is_shared_across_plugin_instances():
     )
     assert values == ["summary"] * 16
     assert peak == 4
+
+
+@pytest.mark.asyncio
+async def test_concurrent_extractive_compression_bounds_workers_and_cancellation(monkeypatch):
+    import threading
+
+    from sagents.v2.context import (
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+    from sagents.v2.context.plugins._shared import progress_summary
+
+    loop = asyncio.get_running_loop()
+    event_loop_thread = threading.get_ident()
+    worker_release = threading.Event()
+    two_started = asyncio.Event()
+    lock = threading.Lock()
+    active_keys = set()
+    max_active = 0
+    summarize = progress_summary.bounded_snapshot
+
+    def blocked_summary(request):
+        nonlocal max_active
+        assert threading.get_ident() != event_loop_thread
+        key = request.scope.context_key
+        with lock:
+            active_keys.add(key)
+            max_active = max(max_active, len(active_keys))
+            if len(active_keys) == 2:
+                loop.call_soon_threadsafe(two_started.set)
+        try:
+            assert worker_release.wait(5)
+            return summarize(request)
+        finally:
+            with lock:
+                active_keys.remove(key)
+
+    monkeypatch.setattr(progress_summary, "bounded_snapshot", blocked_summary)
+    messages = tuple(
+        message(f"{index}: " + "historic decision " * 60,
+                "user" if index % 2 == 0 else "assistant")
+        for index in range(24)
+    )
+    store = InMemoryConversationSummaryStore()
+    reducer = PersistentSummaryContextReducer(store)
+    requests = [scope(f"session-{index}").model_copy(update={"force": True}) for index in range(16)]
+    tasks = [asyncio.create_task(reducer.reduce(messages, scope=request)) for request in requests]
+    try:
+        await asyncio.wait_for(two_started.wait(), timeout=3)
+        with lock:
+            cancelled_key = min(active_keys)
+        index = next(i for i, request in enumerate(requests) if request.context_key == cancelled_key)
+        tasks[index].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await tasks[index]
+    finally:
+        worker_release.set()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert max_active == 2
+    assert sum(isinstance(result, asyncio.CancelledError) for result in results) == 1
+    assert await store.get(cancelled_key, session_id=cancelled_key) is None
+    for request, result in zip(requests, results, strict=True):
+        if isinstance(result, asyncio.CancelledError):
+            continue
+        assert not isinstance(result, BaseException)
+        assert result.strategy == "persistent_summary"
+        assert result.messages[-1] == messages[-1]
+        assert result.historical_messages == messages[:20]
+        assert await store.get(request.context_key, session_id=request.session_id) is not None

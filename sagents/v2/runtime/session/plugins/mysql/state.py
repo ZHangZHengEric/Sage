@@ -22,6 +22,7 @@ from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from .._shared.sql import SqlSessionPersistence
 from .._shared.loading import DurableSessionLoading
 from .._shared.aggregate import (
+    DEFAULT_DURABLE_CACHE_BYTES,
     SessionStoreCorruptionError as SessionStoreCorruptionError,
     _principal_lookup_key as _principal_lookup_key,
     _LOCATION_KINDS as _LOCATION_KINDS,
@@ -110,7 +111,7 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
         table_prefix: str | None = None,
         provision_schema: bool = True,
         max_cached_sessions: int = 256,
-        max_cached_bytes: int = 1024 * 1024**2,
+        max_cached_bytes: int = DEFAULT_DURABLE_CACHE_BYTES,
         cache_idle_seconds: float = 300,
         max_connections: int = 16,
         max_pending_connections: int = 64,
@@ -370,6 +371,7 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
         if self._closed:
             return
         self._closed = True
+        await self._session_cache.close()
         pool = self._pool
         self._pool = None
         if pool is not None:

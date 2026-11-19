@@ -205,6 +205,7 @@ class _PostgresSessionState(
 
     async def close(self):
         self._closed = True
+        await self._session_cache.close()
         async with self._init_lock:
             pool, self._pool = self._pool, None
             if pool is not None:

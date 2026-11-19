@@ -44,7 +44,6 @@ from sagents.v2.runtime.session.plugins.filesystem.layout import (
 )
 from sagents.v2.runtime.session.plugins.filesystem.ownership import record_owner
 from sagents.v2.runtime.observability.logs import get_logger
-from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
     FILESYSTEM_SESSION_STORE_FORMAT_V2,
@@ -184,8 +183,6 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 idle_seconds=cache_idle_seconds, eligible=self._cache_can_evict,
                 allow_suspended=evict_manually_paused_sessions,
             )
-            self._cache_timer: asyncio.TimerHandle | None = None
-            self._cache_task: asyncio.Task[None] | None = None
         except Exception:
             self._release_writer_lock()
             raise
@@ -316,13 +313,15 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         if previous is None:
             state = SessionAggregateSnapshotV2(sessions=()).model_dump(mode="json")
         else:
-            state = deepcopy(previous)
+            # Rows in the durable baseline are private and treated as immutable.
+            # Copy each map/list that the delta mutates, leaving the baseline
+            # available if the write fails or needs reconciliation.
+            state = previous.copy()
         _FilesystemSessionState._apply_state_delta(
-            state, mutation.model_dump(mode="json", exclude={"kind"})
+            state, mutation.model_dump(mode="json", exclude={"kind"}),
+            copy_on_write=previous is not None,
         )
-        return SessionAggregate(
-            SessionAggregateSnapshotV2.model_validate(state)
-        ).snapshot.model_dump(mode="json")
+        return SessionAggregateSnapshotV2.model_validate(state).model_dump(mode="json")
 
     def _recover_and_matches_state(
         self, session_id: str, expected: dict[str, Any]
@@ -491,29 +490,6 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             # representations. Journal bytes also charge uncompacted updates.
             size = 8 * sum(entry[1] for entry in fingerprint if entry is not None)
         self._session_cache.touch(session_id, size=size)
-        self._schedule_cache_prune()
-
-    def _schedule_cache_prune(self):
-        if (
-            self._closed or self._cache_timer is not None or self._cache_task is not None
-            or not self._session_cache.entries
-        ):
-            return
-        interval = min(30, max(0.05, self._session_cache.idle_seconds / 2))
-        self._cache_timer = asyncio.get_running_loop().call_later(
-            interval, self._start_cache_prune
-        )
-
-    def _start_cache_prune(self):
-        self._cache_timer = None
-        self._cache_task = asyncio.create_task(self._prune_cache())
-
-    async def _prune_cache(self):
-        try:
-            await self._session_cache.prune()
-        finally:
-            self._cache_task = None
-            self._schedule_cache_prune()
 
     def _evict_session_locked(self, session_id):
         run_ids = self._session_run_ids_locked(session_id)
@@ -538,10 +514,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             return
         self._closed = True
         try:
-            if self._cache_timer is not None:
-                self._cache_timer.cancel()
-            if self._cache_task is not None:
-                await self._cache_task
+            await self._session_cache.close()
             await asyncio.to_thread(self._flush_session_index)
         finally:
             await asyncio.to_thread(self._release_writer_lock)
@@ -1389,18 +1362,13 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
     def _write_snapshot(self, path: Path, state: dict[str, Any]) -> None:
         current_revision = int(state["sessions"][0]["revision"])
         typed_state = SessionAggregateSnapshotV2.model_validate(state)
-        unsigned = {
-            "format": self.format_version,
-            "write_id": new_id("session_write"),
-            "current_session_revision": current_revision,
-            "state": typed_state.model_dump(mode="json"),
-        }
-        # Validate once, then checksum the exact JSON representation that will
-        # be written. Nested models may canonicalize unordered collections;
-        # hashing their pre-validation representation can produce a snapshot
-        # whose checksum never matched its own on-disk payload.
+        # Hash and persist the same normalization, including the ordering of
+        # any collections serialized from sets.
         normalized = SessionSnapshotEnvelope(
-            **unsigned,
+            format=self.format_version,
+            write_id=new_id("session_write"),
+            current_session_revision=current_revision,
+            state=typed_state,
             checksum="pending",
         ).model_dump(mode="json", exclude={"checksum"})
         payload = {
@@ -1694,8 +1662,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
     @classmethod
     def _atomic_jsonl_write(cls, path: Path, rows) -> None:
-        encoded = b"".join(cls._canonical_json(dict(row)) + b"\n" for row in rows)
-        cls._atomic_bytes_write(path, encoded)
+        cls._atomic_chunks_write(path, (cls._canonical_json(dict(row)) + b"\n" for row in rows))
 
     def _write_session_state(
         self,
@@ -1736,8 +1703,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             journal = session_dir / "journal.jsonl"
             fingerprint = self._storage_fingerprint(session_dir)
             event_appends = None
-            compacted = is_new or previous is None
-            if is_new or previous is None:
+            compacted = is_new or previous is None or self._journal_has_partial_tail(journal)
+            if compacted:
+                # Publish the proved complete prefix and this commit together.
+                # Appending after a torn tail would turn it into a corrupt record.
                 self._write_snapshot(snapshot, state)
                 self._atomic_bytes_write(journal, b"")
                 self._journal_commits[session_id] = 0
@@ -1798,6 +1767,17 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                     session_id=session_id,
                 )
             return session_dir
+
+    @staticmethod
+    def _journal_has_partial_tail(path: Path) -> bool:
+        try:
+            with path.open("rb") as stream:
+                if stream.seek(0, os.SEEK_END) == 0:
+                    return False
+                stream.seek(-1, os.SEEK_END)
+                return stream.read(1) != b"\n"
+        except FileNotFoundError:
+            return False
 
     @classmethod
     def _append_journal_line(cls, path: Path, payload: dict[str, Any]) -> None:
@@ -1887,7 +1867,9 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         }
 
     @staticmethod
-    def _apply_state_delta(state: dict[str, Any], delta: dict[str, Any]) -> None:
+    def _apply_state_delta(
+        state: dict[str, Any], delta: dict[str, Any], *, copy_on_write: bool = False,
+    ) -> None:
         identities = {
             "sessions": ("session_id",),
             "runs": ("run_id",),
@@ -1933,6 +1915,14 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 for value in state.get(collection, ())
                 if tuple(value.get(key) for key in keys) not in removed
             ]
+        if copy_on_write:
+            maps = delta.get("appends", {}).keys() | delta.get("replacements", {}).keys() | delta.get("map_deletes", {}).keys()
+            for collection in maps:
+                state[collection] = dict(state.get(collection, {}))
+            for collection, values in delta.get("appends", {}).items():
+                for key in values:
+                    if key in state[collection]:
+                        state[collection][key] = list(state[collection][key])
         for collection, values in delta.get("appends", {}).items():
             target = state.setdefault(collection, {})
             for key, rows in values.items():
@@ -2019,6 +2009,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         session_id, durable, prepared, journal_count, snapshot_format = await asyncio.to_thread(
             self._load_one_session, snapshot, expected_session_id
         )
+        # A child can be in the coordinator before its filesystem index is
+        # published. Keep the live row when a concurrent tree reader finds it.
+        if self._repair_loaded_session_marker_locked(session_id):
+            return session_id
         try:
             install_session_objects(self, prepared)
         except AggregateCorruptionError as exc:
@@ -2199,10 +2193,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 state = envelope.state.model_dump(mode="json")
             elif snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V3:
                 envelope = SessionSnapshotEnvelopeV3.model_validate(payload)
-                state = deepcopy(envelope.state)
+                state = envelope.state
             elif snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V2:
                 envelope = SessionSnapshotEnvelopeV2.model_validate(payload)
-                state = deepcopy(envelope.state)
+                state = envelope.state
             else:
                 raise ValueError(f"unsupported snapshot format {snapshot_format!r}")
         except Exception as exc:
@@ -2211,9 +2205,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 f"snapshot {snapshot} contains an invalid schema: {exc}",
             ) from exc
         revision = envelope.current_session_revision
+        del envelope, payload
         journal = snapshot.parent / "journal.jsonl"
         if snapshot_format == FILESYSTEM_SESSION_STORE_FORMAT_V2:
-            if journal.exists() and journal.read_bytes().strip():
+            if journal.exists() and any(line.strip() for line in self._journal_lines(journal)):
                 raise self._corrupt(
                     "session_store.journal_corrupt",
                     f"v2 snapshot {snapshot} unexpectedly has a journal",
@@ -2223,22 +2218,9 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         if not journal.exists():
             normalized = self._normalize_snapshot_state(state, snapshot, revision)
             return normalized, 0, snapshot_format
-        try:
-            encoded = journal.read_bytes()
-        except OSError as exc:
-            raise self._corrupt(
-                "session_store.journal_unreadable",
-                f"journal {journal} cannot be read: {exc}",
-            ) from exc
-        lines = encoded.splitlines(keepends=True)
         complete_count = 0
-        for index, line in enumerate(lines):
+        for index, line in enumerate(self._journal_lines(journal)):
             if not line.endswith(b"\n"):
-                if index != len(lines) - 1:
-                    raise self._corrupt(
-                        "session_store.journal_corrupt",
-                        f"journal {journal} contains an incomplete middle record",
-                    )
                 LOGGER.warning(
                     "session.filesystem.incomplete_journal_tail",
                     "ignoring incomplete Session journal tail",
@@ -2298,18 +2280,28 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         normalized = self._normalize_snapshot_state(state, snapshot, revision)
         return normalized, complete_count, snapshot_format
 
+    def _journal_lines(self, journal: Path):
+        try:
+            with journal.open("rb") as stream:
+                yield from stream
+        except OSError as exc:
+            raise self._corrupt(
+                "session_store.journal_unreadable",
+                f"journal {journal} cannot be read: {exc}",
+            ) from exc
+
     def _normalize_snapshot_state(
         self,
         state: dict[str, Any],
         snapshot: Path,
         revision: int,
     ) -> dict[str, Any]:
-        normalized = deepcopy(state)
-        if normalized.get("session_format_version") == "sage.session-aggregate/v1":
-            normalized["session_format_version"] = "sage.session-aggregate/v2"
-        self._restore_legacy_principal_types(normalized)
+        # Recovery owns this decoded aggregate. Normalize it in place.
+        if state.get("session_format_version") == "sage.session-aggregate/v1":
+            state["session_format_version"] = "sage.session-aggregate/v2"
+        self._restore_legacy_principal_types(state)
         try:
-            typed = SessionAggregateSnapshotV2.model_validate(normalized)
+            typed = SessionAggregateSnapshotV2.model_validate(state)
         except Exception as exc:
             raise self._corrupt(
                 "session_store.corrupt_snapshot",
@@ -2588,19 +2580,32 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
     @classmethod
     def _atomic_bytes_write(cls, path: Path, encoded: bytes) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            if path.read_bytes() == encoded:
-                return
+            if path.stat().st_size == len(encoded):
+                with path.open("rb") as existing:
+                    view = memoryview(encoded)
+                    if all(
+                        existing.read(1024 * 1024) == view[offset:offset + 1024 * 1024]
+                        for offset in range(0, len(encoded), 1024 * 1024)
+                    ) and not existing.read(1):
+                        return
         except FileNotFoundError:
             pass
+        cls._atomic_chunks_write(path, (encoded,))
+
+    @classmethod
+    def _atomic_chunks_write(cls, path: Path, chunks) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{new_id('tmp')}")
-        with temporary.open("wb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(path)
-        cls._fsync_directory(path.parent)
+        try:
+            with temporary.open("wb") as stream:
+                stream.writelines(chunks)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+            cls._fsync_directory(path.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _canonical_json(payload: dict[str, Any]) -> bytes:

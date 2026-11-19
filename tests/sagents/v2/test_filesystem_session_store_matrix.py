@@ -1883,3 +1883,62 @@ async def test_filesystem_opt_in_manual_pause_eviction_reloads_and_resumes(tmp_p
         assert (await engine.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
     finally:
         await store.close()
+
+
+@pytest.mark.asyncio
+async def test_filesystem_accepts_next_commit_after_interrupted_journal_append(tmp_path):
+    store = FilesystemSessionStore(tmp_path)
+    first = await store.create_run(command("tail-base"), CONTEXT)
+    session_id = first.handle.session_id
+    await store.create_run(command(
+        "tail-committed", session_id=session_id, mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+    ), CONTEXT)
+    journal = await store.session_directory(session_id) / "journal.jsonl"
+    committed_events = await store.read_session_events(session_id)
+    await store.close()
+
+    # Simulate a process that stopped before publishing a complete record.
+    with journal.open("ab") as output:
+        output.write(b'{"format":"partial-record"')
+
+    reopened = FilesystemSessionStore(tmp_path)
+    next_command = command(
+        "tail-follow-up", session_id=session_id, mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+    )
+    try:
+        assert await reopened.read_session_events(session_id) == committed_events
+        following = await reopened.create_run(next_command, CONTEXT)
+    finally:
+        await reopened.close()
+
+    durable = FilesystemSessionStore(tmp_path)
+    try:
+        runs = await durable.list_session_runs(session_id)
+        assert len(runs) == 3
+        assert (await durable.get_run(following.handle.run_id)).run_id == following.handle.run_id
+        duplicate = await durable.create_run(next_command, CONTEXT)
+        assert duplicate.duplicate and duplicate.handle.run_id == following.handle.run_id
+        events = await durable.read_session_events(session_id)
+        assert events[:len(committed_events)] == committed_events
+        assert [event.session_sequence for event in events] == list(range(1, len(events) + 1))
+    finally:
+        await durable.close()
+
+
+@pytest.mark.asyncio
+async def test_tree_discovery_keeps_live_child_before_index_publication(tmp_path):
+    store = FilesystemSessionStore(tmp_path)
+    try:
+        runtime = HarnessRuntime(cast('SessionStore', store))
+        parent = await runtime.start_run(command("discovery-parent"), CONTEXT)
+        child = await runtime.start_run(
+            command("discovery-child", session_id=parent.session_id, mode=SessionConcurrencyMode.FORK),
+            CONTEXT,
+        )
+        live = store._sessions[child.session_id]
+        store._index_paths.pop(child.session_id)
+        children = await store.list_descendant_sessions(parent.session_id)
+        assert [session.session_id for session in children] == [child.session_id]
+        assert store._sessions[child.session_id] is live
+    finally:
+        await store.close()

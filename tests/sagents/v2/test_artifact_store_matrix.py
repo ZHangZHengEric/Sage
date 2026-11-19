@@ -132,3 +132,35 @@ async def test_file_attachment_loader_never_follows_symlinks(tmp_path):
     with pytest.raises(SageV2Error) as error:
         await store.get("image")
     assert error.value.info.code == "artifact.integrity_failed"
+
+
+@pytest.mark.asyncio
+async def test_filesystem_streams_large_artifacts_and_keeps_open_snapshot(tmp_path):
+    store = FilesystemArtifactStore(tmp_path)
+    part = b"x" * (1024 * 1024)
+    ref = await store.put(
+        artifact_id="large", media_type="application/octet-stream",
+        content=chunks(part, part, b"end"),
+    )
+
+    loaded, content = await store.get(ref.artifact_id)
+    assert loaded == ref
+    assert await store.delete(ref.artifact_id)
+    assert [chunk async for chunk in content] == [part, part, b"end"]
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_filesystem_failed_source_releases_spooled_artifact(tmp_path):
+    store = FilesystemArtifactStore(tmp_path)
+
+    async def broken_source():
+        yield b"partial data"
+        raise RuntimeError("source closed before EOF")
+
+    with pytest.raises(RuntimeError, match="source closed"):
+        await store.put(
+            artifact_id="unfinished", media_type="application/octet-stream",
+            content=broken_source(),
+        )
+    assert not list(tmp_path.iterdir())

@@ -178,18 +178,16 @@ class SqlSessionCommit:
             if should_snapshot
             else self._persisted_mutation_counts.get(session_id, 0) + 1,
         )
-        # Conservatively account for retained Python objects using serialized
-        # bytes. Repeated mutations overestimate rather than hide memory growth.
+        # Compaction rewrites the existing aggregate on disk. Charge only
+        # the mutation and new events to an already resident aggregate.
+        cache_record = encoded_mutation
+        if cache_record is None:
+            cache_record = encoded_compact if expected_revision is None else _json(mutation)
         self._session_cache.touch(
             session_id,
-            charge=4
-            * (
-                len((encoded_compact or encoded_mutation or "").encode())
-                + sum(
-                    len(_json(event).encode())
-                    for rows in events.values()
-                    for event in rows
-                )
+            charge=4 * (
+                len((cache_record or "").encode())
+                + sum(len(_json(event).encode()) for rows in events.values() for event in rows)
             ),
         )
         self._storage_logger.debug(

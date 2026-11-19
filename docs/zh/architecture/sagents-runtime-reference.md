@@ -1288,7 +1288,7 @@ Compact authoritative checksummed state per Session.
 
 ### sage.session.mysql
 
-Durable per-Session MySQL store with appended Run events. No global Session index.
+MySQL 按会话持久化数据并追加 Run 事件。SQL 和 Redis 会话存储的默认回收阈值为每进程 256 个会话、估算 1 GiB、空闲 300 秒。没有新请求时，空闲计时器也会触发回收。
 
 版本：`2.0.0`；scope：process；所有权：`owned`。
 
@@ -1321,8 +1321,8 @@ capabilities:
 
 `dsn` is required. `table_prefix` defaults to `sagent` and may be empty; nonempty
 prefixes match `[a-z][a-z0-9_]{0,32}`. `max_cached_sessions` (256),
-`max_cached_bytes` (268435456) and `cache_idle_seconds` (300) bound idle aggregate
-retention. PostgreSQL connection options, including SSL, are preserved. Startup
+`max_cached_bytes` (1073741824, or 1 GiB) and `cache_idle_seconds` (300) bound idle aggregate
+retention. Idle entries are also pruned without incoming requests. PostgreSQL connection options, including SSL, are preserved. Startup
 creates tables transactionally. This storage format does not automatically migrate
 historical PostgreSQL tables. Server selects it with `SAGE_SERVER_POSTGRES_URL`;
 leave `SAGE_SERVER_MYSQL_URL` unset and install `.[server,postgres]`.
