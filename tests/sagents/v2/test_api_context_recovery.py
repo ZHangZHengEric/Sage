@@ -952,35 +952,40 @@ def test_legacy_plugin_settings_do_not_resurrect_input_estimators():
 
 
 @pytest.mark.asyncio
-async def test_summary_configured_model_limit_splits_from_reported_usage_even_after_success():
+async def test_summary_configured_model_limit_splits_before_dispatch():
     from sagents.v2.contracts.items import UsageSummary
 
     class Reported(FragmentModel):
         async def capabilities(self, binding):
             caps = await super().capabilities(binding)
-            return caps.model_copy(update={"max_input_tokens": 1800})
+            return caps.model_copy(update={"max_input_tokens": 128000})
 
         async def stream(self, request):
+            billed = sum(len(block.text.encode("utf-8")) for msg in request.messages for block in msg.content)
+            assert billed < 128000
             async for event in super().stream(request):
-                response = cast('ModelResponse', event.response).model_copy(
-                    update={
-                        "usage": UsageSummary(
-                            reported=True,
-                            input_tokens=len(request.messages[-1].content[0].text),
-                        )
-                    }
+                response = cast("ModelResponse", event.response).model_copy(
+                    update={"usage": UsageSummary(reported=True, input_tokens=billed)}
                 )
                 yield event.model_copy(update={"response": response})
 
-    model = Reported(limit=100000)
-    result = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
-        SummarizationRequest(
-            scope=scope(), messages=(message("facts " * 1000),), target_tokens=64
-        )
-    )
-    assert result
-    assert len(model.calls) >= 3
-    assert len(model.calls[0].messages[-1].content[0].text) > 1800
+    model = Reported(limit=128000)
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, model))
+    source = "PREFIX " + "猫🙂A" * 54200 + " TAIL"
+    request = SummarizationRequest(scope=scope(), messages=(message(source),), target_tokens=64)
+    result = await summarizer.summarize(request)
+    assert result and len(model.calls) == 4
+    assert "PREFIX" in model.calls[0].messages[-1].content[0].text
+    assert "TAIL" in model.calls[-1].messages[-1].content[0].text
+    fragments = summarizer._split_source(source, 128000)
+    assert "".join(fragments) == source
+
+    # Much larger inputs still produce a bounded summary under the existing
+    # episode limits without dispatching any knowingly oversized request.
+    model.calls.clear()
+    oversized = request.model_copy(update={"messages": (message("history fact " * 650000),)})
+    assert await summarizer.summarize(oversized)
+    assert not model.calls
 
 
 @pytest.mark.asyncio
@@ -990,7 +995,7 @@ async def test_auxiliary_configured_model_limit_compresses_accepted_large_respon
     class Reported(FragmentModel):
         async def capabilities(self, binding):
             caps = await super().capabilities(binding)
-            return caps.model_copy(update={"max_input_tokens": 2000})
+            return caps.model_copy(update={"max_input_tokens": 4096})
 
         async def stream(self, request):
             if request.metadata.get("purpose") == "conversation_summary":
@@ -1006,7 +1011,7 @@ async def test_auxiliary_configured_model_limit_compresses_accepted_large_respon
                     text="accepted",
                     usage=UsageSummary(
                         reported=True,
-                        input_tokens=3000
+                        input_tokens=5000
                         if not request.metadata.get("context_recovery_attempt")
                         else 200,
                     ),
@@ -1023,7 +1028,11 @@ async def test_auxiliary_configured_model_limit_compresses_accepted_large_respon
     events = [e async for e in stream_auxiliary_model(model, request)]
     assert len(events) == 1
     assert model.calls[-1].metadata["context_recovery_attempt"] == 1
-    assert len(model.calls) == 3
+    assert len(model.calls) >= 3
+    assert all(
+        sum(len(block.text.encode("utf-8")) for msg in summary.messages for block in msg.content) < 4096
+        for summary in model.calls[1:-1]
+    )
 
 
 @pytest.mark.asyncio

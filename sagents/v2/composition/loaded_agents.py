@@ -603,17 +603,20 @@ class LoadedAgents:
             package, historical=True, expected_hash=run.resolved_spec_hash
         )
 
-    async def restore_pending(self):
+    async def restore_pending(self, intents=None):
         async with self.restore_lock:
             if self.application._closing or self.application._closed:
                 return
             store = self.process_runtime.session_store
             reader = getattr(store, "list_dispatchable_runs", None)
-            if reader is None:
-                return
+            if intents is None:
+                if reader is None:
+                    return
+                intents = await reader()
             issues = []
             failures = {}
-            for intent in await reader():
+            previous = set(self.recovery_issues)
+            for intent in intents:
                 spec_hash = intent.run.resolved_spec_hash
                 if any(
                     handle.composition_hash == spec_hash
@@ -642,11 +645,12 @@ class LoadedAgents:
                     message=str(error),
                 )
                 issues.append(issue)
-                _LOGGER.exception(
-                    issue.code, "Run recovery blocked; continuing App startup", error,
-                    run_id=issue.run_id, session_id=issue.session_id,
-                    resolved_spec_hash=spec_hash,
-                )
+                if issue not in previous:
+                    _LOGGER.exception(
+                        issue.code, "Run recovery blocked", error,
+                        run_id=issue.run_id, session_id=issue.session_id,
+                        resolved_spec_hash=spec_hash,
+                    )
             self.recovery_issues = tuple(issues)
 
 

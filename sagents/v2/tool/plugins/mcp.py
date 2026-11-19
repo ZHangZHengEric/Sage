@@ -13,7 +13,7 @@ import base64
 import hashlib
 import json
 import re
-from time import perf_counter
+from time import monotonic, perf_counter
 from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -137,8 +137,11 @@ class McpToolPlugin:
         self._discovery_errors: dict[str, RuntimeErrorInfo] = {}
         self._lock = asyncio.Lock()
         self._discovery_fingerprint = self.servers_fingerprint(self.servers)
-        self._discovery_complete = False
-        self._discovery_task: asyncio.Task[tuple[ToolDefinition, ...]] | None = None
+        self._server_catalogs: dict[str, tuple[
+            dict[str, ToolDefinition], dict[str, tuple[McpServerConfig, str]],
+        ]] = {}
+        self._discovery_retry: dict[str, tuple[int, float]] = {}
+        self._discovery_task: asyncio.Task[None] | None = None
         self._discovery_generation = 0
 
     @staticmethod
@@ -170,7 +173,8 @@ class McpToolPlugin:
 
     def invalidate_discovery(self) -> None:
         self._discovery_generation += 1
-        self._discovery_complete = False
+        self._server_catalogs.clear()
+        self._discovery_retry.clear()
         self._definitions = {}
         self._routes = {}
         self._discovery_errors = {}
@@ -182,29 +186,33 @@ class McpToolPlugin:
         while True:
             fingerprint = self.servers_fingerprint(self.servers)
             async with self._lock:
-                if (
-                    self._discovery_complete
-                    and self._discovery_fingerprint == fingerprint
-                ):
-                    return tuple(
-                        self._definitions[name] for name in sorted(self._definitions)
-                    )
                 if self._discovery_fingerprint != fingerprint:
                     self.invalidate_discovery()
                 generation = self._discovery_generation
                 if self._discovery_task is None:
+                    now = monotonic()
+                    pending = tuple(
+                        server for server in self.servers
+                        if server.name not in self._server_catalogs
+                        and self._discovery_retry.get(server.name, (0, 0.0))[1] <= now
+                    )
+                    if not pending:
+                        return self._catalog_result()
                     self._discovery_task = asyncio.create_task(
-                        self._discover_tools(self.servers, generation)
+                        self._discover_tools(pending, generation, fingerprint)
                     )
                     self._discovery_task.add_done_callback(self._discovery_finished)
                 task = self._discovery_task
             # Observers do not own this shared read-only discovery task.
-            result = await asyncio.shield(task)
-            if (
-                generation == self._discovery_generation
-                and fingerprint == self.servers_fingerprint(self.servers)
-            ):
-                return result
+            await asyncio.shield(task)
+            if generation == self._discovery_generation and fingerprint == self.servers_fingerprint(self.servers):
+                return self._catalog_result()
+
+    def _catalog_result(self) -> tuple[ToolDefinition, ...]:
+        for server in self.servers:
+            if server.required and server.name in self._discovery_errors:
+                raise SageV2Error(self._discovery_errors[server.name])
+        return tuple(self._definitions[name] for name in sorted(self._definitions))
 
     def _discovery_finished(self, task) -> None:
         if self._discovery_task is task:
@@ -212,41 +220,53 @@ class McpToolPlugin:
         if not task.cancelled():
             task.exception()  # Retrieve failures even when all observers detached.
 
+    def _record_discovery_error(self, name: str, error: RuntimeErrorInfo) -> None:
+        self._server_catalogs.pop(name, None)
+        self._discovery_errors[name] = error
+        attempts = min(self._discovery_retry.get(name, (0, 0.0))[0] + 1, 6)
+        self._discovery_retry[name] = (attempts, monotonic() + min(30, 2 ** (attempts - 1)))
+
     async def _discover_tools(
-        self, servers: tuple[McpServerConfig, ...], generation: int
-    ) -> tuple[ToolDefinition, ...]:
-        results = await asyncio.gather(
-            *(self._discover_server(server) for server in servers)
-        )
-        discovered: dict[str, ToolDefinition] = {}
-        routes: dict[str, tuple[McpServerConfig, str]] = {}
-        discovery_errors: dict[str, RuntimeErrorInfo] = {}
-        for server, raw_tools, error in results:
-            if error is not None:
-                discovery_errors[server.name] = error
-                continue
-            try:
-                server_definitions, server_routes = self._project_tools(
-                    server, raw_tools or (), existing_names=frozenset(discovered)
-                )
-            except SageV2Error as exc:
-                if server.required:
-                    raise
-                discovery_errors[server.name] = exc.info
-                continue
-            discovered.update(server_definitions)
-            routes.update(server_routes)
+        self, pending: tuple[McpServerConfig, ...], generation: int, fingerprint: str
+    ) -> None:
+        results = await asyncio.gather(*(self._discover_server(server) for server in pending))
         async with self._lock:
-            if generation == self._discovery_generation and self.servers_fingerprint(
-                servers
-            ) == self.servers_fingerprint(self.servers):
-                self._definitions = discovered
-                self._routes = routes
-                self._discovery_errors = discovery_errors
-                # A temporarily unavailable optional server must be discoverable
-                # on a later request without requiring a settings change.
-                self._discovery_complete = not discovery_errors
-        return tuple(discovered[name] for name in sorted(discovered))
+            if (generation != self._discovery_generation
+                    or fingerprint != self.servers_fingerprint(self.servers)):
+                return
+            for server, raw_tools, error in results:
+                name = server.name
+                if error is not None:
+                    self._record_discovery_error(name, error)
+                    continue
+                try:
+                    self._server_catalogs[name] = self._project_tools(server, raw_tools or ())
+                except SageV2Error as exc:
+                    self._record_discovery_error(name, exc.info)
+                else:
+                    self._discovery_errors.pop(name, None)
+                    self._discovery_retry.pop(name, None)
+
+            definitions: dict[str, ToolDefinition] = {}
+            routes: dict[str, tuple[McpServerConfig, str]] = {}
+            for server in self.servers:
+                catalog = self._server_catalogs.get(server.name)
+                if catalog is None:
+                    continue
+                server_definitions, server_routes = catalog
+                collisions = definitions.keys() & server_definitions.keys()
+                if collisions:
+                    error = self._error(
+                        "mcp.tool_name_collision", f"multiple MCP tools map to {min(collisions)!r}",
+                        ErrorCategory.CONFLICT,
+                    )
+                    self._record_discovery_error(server.name, error.info)
+                    continue
+                definitions.update(server_definitions)
+                routes.update(server_routes)
+            if any(server.required and server.name in self._discovery_errors for server in self.servers):
+                definitions, routes = {}, {}
+            self._definitions, self._routes = definitions, routes
 
     async def _discover_server(
         self, server: McpServerConfig
@@ -263,8 +283,6 @@ class McpToolPlugin:
                 tool_count = len(raw_tools)
             outcome = "completed"
         except SageV2Error as error:
-            if server.required:
-                raise
             return server, None, error.info
         except Exception as exc:
             # Discovery is read-only and happens before a tool call is
@@ -276,8 +294,6 @@ class McpToolPlugin:
                 exc,
                 category=ErrorCategory.PROVIDER_TRANSIENT,
             )
-            if server.required:
-                raise error from exc
             return server, None, error.info
         finally:
             finished = perf_counter()
@@ -617,8 +633,6 @@ class McpToolPlugin:
         cls,
         server: McpServerConfig,
         raw_tools: tuple[Any, ...],
-        *,
-        existing_names: frozenset[str],
     ) -> tuple[
         dict[str, ToolDefinition],
         dict[str, tuple[McpServerConfig, str]],
@@ -630,7 +644,7 @@ class McpToolPlugin:
             if not remote_name:
                 continue
             public_name = cls._public_name(server.name, remote_name)
-            if public_name in existing_names or public_name in definitions:
+            if public_name in definitions:
                 raise cls._error(
                     "mcp.tool_name_collision",
                     f"multiple MCP tools map to {public_name!r}",

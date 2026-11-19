@@ -196,6 +196,7 @@ class RedisArchiveProtocol:
                     pipe.hset(key, "archived_revision", fields["revision"])
                 if deleted or quiescent == "1":
                     pipe.srem(self._key("resident"), sid)
+                    pipe.srem(self._key("dispatch_sessions"), sid)
                     if deleted:
                         pipe.srem(self._key("suspended"), sid)
                     if not deleted:

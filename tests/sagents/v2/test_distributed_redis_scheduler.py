@@ -230,3 +230,26 @@ async def test_tenant_capacity_is_shared_between_distinct_queues(scheduler_pair)
     await first.release(a_lease, LeaseReleaseReason.COMPLETED)
     b_lease = await claim(second)
     assert b_lease is not None and b_lease.work.work_id == "work-b"
+
+
+@pytest.mark.asyncio
+async def test_restore_queued_reopens_retired_receipt_atomically_and_respects_leases(scheduler_pair):
+    first, second = scheduler_pair()
+    item = work("orphan")
+    assert await first.submit(item)
+    lease = await claim(first)
+    assert lease is not None
+    assert not await second.restore_queued(item)
+    assert not await second.restore_queued(work("another-item", run_id=item.run_id))
+    await first.release(lease, LeaseReleaseReason.CANCELLED)
+    assert not await first.submit(item)
+    assert sorted(await asyncio.gather(first.restore_queued(item), second.restore_queued(item))) == [False, True]
+    active = await claim(second)
+    assert active is not None and active.fencing_token > lease.fencing_token
+    assert await claim(first) is None
+    await second.release(active, LeaseReleaseReason.COMPLETED)
+
+    cancelled = work("cancelled")
+    assert await first.submit(cancelled)
+    assert await first.cancel(cancelled.work_id)
+    assert not await second.restore_queued(cancelled)

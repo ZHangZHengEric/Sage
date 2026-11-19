@@ -150,14 +150,15 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 *mutation["patches"].get("runs", ()),
             ]
         )
-        quiescent = all(
-            self._runs[rid].state in _STOPPED
-            for rid in self._session_run_ids_locked(sid)
-        )
-        suspended = any(
-            self._runs[rid].state == RunState.SUSPENDED
-            for rid in self._session_run_ids_locked(sid)
-        )
+        session_runs = tuple(self._runs[rid] for rid in self._session_run_ids_locked(sid))
+        quiescent = all(row.state in _STOPPED for row in session_runs)
+        suspended = any(row.state == RunState.SUSPENDED for row in session_runs)
+        intents = [
+            {"run": self._run_snapshot(row).model_dump(mode="json"),
+             "context": row.request_context.model_dump(mode="json")}
+            for row in session_runs
+            if self._is_dispatchable_run(row) and row.request_context is not None
+        ]
         attachments = {
             identity: base64.b64encode(content).decode("ascii")
             for identity, content in self._pending_attachments(sid)
@@ -211,6 +212,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     "last_sequence": head["last_sequence"],
                     "commit_id": commit_id,
                     "quiescent": "1" if quiescent else "0",
+                    "dispatch_revision": revision,
+                    "dispatch_intents": _json(intents),
                 }
                 if staged_base:
                     token, parts = staged_base
@@ -225,6 +228,10 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 if snapshot_token and not restoring:
                     pipe.persist(self._key(f"snapshot:{snapshot_token}"))
                 pipe.sadd(self._key("resident"), sid)
+                if intents:
+                    pipe.sadd(self._key("dispatch_sessions"), sid)
+                else:
+                    pipe.srem(self._key("dispatch_sessions"), sid)
                 if suspended:
                     pipe.sadd(self._key("suspended"), sid)
                 else:

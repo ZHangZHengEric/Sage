@@ -351,15 +351,15 @@ async def test_waiting_subscription_delivers_cross_instance_preview_after_its_pr
     before = await second.get_run(rid)
     seen, = await second.read_stream_previews(rid)
     observed_empty_read = asyncio.Event()
-    original = second.read_stream_previews
+    original = second._read_preview_page
 
     async def observed_read(*args, **kwargs):
-        events = await original(*args, **kwargs)
-        if not events:
+        page = await original(*args, **kwargs)
+        if not page[1]:
             observed_empty_read.set()
-        return events
+        return page
 
-    second.read_stream_previews = observed_read
+    second._read_preview_page = observed_read
     stream = second.subscribe_events(EventCursor(
         run_id=rid, run_sequence=before.last_run_sequence,
         preview_sequence=seen.preview_sequence, preview_epoch=seen.preview_epoch))
@@ -377,7 +377,7 @@ async def test_waiting_subscription_delivers_cross_instance_preview_after_its_pr
         pending.cancel()
         await asyncio.gather(pending, return_exceptions=True)
         await stream.aclose()
-        second.read_stream_previews = original
+        second._read_preview_page = original
 
 
 @pytest.mark.asyncio
@@ -732,3 +732,180 @@ async def test_concurrent_previews_for_different_runs_keep_each_runs_original_ep
         assert [event.preview_sequence for event in previews] == [1, 2]
         assert [event.data.delta for event in previews] == ["initial", "concurrent"]
         assert {event.preview_epoch for event in previews} == {epoch}
+
+
+@pytest.mark.asyncio
+async def test_preview_caught_up_reads_only_watermark_and_validates_new_suffix(stores, monkeypatch):
+    from sagents.v2.contracts.events import RuntimeEvent
+
+    first, second = stores
+    rid = (await first.create_run(command(), CONTEXT)).handle.run_id
+    await transition(first, rid, RunState.RUNNING, "running")
+    run = await first.get_run(rid)
+    await first.publish_stream_preview(
+        run_id=rid, expected_revision=run.revision, context=CONTEXT,
+        drafts=tuple(EventDraft(type="message.delta", item_id="assistant-message",
+                                data=ItemEventData(operation="delta", delta=str(index)))
+                     for index in range(2048)),
+    )
+    calls = []
+    validate = RuntimeEvent.model_validate_json
+
+    def observed(raw):
+        calls.append(raw)
+        return validate(raw)
+
+    monkeypatch.setattr(RuntimeEvent, "model_validate_json", observed)
+    for _ in range(10):
+        assert await second.read_stream_previews(rid, after_preview_sequence=2048) == ()
+    assert calls == []
+    await publish_preview(first, rid, "new")
+    event, = await second.read_stream_previews(rid, after_preview_sequence=2048)
+    assert event.preview_sequence == 2049
+    assert len(calls) == 1
+    assert await first._redis.zcard(first._key("preview-events:" + rid)) == 2048
+
+
+@pytest.mark.asyncio
+async def test_preview_migrates_legacy_buffer_then_reports_overflow_and_hides_completed(stores):
+    import json
+
+    from sagents.v2.contracts.common import utc_now
+    from sagents.v2.contracts.items import ItemSnapshot, ItemStatus, MessageItemData
+
+    first, second = stores
+    first.max_preview_events = second.max_preview_events = 3
+    rid = (await first.create_run(command(), CONTEXT)).handle.run_id
+    await transition(first, rid, RunState.RUNNING, "running")
+    await publish_preview(first, rid, "old")
+    old, = await second.read_stream_previews(rid)
+    key = first._key("previews:" + rid)
+    index = first._key("preview-events:" + rid)
+    # Model an in-flight buffer left by the previous binary.
+    await first._redis.hdel(key, "indexed_sequence")
+    await first._redis.hset(key, "events", json.dumps([old.model_dump(mode="json")]))
+    await first._redis.delete(index)
+    assert (await second.read_stream_previews(rid)) == (old,)
+    await publish_preview(first, rid, "migrated")
+    assert [e.preview_sequence for e in await second.read_stream_previews(rid)] == [1, 2]
+    for text in ("three", "four", "five", "six"):
+        await publish_preview(first, rid, text)
+    stream = second.subscribe_events(EventCursor(run_id=rid, run_sequence=old.run_sequence,
+        preview_sequence=old.preview_sequence, preview_epoch=old.preview_epoch))
+    try:
+        gap = await asyncio.wait_for(anext(stream), 2)
+        assert gap.type == "stream.gap" and gap.data.state == "preview_buffer_overflow"
+        next_event = await asyncio.wait_for(anext(stream), 2)
+        assert next_event.preview_sequence == 4 and next_event.preview_epoch == old.preview_epoch
+    finally:
+        await stream.aclose()
+
+    run = await first.get_run(rid)
+    now = utc_now()
+    item = ItemSnapshot(item_id="assistant-message", run_id=rid, status=ItemStatus.COMPLETED,
+        data=MessageItemData(role="assistant", content=(TextBlock(text="canonical"),)),
+        created_at=now, updated_at=now)
+    await first.commit_run(run_id=rid, expected_revision=run.revision, expected_states={RunState.RUNNING},
+        new_state=RunState.RUNNING, context=CONTEXT, idempotency_key="complete-item",
+        drafts=(EventDraft(type="message.completed", item_id=item.item_id,
+            data=ItemEventData(operation="completed", item=item)),))
+    assert await second.read_stream_previews(rid) == ()
+    durable = await second.read_events(rid, after_sequence=old.run_sequence)
+    assert [event.type for event in durable] == ["message.completed"]
+
+
+@pytest.mark.asyncio
+async def test_recovery_intent_survives_missing_resident_membership_without_loading_history(stores, monkeypatch):
+    first, second = stores
+    created = await first.create_run(command(), CONTEXT)
+    rid, sid = created.handle.run_id, created.handle.session_id
+    assert await first._redis.srem(first._key("resident"), sid)
+    with monkeypatch.context() as patch:
+        patch.setattr(second, "get_session", AsyncMock(side_effect=AssertionError("hydrated history")))
+        intent, = await second.list_dispatchable_runs()
+    assert intent.run.run_id == rid
+    assert intent.run.state == RunState.QUEUED
+    assert intent.context == CONTEXT
+
+    # The legacy path still resolves canonical state when the derived fields
+    # are absent. An old producer need only maintain its resident membership.
+    await first._redis.sadd(first._key("resident"), sid)
+    await first._redis.hdel(first._session_key(sid), "dispatch_revision", "dispatch_intents")
+    legacy, = await second.list_dispatchable_runs()
+    assert legacy == intent
+    await transition(first, rid, RunState.CANCELLED, "cancel")
+    assert await second.list_dispatchable_runs() == ()
+
+
+@pytest.mark.asyncio
+async def test_two_recovery_workers_requeue_original_runs_without_stealing_live_lease(stores):
+    from collections import Counter
+
+    from sagents.v2.runtime import HarnessRuntime
+    from sagents.v2.runtime.execution.dispatcher import LocalWorkerDispatcher
+    from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason
+    from sagents.v2.runtime.execution.scheduler.plugins.redis_distributed import RedisDistributedScheduler
+    from sagents.v2.runtime.session.fencing import LeaseFencedSessionStore
+
+    first, second = stores
+    handles = [(await first.create_run(command(f"lost-handoff-{index}"), CONTEXT)).handle
+               for index in range(8)]
+    executions = Counter()
+
+    class CompletingAgent:
+        def __init__(self, store):
+            self.runtime = HarnessRuntime(store)
+
+        def ensure_execution(self, run_id, context, *, resume):
+            async def execute():
+                assert not resume
+                executions[run_id] += 1
+                current = await self.runtime.get_run(run_id)
+                running = await self.runtime.start_execution(
+                    run_id=run_id, expected_revision=current.revision, context=context,
+                    idempotency_key="recovered-start")
+                await asyncio.sleep(.01)
+                return await self.runtime.complete_run(
+                    run_id=run_id, expected_revision=running.revision, context=context,
+                    idempotency_key="recovered-complete")
+
+            return asyncio.create_task(execute())
+
+    schedulers, dispatchers = [], []
+    for store in stores:
+        scheduler = RedisDistributedScheduler(
+            redis_url=store.redis_url, key_prefix=store.key_prefix + ":orphan-recovery",
+            max_concurrent_runs=3, max_concurrent_runs_per_tenant=3)
+        scheduler._redis = store._redis
+        scheduler_store = LeaseFencedSessionStore(store, scheduler)
+        dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1, lease_seconds=30,
+            max_concurrent_runs_per_tenant=3, distributed_claims=True,
+            lease_scope_factory=scheduler_store.lease_scope, recovery_interval_seconds=.05)
+        dispatcher.attach_recovery_agent(cast("RecoveryAgent", CompletingAgent(store)))
+        schedulers.append(scheduler)
+        dispatchers.append(dispatcher)
+
+    async def wait_completed(run_ids):
+        async with asyncio.timeout(15):
+            while True:
+                snapshots = await asyncio.gather(*(second.get_run(run_id) for run_id in run_ids))
+                if all(snapshot.state == RunState.COMPLETED for snapshot in snapshots):
+                    return
+                await asyncio.sleep(.03)
+
+    try:
+        await schedulers[0].submit(dispatchers[0]._work_item(handles[0], CONTEXT, resume=False))
+        live = await schedulers[0].claim("original-worker", lease_duration=timedelta(seconds=45), wait_timeout=0)
+        assert live is not None
+        await asyncio.gather(*(dispatcher.start(recover=False) for dispatcher in dispatchers))
+        await wait_completed([run.run_id for run in handles[1:]])
+        assert executions[handles[0].run_id] == 0
+        assert (await second.get_run(handles[0].run_id)).state == RunState.QUEUED
+        await schedulers[0].assert_fence(live)
+        await schedulers[0].release(live, LeaseReleaseReason.CANCELLED)
+        await wait_completed([handles[0].run_id])
+        assert executions == Counter({run.run_id: 1 for run in handles})
+        await asyncio.gather(*(dispatcher.refresh_recovery() for dispatcher in dispatchers))
+        assert await schedulers[0].pending_count() == 0
+    finally:
+        await asyncio.gather(*(dispatcher.close() for dispatcher in dispatchers))

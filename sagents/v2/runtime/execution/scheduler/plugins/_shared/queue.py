@@ -130,10 +130,25 @@ class SchedulerQueue:
             max_retained_terminal_items=self._max_retained_terminal,
         )
 
+    async def restore_queued(self, work: WorkItem) -> bool:
+        # The caller proved a durable QUEUED intent. A terminal scheduler
+        # receipt by itself does not establish a terminal Run.
+        return await self._submit(work, restore_queued=True)
+
     async def submit(self, work: WorkItem) -> bool:
+        return await self._submit(work)
+
+    async def _submit(self, work: WorkItem, *, restore_queued: bool = False) -> bool:
         async with self._condition:
             self._ensure_open()
-            if work.idempotency_key in self._idempotency:
+            if restore_queued and (
+                work.work_id in self._items
+                or work.work_id in self._cancelled
+                or work.run_id in self._run_lease
+            ):
+                return False
+            retired = work.idempotency_key in self._terminal_idempotency_key_set
+            if work.idempotency_key in self._idempotency and not (restore_queued and retired):
                 return False
             if work.work_id in self._items:
                 raise self._error(
@@ -153,6 +168,9 @@ class SchedulerQueue:
                     "scheduler pending queue is full",
                     retryable=True,
                 )
+            if restore_queued and retired:
+                self._terminal_idempotency_key_set.remove(work.idempotency_key)
+                self._terminal_idempotency_keys.remove(work.idempotency_key)
             self._items[work.work_id] = work
             self._idempotency[work.idempotency_key] = work.work_id
             self._push_locked(work)

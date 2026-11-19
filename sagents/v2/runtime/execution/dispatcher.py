@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections.abc import Awaitable, Callable
@@ -15,7 +14,7 @@ from types import TracebackType
 
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.distributed.redis_coordination import is_redis_transport_error
-from sagents.v2.runtime.session.contracts import SessionStore
+from sagents.v2.runtime.session.contracts import DispatchableRun, SessionStore
 
 if TYPE_CHECKING:
     from sagents.v2.sagent import RecoveryAgent
@@ -92,7 +91,8 @@ class LocalWorkerDispatcher:
         lease_scope_factory: Callable[[WorkerLease], AbstractAsyncContextManager[object]] | None = None,
         preserve_runs_on_shutdown: bool = True,
         distributed_claims: bool = False,
-        restore_revisions: Callable[[], Awaitable[None]] | None = None,
+        restore_revisions: Callable[[tuple[DispatchableRun, ...]], Awaitable[None]] | None = None,
+        recovery_interval_seconds: float = 5.0,
     ) -> None:
         if max_concurrent_runs < 1 or max_concurrent_runs_per_tenant < 1:
             raise ValueError("dispatcher concurrency limits must be positive")
@@ -105,7 +105,13 @@ class LocalWorkerDispatcher:
         self.lease_scope_factory = lease_scope_factory
         self.preserve_runs_on_shutdown = preserve_runs_on_shutdown
         self.distributed_claims = distributed_claims
+        if recovery_interval_seconds <= 0:
+            raise ValueError("dispatcher recovery interval must be positive")
         self._restore_revisions = restore_revisions
+        self._recovery_interval_seconds = recovery_interval_seconds
+        self._recovery_task: asyncio.Task[None] | None = None
+        self._recovery_lock = asyncio.Lock()
+        self._recovery_retrying = False
         self._supports_deferred_work = "available_at" in inspect.signature(scheduler.release).parameters
         self._requests: dict[str, _DispatchRequest] = {}
         self._run_gates: dict[str, tuple[asyncio.Lock, int]] = {}
@@ -135,6 +141,7 @@ class LocalWorkerDispatcher:
             not self._closed
             and self._claim_error is None
             and not self._claim_retrying
+            and not self._recovery_retrying
             and any(not worker.done() for worker in self._workers)
         )
 
@@ -174,47 +181,87 @@ class LocalWorkerDispatcher:
             raise RuntimeError("local worker dispatcher is closed")
         if self._claim_error is not None:
             raise self._claim_error
-        if any(not worker.done() for worker in self._workers):
-            return
         if recover:
-            if self._restore_revisions is not None:
-                await self._restore_revisions()
             await self._restore_dispatchable_work()
         self._fill_worker_pool()
+        if self._recovery_task is None and self._recovery_agent is not None:
+            self._recovery_task = asyncio.create_task(
+                self._reconcile_pending(initial_delay=self._recovery_interval_seconds if recover else 0),
+                name="sage-dispatch-recovery"
+            )
 
     async def refresh_recovery(self) -> None:
         """Re-enqueue newly available revisions for a running dispatcher."""
         async with self._lifecycle:
-            if any(not worker.done() for worker in self._workers):
+            if not self._closed and any(not worker.done() for worker in self._workers):
                 await self._restore_dispatchable_work()
 
-    async def _restore_dispatchable_work(self) -> None:
-        """Rebuild missing Scheduler entries from authoritative Run intents."""
-
-        if self._recovery_agent is None:
-            return
-        store = self._recovery_agent.runtime.session_store
-        reader = getattr(store, "list_dispatchable_runs", None)
-        if reader is None:
-            return
-        for intent in await reader():
-            if self.recovery_filter is not None and not self.recovery_filter(
-                intent.run
-            ):
-                continue
+    async def _reconcile_pending(self, *, initial_delay: float) -> None:
+        # Recovery has its own task. A long Run on worker zero cannot prevent
+        # reconciliation, and a failed scan cannot stop healthy workers.
+        delay = initial_delay
+        retry = 0.1
+        while True:
+            await asyncio.sleep(delay)
             try:
-                work = self._work_item(
-                    intent.run, intent.context,
-                    resume=intent.run.state == RunState.RESUMING,
-                )
-                wake_at = await self._automatic_resume_at(store, intent.run.run_id)
-                if wake_at is not None and intent.run.state == RunState.RUNNING:
-                    work = work.model_copy(update={"available_at": wake_at})
-                await self.scheduler.submit(
-                    work
-                )
-            except SageV2Error as exc:
-                if exc.info.code != "scheduler.work_id_conflict":
+                await self._restore_dispatchable_work(queued_only=not self.distributed_claims)
+            except Exception as exc:
+                self._recovery_retrying = True
+                delay = min(retry, self._recovery_interval_seconds)
+                retry = min(retry * 2, self._recovery_interval_seconds)
+                _LOGGER.exception("scheduler.recovery.scan_failed", "Run recovery scan failed", exc)
+            else:
+                self._recovery_retrying = False
+                delay = self._recovery_interval_seconds
+                retry = 0.1
+
+    async def _restore_dispatchable_work(self, *, queued_only: bool = False) -> None:
+        """Rebuild missing Scheduler entries from authoritative Run intents."""
+        async with self._recovery_lock:
+            if self._closed or self._recovery_agent is None:
+                return
+            runtime = self._recovery_agent.runtime
+            store = runtime.session_store
+            reader = getattr(store, "list_dispatchable_runs", None)
+            if reader is None:
+                return
+            intents = await reader()
+            if self._restore_revisions is not None:
+                await self._restore_revisions(intents)
+            restore_queued = getattr(self.scheduler, "restore_queued", self.scheduler.submit)
+            existing_reader = getattr(self.scheduler, "existing_work_ids", None)
+            existing = await existing_reader() if existing_reader is not None and intents else ()
+            for intent in intents:
+                run = intent.run
+                if (queued_only and run.state != RunState.QUEUED) or f"work-{run.run_id}" in existing:
+                    continue
+                if self.recovery_filter is not None and not self.recovery_filter(run):
+                    continue
+                try:
+                    work = self._work_item(run, intent.context, resume=run.state == RunState.RESUMING)
+                    if run.state == RunState.QUEUED:
+                        # A stale scan cannot authorize reopening a different
+                        # generation. The worker checks the durable state again.
+                        current = await runtime.get_run(run.run_id)
+                        if current.state != RunState.QUEUED or current.revision != run.revision:
+                            continue
+                        if await restore_queued(work):
+                            _LOGGER.info(
+                                "scheduler.recovery.requeued", "Restored queued Run",
+                                run_id=run.run_id, session_id=run.session_id,
+                                revision=run.revision,
+                            )
+                        continue
+                    wake_at = await self._automatic_resume_at(store, run.run_id)
+                    if wake_at is not None and run.state == RunState.RUNNING:
+                        work = work.model_copy(update={"available_at": wake_at})
+                    await self.scheduler.submit(work)
+                except SageV2Error as exc:
+                    if exc.info.code in {"scheduler.work_id_conflict", "run.not_found"}:
+                        continue
+                    if exc.info.code == "scheduler.queue_full":
+                        # Next scan starts from the oldest intent again.
+                        break
                     raise
 
     async def submit(
@@ -353,6 +400,9 @@ class LocalWorkerDispatcher:
             while self._submissions_inflight:
                 await self._lifecycle.wait()
             workers, self._workers = self._workers, []
+            if self._recovery_task is not None:
+                workers.append(self._recovery_task)
+                self._recovery_task = None
         for worker in workers:
             worker.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
@@ -368,14 +418,8 @@ class LocalWorkerDispatcher:
     async def _worker(self, index: int) -> None:
         worker_id = f"local-{index}"
         retry_delay = 0.1
-        next_recovery_scan = 0.0
         while self._claim_error is None and index < self.max_concurrent_runs:
             try:
-                if self.distributed_claims and index == 0 and time.monotonic() >= next_recovery_scan:
-                    # Repair acceptance-before-enqueue crashes without needing
-                    # a whole-fleet restart. submit remains globally idempotent.
-                    await self._restore_dispatchable_work()
-                    next_recovery_scan = time.monotonic() + 1.0
                 lease = await self.scheduler.claim(
                     worker_id,
                     lease_duration=self.lease_duration,

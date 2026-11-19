@@ -8,6 +8,7 @@ reuse these rules without depending on one another.
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_right
 from weakref import WeakValueDictionary
 import hashlib
 import json
@@ -2740,34 +2741,25 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 row.state not in TERMINAL_RUN_STATES for row in self._runs.values()
             )
 
+    @staticmethod
+    def _is_dispatchable_run(row: _RunRow) -> bool:
+        return (
+            row.state in {RunState.QUEUED, RunState.RUNNING, RunState.SUSPEND_REQUESTED, RunState.RESUMING}
+            and row.request_context is not None
+            and row.start_command is not None
+            and row.start_command.parent_run_id is None
+        )
+
     async def list_dispatchable_runs(self) -> tuple[DispatchableRun, ...]:
         """Return root execution intents whose Scheduler work can be rebuilt."""
-
         async with self._lock:
-            active = {
-                RunState.QUEUED,
-                RunState.RUNNING,
-                RunState.SUSPEND_REQUESTED,
-                RunState.RESUMING,
-            }
             rows = sorted(
-                (
-                    row
-                    for row in self._runs.values()
-                    if row.state in active
-                    and row.request_context is not None
-                    and row.start_command is not None
-                    and row.start_command.parent_run_id is None
-                ),
+                (row for row in self._runs.values() if self._is_dispatchable_run(row)),
                 key=lambda row: (row.created_at, row.run_id),
             )
             return tuple(
-                DispatchableRun(
-                    run=self._run_snapshot(row),
-                    context=row.request_context,
-                )
-                for row in rows
-                if row.request_context is not None
+                DispatchableRun(run=self._run_snapshot(row), context=row.request_context)
+                for row in rows if row.request_context is not None
             )
 
     async def list_descendant_sessions(
@@ -2824,16 +2816,12 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         async with self._run_session_read(run_id):
             if run_id not in self._runs:
                 raise self._not_found("run.not_found", run_id)
-            events = [
-                event
-                for event in self._run_events[run_id]
-                if event.run_sequence > after_sequence
-            ]
-            if limit is not None:
-                if limit < 1:
-                    raise ValueError("limit must be positive")
-                events = events[:limit]
-            return tuple(events)
+            events = self._run_events[run_id]
+            start = bisect_right(events, after_sequence, key=lambda event: event.run_sequence)
+            if limit is not None and limit < 1:
+                raise ValueError("limit must be positive")
+            end = start + limit if limit is not None else None
+            return tuple(events[start:end])
 
     async def read_stream_previews(
         self, run_id: str, *, after_preview_sequence: int = 0

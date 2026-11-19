@@ -905,27 +905,35 @@ async def test_discovery_invalidated_in_flight_does_not_publish_stale_routes():
 
 
 @pytest.mark.asyncio
-async def test_optional_mcp_recovers_after_transient_discovery_failure():
-    attempts = 0
+async def test_optional_mcp_recovers_after_transient_discovery_failure(monkeypatch):
+    from sagents.v2.tool.plugins import mcp
+
+    now = 0.0
+    monkeypatch.setattr(mcp, "monotonic", lambda: now)
+    attempts = {"drive": 0, "healthy": 0}
 
     @asynccontextmanager
     async def factory(config):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
+        attempts[config.name] += 1
+        if config.name == "drive" and attempts["drive"] == 1:
             raise OSError("temporarily offline")
         yield FakeSession()
 
     plugin = McpToolPlugin(
         (
-            McpServerConfig(
-                name="drive", protocol="stdio", command="fake", required=False
-            ),
+            McpServerConfig(name="drive", protocol="stdio", command="fake", required=False),
+            McpServerConfig(name="healthy", protocol="stdio", command="fake"),
         ),
         session_factory=factory,
     )
-    assert await plugin.list_tools(run_id="one") == ()
-    assert len(await plugin.list_tools(run_id="two")) == 1
+    for _ in range(747):
+        assert len(await plugin.list_tools(run_id="one")) == 1
+    assert attempts == {"drive": 1, "healthy": 1}
+    now = 1.0
+    assert all(len(result) == 2 for result in await asyncio.gather(
+        *(plugin.list_tools(run_id="two") for _ in range(16))
+    ))
+    assert attempts == {"drive": 2, "healthy": 1}
     assert plugin.discovery_errors() == {}
 
 

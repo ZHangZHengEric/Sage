@@ -267,7 +267,9 @@ async def test_dispatcher_resumes_after_redis_transport_failure(monkeypatch, fai
             CONTEXT,
         )
         assert (await asyncio.wait_for(result, timeout=2)).state == RunState.COMPLETED
-        assert dispatcher.ready
+        async with asyncio.timeout(2):
+            while not dispatcher.ready:
+                await asyncio.sleep(0.01)
         assert dispatcher._workers == [worker]
     finally:
         await dispatcher.close()
@@ -889,3 +891,27 @@ async def test_close_during_recovery_records_shutdown():
     )
     await agent.close()
     await scheduler.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_restores_original_queued_run_once_after_workers_start():
+    runtime = HarnessRuntime(cast("SessionStore", EphemeralSessionStore()))
+    scheduler = InMemoryScheduler()
+    agent = RecoveryAgent(runtime)
+    workers = [
+        LocalWorkerDispatcher(scheduler, max_concurrent_runs=1, recovery_interval_seconds=0.02)
+        for _ in range(2)
+    ]
+    try:
+        for dispatcher in workers:
+            dispatcher.attach_recovery_agent(cast("RecoveryAgentPort", agent))
+            await dispatcher.start()
+        # Model a crash between durable admission and submitting scheduler work.
+        handle = await runtime.start_run(start_command("orphan-after-start"), CONTEXT)
+        snapshot = await wait_for_terminal(runtime, handle.run_id)
+        assert snapshot.run_id == handle.run_id
+        await asyncio.gather(*(dispatcher.refresh_recovery() for dispatcher in workers))
+        assert agent.executions == [(handle.run_id, False)]
+    finally:
+        await asyncio.gather(*(dispatcher.close() for dispatcher in workers))
+        await scheduler.close()

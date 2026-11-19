@@ -164,6 +164,21 @@ class RedisDistributedScheduler:
     async def submit(self, work):
         return await self._mutate(lambda value: value.submit(work), submitted_work=work)
 
+    async def existing_work_ids(self):
+        redis = await self._client()
+        raw = await redis.get(self.key_prefix + ":state")
+        if not raw:
+            return frozenset()
+
+        def identities():
+            state = json.loads(raw)
+            return frozenset(item["work_id"] for item in state["items"]) | frozenset(state.get("cancelled", ()))
+
+        return await asyncio.to_thread(identities)
+
+    async def restore_queued(self, work):
+        return await self._mutate(lambda value: value.restore_queued(work), submitted_work=work)
+
     async def claim(self, worker_id, *, lease_duration, policy=None, wait_timeout=None):
         if wait_timeout is not None and wait_timeout < 0:
             raise ValueError("wait_timeout must be nonnegative")

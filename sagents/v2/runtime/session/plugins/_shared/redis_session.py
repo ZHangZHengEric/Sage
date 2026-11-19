@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_left
 from contextlib import AsyncExitStack, asynccontextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -10,6 +11,7 @@ import hashlib
 import json
 import time
 import uuid
+from operator import attrgetter
 
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.events import (
@@ -28,8 +30,15 @@ from sagents.v2.runtime.distributed.redis_coordination import (
 )
 from sagents.v2.runtime.observability.logs import get_logger
 
+from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
+
 from .aggregate import _json
 from .loading import DurableSessionLoading
+
+
+_PREVIEW_HEADER = ("epoch", "sequence", "indexed_sequence")
+_COMPLETION_TYPES = {"message.completed", "reasoning.completed", "item.completed"}
+_RUN_SEQUENCE = attrgetter("run_sequence")
 
 
 class RedisSessionCoordination:
@@ -275,21 +284,45 @@ class RedisSessionCoordination:
         )
 
     async def list_dispatchable_runs(self):
+        from sagents.v2.contracts.principals import RequestContext
+        from sagents.v2.contracts.run_state import RunSnapshot
+        from sagents.v2.runtime.session.contracts import DispatchableRun
         from sagents.v2.runtime.session.state import SessionStoreCoordinator
+        from .redis_metadata import _read_redis_fields_batched
 
         await self._ensure_ready()
-        resident = set(await self._redis.smembers(self._key("resident")))
-        for sid in sorted(resident):
-            try:
-                await self.get_session(sid)
-            except SageV2Error as exc:
-                if exc.info.code != "session.not_found":
-                    raise
-        return tuple(
-            intent
-            for intent in await SessionStoreCoordinator.list_dispatchable_runs(self)
-            if intent.run.session_id in resident
-        )
+        candidates = sorted(await self._redis.sunion(
+            self._key("resident"), self._key("dispatch_sessions"),
+        ))
+        heads = await _read_redis_fields_batched(self, [
+            ("hmget", self._session_key(sid), ("revision", "dispatch_revision", "dispatch_intents", "deleted"))
+            for sid in candidates
+        ])
+        intents, legacy = [], set()
+        for sid, (revision, indexed, encoded, deleted) in zip(candidates, heads, strict=True):
+            if deleted == "1":
+                continue
+            if revision is not None and indexed == revision and encoded is not None:
+                intents.extend(
+                    DispatchableRun(run=RunSnapshot.model_validate(row["run"]),
+                                    context=RequestContext.model_validate(row["context"]))
+                    for row in json.loads(encoded)
+                )
+            else:
+                # Old snapshots do not carry the derived intent fields.
+                try:
+                    await self.get_session(sid)
+                except SageV2Error as exc:
+                    if exc.info.code != "session.not_found":
+                        raise
+                else:
+                    legacy.add(sid)
+        if legacy:
+            intents.extend(
+                intent for intent in await SessionStoreCoordinator.list_dispatchable_runs(self)
+                if intent.run.session_id in legacy
+            )
+        return tuple(sorted(intents, key=lambda intent: (intent.run.created_at, intent.run.run_id)))
 
     async def has_nonterminal_runs(self):
         from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
@@ -408,61 +441,109 @@ class RedisSessionCoordination:
         run = await self.get_run(run_id)
         async with self._guard("session:" + run.session_id):
             key = self._key("previews:" + run_id)
-            fields = await self._redis.hgetall(key)
-            epoch = fields.get("epoch") or uuid.uuid4().hex
-            self._preview_sequences[run_id] = int(fields.get("sequence", 0))
-            self._stream_previews[run_id] = [
-                RuntimeEvent.model_validate(row)
-                for row in json.loads(fields.get("events", "[]"))
-            ]
+            index = self._key("preview-events:" + run_id)
+            epoch, stored, indexed = await self._redis.hmget(key, _PREVIEW_HEADER)
+            rebuild = not epoch or stored != indexed
+            migrated = {}
+            if rebuild and epoch:
+                legacy = await self._redis.hget(key, "events")
+                migrated = {
+                    _json(row): row["preview_sequence"]
+                    for row in json.loads(legacy or "[]")
+                    if row.get("preview_epoch") == epoch
+                }
+            epoch = epoch or uuid.uuid4().hex
+            self._preview_sequences[run_id] = int(stored or 0)
+            self._stream_previews[run_id] = []
             token = self._publication_epoch.set(epoch)
             try:
                 result = await super().publish_stream_preview(run_id=run_id, **options)
             finally:
                 self._publication_epoch.reset(token)
-            events = self._stream_previews.get(run_id, ())[-self.max_preview_events :]
-            encoded = _json([event.model_dump(mode="json") for event in events])
+            events = self._stream_previews.pop(run_id, ())
+            if not events:
+                return result
+            sequence = events[-1].preview_sequence
+            rows = {
+                **migrated,
+                **{event.model_dump_json(): event.preview_sequence for event in events[-self.max_preview_events:]},
+            }
 
             async def write():
                 async with self._redis.pipeline() as pipe:
                     await self._owned(pipe)
                     pipe.multi()
-                    pipe.hset(
-                        key,
-                        mapping={
-                            "epoch": epoch,
-                            "sequence": self._preview_sequences[run_id],
-                            "events": encoded,
-                        },
-                    )
+                    if rebuild:
+                        pipe.delete(index)
+                    pipe.zadd(index, rows)
+                    pipe.zremrangebyrank(index, 0, -self.max_preview_events - 1)
+                    pipe.hset(key, mapping={"epoch": epoch, "sequence": sequence, "indexed_sequence": sequence})
+                    pipe.hdel(key, "events")
+                    pipe.expire(index, self.preview_retention_seconds)
                     pipe.expire(key, self.preview_retention_seconds)
                     await pipe.execute()
 
             await self._retry_transaction(write)
             return result
 
-    async def read_stream_previews(self, run_id, *, after_preview_sequence=0):
-        from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
+    async def _read_preview_page(self, run_id, after, *, epoch=None, follow_epoch=False):
+        key = self._key("previews:" + run_id)
+        index = self._key("preview-events:" + run_id)
+        for _ in range(4):
+            head = await self._redis.hmget(key, _PREVIEW_HEADER)
+            current, sequence, indexed = head
+            lower = 0 if follow_epoch and current != epoch else after
+            if not current or int(sequence or 0) <= lower:
+                return current, ()
+            use_index = sequence == indexed
+            # Fetch the range and its generation atomically. A concurrent
+            # writer can advance the tail, but can't mix epochs with this page.
+            async with self._redis.pipeline(transaction=True) as pipe:
+                pipe.hmget(key, _PREVIEW_HEADER)
+                if use_index:
+                    pipe.zrangebyscore(index, f"({lower}", "+inf")
+                else:
+                    pipe.hget(key, "events")  # compatibility with pre-index producers
+                verified, rows = await pipe.execute()
+            actual_epoch, actual_sequence, actual_index = verified
+            if actual_epoch != current or (actual_sequence == actual_index) != use_index:
+                continue
+            if use_index:
+                events = tuple(RuntimeEvent.model_validate_json(row) for row in rows)
+            else:
+                events = tuple(
+                    RuntimeEvent.model_validate(row) for row in json.loads(rows or "[]")
+                    if row.get("preview_epoch") == current and (row.get("preview_sequence") or 0) > lower
+                )
+            return current, events
+        # Next poll can retry after concurrent epoch changes settle. Preserve
+        # the caller's watermark rather than announcing an unverified gap.
+        return epoch, ()
 
-        run = await self.get_run(run_id)
-        if run.state in TERMINAL_RUN_STATES:
+    async def _completed_preview_items(self, run_id, events):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        async with self._run_session_read(run_id):
+            if self._runs[run_id].state in TERMINAL_RUN_STATES:
+                return None
+            # An emitted preview is anchored at the current durable sequence.
+            # Only completions at or after the oldest such anchor supersede it.
+            history = self._run_events[run_id]
+            start = bisect_left(history, min(event.run_sequence for event in events), key=_RUN_SEQUENCE)
+            candidates = {event.item_id for event in events}
+            return {
+                event.item_id for event in history[start:]
+                if event.type in _COMPLETION_TYPES and event.item_id in candidates
+            }
+
+    async def read_stream_previews(self, run_id, *, after_preview_sequence=0):
+        await self._ensure_ready()
+        epoch, previews = await self._read_preview_page(run_id, after_preview_sequence)
+        if epoch is None:
+            await self.get_run(run_id)  # Preserve the missing-Run error without hydrating caught-up readers.
+        if not previews:
             return ()
-        raw = await self._redis.hget(self._key("previews:" + run_id), "events")
-        events = tuple(
-            RuntimeEvent.model_validate(row) for row in json.loads(raw or "[]")
-        )
-        completed = {
-            event.item_id
-            for event in await self.read_events(run_id)
-            if event.type
-            in {"message.completed", "reasoning.completed", "item.completed"}
-        }
-        return tuple(
-            event
-            for event in events
-            if (event.preview_sequence or 0) > after_preview_sequence
-            and event.item_id not in completed
-        )
+        completed = await self._completed_preview_items(run_id, previews)
+        return () if completed is None else tuple(event for event in previews if event.item_id not in completed)
 
     async def _preview_gap(self, run_id, epoch, previous_sequence, state, run_sequence):
         run = await self.get_run(run_id)
@@ -504,21 +585,14 @@ class RedisSessionCoordination:
                     yield event
             if len(events) >= self._subscriber_queue_size:
                 continue  # Drain the durable backlog before live previews.
-            current_epoch = await self._redis.hget(
-                self._key("previews:" + cursor.run_id), "epoch"
+            current_epoch, previews = await self._read_preview_page(
+                cursor.run_id, preview_sequence, epoch=epoch, follow_epoch=True,
             )
             current_epoch = (
                 current_epoch
                 or "empty-" + hashlib.sha256(self.key_prefix.encode()).hexdigest()[:24]
             )
-            previews = await self.read_stream_previews(
-                cursor.run_id,
-                after_preview_sequence=preview_sequence
-                if epoch == current_epoch
-                else 0,
-            )
-            if previews:
-                current_epoch = previews[0].preview_epoch
+            completed = await self._completed_preview_items(cursor.run_id, previews) if previews else ()
             if epoch != current_epoch:
                 if epoch is not None and preview_sequence and not previews:
                     yield await self._preview_gap(
@@ -547,7 +621,8 @@ class RedisSessionCoordination:
                     and (event.preview_sequence or 0) > preview_sequence
                 ):
                     preview_sequence = event.preview_sequence or 0
-                    yield event
+                    if completed is not None and event.item_id not in completed:
+                        yield event
             await asyncio.sleep(self.event_poll_seconds)
 
     async def close(self):

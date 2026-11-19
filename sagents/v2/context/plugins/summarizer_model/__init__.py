@@ -11,7 +11,7 @@ import json
 
 import httpx
 
-from sagents.v2.context.plugins._shared.progress_summary import task_snapshot
+from sagents.v2.context.plugins._shared.progress_summary import extract_snapshot, task_snapshot
 from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -22,6 +22,7 @@ from sagents.v2.model.recovery import (
     adaptive_summary,
     model_call_budget,
     reported_context_limit_error,
+    recovery_error,
 )
 from sagents.v2.model.provider import (
     DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
@@ -95,34 +96,118 @@ class ModelConversationSummarizer:
 
     @scoped_recovery
     async def summarize(self, request: SummarizationRequest) -> str:
-        # The complete source, including the previous checkpoint, participates
-        # in splitting. Never drop a prefix or commit a partial successful half.
+        from sagents.v2.model.recovery_scope import current_recovery_scope, reserve_additional_request
+
         source = await bounded_to_thread("context-cpu", partial(self._source, request))
+        capabilities = getattr(self.model, "capabilities", None)
+        limits = None
+        if callable(capabilities):
+            probe = request.model_copy(update={"messages": (), "previous_summary": None})
+            limits = await self._attempt_with_retries(
+                probe, discover=partial(capabilities, self.model_binding),
+            )
+        source_limit = None
+        if limits is not None and limits.max_input_tokens is not None:
+            # Reserve for framing, the longest prompt (including a repair),
+            # the optional schema, and the wrapper used by fragment requests.
+            overhead = 96 + len(self._instructions(request, repair=True).encode("utf-8"))
+            if limits.supports_structured_output:
+                overhead += len(json.dumps(self._SCHEMA, separators=(",", ":")).encode("utf-8"))
+            source_limit = limits.max_input_tokens - overhead
+            if source_limit < 4:
+                raise recovery_error(
+                    "model.context_irreducible", "The summary prompt exceeds the model input budget"
+                )
+        max_parts = None
+        if source_limit is not None:
+            scope = current_recovery_scope()
+            state = scope.states.get(f"{scope.step_key}:summary_fragment")
+            max_parts = 1 + max(0, min(
+                scope.config.episode_requests - scope.episode_counts.get(scope.step_key, 0),
+                scope.config.context_repairs - (state.counts.get("context", 0) if state else 0),
+                scope.config.run_requests - scope.run_requests,
+            ))
+        parts = await bounded_to_thread(
+            "context-cpu", partial(self._split_source, source, source_limit, max_parts=max_parts)
+        )
+        if parts is None:
+            # Canonical messages still remain in the ledger. Use the existing
+            # extractive summary when the request count exceeds durable limits.
+            LOGGER.bind(run_id=request.scope.run_id, session_id=request.scope.session_id).info(
+                "context.summary.preflight_extractive", "Using a bounded extractive summary",
+                max_fragments=max_parts, source_characters=len(source), source_bytes_per_fragment=source_limit,
+            )
+            del source
+            return await extract_snapshot(request)
         first = True
 
         async def summarize_fragment(fragment):
             nonlocal first
-            if first:
-                first = False
-                return await self._summarize_with_retries(request, account_initial=True)
-            from sagents.v2.model.recovery_scope import reserve_additional_request
-            await reserve_additional_request("context", purpose="summary_fragment")
-            fragment_request = request.model_copy(
-                update={
-                    "previous_summary": None,
-                    "messages": (
-                        ModelMessage(role="user", content=(TextBlock(text=fragment),)),
-                    ),
-                }
-            )
-            return await self._summarize_with_retries(fragment_request)
+            initial = first
+            first = False
+            if not initial:
+                await reserve_additional_request("context", purpose="summary_fragment")
+            fragment_request = request
+            if fragment is not source:
+                fragment_request = request.model_copy(
+                    update={
+                        "previous_summary": None,
+                        "messages": (ModelMessage(role="user", content=(TextBlock(text=fragment),)),),
+                    }
+                )
+            return await self._attempt_with_retries(fragment_request, account_initial=initial)
 
-        with model_call_budget():
-            result = await adaptive_summary(
-                source, summarize_fragment, merge=self._merge_payloads
-            )
+        with model_call_budget() as budget:
+            if len(parts) > budget.remaining:
+                raise recovery_error(
+                    "model.context_recovery_exhausted", "Context recovery reached its model-call limit"
+                )
+            result = await adaptive_summary(parts[0], summarize_fragment, merge=self._merge_payloads)
+            for part in parts[1:]:
+                value = await adaptive_summary(part, summarize_fragment, merge=self._merge_payloads)
+                result = self._merge_payloads(result, value)
+        if len(parts) > 1 and len(result) >= len(source):
+            raise recovery_error("context.summary_no_progress", "Summary splitting did not reduce its source")
         return await bounded_to_thread(
             "context-cpu", partial(self._with_task_evidence, request, result)
+        )
+
+    @staticmethod
+    def _split_source(
+        source: str, max_bytes: int | None, *, max_parts: int | None = None,
+    ) -> tuple[str, ...] | None:
+        if max_bytes is None:
+            return (source,)
+        # UTF-8 bytes bound byte-based tokenizers without a network vocabulary.
+        aggregate_limit = max_bytes * max_parts if max_parts is not None else None
+        if aggregate_limit is not None and len(source) > aggregate_limit:
+            return None
+        encoded = source.encode("utf-8")
+        if aggregate_limit is not None and len(encoded) > aggregate_limit:
+            return None
+        if len(encoded) <= max_bytes:
+            return (source,)
+        result = []
+        position = 0
+        while position < len(encoded):
+            if len(result) == max_parts:
+                return None
+            end = min(position + max_bytes, len(encoded))
+            if end < len(encoded):
+                while encoded[end] & 0xC0 == 0x80:
+                    end -= 1
+            result.append(encoded[position:end].decode("utf-8"))
+            position = end
+        return tuple(result)
+
+    @staticmethod
+    def _instructions(request, *, repair: bool) -> str:
+        language = request.response_language
+        return (
+            prompt_text("summary_system", language) + "\n"
+            + prompt_text("summary_language", language) + " "
+            + prompt_text("summary_budget", language, target_tokens=request.target_tokens)
+            + ("\n\n" + prompt_text("summary_retry", language) if repair else "")
         )
 
     @staticmethod
@@ -141,7 +226,7 @@ class ModelConversationSummarizer:
             payload["open_tasks"] = snapshot.get("open_tasks", [])
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
-    async def _summarize_with_retries(self, request: SummarizationRequest, *, account_initial=False) -> str:
+    async def _attempt_with_retries(self, request: SummarizationRequest, *, account_initial=False, discover=None):
         from sagents.v2.model.recovery import execute_recoverable_operation
         from sagents.v2.model.recovery_scope import current_recovery_scope, recovery_call
         from sagents.v2.model.failures import failure_from_error
@@ -149,17 +234,21 @@ class ModelConversationSummarizer:
         logger = LOGGER.bind(session_id=request.scope.session_id, run_id=request.scope.run_id,
             correlation_id=new_id("summary_operation"))
         progress = {}
+        purpose = "summary_transport" if discover is None else "summary_capabilities"
 
         async def attempt():
             progress.clear()
             reservation = scope.states.get(key)
             progress.update(attempt=0, text_delta_count=0, reasoning_delta_count=0,
                 timeout_attempt=(reservation.counts.get("transient", 0) if reservation else 0) + 1)
-            logger.info("context.summary.attempt_started", "Starting conversation summary attempt", attributes=progress)
+            if discover is None:
+                logger.info("context.summary.attempt_started", "Starting conversation summary attempt", attributes=progress)
             # Capacity belongs to a request, never to backoff or a restored wait.
             async with auxiliary_capacity("context-summary"):
                 try:
                     async with asyncio.timeout(self.timeout_seconds):
+                        if discover is not None:
+                            return await discover()
                         return await self._summarize(request, progress)
                 except TimeoutError as exc:
                     raise self._timeout_error("total", progress) from exc
@@ -176,7 +265,7 @@ class ModelConversationSummarizer:
                 "Conversation summary recovery scheduled", error=SageV2Error(error),
                 attributes={**error.metadata, **progress, "retry_delay_seconds": decision.delay_seconds})
 
-        with recovery_call(request, "summary_transport") as key:
+        with recovery_call(request, purpose) as key:
             pending = scope.states.get(key)
             if (account_initial and scope.episode_counts.get(scope.step_key, 0)
                 and not (pending and pending.pending_action is not None)
@@ -185,7 +274,7 @@ class ModelConversationSummarizer:
                 await reserve_additional_request("context", purpose="recovery_summary")
             try:
                 result = await execute_recoverable_operation(attempt, scope=scope, key=key,
-                    purpose="summary_transport", transient_retries=self._MAX_TIMEOUT_RETRIES, on_retry=on_retry)
+                    purpose=purpose, transient_retries=self._MAX_TIMEOUT_RETRIES, on_retry=on_retry)
             except SageV2Error as exc:
                 is_timeout = exc.info.code == "context.summarizer.model_timeout"
                 if is_timeout:
@@ -194,7 +283,8 @@ class ModelConversationSummarizer:
                 logger.exception("context.summary.timeout_exhausted" if is_timeout else "context.summary.failed",
                     "Conversation summary failed", exc, attributes={**exc.info.metadata, **progress})
                 raise exc
-            logger.info("context.summary.completed", "Conversation summary completed", attributes=progress)
+            if discover is None:
+                logger.info("context.summary.completed", "Conversation summary completed", attributes=progress)
             return result
 
     def _as_timeout_error(self, error, progress):
@@ -277,11 +367,6 @@ class ModelConversationSummarizer:
         last_error = ""
         for attempt in range(2):
             progress["attempt"] = attempt + 1
-            retry = (
-                ("\n\n" + prompt_text("summary_retry", request.response_language))
-                if attempt
-                else ""
-            )
             model_request = ModelRequest(
                 request_id=new_id("summary_request"),
                 run_id=request.scope.run_id,
@@ -291,22 +376,7 @@ class ModelConversationSummarizer:
                         role="system",
                         content=(
                             TextBlock(
-                                text=(
-                                    prompt_text(
-                                        "summary_system", request.response_language
-                                    )
-                                    + "\n"
-                                    + prompt_text(
-                                        "summary_language", request.response_language
-                                    )
-                                    + " "
-                                    + prompt_text(
-                                        "summary_budget",
-                                        request.response_language,
-                                        target_tokens=request.target_tokens,
-                                    )
-                                    + retry
-                                )
+                                text=self._instructions(request, repair=bool(attempt)),
                             ),
                         ),
                     ),
