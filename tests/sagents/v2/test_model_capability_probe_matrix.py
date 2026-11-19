@@ -485,3 +485,42 @@ async def test_tool_probe_does_not_require_force_or_strict_mode():
                 yield event
     report = await probe_model_capabilities(cast(ModelProvider, ThinkingToolsProvider()), model_binding='primary')
     assert report.supports_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "status_code", "status"),
+    [
+        ("This model does not support audio inputs", "400", "unsupported"),
+        ("invalid audio format", "400", "error"),
+        ("audio input unavailable", "429", "error"),
+    ],
+)
+async def test_media_probe_reports_independent_failures(message, status_code, status):
+    class MediaProvider(ProbeProvider):
+        async def _stream(self, request):
+            if "audio_input" in request.request_id:
+                raise SageV2Error(RuntimeErrorInfo(
+                    code="model.provider_permanent",
+                    category=ErrorCategory.PROVIDER_PERMANENT,
+                    message=message,
+                    provider_code=status_code,
+                ))
+            if "video_input" in request.request_id:
+                yield ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id="ignored_video", text="blue", finish_reason="stop",
+                    ),
+                )
+                return
+            async for event in super()._stream(request):
+                yield event
+
+    report = await probe_model_capabilities(
+        cast(ModelProvider, MediaProvider()), model_binding="primary",
+        media_inputs=("audio_input", "video_input"),
+    )
+    assert report.outcome("multimodal").supported
+    assert report.outcome("audio_input").status.value == status
+    assert report.outcome("video_input").status == ModelCapabilityProbeStatus.UNSUPPORTED

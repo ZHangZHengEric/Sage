@@ -1371,6 +1371,11 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
             model_binding=request.model_binding,
             max_output_tokens=effective,
             timeout_seconds=request.timeout_seconds,
+            media_inputs=(
+                ("audio_input", "video_input")
+                if self.config.video_storage is None else ("audio_input",)
+            ),
+            hosted_video=self.config.video_storage is not None,
         )
         image_detail_mode = "include"
         current_multimodal = report.outcome("multimodal")

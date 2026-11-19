@@ -148,16 +148,8 @@ class MediaTools:
                 else {},
             )
 
-        capability = self.runtime.supports_multimodal_input
-        if callable(capability):
-            capability = capability(invocation.call.owner_agent_id)
-        if capability is False:
-            return result(
-                "error",
-                f"The current model does not support {kind} input.",
-                reason="multimodal_unsupported",
-            )
-
+        # The request builder gates these tools on their own input capability.
+        # The runtime's legacy multimodal flag controls image analysis only.
         try:
             parsed = urlparse(path)
         except ValueError:

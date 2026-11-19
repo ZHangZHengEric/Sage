@@ -11,16 +11,18 @@ from __future__ import annotations
 from sagents.v2.model.recovery import collect_response, model_call_budget
 
 import asyncio
+import base64
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from importlib.resources import files
 from typing import Any
 
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import ImageBlock, TextBlock
+from sagents.v2.contracts.items import AudioBlock, FileBlock, ImageBlock, TextBlock
 from sagents.v2.model.contracts import (
     ModelMessage,
     ModelRequest,
@@ -33,6 +35,8 @@ from sagents.v2.model.capability_contracts import (
     ModelCapabilityProbeRequest,
     ModelCapabilityProbeStatus,
     ModelCapabilityProfile,
+    MEDIA_PROBES,
+    MediaProbeName,
     ProbeName,
 )
 from sagents.v2.model.provider import ModelProvider
@@ -80,6 +84,8 @@ def capability_probe_config(config):
                     "supports_parallel_tool_calls": True,
                     "supports_reasoning": True,
                     "supports_multimodal_input": True,
+                    "supports_audio_input": True,
+                    "supports_video_input": True,
                     "supports_structured_output": True,
                 }
             ),
@@ -324,6 +330,16 @@ def model_capability_profile(
         reasoning if value.name == "reasoning_control" else value
         for value in report.outcomes
     )
+    names = {outcome.name for outcome in outcomes}
+    outcomes += tuple(
+        ModelCapabilityProbeOutcome(
+            name=name,
+            status=ModelCapabilityProbeStatus.SKIPPED,
+            metadata={"reason": "protocol_has_no_media_input"},
+        )
+        for name in MEDIA_PROBES
+        if name not in names
+    )
     return ModelCapabilityProfile(
         plugin_id=plugin_id,
         plugin_version=plugin_version,
@@ -342,6 +358,8 @@ async def probe_model_capabilities(
     model_binding: str,
     max_output_tokens: int = 128,
     timeout_seconds: float = 30,
+    media_inputs: tuple[MediaProbeName, ...] = (),
+    hosted_video: bool = False,
 ) -> ModelCapabilityProbeReport:
     """Run independent semantic probes through one configured provider.
 
@@ -352,13 +370,14 @@ async def probe_model_capabilities(
 
     run_id = new_id("model_capability_probe")
     completed = 0
-    report_model_probe_progress("capabilities", completed, 5)
+    total = 5 + len(media_inputs)
+    report_model_probe_progress("capabilities", completed, total)
 
     async def run_check(name, probe, *, timeout_seconds):
         nonlocal completed
         outcome = await _bounded_probe(name, probe, timeout_seconds=timeout_seconds)
         completed += 1
-        report_model_probe_progress("capabilities", completed, 5)
+        report_model_probe_progress("capabilities", completed, total)
         return outcome
 
     executable = await asyncio.gather(
@@ -412,7 +431,26 @@ async def probe_model_capabilities(
             ),
             timeout_seconds=timeout_seconds,
         ),
+        *(
+            run_check(
+                name,
+                _probe_media(
+                    provider, name, model_binding=model_binding,
+                    run_id=run_id, max_output_tokens=max_output_tokens,
+                ),
+                timeout_seconds=timeout_seconds,
+            )
+            for name in media_inputs
+        ),
     )
+    # Hosted video requires a durable Run owner. A settings probe cannot
+    # publish an untracked object or substitute the inline transport.
+    if hosted_video:
+        executable.append(ModelCapabilityProbeOutcome(
+            name="video_input",
+            status=ModelCapabilityProbeStatus.SKIPPED,
+            metadata={"reason": "video_storage_requires_session"},
+        ))
     outcomes = (
         *executable,
         ModelCapabilityProbeOutcome(
@@ -652,6 +690,62 @@ async def _probe_multimodal(
     return _supported("multimodal", text)
 
 
+async def _probe_media(
+    provider: ModelProvider,
+    name: MediaProbeName,
+    *,
+    model_binding: str,
+    run_id: str,
+    max_output_tokens: int,
+) -> ModelCapabilityProbeOutcome:
+    if name == "audio_input":
+        filename, mime_type = "audio.wav", "audio/wav"
+        prompt = "Transcribe the two English words spoken in this audio. Reply with only the words."
+        answer = r"maple[\W_]+lantern"
+    else:
+        filename, mime_type = "video.mp4", "video/mp4"
+        prompt = (
+            "What are the main colors at the beginning and end of this video? "
+            "Reply in English with just the two color names, in order."
+        )
+        answer = r"blue[\W_]+yellow"
+    try:
+        sample = files("sagents.v2.model").joinpath("probe_media", filename).read_bytes()
+    except OSError:
+        return ModelCapabilityProbeOutcome(
+            name=name,
+            status=ModelCapabilityProbeStatus.ERROR,
+            error="the bundled media probe fixture could not be read",
+            error_code="model.probe_fixture_unavailable",
+        )
+    uri = f"data:{mime_type};base64," + base64.b64encode(sample).decode("ascii")
+    block = (
+        AudioBlock(uri=uri, mime_type=mime_type)
+        if name == "audio_input"
+        else FileBlock(uri=uri, name=filename, mime_type=mime_type, size=len(sample))
+    )
+    response, error = await _request(
+        provider,
+        ModelRequest(
+            request_id=new_id("model_probe_" + name),
+            run_id=run_id,
+            model_binding=model_binding,
+            messages=(ModelMessage(
+                role="user", content=(TextBlock(text=prompt), block),
+            ),),
+            max_output_tokens=max_output_tokens,
+        ),
+        name=name,
+    )
+    if error is not None:
+        return error
+    assert response is not None
+    text = response.text.strip()
+    if not re.fullmatch(rf"\W*{answer}\W*", text, re.IGNORECASE):
+        return _unsupported(name, "response did not identify the probe media", response=text)
+    return _supported(name, text, metadata={"mime_type": mime_type})
+
+
 async def _probe_structured_output(
     provider: ModelProvider,
     *,
@@ -838,7 +932,7 @@ async def _request(
         diagnostic = _compact_probe_error(exc.info.message, name=name)
         return None, ModelCapabilityProbeOutcome(
             name=name,
-            status=_output_format_error_status(
+            status=_probe_error_status(
                 name, exc.info.message, exc.info.provider_code
             ),
             error=exc.info.message,
@@ -852,7 +946,7 @@ async def _request(
         message = str(exc)
         return None, ModelCapabilityProbeOutcome(
             name=name,
-            status=_output_format_error_status(name, message, status),
+            status=_probe_error_status(name, message, status),
             error=message,
             error_code=type(exc).__name__,
             provider_code=str(status) if status is not None else None,
@@ -868,25 +962,25 @@ async def _request(
     return completed, None
 
 
-def _output_format_error_status(
+def _probe_error_status(
     name: ProbeName, message: str, provider_code: str | int | None
 ) -> ModelCapabilityProbeStatus:
-    """Only explicit format rejection proves an output capability unsupported.
-
-    Invalid schemas, authentication, transport and provider failures remain errors.
-    Keep the provider's original diagnostic on either outcome.
-    """
-    if name not in {"structured_output", "json_object"} or str(provider_code) not in {
-        "400",
-        "422",
-    }:
+    """Explicit shape rejections are evidence; transport and auth failures are errors."""
+    if str(provider_code) not in {"400", "422"}:
         return ModelCapabilityProbeStatus.ERROR
-    output_format = r"(?:response_format(?:\s+type)?|json_schema|json_object)"
+    if name == "audio_input":
+        request_shape = r"(?:input_audio|audio(?:[ _]+inputs?)?)"
+    elif name == "video_input":
+        request_shape = r"(?:video_url|video(?:[ _]+inputs?)?)"
+    elif name in {"structured_output", "json_object"}:
+        request_shape = r"(?:response_format(?:\s+type)?|json_schema|json_object)"
+    else:
+        return ModelCapabilityProbeStatus.ERROR
     rejection = r"(?:not\s+supported|unsupported|unavailable|not\s+available)"
     if re.search(
-        rf"\b{output_format}\b[\"']?\s+(?:is\s+)?{rejection}\b"
-        rf"|\b{rejection}\s+{output_format}\b"
-        rf"|\bdoes\s+not\s+support\s+[\"']?{output_format}\b",
+        rf"\b{request_shape}\b[\"']?\s+(?:is\s+)?{rejection}\b"
+        rf"|\b{rejection}\s+{request_shape}\b"
+        rf"|\bdoes\s+not\s+support\s+[\"']?{request_shape}\b",
         " ".join(message.split()),
         re.IGNORECASE,
     ):

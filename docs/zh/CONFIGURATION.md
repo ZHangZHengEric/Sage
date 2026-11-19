@@ -84,6 +84,10 @@ models:
   部分 OpenRouter 模型）设为 `true`，音频以 `input_audio`、视频以 `video_url` 发送。
 - `openai-responses`、`anthropic-messages`：始终不支持，声明会被忽略。
 
+模型能力探测分别测试图片输入、WAV 音频和内联 MP4 视频。保存探测结果后，未手动声明的
+`audio_input` 和 `video_input` 采用明确的支持或不支持结果。显式声明优先。连接错误
+会保留未校验状态。对象存储托管的视频上传需要归属 Run，设置中的探测会跳过该路径。
+
 Sage 会按模型能力、请求限额和 32 MB 的附件 Base64 总预算优先选择近期附件，再加载
 选中的内容。不支持或超出限额的附件会替换为一行省略说明，会话仍保留原始附件快照。
 

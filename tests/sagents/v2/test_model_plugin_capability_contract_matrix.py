@@ -9,7 +9,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.items import ImageBlock, TextBlock
+from sagents.v2.contracts.items import AudioBlock, FileBlock, ImageBlock, TextBlock
 from sagents.v2.model import (
     AnthropicMessagesConfig,
     AnthropicMessagesModelProvider,
@@ -34,7 +34,11 @@ from sagents.v2.model.protocols import (
     create_registered_model_provider,
     model_protocol_descriptors,
 )
-from sagents.v2.package.manifest.models import ModelRequestDefaults, ModelRoute
+from sagents.v2.package.manifest.models import (
+    ModelCapabilityDeclaration,
+    ModelRequestDefaults,
+    ModelRoute,
+)
 
 
 def _supported_outcomes():
@@ -57,7 +61,28 @@ def _supported_outcomes():
 
 class _SemanticProbeMixin:
     async def _stream(self, request):
-        if "multimodal" in request.request_id:
+        last_block = request.messages[-1].content[-1]
+        if isinstance(last_block, (AudioBlock, FileBlock)):
+            import base64
+
+            payload = self.diagnostic_request(request)
+            if isinstance(last_block, AudioBlock):
+                expected_mime, answer, wire_type = "audio/wav", "Maple lantern.", "input_audio"
+                assert base64.b64decode(last_block.uri.split(",", 1)[1]).startswith(b"RIFF")
+            else:
+                expected_mime, answer, wire_type = "video/mp4", "blue, yellow", "video_url"
+                assert base64.b64decode(last_block.uri.split(",", 1)[1])[4:8] == b"ftyp"
+            if "contents" in payload:
+                media = payload["contents"][-1]["parts"][-1]["inlineData"]
+                assert media["mimeType"] == expected_mime and media["data"]
+            else:
+                media = payload["messages"][-1]["content"][-1]
+                assert media["type"] == wire_type
+                assert media[wire_type]
+            response = ModelResponse(
+                response_id="response_media", text=answer, finish_reason="stop",
+            )
+        elif "multimodal" in request.request_id:
             if (
                 hasattr(getattr(self, 'config'), "image_detail_mode")
                 and getattr(self, 'config').image_detail_mode == "include"
@@ -191,6 +216,12 @@ async def test_every_builtin_model_plugin_returns_owned_versioned_profile(
     assert profile.plugin_id == plugin_id
     assert profile.plugin_version == provider.plugin_version
     assert profile.protocol == protocol
+    for modality in ("audio_input", "video_input"):
+        outcome = profile.outcome(modality)
+        if protocol in {"gemini-generate-content", "openai-chat-completions"}:
+            assert outcome.status == ModelCapabilityProbeStatus.SUPPORTED
+        else:
+            assert outcome.status == ModelCapabilityProbeStatus.SKIPPED
     assert profile.route_fingerprint == "sha256:route"
     assert profile.supports("connection") is True
     assert profile.supports("multimodal") is True
@@ -358,3 +389,65 @@ async def test_probes_bypass_unverified_declarations_without_widening_runtime(pr
     assert profile.supports('structured_output')
     assert provider.config.capabilities == denied
     assert (await provider.capabilities('primary')).supports_tools is False
+
+
+@pytest.mark.asyncio
+async def test_media_profile_uses_verified_values_only_when_unspecified():
+    outcomes = (
+        *_supported_outcomes(),
+        ModelCapabilityProbeOutcome(name="audio_input", status=ModelCapabilityProbeStatus.SUPPORTED),
+        ModelCapabilityProbeOutcome(name="video_input", status=ModelCapabilityProbeStatus.UNSUPPORTED),
+    )
+    legacy = ModelCapabilityProfile(
+        plugin_id=OpenAIChatCompletionsModelProvider.plugin_id,
+        plugin_version=OpenAIChatCompletionsModelProvider.plugin_version,
+        protocol="openai-chat-completions",
+        route_fingerprint="fingerprint",
+        effective_max_output_tokens=128,
+        outcomes=_supported_outcomes(),
+    )
+    assert legacy.media_support("audio_input") is None
+    profile = ModelCapabilityProfile.model_validate(
+        legacy.model_copy(update={"outcomes": outcomes}).model_dump(mode="json")
+    )
+    route = ModelRoute(
+        provider="openai-chat-completions", model="test",
+        capabilities=ModelCapabilityDeclaration(multimodal=False),
+        capability_profile=profile,
+    )
+    capabilities = await create_registered_model_provider(
+        route, client=object()
+    ).capabilities("primary")
+    assert capabilities.supports_multimodal_input is False
+    assert capabilities.supports_audio_input is True
+    assert capabilities.supports_video_input is False
+    explicit = route.model_copy(update={"capabilities": (
+        ModelCapabilityDeclaration(audio_input=False, video_input=True)
+    )})
+    capabilities = await create_registered_model_provider(
+        explicit, client=object()
+    ).capabilities("primary")
+    assert capabilities.supports_audio_input is False
+    assert capabilities.supports_video_input is True
+
+
+@pytest.mark.asyncio
+async def test_settings_probe_skips_hosted_video():
+    from sagents.v2.runtime.artifact.video_storage import S3VideoStorageConfig
+
+    provider = _GeminiProbeProvider(
+        GeminiGenerateContentConfig(
+            model="gemini-test", capabilities=CAPABILITIES,
+            video_storage=S3VideoStorageConfig(bucket="private-probe-test"),
+        ),
+        client=object(),
+    )
+    profile = await provider.probe_capabilities(ModelCapabilityProbeRequest(
+        model_binding="primary", route_fingerprint="hosted-route",
+        reasoning_efforts=(),
+    ))
+    assert profile.media_support("audio_input") is True
+    assert profile.media_support("video_input") is None
+    video = profile.outcome("video_input")
+    assert video.status == ModelCapabilityProbeStatus.SKIPPED
+    assert video.metadata["reason"] == "video_storage_requires_session"

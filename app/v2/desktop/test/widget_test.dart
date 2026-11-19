@@ -10893,6 +10893,8 @@ void main() {
           },
         },
         'probes': {
+          'audio_input': {'status': 'supported'},
+          'video_input': {'status': 'skipped'},
           'multimodal': {
             'supported': false,
             'status': 'error',
@@ -10909,7 +10911,13 @@ void main() {
           'schema_version': 2,
           'route_fingerprint': 'sha256:verified-route',
           'verified_at': '2026-09-03T00:00:00Z',
-          'successful_probes': ['connection'],
+          'successful_probes': ['connection', 'audio_input'],
+          'plugin_profile': {
+            'outcomes': [
+              {'name': 'audio_input', 'status': 'supported'},
+              {'name': 'video_input', 'status': 'skipped'},
+            ],
+          },
           'failed_probes': ['multimodal'],
           'probe_diagnostics': {
             'multimodal': {
@@ -10948,6 +10956,8 @@ void main() {
     await tester.tap(capabilityCheck);
     await tester.pumpAndSettle();
 
+    expect(find.text('音频输入'), findsOneWidget);
+    expect(find.text('视频输入'), findsOneWidget);
     expect(find.textContaining('HTTP 400'), findsOneWidget);
     expect(
       find.textContaining('ResponseInputImageParam.detail: Field required'),
@@ -10960,6 +10970,8 @@ void main() {
     await tester.tap(save);
     await tester.pumpAndSettle();
 
+    expect(find.text('音频输入'), findsOneWidget);
+    expect(find.text('视频输入'), findsOneWidget);
     expect(find.textContaining('HTTP 400'), findsOneWidget);
     expect(
       find.textContaining('ResponseInputImageParam.detail: Field required'),

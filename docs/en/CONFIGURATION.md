@@ -92,6 +92,13 @@ matching input. Declare it with `audio_input` and `video_input` under
 - `openai-responses` and `anthropic-messages`: never supported; the declaration
   is ignored.
 
+The model capability check probes image input, WAV audio, and inline MP4 video
+independently. A saved result supplies the default for an unspecified
+`audio_input` or `video_input` setting when it conclusively supports or rejects
+that input. Explicit settings take precedence. A connection error leaves that
+input unverified. Hosted video is skipped during settings probes because
+uploading a video requires an owning Run.
+
 Sage selects recent Session attachments by model capability, configured request
 limits, and a 32 MB aggregate Base64 budget before loading payloads. A short
 notice represents unsupported attachments and attachments that exceed these

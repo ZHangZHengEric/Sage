@@ -6964,8 +6964,9 @@ class _ModelCapabilityResult extends StatelessWidget {
     return values
         .map((value) => thinking
             ? _thinkingLevelLabel(value, l10n)
-            : value == 'memory_recall_query'
-            ? l10n.text('model.probeStage.memory_recall_query')
+            : const {'memory_recall_query', 'audio_input', 'video_input'}
+                .contains(value)
+            ? l10n.text('model.probeStage.$value')
             : value)
         .join(' · ');
   }
@@ -6973,6 +6974,27 @@ class _ModelCapabilityResult extends StatelessWidget {
   bool? _profileCapability(String key) {
     if (profile == null || !profile!.containsKey(key)) return null;
     return profile![key] == true;
+  }
+
+  String? _mediaStatus(String name, SageLocalizations l10n) {
+    final probes = report?['probes'];
+    final plugin = profile?['plugin_profile'];
+    final outcomes = plugin is Map ? plugin['outcomes'] : null;
+    Object? result = probes is Map ? probes[name] : null;
+    if (result == null && outcomes is List) {
+      for (final outcome in outcomes) {
+        if (outcome is Map && outcome['name'] == name) {
+          result = outcome;
+          break;
+        }
+      }
+    }
+    if (result is! Map) return null;
+    return switch (result['status']) {
+      'supported' => l10n.text('model.supported'),
+      'unsupported' => l10n.text('model.unsupported'),
+      _ => l10n.text('model.notVerified'),
+    };
   }
 
   String? _probeFailure(String name) {
@@ -7120,6 +7142,12 @@ class _ModelCapabilityResult extends StatelessWidget {
               technical: true,
               failed: _list('failed_probes').isNotEmpty,
             ),
+            for (final name in const ['audio_input', 'video_input'])
+              if (_mediaStatus(name, l10n) case final status?)
+                _CapabilityMetricData(
+                  l10n.text('model.probeStage.$name'),
+                  status,
+                ),
             if (multimodalFailure != null)
               _CapabilityMetricData(
                 '${l10n.text('model.multimodal')} · '

@@ -188,8 +188,16 @@ def create_registered_model_provider(
         supports_parallel_tool_calls=bool(declaration.parallel_tool_calls),
         supports_reasoning=bool(declaration.reasoning),
         supports_multimodal_input=bool(declaration.multimodal),
-        supports_audio_input=declaration.audio_input,
-        supports_video_input=declaration.video_input,
+        supports_audio_input=(
+            capability_profile.media_support("audio_input")
+            if declaration.audio_input is None and capability_profile is not None
+            else declaration.audio_input
+        ),
+        supports_video_input=(
+            capability_profile.media_support("video_input")
+            if declaration.video_input is None and capability_profile is not None
+            else declaration.video_input
+        ),
         supports_structured_output=bool(declaration.structured_output),
         max_input_tokens=route.limits.context_window,
         max_output_tokens=route.limits.max_output_tokens,
