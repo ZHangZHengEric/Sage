@@ -62,6 +62,9 @@ class RedisSessionCoordination:
             )
         self.coordination_ttl_seconds = coordination_ttl_seconds
         self.coordination_wait_seconds = coordination_wait_seconds
+        self._durable_polls = {}
+        self._edge_watch = None
+        self._edge_lock = asyncio.Lock()
         self.event_poll_seconds = event_poll_seconds
         if min(max_preview_events, preview_retention_seconds) < 1:
             raise ValueError("Preview bounds must be positive")
@@ -641,14 +644,42 @@ class RedisSessionCoordination:
 
     async def subscribe_durable_events(self, cursor, session_id):
         sequence = cursor.run_sequence
-        while not self._closed:
-            events = await self.read_indexed_run_events(cursor.run_id, session_id,
-                after_sequence=sequence, limit=self._subscriber_queue_size)
-            for event in events:
-                sequence = event.run_sequence
-                yield event
-            if len(events) < self._subscriber_queue_size:
-                await asyncio.sleep(self.event_poll_seconds)
+        key = (session_id, cursor.run_id)
+        group = self._durable_polls.setdefault(key, {"users": 0, "reads": {}})
+        group["users"] += 1
+        reads = group["reads"]
+        try:
+            while not self._closed:
+                task = reads.get(sequence)
+                if task is None:
+                    task = asyncio.create_task(self.read_indexed_run_events(
+                        cursor.run_id, session_id, after_sequence=sequence, limit=self._subscriber_queue_size))
+                    reads[sequence] = task
+                    # Concurrent readers join the same page. Retain it for one
+                    # polling interval so staggered clients share idle reads.
+                    def expire(done, offset=sequence):
+                        def discard():
+                            if reads.get(offset) is done:
+                                reads.pop(offset)
+                        if done.cancelled() or done.exception() is not None or done.result():
+                            discard()
+                        else:
+                            asyncio.get_running_loop().call_later(self.event_poll_seconds, discard)
+                    task.add_done_callback(expire)
+                events = await asyncio.shield(task)
+                for event in events:
+                    sequence = event.run_sequence
+                    yield event
+                if len(events) < self._subscriber_queue_size:
+                    await asyncio.sleep(self.event_poll_seconds)
+        finally:
+            group["users"] -= 1
+            if not group["users"]:
+                self._durable_polls.pop(key, None)
+                for task in reads.values():
+                    if not task.done():
+                        task.cancel()
+                reads.clear()
 
     async def subscribe_events(self, cursor):
         # Canonical events are the replay authority. Polling is deliberately
@@ -710,6 +741,10 @@ class RedisSessionCoordination:
     async def close(self):
         if self._closed:
             return
+        async with self._edge_lock:
+            if self._edge_watch is not None:
+                await self._edge_watch.reset()
+                self._edge_watch = None
         await self._session_cache.close()
         if self._worker is not None:
             self._worker.cancel()

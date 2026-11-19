@@ -9,26 +9,49 @@ class RedisManagedSessionHeads:
         # writers update both representations in the same Redis transaction.
         legacy = self._key("parents")
         order = self._key("child-edges:v2")
-        async with self._redis.pipeline(transaction=True) as pipe:
-            pipe.hlen(legacy)
-            pipe.zcard(order)
-            count, indexed = await pipe.execute()
-        if count == indexed:
-            return
+        from redis.exceptions import WatchError
 
-        async def rebuild():
-            async with self._redis.pipeline() as pipe:
-                await pipe.watch(legacy)
-                if await pipe.hlen(legacy) == await pipe.zcard(order):
-                    return
-                edges = list((await pipe.hgetall(legacy)).items())
-                pipe.multi()
-                pipe.delete(order)
-                for offset in range(0, len(edges), 256):
-                    pipe.zadd(order, {parent + "\0" + sid: 0 for sid, parent in edges[offset:offset + 256]})
-                await pipe.execute()
+        async with self._edge_lock:
+            # Arm the successor before checking the previous WATCH. This
+            # detects legacy mutations even when HLEN and ZCARD stay equal.
+            successor = self._redis.pipeline()
+            try:
+                await successor.watch(legacy)
+                previous, self._edge_watch = self._edge_watch, None
+                if previous is not None:
+                    try:
+                        previous.multi()
+                        previous.hlen(legacy)
+                        previous.zcard(order)
+                        count, indexed = await previous.execute()
+                    except WatchError:
+                        pass
+                    else:
+                        if count == indexed:
+                            self._edge_watch = successor
+                            return
+                    finally:
+                        await previous.reset()
 
-        await self._retry_transaction(rebuild)
+                async def reconcile():
+                    async with self._redis.pipeline() as pipe:
+                        await pipe.watch(legacy, order)
+                        edges = await pipe.hgetall(legacy)
+                        expected = {parent + "\0" + sid for sid, parent in edges.items()}
+                        current = set(await pipe.zrange(order, 0, -1))
+                        pipe.multi()
+                        if stale := current - expected:
+                            pipe.zrem(order, *stale)
+                        if missing := expected - current:
+                            pipe.zadd(order, {edge: 0 for edge in missing})
+                        pipe.ping()
+                        await pipe.execute()
+
+                await self._retry_transaction(reconcile)
+                self._edge_watch = successor
+            finally:
+                if self._edge_watch is not successor:
+                    await successor.reset()
 
     async def _indexed_children(self, parents):
         order = self._key("child-edges:v2")

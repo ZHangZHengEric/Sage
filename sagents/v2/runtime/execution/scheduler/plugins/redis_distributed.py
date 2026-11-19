@@ -143,6 +143,28 @@ class RedisDistributedScheduler:
             value._load_state(state)
         return value
 
+    @staticmethod
+    def _decode_state(raw):
+        # Each appended receipt is an atomic claim of a previously pending
+        # item. The next ordinary mutation folds receipts into the snapshot.
+        base, *receipts = raw.split("\x1e")
+        state = json.loads(base)
+        for encoded in receipts:
+            receipt = json.loads(encoded)
+            lease = receipt["lease"]
+            if expired := receipt.get("expired"):
+                state["leases"] = [row for row in state["leases"] if row["lease_id"] not in expired]
+                retries = receipt["retries"]
+                state["items"] = [retries.get(row["work_id"], row) for row in state["items"]]
+                state["pending"].extend(receipt["pending"])
+                state["sequence"] = receipt["sequence"]
+            state["leases"].append(lease)
+            state["fence_sequence"] = lease["fencing_token"]
+            # Before another receipt can requeue an expired item, remove
+            # the pending entry consumed by its original claim.
+            state["pending"] = [entry for entry in state["pending"] if entry[3] != lease["work"]["work_id"]]
+        return state
+
     async def _mutate(self, operation, *, blocked_run=None, blocked_work=None, claim_queue=False, submitted_work=None):
         from redis.exceptions import WatchError
         redis = await self._client()
@@ -163,7 +185,7 @@ class RedisDistributedScheduler:
                 await pipe.watch(state_key)
                 raw = await pipe.get(state_key)
                 large = raw is not None and len(raw) > 256 * 1024
-                state = (await asyncio.to_thread(json.loads, raw) if large else json.loads(raw)) if raw else None
+                state = (await asyncio.to_thread(self._decode_state, raw) if large else self._decode_state(raw)) if raw else None
                 limits = self._limits
                 epoch = state.pop("claim_epoch", "") if state is not None else ""
                 head = await pipe.get(self._claim_head_key())
@@ -180,13 +202,10 @@ class RedisDistributedScheduler:
                 seconds, microseconds = await redis.time()
                 now = datetime.fromtimestamp(seconds + microseconds / 1e6, timezone.utc)
                 narrowed = claim_queue and indexed and now.timestamp() < next_expiry
-                untouched = []
                 loaded_state = state
                 if narrowed:
                     candidates = set(await pipe.zrangebyscore(due_key, "-inf", now.timestamp()))
-                    candidates_pending = []
-                    for entry in state["pending"]:
-                        (candidates_pending if entry[3] in candidates else untouched).append(entry)
+                    candidates_pending = [entry for entry in state["pending"] if entry[3] in candidates]
                     retained = candidates | {row["work"]["work_id"] for row in state["leases"]}
                     loaded_state = state | {
                         "pending": candidates_pending,
@@ -220,17 +239,38 @@ class RedisDistributedScheduler:
                     queues[submitted_work.work_id] = self.queue_id
                 for entry in other_queues:
                     heapq.heappush(reference._pending, entry)
-                snapshot = reference._dump_state_locked()
                 if narrowed:
-                    # No expiry occurred, so a claim can only change the due
-                    # heap and leases. Keep the other work rows byte-for-byte.
-                    snapshot["items"] = state["items"]
-                    snapshot["pending"].extend(untouched)
-                    heapq.heapify(snapshot["pending"])
+                    if result is None:
+                        return False, None
+                    work_id = result.work.work_id
+                    counts[self.queue_id] -= 1
+                    expiry = min(next_expiry, result.expires_at.timestamp())
+                    head = [epoch, limits, counts, len(reference._leases), str(expiry)]
+                    pipe.multi()
+                    pipe.append(state_key, "\x1e" + json.dumps({"lease": result.model_dump(mode="json")}, separators=(",", ":")))
+                    pipe.zrem(due_key, work_id)
+                    pipe.set(self._claim_head_key(), json.dumps(head))
+                    await pipe.execute()
+                    return False, result
+                snapshot = reference._dump_state_locked()
                 item_ids = {row["work_id"] for row in snapshot["items"]}
                 snapshot["_queues"] = {wid: queue for wid, queue in queues.items() if wid in item_ids}
                 snapshot["_limits"] = limits
-                if indexed and (state == snapshot or (narrowed and result is None)):
+                if indexed and state == snapshot:
+                    return False, result
+                if claim_queue and result is not None:
+                    active = set(reference._leases)
+                    expired = {row["lease_id"]: row["work"]["work_id"] for row in state["leases"]
+                               if row["lease_id"] not in active}
+                    retry_ids = set(expired.values())
+                    receipt = {"lease": result.model_dump(mode="json"), "expired": list(expired),
+                               "retries": {row["work_id"]: row for row in snapshot["items"] if row["work_id"] in retry_ids},
+                               "pending": [entry for entry in snapshot["pending"] if entry[3] in retry_ids],
+                               "sequence": snapshot["sequence"]}
+                    pipe.multi()
+                    pipe.append(state_key, "\x1e" + json.dumps(receipt, separators=(",", ":")))
+                    self._publish_claim_index(pipe, reference, state, snapshot, epoch, indexed=indexed, prior_counts=counts)
+                    await pipe.execute()
                     return False, result
                 epoch = uuid.uuid4().hex
                 if large:
@@ -284,7 +324,7 @@ class RedisDistributedScheduler:
             return frozenset()
 
         def identities():
-            state = json.loads(raw)
+            state = json.loads(raw.partition("\x1e")[0])
             return frozenset(item["work_id"] for item in state["items"]) | frozenset(state.get("cancelled", ()))
 
         return await asyncio.to_thread(identities)

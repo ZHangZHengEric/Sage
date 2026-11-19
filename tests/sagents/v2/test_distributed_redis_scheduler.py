@@ -82,11 +82,15 @@ async def test_indexed_claim_reads_only_due_work_and_repairs_legacy_state(schedu
 
     ready = work("ready")
     assert await first.submit(ready)
+    state_key = first.key_prefix + ":state"
+    base = await first._redis.get(state_key)
     with patch.object(second, "_reference", wraps=second._reference) as reference:
         lease = await claim(second)
     assert lease is not None and lease.work == ready
     snapshot = reference.call_args.args[1]
     assert [item["work_id"] for item in snapshot["items"]] == [ready.work_id]
+    stored_base, receipt = (await first._redis.get(state_key)).split("\x1e")
+    assert stored_base == base and json.loads(receipt)["lease"]["lease_id"] == lease.lease_id
     assert len(await first.existing_work_ids()) == 13
 
     await first.release(lease, LeaseReleaseReason.COMPLETED)

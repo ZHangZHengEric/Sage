@@ -600,6 +600,11 @@ async def test_topology_index_migrates_legacy_edges_and_cleans_up_tombstones(sto
     await redis.zrem(first._key("child-edges:v2"), parent.session_id + "\0" + child.session_id)
     assert await second.list_direct_child_session_ids(parent.session_id) == [child.session_id]
     assert await redis.hget(first._key("parents"), child.session_id) == parent.session_id
+    # A legacy writer reparents the child without changing either count.
+    await redis.hset(first._key("parents"), child.session_id, "other-parent")
+    assert await second.list_direct_child_session_ids(parent.session_id) == []
+    assert await second.list_direct_child_session_ids("other-parent") == [child.session_id]
+    await redis.hset(first._key("parents"), child.session_id, parent.session_id)
     assert set(await second.list_workspace_descendant_ids([parent.session_id])) == {
         child.session_id, grandchild.session_id}
     for run in (parent, child, grandchild):
@@ -1102,17 +1107,30 @@ async def test_durable_event_tail_handles_revision_only_updates_and_reconnect(st
             assert (*first_page, *remaining) == added.events[-64:]
 
         await asyncio.gather(*(reconnect() for _ in range(16)))
+        joined = asyncio.Event()
+        proceed = asyncio.Event()
+        read_page = second.read_indexed_run_events
+        async def held_read(*args, **kwargs):
+            joined.set()
+            await proceed.wait()
+            return await read_page(*args, **kwargs)
+        shared = AsyncMock(side_effect=held_read)
+        patch.setattr(second, "read_indexed_run_events", shared)
         streams = [second.subscribe_durable_events(
             EventCursor(run_id=rid, run_sequence=added.events[-1].run_sequence), sid) for _ in range(16)]
         waiting = [asyncio.create_task(anext(stream)) for stream in streams]
         try:
-            await asyncio.sleep(.05)
+            await asyncio.wait_for(joined.wait(), 5)
+            waiting[0].cancel()
+            await asyncio.gather(waiting[0], return_exceptions=True)
+            assert shared.await_count == 1
+            proceed.set()
             current = await first.get_run(rid)
             live = await first.commit_run(run_id=rid, expected_revision=current.revision,
                 expected_states={RunState.RUNNING}, new_state=RunState.RUNNING, context=CONTEXT,
                 idempotency_key="live-event", drafts=(EventDraft(type="message.delta", item_id="durable-message",
                     data=ItemEventData(operation="delta", delta="after-reconnect")),))
-            assert await asyncio.wait_for(asyncio.gather(*waiting), 5) == [live.events[0]] * len(streams)
+            assert await asyncio.wait_for(asyncio.gather(*waiting[1:]), 5) == [live.events[0]] * (len(streams) - 1)
         finally:
             for task in waiting:
                 task.cancel()
