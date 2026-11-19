@@ -1942,3 +1942,81 @@ async def test_tree_discovery_keeps_live_child_before_index_publication(tmp_path
         assert store._sessions[child.session_id] is live
     finally:
         await store.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_rechecks_child_admitted_between_tree_discovery_and_locks(tmp_path, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    store = FilesystemSessionStore(tmp_path)
+    root = (await store.create_run(command("delete-race"), CONTEXT)).handle
+    await store.commit_run(run_id=root.run_id, expected_revision=root.run_revision,
+                           expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED,
+                           drafts=(), idempotency_key="stop-root", context=CONTEXT)
+    discovered, resume = asyncio.Event(), asyncio.Event()
+    operation = store._session_operation
+
+    @asynccontextmanager
+    async def pause_delete(*session_ids):
+        if session_ids == (root.session_id,) and not discovered.is_set():
+            discovered.set()
+            await resume.wait()
+        async with operation(*session_ids):
+            yield
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "_session_operation", pause_delete)
+            deleting = asyncio.create_task(store.delete_session(root.session_id))
+            await asyncio.wait_for(discovered.wait(), 5)
+            try:
+                child = (await store.create_run(command("late-child").model_copy(
+                    update={"parent_run_id": root.run_id}), CONTEXT)).handle
+            finally:
+                resume.set()
+            with pytest.raises(SageV2Error) as active:
+                await deleting
+            assert active.value.info.metadata["active_session_ids"] == [child.session_id]
+        await store.commit_run(run_id=child.run_id, expected_revision=child.run_revision,
+                               expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED,
+                               drafts=(), idempotency_key="stop-child", context=CONTEXT)
+        await store.delete_session(root.session_id)
+    finally:
+        await store.close()
+    reopened = FilesystemSessionStore(tmp_path)
+    try:
+        for handle in (root, child):
+            with pytest.raises(SageV2Error) as missing:
+                await reopened.get_session(handle.session_id)
+            assert missing.value.info.code == "session.not_found"
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_reopen_finishes_tree_delete_intent_and_keeps_unrelated_start_receipt(tmp_path):
+    store = FilesystemSessionStore(tmp_path)
+    other = command("other")
+    try:
+        root = (await store.create_run(command("root"), CONTEXT)).handle
+        child = (await store.create_run(command("child").model_copy(
+            update={"parent_run_id": root.run_id}), CONTEXT)).handle
+        unrelated = (await store.create_run(other, CONTEXT)).handle
+        for handle in (root, child):
+            await store.commit_run(run_id=handle.run_id, expected_revision=handle.run_revision,
+                                   expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED,
+                                   drafts=(), idempotency_key="stop-" + handle.run_id, context=CONTEXT)
+        store._write_transaction("delete", root.session_id, session_ids={root.session_id, child.session_id})
+    finally:
+        await store.close()
+    reopened = FilesystemSessionStore(tmp_path)
+    try:
+        owners = {json.loads(path.read_bytes())["session_id"] for path in reopened.idempotency_root.glob("*.json")}
+        assert owners == {unrelated.session_id}
+        assert (await reopened.create_run(other, CONTEXT)).duplicate
+        for handle in (root, child):
+            with pytest.raises(SageV2Error) as missing:
+                await reopened.get_session(handle.session_id)
+            assert missing.value.info.code == "session.not_found"
+    finally:
+        await reopened.close()

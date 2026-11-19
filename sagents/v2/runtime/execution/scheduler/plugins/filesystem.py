@@ -85,6 +85,9 @@ class _FilesystemSchedulerStateMachine:
         self._terminal_idempotency_key_set: set[str] = set()
         self._sequence = 0
         self._closed = False
+        # Expiry can change several items before one claim is committed.
+        # Coalesce changes under the condition and clear only after durability.
+        self._changes: dict[tuple[str, str], Any] = {}
         self._state_store = state_store
         if state_store is not None:
             restored = state_store.load()
@@ -146,8 +149,10 @@ class _FilesystemSchedulerStateMachine:
             if restore_queued and retired:
                 self._terminal_idempotency_key_set.remove(work.idempotency_key)
                 self._terminal_idempotency_keys.remove(work.idempotency_key)
+                self._changes["terminal_idempotency_keys", work.idempotency_key] = None
             self._items[work.work_id] = work
             self._idempotency[work.idempotency_key] = work.work_id
+            self._changes["idempotency", work.idempotency_key] = work.work_id
             self._push_locked(work)
             await self._persist_locked()
             self._condition.notify_all()
@@ -183,6 +188,7 @@ class _FilesystemSchedulerStateMachine:
                             expires_at=now + lease_duration,
                         )
                         self._leases[lease.lease_id] = lease
+                        self._changes["leases", lease.lease_id] = lease
                         self._work_lease[work.work_id] = lease.lease_id
                         self._run_lease[work.run_id] = lease.lease_id
                         await self._persist_locked()
@@ -225,6 +231,7 @@ class _FilesystemSchedulerStateMachine:
                     expires_at=now + lease_duration,
                 )
                 self._leases[lease.lease_id] = lease
+                self._changes["leases", lease.lease_id] = lease
                 self._work_lease[work.work_id] = lease.lease_id
                 self._run_lease[work.run_id] = lease.lease_id
                 await self._persist_locked()
@@ -254,6 +261,7 @@ class _FilesystemSchedulerStateMachine:
                 )
             renewed = current.model_copy(update={"expires_at": now + lease_duration})
             self._leases[lease.lease_id] = renewed
+            self._changes["leases", lease.lease_id] = renewed
             await self._persist_locked()
             return renewed
 
@@ -271,6 +279,7 @@ class _FilesystemSchedulerStateMachine:
             )
             self._assert_fence_locked(lease)
             self._leases.pop(lease.lease_id, None)
+            self._changes["leases", lease.lease_id] = None
             self._work_lease.pop(lease.work.work_id, None)
             self._run_lease.pop(lease.work.run_id, None)
             if requeue and lease.work.work_id not in self._cancelled:
@@ -284,6 +293,7 @@ class _FilesystemSchedulerStateMachine:
                 self._push_locked(retry)
             else:
                 self._items.pop(lease.work.work_id, None)
+                self._changes["items", lease.work.work_id] = None
                 self._remember_terminal_locked(lease.work)
             await self._persist_locked()
             self._condition.notify_all()
@@ -344,12 +354,16 @@ class _FilesystemSchedulerStateMachine:
                     break
                 await self._condition.wait()
             self._cancelled.add(work_id)
+            self._changes["cancelled", work_id] = True
+            self._changes["pending", work_id] = None
             lease_id = self._work_lease.pop(work_id, None)
             if lease_id is not None:
                 lease = self._leases.pop(lease_id, None)
+                self._changes["leases", lease_id] = None
                 if lease is not None:
                     self._run_lease.pop(lease.work.run_id, None)
             self._items.pop(work_id, None)
+            self._changes["items", work_id] = None
             self._pending = [entry for entry in self._pending if entry[3] != work_id]
             heapq.heapify(self._pending)
             self._remember_terminal_locked(work)
@@ -384,9 +398,23 @@ class _FilesystemSchedulerStateMachine:
     async def _persist_locked(self) -> None:
         if self._state_store is not None:
             try:
-                await self._state_store.save(self._dump_state_locked())
+                if isinstance(self._state_store, FilesystemSchedulerStateStore) and self._state_store.can_append:
+                    state = {
+                        "format": self._state_store.delta_format,
+                        "changes": [
+                            [kind, key, value.model_dump(mode="json")
+                             if isinstance(value, (WorkItem, WorkerLease)) else value]
+                            for (kind, key), value in self._changes.items()
+                        ],
+                        "fence_sequence": self._fence_sequence,
+                        "sequence": self._sequence,
+                    }
+                else:
+                    state = self._dump_state_locked()
+                await self._state_store.save(state)
+                self._changes.clear()
             except BaseException as exc:
-                # A failed atomic replace may have committed before a later
+                # A write may have committed before a later
                 # fsync/reporting failure. Continuing from the mutated in-memory
                 # view could therefore duplicate or lose work. Poison this
                 # writer and require reopening from the authoritative file.
@@ -465,6 +493,7 @@ class _FilesystemSchedulerStateMachine:
     def _remember_terminal_locked(self, work: WorkItem | None) -> None:
         if work is None or work.idempotency_key in self._terminal_idempotency_key_set:
             return
+        self._changes["terminal_idempotency_keys", work.idempotency_key] = True
         self._terminal_idempotency_keys.append(work.idempotency_key)
         self._terminal_idempotency_key_set.add(work.idempotency_key)
         self._prune_terminal_metadata_locked()
@@ -473,22 +502,20 @@ class _FilesystemSchedulerStateMachine:
         while len(self._terminal_idempotency_keys) > self._max_retained_terminal:
             key = self._terminal_idempotency_keys.pop(0)
             self._terminal_idempotency_key_set.discard(key)
+            self._changes["terminal_idempotency_keys", key] = None
             work_id = self._idempotency.get(key)
             if work_id is not None and work_id not in self._items:
                 self._idempotency.pop(key, None)
+                self._changes["idempotency", key] = None
+                self._changes["cancelled", work_id] = None
                 self._cancelled.discard(work_id)
 
     def _push_locked(self, work: WorkItem) -> None:
         self._sequence += 1
-        heapq.heappush(
-            self._pending,
-            (
-                work.available_at.timestamp(),
-                -work.priority,
-                self._sequence,
-                work.work_id,
-            ),
-        )
+        entry = (work.available_at.timestamp(), -work.priority, self._sequence, work.work_id)
+        heapq.heappush(self._pending, entry)
+        self._changes["pending", work.work_id] = entry
+        self._changes["items", work.work_id] = work
 
     def _pop_available_locked(
         self, policy: SchedulerClaimPolicy | None = None
@@ -504,8 +531,10 @@ class _FilesystemSchedulerStateMachine:
             entry = heapq.heappop(self._pending)
             available_at, _, _, work_id = entry
             if work_id not in self._items or work_id in self._cancelled:
+                self._changes["pending", work_id] = None
                 continue
             if work_id in self._work_lease:
+                self._changes["pending", work_id] = None
                 continue
             if available_at > now_timestamp:
                 skipped.append(entry)
@@ -531,6 +560,7 @@ class _FilesystemSchedulerStateMachine:
             if entry == selected_entry:
                 continue
             heapq.heappush(self._pending, entry)
+        self._changes["pending", selected_entry[3]] = None
         return self._items[selected_entry[3]]
 
     def _seconds_until_next_locked(
@@ -581,6 +611,7 @@ class _FilesystemSchedulerStateMachine:
         if current is None:
             return
         self._leases.pop(lease.lease_id, None)
+        self._changes["leases", lease.lease_id] = None
         self._work_lease.pop(lease.work.work_id, None)
         self._run_lease.pop(lease.work.run_id, None)
         if (
@@ -643,25 +674,84 @@ class SchedulerInUseError(SageV2Error):
 
 
 class FilesystemSchedulerStateStore:
+    """One atomically replaced checkpoint followed by fsynced, offset-checked records."""
+
     format = "sage.scheduler-file/v1"
+    magic = b"sage.scheduler-file/v2\n"
+    delta_format = "sage.scheduler-delta/v1"
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
         self.path = self.root / "scheduler-state.json"
         self._lock = asyncio.Lock()
+        self._base_end = self._end = self._records = 0
 
-    def load(self) -> dict[str, Any] | None:
-        if not self.path.exists():
-            return None
-        envelope = json.loads(self.path.read_text(encoding="utf-8"))
+    @property
+    def can_append(self) -> bool:
+        return (self._base_end > 0 and self._records < 1024
+                and self._end - self._base_end < max(1024 * 1024, self._base_end))
+
+    def _legacy_state(self, encoded):
+        envelope = json.loads(encoded)
         if envelope.get("format") != self.format:
             raise ValueError("unsupported filesystem Scheduler format")
         state = envelope.get("state")
-        if not isinstance(state, dict):
-            raise ValueError("filesystem Scheduler state is missing")
-        if envelope.get("checksum") != self._checksum(state):
+        if not isinstance(state, dict) or envelope.get("checksum") != self._checksum(state):
             raise ValueError("filesystem Scheduler checksum mismatch")
         return state
+
+    @staticmethod
+    def _read_record(line: bytes) -> dict[str, Any]:
+        checksum, separator, payload = line.removesuffix(b"\n").partition(b" ")
+        if not separator or checksum != hashlib.sha256(payload).hexdigest().encode("ascii"):
+            raise ValueError("filesystem Scheduler checksum mismatch")
+        return json.loads(payload)
+
+    def load(self) -> dict[str, Any] | None:
+        self._base_end = self._end = self._records = 0
+        if not self.path.exists():
+            return None
+        with self.path.open("rb") as handle:
+            if handle.read(len(self.magic)) != self.magic:
+                handle.seek(0)
+                return self._legacy_state(handle.read())
+            base = handle.readline()
+            if not base.endswith(b"\n"):
+                raise ValueError("incomplete filesystem Scheduler checkpoint")
+            state = self._read_record(base)
+            self._base_end = self._end = handle.tell()
+            if not handle.peek(1):
+                return state
+            tables = {
+                "pending": {row[3]: row for row in state["pending"]},
+                "items": {row["work_id"]: row for row in state["items"]},
+                "leases": {row["lease_id"]: row for row in state["leases"]},
+                "idempotency": state["idempotency"],
+                "cancelled": dict.fromkeys(state["cancelled"], True),
+                "terminal_idempotency_keys": dict.fromkeys(state["terminal_idempotency_keys"], True),
+            }
+            for encoded in handle:
+                if not encoded.endswith(b"\n"):
+                    # An interrupted append was never acknowledged. The next
+                    # writer truncates this tail before appending a new record.
+                    break
+                delta = self._read_record(encoded)
+                if delta["format"] != self.delta_format or delta["offset"] != self._end:
+                    raise ValueError("invalid filesystem Scheduler journal position")
+                for kind, key, value in delta["changes"]:
+                    if value is None:
+                        tables[kind].pop(key, None)
+                    else:
+                        tables[kind][key] = value
+                state.update(sequence=delta["sequence"], fence_sequence=delta["fence_sequence"])
+                self._end += len(encoded)
+                self._records += 1
+            if self._records:
+                for kind in ("pending", "items", "leases"):
+                    state[kind] = list(tables[kind].values())
+                for kind in ("cancelled", "terminal_idempotency_keys"):
+                    state[kind] = list(tables[kind])
+            return state
 
     async def save(self, state: dict[str, Any]) -> None:
         async with self._lock:
@@ -679,25 +769,38 @@ class FilesystemSchedulerStateStore:
                 raise asyncio.CancelledError
 
     def _write(self, state: dict[str, Any]) -> None:
+        delta = state.get("format") == self.delta_format
+        if delta:
+            state = dict(state, offset=self._end)
+        payload = self._encode(state)
+        checksum = hashlib.sha256(payload).hexdigest().encode("ascii")
+        record = (checksum, b" ", payload, b"\n")
+        if delta:
+            with self.path.open("r+b") as handle:
+                actual_end = handle.seek(0, os.SEEK_END)
+                if actual_end < self._end:
+                    raise ValueError("filesystem Scheduler journal was truncated")
+                if actual_end > self._end:
+                    handle.seek(self._end)
+                    handle.truncate()
+                handle.writelines(record)
+                handle.flush()
+                os.fsync(handle.fileno())
+                self._end = handle.tell()
+                self._records += 1
+            return
         self.root.mkdir(parents=True, exist_ok=True)
-        envelope = {
-            "format": self.format,
-            "checksum": self._checksum(state),
-            "state": state,
-        }
-        encoded = json.dumps(
-            envelope,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
         temporary = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
         try:
             with temporary.open("wb") as handle:
-                handle.write(encoded)
+                handle.write(self.magic)
+                handle.writelines(record)
+                end = handle.tell()
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.path)
+            self._base_end = self._end = end
+            self._records = 0
             # Windows CRT cannot open directories; file data was fsynced above.
             if os.name != "nt":
                 descriptor = os.open(self.root, os.O_RDONLY)
@@ -709,14 +812,17 @@ class FilesystemSchedulerStateStore:
             temporary.unlink(missing_ok=True)
 
     @staticmethod
-    def _checksum(state: dict[str, Any]) -> str:
-        encoded = json.dumps(
+    def _encode(state: dict[str, Any]) -> bytes:
+        return json.dumps(
             state,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+    @classmethod
+    def _checksum(cls, state: dict[str, Any]) -> str:
+        return f"sha256:{hashlib.sha256(cls._encode(state)).hexdigest()}"
 
 
 class FilesystemScheduler(_FilesystemSchedulerStateMachine):

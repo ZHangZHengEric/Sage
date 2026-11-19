@@ -2541,7 +2541,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 current = self._session_tree_ids_locked(session_id)
                 if current != session_ids:
                     continue
-                await self._delete_session_tree_locked(session_id)
+                await self._delete_session_tree_locked(session_id, current)
                 async with self._lock:
                     self._topology_revision += 1
                     for removed_session_id in session_ids:
@@ -2552,37 +2552,32 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             "session tree changed repeatedly while deletion was acquiring locks",
         )
 
+    @staticmethod
+    def _descendant_ids(roots, parent_links):
+        children = {}
+        for sid, parent in parent_links:
+            if parent is not None:
+                children.setdefault(parent, []).append(sid)
+        descendants = set()
+        pending = list(roots)
+        while pending:
+            for child in children.pop(pending.pop(), ()):
+                descendants.add(child)
+                pending.append(child)
+        return descendants
+
+    def _loaded_descendant_ids(self, roots):
+        return self._descendant_ids(roots, (
+            (row.session_id, row.parent_session_id) for row in self._sessions.values()
+        ))
+
     def _session_tree_ids_locked(self, session_id: str) -> frozenset[str]:
         if session_id not in self._sessions:
             raise self._not_found("session.not_found", session_id)
-        session_ids = {session_id}
-        while True:
-            descendants = {
-                row.session_id
-                for row in self._sessions.values()
-                if row.parent_session_id in session_ids
-                and row.session_id not in session_ids
-            }
-            if not descendants:
-                return frozenset(session_ids)
-            session_ids.update(descendants)
+        return frozenset({session_id} | self._loaded_descendant_ids((session_id,)))
 
-    async def _delete_session_tree_locked(self, session_id: str) -> None:
+    async def _delete_session_tree_locked(self, session_id: str, session_ids: frozenset[str]) -> None:
         with nullcontext():
-            session = self._sessions.get(session_id)
-            if session is None:
-                raise self._not_found("session.not_found", session_id)
-            session_ids = {session_id}
-            while True:
-                descendants = {
-                    row.session_id
-                    for row in self._sessions.values()
-                    if row.parent_session_id in session_ids
-                    and row.session_id not in session_ids
-                }
-                if not descendants:
-                    break
-                session_ids.update(descendants)
             run_ids = {
                 row.run_id
                 for row in self._runs.values()
@@ -2725,12 +2720,9 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         """Trusted Host probe over supplied roots and their descendant Sessions."""
         async with self._lock:
             selected = set(session_ids)
-            frontier = set(selected)
-            while frontier:
-                children = {row.session_id for row in self._sessions.values()
-                            if row.parent_session_id in frontier and row.session_id not in selected}
-                selected.update(children)
-                frontier = children
+            if not selected:
+                return False
+            selected.update(self._loaded_descendant_ids(selected))
             return any(row.session_id in selected and row.state not in TERMINAL_RUN_STATES
                        for row in self._runs.values())
 
@@ -2768,17 +2760,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         async with self._lock:
             if session_id not in self._sessions:
                 raise self._not_found("session.not_found", session_id)
-            descendant_ids: set[str] = set()
-            frontier = {session_id}
-            while frontier:
-                children = {
-                    row.session_id
-                    for row in self._sessions.values()
-                    if row.parent_session_id in frontier
-                    and row.session_id not in descendant_ids
-                }
-                descendant_ids.update(children)
-                frontier = children
+            descendant_ids = self._loaded_descendant_ids((session_id,))
             rows = sorted(
                 (self._sessions[value] for value in descendant_ids),
                 key=lambda row: (row.created_at, row.session_id),

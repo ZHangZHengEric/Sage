@@ -379,3 +379,165 @@ async def test_filesystem_scheduler_restores_lease_and_monotonic_fence(tmp_path)
     assert new.work.attempt == 2
     assert new.fencing_token == cast('WorkerLease', old).fencing_token + 1
     await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_filesystem_journal_migrates_legacy_and_recovers_torn_tail(tmp_path):
+    import json
+    from sagents.v2.runtime.execution.scheduler.plugins.filesystem import FilesystemSchedulerStateStore
+
+    clock = MutableClock()
+    scheduler = FilesystemScheduler(tmp_path, clock=clock)
+    item = work("legacy", clock)
+    await scheduler.submit(item)
+    state = scheduler._dump_state_locked()
+    await scheduler.close()
+    storage = FilesystemSchedulerStateStore(tmp_path)
+    storage.path.write_text(json.dumps({
+        "format": storage.format, "state": state, "checksum": storage._checksum(state),
+    }))
+
+    scheduler = FilesystemScheduler(tmp_path, clock=clock)
+    lease = await scheduler.claim("first", lease_duration=timedelta(hours=1), wait_timeout=0)
+    assert lease and lease.work == item
+    await scheduler.release(lease, LeaseReleaseReason.COMPLETED)
+    await scheduler.close()
+    committed = storage.path.read_bytes()
+    with storage.path.open("ab") as handle:
+        handle.write(b'{"interrupted":')
+    scheduler = FilesystemScheduler(tmp_path, clock=clock)
+    assert not await scheduler.submit(item)
+    assert await scheduler.claim("next", lease_duration=timedelta(hours=1), wait_timeout=0) is None
+    assert await scheduler.submit(work("next", clock))
+    await scheduler.close()
+    saved = storage.path.read_bytes()
+    assert saved.startswith(committed)
+    assert len(storage.load()["items"]) == 1
+    # A complete corrupt record must never be mistaken for an incomplete append.
+    storage.path.write_bytes(saved.replace(b'work_next', b'work_bork'))
+    with pytest.raises(ValueError, match="checksum"):
+        FilesystemScheduler(tmp_path, clock=clock)
+
+
+@pytest.mark.asyncio
+async def test_journal_survives_owner_process_exit_with_completed_and_abandoned_work(tmp_path):
+    import subprocess
+    import sys
+    import textwrap
+
+    result = await asyncio.to_thread(subprocess.run, [
+        sys.executable, "-c", textwrap.dedent("""
+            import asyncio, os, sys
+            from datetime import timedelta
+            from sagents.v2.runtime.execution.scheduler import FilesystemScheduler, LeaseReleaseReason
+            from tests.sagents.v2.test_scheduler_matrix import MutableClock, work
+            async def run():
+                clock = MutableClock()
+                scheduler = FilesystemScheduler(sys.argv[1], clock=clock)
+                for name in ("completed", "abandoned"):
+                    await scheduler.submit(work(name, clock))
+                first = await scheduler.claim("old", lease_duration=timedelta(days=2), wait_timeout=0)
+                await scheduler.release(first, LeaseReleaseReason.COMPLETED)
+                second = await scheduler.claim("old", lease_duration=timedelta(days=2), wait_timeout=0)
+                print(second.fencing_token, flush=True)
+                os._exit(23)
+            asyncio.run(run())
+        """), str(tmp_path),
+    ], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 23, result.stderr
+    clock = MutableClock()
+    scheduler = FilesystemScheduler(tmp_path, clock=clock)
+    try:
+        assert not await scheduler.submit(work("completed", clock))
+        leases = await asyncio.gather(*(scheduler.claim(
+            str(i), lease_duration=timedelta(days=2), wait_timeout=0
+        ) for i in range(8)))
+        lease, = [candidate for candidate in leases if candidate is not None]
+        assert lease.work.work_id == "work_abandoned" and lease.work.attempt == 2
+        assert lease.fencing_token > int(result.stdout)
+    finally:
+        await scheduler.close()
+
+
+@pytest.mark.asyncio
+async def test_journal_replays_reschedules_expiry_receipt_retirement_and_compaction(tmp_path):
+    from sagents.v2.runtime.execution.scheduler.plugins.filesystem import FilesystemSchedulerStateStore
+
+    clock = MutableClock()
+    scheduler = FilesystemScheduler(tmp_path, clock=clock, max_retained_terminal_items=2)
+    reader = FilesystemSchedulerStateStore(tmp_path)
+
+    def check_replay():
+        expected = scheduler._dump_state_locked()
+        actual = reader.load()
+        # Reopening re-heapifies pending entries; equal priority uses the saved sequence.
+        for state in (expected, actual):
+            state["pending"].sort()
+            state["cancelled"].sort()
+            state["items"].sort(key=lambda item: item["work_id"])
+            state["leases"].sort(key=lambda lease: lease["lease_id"])
+        assert actual == expected
+
+    try:
+        for i in range(5):
+            await scheduler.submit(work(str(i), clock))
+        await scheduler.reschedule_pending("work_0", clock.now + timedelta(days=1))
+        await scheduler.cancel("work_2")
+        lease = await scheduler.claim("one", lease_duration=timedelta(seconds=1), wait_timeout=0)
+        renewed = await scheduler.renew(lease, lease_duration=timedelta(seconds=10))
+        check_replay()
+        await scheduler.release(renewed, LeaseReleaseReason.COMPLETED, requeue=True)
+        lease = await scheduler.claim("two", lease_duration=timedelta(seconds=1), wait_timeout=0)
+        clock.advance(2)
+        assert await scheduler.reap_expired() == 1
+        check_replay()
+        for i in range(3):
+            lease = await scheduler.claim("three", lease_duration=timedelta(days=1), wait_timeout=0)
+            await scheduler.release(lease, LeaseReleaseReason.COMPLETED)
+        check_replay()
+        assert await scheduler.restore_queued(lease.work)
+        # Cross the record-count compaction boundary with a non-empty queue.
+        scheduler._state_store._records = 1024
+        await scheduler.submit(work("compact", clock))
+        assert scheduler._state_store._records == 0
+        await scheduler.cancel("work_compact")
+        check_replay()
+    finally:
+        await scheduler.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement_committed", [False, True])
+async def test_failed_checkpoint_reopens_only_one_generation(tmp_path, monkeypatch, replacement_committed):
+    import os
+
+    clock = MutableClock()
+    scheduler = FilesystemScheduler(tmp_path, clock=clock)
+    done = work("done", clock)
+    await scheduler.submit(done)
+    lease = await scheduler.claim("first", lease_duration=timedelta(minutes=1), wait_timeout=0)
+    await scheduler.release(lease, LeaseReleaseReason.COMPLETED)
+    scheduler._state_store._records = 1024
+    replace = os.replace
+
+    def fail(source, target):
+        if replacement_committed:
+            replace(source, target)
+        raise OSError("interrupted checkpoint")
+
+    next_item = work("next", clock)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail)
+        with pytest.raises(SageV2Error) as failed:
+            await scheduler.submit(next_item)
+        assert failed.value.info.code == "scheduler.persistence_failed"
+    await scheduler.close()
+    reopened = FilesystemScheduler(tmp_path, clock=clock)
+    try:
+        assert not await reopened.submit(done)
+        assert await reopened.submit(next_item) is not replacement_committed
+        lease = await reopened.claim("new", lease_duration=timedelta(minutes=1), wait_timeout=0)
+        assert lease.work == next_item
+        assert await reopened.claim("other", lease_duration=timedelta(minutes=1), wait_timeout=0) is None
+    finally:
+        await reopened.close()
