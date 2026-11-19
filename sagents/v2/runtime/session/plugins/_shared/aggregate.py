@@ -72,7 +72,7 @@ class DurableAggregateCache:
         self,
         *,
         max_cached_sessions=256,
-        max_cached_bytes=256 * 1024**2,
+        max_cached_bytes=1024 * 1024**2,
         cache_idle_seconds=300,
         **kwargs,
     ):

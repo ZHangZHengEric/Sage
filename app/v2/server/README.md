@@ -35,7 +35,7 @@ web/            前端
 
 Run 装配使用独立的 runtime/models 快照，不再修改进程 App 的默认配置；相同 revision 合并构建，不同配置可并行构建。租户工作区在 Run 受理时冻结到标准 execution snapshot；工作区删除、导入与受理按 `(tenant_id, agent_id)` 互斥。空闲 Agent revision 可释放资源，已有句柄和暂停 Run 通过原始归档恢复，不切换到最新版本。
 
-MySQL 冷加载只解析、安装目标 Session，保留其他运行中的内存对象。已建立 owner 的历史分页直接查询既有事件表，在同一只读事务内核对身份、序号 head 与页面；最新启动命令也只返回一个 Run 的配置。旧 owner 缺失的数据沿用完整身份推导。MySQL/Redis-MySQL 的 Session 内存缓存默认最多 256 个、按序列化大小保守估算 256 MiB、空闲 300 秒，在操作结束时回收；插件配置 `max_cached_sessions`、`max_cached_bytes`、`cache_idle_seconds` 可调整。活动 Run、操作、订阅及未释放的 compute 受保护，必要时可超过缓存目标；这些值不是进程内存硬限制。回收只释放内存，保留业务、附件和派生数据。Redis 模式从权威热状态读取历史，不读取可能滞后的 MySQL 归档。
+MySQL 冷加载只解析、安装目标 Session，保留其他运行中的内存对象。已建立 owner 的历史分页直接查询既有事件表，在同一只读事务内核对身份、序号 head 与页面；最新启动命令也只返回一个 Run 的配置。旧 owner 缺失的数据沿用完整身份推导。MySQL/Redis-MySQL 的 Session 内存缓存默认最多 256 个、按序列化大小保守估算 1 GiB、空闲 300 秒，在操作结束时回收；插件配置 `max_cached_sessions`、`max_cached_bytes`、`cache_idle_seconds` 可调整。活动 Run、操作、订阅及未释放的 compute 受保护，必要时可超过缓存目标；这些值不是进程内存硬限制。回收只释放内存，保留业务、附件和派生数据。Redis 模式从权威热状态读取历史，不读取可能滞后的 MySQL 归档。
 
 MySQL 和 PostgreSQL 的独立 SessionStore 使用单 worker（`multi_process_writes: False`），订阅者留在进程内，Scheduler 与 JobRuntime 是内存实现。Session CAS 拒绝过期提交；数据库持久化本身不提供横向扩容。Redis/MySQL 和 Redis/PostgreSQL 的分布式执行需显式配置对应调度器。manifest 的 `required_guarantees` 在装配阶段校验 SessionStore 的事务性、持久性与 actor 授权能力。
 

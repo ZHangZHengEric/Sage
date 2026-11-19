@@ -110,7 +110,7 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
         table_prefix: str | None = None,
         provision_schema: bool = True,
         max_cached_sessions: int = 256,
-        max_cached_bytes: int = 256 * 1024**2,
+        max_cached_bytes: int = 1024 * 1024**2,
         cache_idle_seconds: float = 300,
         max_connections: int = 16,
         max_pending_connections: int = 64,
