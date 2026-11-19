@@ -42,6 +42,15 @@ class SqlSessionArchive:
                     )
         return result
 
+    async def archived_attachment_ids(self, sid):
+        async with self._reader_connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    f"SELECT artifact_id FROM {self._table('attachments')} WHERE session_id = %s",
+                    (sid,),
+                )
+                return {row[0] for row in await cursor.fetchall()}
+
     async def archive_attachments(self, sid, attachments):
         # Attachments are immutable. Persist each before publishing revisions
         # which reference it, without one transaction spanning all blobs.

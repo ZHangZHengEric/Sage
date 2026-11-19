@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from sagents.v2.runtime.observability.logs import get_logger
 from .aggregate import _json
+from .redis_metadata import metadata_index_keys
 
 LOGGER = get_logger(__name__)
 
@@ -130,23 +131,31 @@ class RedisArchiveProtocol:
         if deleted:
             await self._archive.delete_archived_sessions((sid,))
         else:
-            base = await asyncio.to_thread(json.loads, fields["base"])
-            base_revision = int(base["sessions"][0]["revision"])
             previous = await self._archive.revision(sid)
-            content = await self._redis.hgetall(self._key(f"attachments:{sid}"))
-            attachments = await asyncio.to_thread(
-                lambda: {
-                    identity: base64.b64decode(value)
-                    for identity, value in content.items()
-                }
-            )
+            base = None
+            if fields.get("base_revision") is None:
+                base = await asyncio.to_thread(json.loads, fields["base"])
+                base_revision = int(base["sessions"][0]["revision"])
+            else:
+                base_revision = int(fields["base_revision"])
+            attachment_key = self._key(f"attachments:{sid}")
+            missing = set(await self._redis.hkeys(attachment_key))
+            if missing and previous is not None:
+                missing.difference_update(await self._archive.archived_attachment_ids(sid))
             if previous is None or previous < base_revision:
                 # New sessions have a small initial base. Legacy compact snapshots
                 # need a one-time baseline before their retained journal can append.
+                if base is None:
+                    base = await asyncio.to_thread(json.loads, fields["base"])
+                attachments = {}
+                for identity in sorted(missing):
+                    attachments[identity] = await self._read_archive_attachment(attachment_key, identity)
                 await self._archive.archive_session(base, attachments)
                 previous = base_revision
             else:
-                await self._archive.archive_attachments(sid, attachments)
+                for identity in sorted(missing):
+                    content = await self._read_archive_attachment(attachment_key, identity)
+                    await self._archive.archive_attachments(sid, {identity: content})
             batch, size = [], 0
             for revision in range(previous + 1, int(fields["revision"]) + 1):
                 encoded = fields[f"d:{revision}"]
@@ -162,6 +171,12 @@ class RedisArchiveProtocol:
                 size += encoded_size
             if batch:
                 await self._archive.archive_batch(sid, batch)
+
+    async def _read_archive_attachment(self, key, identity):
+        value = await self._redis.hget(key, identity)
+        if value is None:
+            raise RuntimeError(f"Redis attachment {identity!r} disappeared during archival")
+        return await asyncio.to_thread(base64.b64decode, value)
 
     async def _ack_archive_snapshot(self, sid, fields):
         from redis.exceptions import WatchError
@@ -180,6 +195,7 @@ class RedisArchiveProtocol:
                 ) or base_snapshot != fields.get("base_snapshot"):
                     return
                 token = await pipe.hget(key, "base_snapshot")
+                parent = await pipe.hget(self._key("parents"), sid) if deleted else None
                 pipe.multi()
                 pipe.srem(self._key("pending"), sid)
                 if deleted:
@@ -187,11 +203,14 @@ class RedisArchiveProtocol:
                         key,
                         self._key(f"attachments:{sid}"),
                         self._key(f"derived:{sid}"),
+                        *metadata_index_keys(self, sid),
                     )
                     if token:
                         pipe.delete(self._key(f"snapshot:{token}"))
                     pipe.hset(key, "deleted", "1")
                     pipe.hdel(self._key("parents"), sid)
+                    if parent is not None:
+                        pipe.zrem(self._key("child-edges:v2"), parent + "\0" + sid)
                 else:
                     pipe.hset(key, "archived_revision", fields["revision"])
                 if deleted or quiescent == "1":
@@ -204,6 +223,7 @@ class RedisArchiveProtocol:
                             key,
                             self._key(f"attachments:{sid}"),
                             self._key(f"derived:{sid}"),
+                            *metadata_index_keys(self, sid),
                         ]
                         if token:
                             cached_keys.append(self._key(f"snapshot:{token}"))

@@ -24,6 +24,7 @@ from sagents.v2.runtime.observability.logs import get_logger
 from .aggregate import _json, _principal_lookup_key
 from .redis_heads import RedisManagedSessionHeads
 from .redis_archive import RedisArchiveProtocol
+from .redis_metadata import metadata_index_keys, prepare_run_metadata, publish_run_metadata
 
 
 LOGGER = get_logger(__name__)
@@ -194,13 +195,20 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         key = self._session_key(sid)
         tails = self._event_tail_changes(mutation)
         deleted_runs = [row[0] for row in mutation["deletes"].get("runs", ())]
+        metadata_keys = metadata_index_keys(self, sid)
+        metadata_updated = {
+            row["run_id"] for row in (
+                *mutation["upserts"].get("runs", ()), *mutation["patches"].get("runs", ())
+            )
+            if "state" in row
+        }
 
         async def write():
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
                 await pipe.watch(key)
-                previous, indexed_revision, index_epoch = await pipe.hmget(
-                    key, ("revision", "event_index_revision", "event_index_epoch")
+                previous, indexed_revision, index_epoch, metadata_revision = await pipe.hmget(
+                    key, ("revision", "event_index_revision", "event_index_epoch", "run_metadata_revision")
                 )
                 restoring = expected is None and sid in self._backup_restores.get()
                 if restoring and await pipe.hget(key, "deleted") == "1":
@@ -212,6 +220,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     )
                 old_fields = await pipe.hkeys(key) if compact else ()
                 snapshot_token = await pipe.hget(key, "base_snapshot")
+                parent = head.get("parent_session_id")
+                old_parent = await pipe.hget(self._key("parents"), sid) if parent else None
                 if staged_base:
                     token, parts = staged_base
                     staged_key = self._key(f"snapshot:{token}")
@@ -227,6 +237,17 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     index_epoch = commit_id
                 fields = [self._event_head_field(rid) for rid in tails]
                 old_heads = await pipe.hmget(key, fields) if fields else ()
+                rebuild_metadata = compact or metadata_revision != previous
+                owner, metadata = prepare_run_metadata(
+                    self, sid, session_runs if rebuild_metadata else (
+                        self._runs[rid] for rid in metadata_updated
+                    )
+                )
+                metadata_ids = tuple(dict.fromkeys((*metadata, *deleted_runs)))
+                old_metadata = (
+                    dict(zip(metadata_ids, await pipe.hmget(metadata_keys[1], metadata_ids), strict=True))
+                    if not rebuild_metadata and metadata_ids else {}
+                )
                 pipe.multi()
                 if restoring:
                     pipe.hdel(
@@ -254,7 +275,13 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     "dispatch_intents": _json(intents),
                     "event_index_revision": revision,
                     "event_index_epoch": index_epoch,
+                    "run_metadata_revision": revision,
+                    "run_metadata_owner": owner,
                 }
+                publish_run_metadata(pipe, metadata_keys, rebuild=rebuild_metadata, members=metadata,
+                                     previous=old_metadata, deleted=deleted_runs)
+                for metadata_key in metadata_keys:
+                    pipe.persist(metadata_key)
                 for (rid, (event_head, members, replaced)), old_head in zip(tails.items(), old_heads, strict=True):
                     tail = self._durable_event_tail(rid)
                     if replaced or not old_head or old_head.partition(":")[0] != index_epoch:
@@ -275,6 +302,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     pipe.persist(self._key(f"snapshot:{token}"))
                 else:
                     values["base" if compact else f"d:{revision}"] = encoded
+                    if compact:
+                        values["base_revision"] = revision
                 pipe.hset(key, mapping=values)
                 pipe.persist(key)
                 if snapshot_token and not restoring:
@@ -306,8 +335,12 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     pipe.hset(self._key("starts"), self._lookup_key(row[:3]), sid)
                 for row in self._persisted_start_keys.get(sid, set()) - starts:
                     pipe.hdel(self._key("starts"), self._lookup_key(row[:3]))
-                if head.get("parent_session_id"):
-                    pipe.hset(self._key("parents"), sid, head["parent_session_id"])
+                if parent and parent != old_parent:
+                    order = self._key("child-edges:v2")
+                    if old_parent is not None:
+                        pipe.zrem(order, old_parent + "\0" + sid)
+                    pipe.hset(self._key("parents"), sid, parent)
+                    pipe.zadd(order, {parent + "\0" + sid: 0})
                 if attachments:
                     pipe.hset(self._key(f"attachments:{sid}"), mapping=attachments)
                 pipe.persist(self._key(f"attachments:{sid}"))
@@ -606,18 +639,7 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         return sid
 
     async def _list_descendant_ids(self, sid):
-        parents = await self._redis.hgetall(self._key("parents"))
-        found = set(await self._archive._list_descendant_ids(sid))
-        frontier = {sid, *found}
-        while frontier:
-            children = {
-                child
-                for child, parent in parents.items()
-                if parent in frontier and child not in found
-            }
-            found.update(children)
-            frontier = children
-        return sorted(found)
+        return await self.list_workspace_descendant_ids([sid])
 
     async def read_session_views(self, session_ids, **options):
         from functools import partial
@@ -698,9 +720,10 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             report.runs = {key: report.runs[key] for key in newest}
         return report
 
-    async def _run_metadata_batch(self, session_ids):
+    async def _run_metadata_batch(self, session_ids, *, backfill_index=False):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload
         from sagents.v2.runtime.session.plugins._shared.redis_metadata import (
+            backfill_run_metadata,
             decode_redis_metadata,
             read_redis_metadata_batch,
         )
@@ -732,6 +755,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     )
                     result.extend(current)
                     owners.update(heads)
+                    if backfill_index:
+                        await backfill_run_metadata(self, sid, fields, current, heads[sid])
             else:
                 cold.append(sid)
         if cold:
@@ -740,35 +765,74 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             owners.update(heads)
         return tuple(result), owners
 
-    async def authorized_run_metadata_page(self, session_ids, context, **options):
+    async def authorized_run_metadata_page(self, session_ids, context, *, after=None, limit=101, agent_id='', states=()):
         from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
+        from .redis_metadata import _read_redis_fields_batched, read_authorized_indexed_page
 
-        return await RunMetadataQueries.authorized_run_metadata_page(
-            self, session_ids, context, **options
+        if not 1 <= limit <= 201 or len(session_ids) > 200:
+            raise ValueError('invalid Run metadata page')
+        await self._ensure_ready()
+        positions = {sid: position for position, sid in enumerate(session_ids)}
+        ids = tuple(sorted(positions, key=positions.__getitem__))
+        if after is not None:
+            ids = ids[ids.index(after[0]):]
+        fields = ("revision", "run_metadata_revision", "deleted")
+        headers = await _read_redis_fields_batched(
+            self, [("hmget", self._session_key(sid), fields) for sid in ids]
         )
+        absent = [sid for sid, (revision, _, deleted) in zip(ids, headers, strict=True)
+                  if revision is None and deleted != "1"]
+        cold = set()
+        if absent:
+            resident = await self._redis.smismember(self._key("resident"), absent)
+            cold = {sid for sid, hot in zip(absent, resident, strict=True) if not hot}
+        result = []
+        fallback = []
+
+        def cursor_for(sid):
+            return after if after is not None and sid == after[0] else None
+
+        async def flush():
+            if not fallback:
+                return
+            options = dict(after=cursor_for(fallback[0]), limit=limit - len(result), agent_id=agent_id, states=states)
+            if fallback[0] in cold:
+                page = await self._archive.authorized_run_metadata_page(fallback, context, **options)
+            else:
+                rows, owners = await self._run_metadata_batch(fallback, backfill_index=True)
+                page = RunMetadataQueries._authorized_metadata_page(self, fallback, context, rows, owners, **options)
+            result.extend(page)
+            fallback.clear()
+
+        for sid, (revision, indexed, deleted) in zip(ids, headers, strict=True):
+            if deleted == "1":
+                continue
+            if revision is None or revision != indexed:
+                if fallback and ((fallback[0] in cold) != (sid in cold)):
+                    await flush()
+                    if len(result) == limit:
+                        break
+                fallback.append(sid)
+                continue
+            await flush()
+            if len(result) == limit:
+                break
+            rows = await read_authorized_indexed_page(
+                self, sid, context, after=cursor_for(sid), limit=limit - len(result),
+                agent_id=agent_id, states=states,
+            )
+            if rows is None:
+                fallback.append(sid)
+            else:
+                result.extend(rows)
+            if len(result) == limit:
+                break
+        await flush()
+        return tuple(result)
 
     async def has_nonterminal_session_trees(self, session_ids):
         """Redis owns hot state; an asynchronous SQL archive cannot overrule it."""
-        await self._ensure_ready()
-        selected = set(session_ids)
-        children = {}
-        for child, parent in (await self._redis.hgetall(self._key("parents"))).items():
-            children.setdefault(parent, []).append(child)
-        frontier = set(selected)
-        while frontier:
-            archived = set(
-                await self._archive.list_workspace_descendant_ids(sorted(frontier))
-            )
-            traversal = list(frontier | (archived - selected))
-            selected.update(archived)
-            frontier = set()
-            while traversal:
-                for child in children.get(traversal.pop(), ()):
-                    if child not in selected:
-                        selected.add(child)
-                        frontier.add(child)
-                        traversal.append(child)
-        ids = sorted(selected)
+        ids = sorted(await self._collect_session_tree(session_ids))
         cold = []
         for offset in range(0, len(ids), 128):
             batch = ids[offset : offset + 128]

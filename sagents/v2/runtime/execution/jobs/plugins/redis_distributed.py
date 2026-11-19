@@ -78,6 +78,28 @@ class RedisDistributedJobRuntime(JobRuntimeState):
     def _output_index_key(self, job_id):
         return self.key_prefix + ":output-offsets:" + job_id
 
+    def _inspect_key(self):
+        return self.key_prefix + ":inspect:v1"
+
+    @staticmethod
+    def _inspect_prefix(epoch):
+        return '{"inspect_epoch":"' + epoch + '",'
+
+    def _next_sweep(self, rows):
+        terminal = [row for row in rows.values() if row["state"] in TERMINAL_JOB_STATES]
+        over_quota = (len(terminal) > self._max_retained_terminal_jobs
+                      or sum(row["output_cursor"]["offset"] for row in terminal)
+                      > self._max_retained_output_bytes)
+        terminal_age = self._output_reconnect_window.total_seconds()
+        if not over_quota:
+            terminal_age = max(terminal_age, self._terminal_ttl.total_seconds())
+        return min(
+            min((datetime.fromisoformat(row["updated_at"]).timestamp() + terminal_age
+                 for row in terminal), default=float("inf")),
+            min((row["lease_until"] for row in rows.values() if row["state"] not in TERMINAL_JOB_STATES),
+                default=float("inf")),
+        )
+
     def _limits(self):
         return [self._max_concurrent, self._max_admitted, self._max_job_output_bytes,
             self._max_job_output_chunks, self._max_buffered_output_bytes,
@@ -109,6 +131,10 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                     occupied = sum(row["state"] in {JobState.RUNNING, JobState.STOPPING} for row in rows.values())
                     original_rows = {job_id: (row["owner"], row["state"], row["lease_until"])
                                      for job_id, row in rows.items()}
+                    original_views = {
+                        job_id: self._inspection_row(row) | {"output_cursor": dict(row["output_cursor"])}
+                        for job_id, row in rows.items()
+                    }
                     removed = self._sweep(rows, now)
                     operation_error = None
                     try:
@@ -123,10 +149,27 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                         removed = self._sweep(rows, now)
                         result, output, operation_error = None, None, exc
                     removed.extend(set(original_rows).difference(rows).difference(removed))
-                    encoded = json.dumps(state, separators=(",", ":"), sort_keys=True)
-                    if encoded != raw or output or removed:
+                    epoch = state.pop("inspect_epoch", "")
+                    index = self._inspect_key()
+                    indexed = bool(raw and epoch and raw.startswith(self._inspect_prefix(epoch))
+                                   and await pipe.hget(index, "@epoch") == epoch)
+                    body = json.dumps(state, separators=(",", ":"), sort_keys=True)
+                    if not indexed or raw != self._inspect_prefix(epoch) + body[1:] or output or removed:
+                        epoch = uuid.uuid4().hex
+                        encoded = self._inspect_prefix(epoch) + body[1:]
                         pipe.multi()
                         pipe.set(key, encoded)
+                        if not indexed:
+                            pipe.delete(index)
+                        elif removed:
+                            pipe.hdel(index, *("job:" + job_id for job_id in removed))
+                        projected = {"job:" + job_id: json.dumps(value, separators=(",", ":"))
+                                     for job_id, row in rows.items()
+                                     if (value := self._inspection_row(row)) != original_views.get(job_id)
+                                     or not indexed}
+                        projected.update({"@epoch": epoch, "@sweep": self._next_sweep(rows),
+                                          "@limits": json.dumps(self._limits())})
+                        pipe.hset(index, mapping=projected)
                         updated_occupied = sum(row["state"] in {JobState.RUNNING, JobState.STOPPING}
                                                for row in rows.values())
                         if raw is None or updated_occupied != occupied:
@@ -194,9 +237,12 @@ class RedisDistributedJobRuntime(JobRuntimeState):
         return rows[job_id]
 
     @staticmethod
-    def _snapshot_record(row):
-        return JobSnapshot.model_validate({key: value for key, value in row.items()
-            if key in JobSnapshot.model_fields})
+    def _inspection_row(row):
+        return {key: value for key, value in row.items() if key in JobSnapshot.model_fields}
+
+    @classmethod
+    def _snapshot_record(cls, row):
+        return JobSnapshot.model_validate(cls._inspection_row(row))
 
     async def submit(self, spec):
         async with self._admission_lock:
@@ -389,6 +435,22 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             return
 
     async def inspect(self, job_id):
+        redis = await self._client()
+        # The matching prefix rejects stale projections after a legacy writer
+        # reserializes the canonical registry with its original sorted keys.
+        prefix_len = len(self._inspect_prefix("0" * 32))
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.getrange(self.key_prefix + ":state", 0, prefix_len - 1)
+            pipe.hmget(self._inspect_key(), ("@epoch", "@sweep", "@limits", "job:" + job_id))
+            pipe.time()
+            prefix, (epoch, sweep, limits, row), (seconds, micros) = await pipe.execute()
+        if epoch and sweep is not None and limits and prefix == self._inspect_prefix(epoch):
+            if json.loads(limits) != self._limits():
+                raise ValueError("Distributed Job instances must use identical shared limits")
+            if seconds + micros / 1e6 < float(sweep):
+                if row is not None:
+                    return JobSnapshot.model_validate_json(row)
+                self._get({}, job_id)
         return await self._mutate(lambda rows, now: (self._snapshot_record(self._get(rows, job_id)), None))
 
     async def wait(self, job_id):

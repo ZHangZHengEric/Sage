@@ -4,6 +4,44 @@ from sagents.v2.runtime.session.child_heads import ManagedSessionHeadQueries
 
 
 class RedisManagedSessionHeads:
+    async def _migrate_child_edges(self):
+        # Keep the reverse map authoritative and intact for rollback. Current
+        # writers update both representations in the same Redis transaction.
+        legacy = self._key("parents")
+        order = self._key("child-edges:v2")
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.hlen(legacy)
+            pipe.zcard(order)
+            count, indexed = await pipe.execute()
+        if count == indexed:
+            return
+
+        async def rebuild():
+            async with self._redis.pipeline() as pipe:
+                await pipe.watch(legacy)
+                if await pipe.hlen(legacy) == await pipe.zcard(order):
+                    return
+                edges = list((await pipe.hgetall(legacy)).items())
+                pipe.multi()
+                pipe.delete(order)
+                for offset in range(0, len(edges), 256):
+                    pipe.zadd(order, {parent + "\0" + sid: 0 for sid, parent in edges[offset:offset + 256]})
+                await pipe.execute()
+
+        await self._retry_transaction(rebuild)
+
+    async def _indexed_children(self, parents):
+        order = self._key("child-edges:v2")
+        result = set()
+        ids = sorted(parents)
+        for offset in range(0, len(ids), 32):
+            async with self._redis.pipeline(transaction=False) as pipe:
+                for parent in ids[offset:offset + 32]:
+                    pipe.zrangebylex(order, "[" + parent + "\0", "(" + parent + "\x01")
+                for values in await pipe.execute():
+                    result.update(value.partition("\0")[2] for value in values)
+        return result
+
     async def _visible_session_ids(self, session_ids):
         ids = tuple(sorted(set(session_ids)))
         visible = []
@@ -18,23 +56,28 @@ class RedisManagedSessionHeads:
 
     async def list_direct_child_session_ids(self, session_id):
         await self._ensure_ready()
+        await self._migrate_child_edges()
         ids = set(await self._archive.list_direct_child_session_ids(session_id))
-        ids.update(
-            child
-            for child, parent in (
-                await self._redis.hgetall(self._key("parents"))
-            ).items()
-            if parent == session_id
-        )
+        ids.update(await self._indexed_children({session_id}))
         return await self._visible_session_ids(ids)
 
     async def list_workspace_descendant_ids(self, session_ids):
-        await self._ensure_ready()
         roots = set(session_ids)
-        found = set()
-        for sid in roots:
-            found.update(await self._list_descendant_ids(sid))
-        return await self._visible_session_ids(found - roots)
+        return await self._visible_session_ids(await self._collect_session_tree(roots) - roots)
+
+    async def _collect_session_tree(self, roots):
+        await self._ensure_ready()
+        await self._migrate_child_edges()
+        found = set(roots)
+        frontier = set(roots)
+        while frontier:
+            # Expand in both stores, including Redis children of archived
+            # descendants and archived children of Redis-only descendants.
+            archived = set(await self._archive.list_workspace_descendant_ids(sorted(frontier)))
+            children = await self._indexed_children(frontier | (archived - found))
+            frontier = children - found - archived
+            found.update(archived | children)
+        return found
 
     async def has_nonterminal_sessions(self, session_ids):
         from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES

@@ -12,6 +12,7 @@ import heapq
 import json
 import random
 import time
+import uuid
 
 from sagents.v2.runtime.distributed.redis_coordination import (
     RedisGuard, RedisMutationFence, active_worker_fence, coordination_error,
@@ -65,6 +66,73 @@ class RedisDistributedScheduler:
     def _guard_key(self, run_id):
         return self.key_prefix + ":mutation:" + run_id
 
+    @property
+    def _limits(self):
+        return [self.max_pending_items, self.max_retained_terminal_items,
+                self.max_concurrent_runs, self.max_concurrent_runs_per_tenant]
+
+    @staticmethod
+    def _claim_prefix(epoch):
+        return '{"claim_epoch":"' + epoch + '",'
+
+    def _claim_head_key(self):
+        return self.key_prefix + ":claim-head:v1"
+
+    def _claim_due_key(self, queue):
+        return self.key_prefix + ":claim-due:v1:" + queue
+
+    @staticmethod
+    def _pending_scores(state):
+        if state is None:
+            return {}
+        queues = state.get("_queues", {})
+        leased = {row["work"]["work_id"] for row in state["leases"]}
+        pending = {row["work_id"] for row in state["items"]} - leased - set(state["cancelled"])
+        result = {}
+        for timestamp, _, _, work_id in state["pending"]:
+            if work_id in pending:
+                bucket = result.setdefault(queues.get(work_id, "default"), {})
+                bucket[work_id] = min(timestamp, bucket.get(work_id, float("inf")))
+        return result
+
+    def _publish_claim_index(self, pipe, reference, before, snapshot, epoch, *, indexed, prior_counts):
+        previous = self._pending_scores(before) if indexed else {}
+        current = self._pending_scores(snapshot)
+        for queue in set(previous) | set(current) | set(prior_counts) | {self.queue_id}:
+            key = self._claim_due_key(queue)
+            old, new = previous.get(queue, {}), current.get(queue, {})
+            if not indexed:
+                pipe.delete(key)
+            elif removed := old.keys() - new.keys():
+                pipe.zrem(key, *removed)
+            if changed := {wid: score for wid, score in new.items() if score != old.get(wid)}:
+                pipe.zadd(key, changed)
+        expiry = min((lease.expires_at.timestamp() for lease in reference._leases.values()),
+                     default=float("inf"))
+        counts = {queue: len(scores) for queue, scores in current.items()}
+        pipe.set(self._claim_head_key(), json.dumps([epoch, self._limits, counts, len(reference._leases), str(expiry)]))
+
+    async def _may_claim(self):
+        redis = await self._client()
+        due_key = self._claim_due_key(self.queue_id)
+        prefix_len = len(self._claim_prefix("0" * 32))
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.getrange(self.key_prefix + ":state", 0, prefix_len - 1)
+            pipe.get(self._claim_head_key())
+            pipe.zrange(due_key, 0, 0, withscores=True)
+            pipe.zcard(due_key)
+            pipe.time()
+            prefix, head, earliest, count, (seconds, micros) = await pipe.execute()
+        if not head:
+            return True
+        epoch, limits, counts, leased, expiry = json.loads(head)
+        if prefix != self._claim_prefix(epoch) or count != counts.get(self.queue_id, 0):
+            return True
+        if limits != self._limits:
+            raise ValueError("Distributed Scheduler instances must use identical shared limits")
+        now = seconds + micros / 1e6
+        return now >= float(expiry) or (leased < self.max_concurrent_runs and bool(earliest) and earliest[0][1] <= now)
+
     def _reference(self, now, state):
         group = SchedulerQuotaGroup(self.max_concurrent_runs,
             self.max_concurrent_runs_per_tenant, self.max_pending_items)
@@ -81,19 +149,51 @@ class RedisDistributedScheduler:
         state_key = self.key_prefix + ":state"
         async def attempt():
             nonlocal blocked_run
-            # Rebuild at most one in-flight queue snapshot per instance.
-            async with self._mutation_lock, redis.pipeline() as pipe:
+            # Serialize snapshot writers so a burst of workers does not copy
+            # the same large snapshot and repeatedly lose their EXEC.
+            async with (
+                self._mutation_lock,
+                RedisGuard(redis, self.key_prefix + ":queue-updates",
+                           ttl_seconds=self.coordination_ttl_seconds) as writer,
+                redis.pipeline() as pipe,
+            ):
+                if claim_queue and not await self._may_claim():
+                    return False, None
+                await watch_fence(pipe, writer)
                 await pipe.watch(state_key)
                 raw = await pipe.get(state_key)
-                state = json.loads(raw) if raw else None
-                limits = [self.max_pending_items, self.max_retained_terminal_items,
-                          self.max_concurrent_runs, self.max_concurrent_runs_per_tenant]
+                large = raw is not None and len(raw) > 256 * 1024
+                state = (await asyncio.to_thread(json.loads, raw) if large else json.loads(raw)) if raw else None
+                limits = self._limits
+                epoch = state.pop("claim_epoch", "") if state is not None else ""
+                head = await pipe.get(self._claim_head_key())
+                due_key = self._claim_due_key(self.queue_id)
+                indexed, counts, next_expiry = False, {}, float("inf")
+                if head:
+                    head_epoch, _, counts, _, expiry = json.loads(head)
+                    if (epoch == head_epoch and raw and raw.startswith(self._claim_prefix(epoch))
+                            and await pipe.zcard(due_key) == counts.get(self.queue_id, 0)):
+                        indexed, next_expiry = True, float(expiry)
                 if state is not None and state.get("_limits", limits) != limits:
                     raise ValueError("Distributed Scheduler instances must use identical shared limits")
                 queues = dict(state.get("_queues", {})) if state else {}
                 seconds, microseconds = await redis.time()
                 now = datetime.fromtimestamp(seconds + microseconds / 1e6, timezone.utc)
-                reference = self._reference(now, state)
+                narrowed = claim_queue and indexed and now.timestamp() < next_expiry
+                untouched = []
+                loaded_state = state
+                if narrowed:
+                    candidates = set(await pipe.zrangebyscore(due_key, "-inf", now.timestamp()))
+                    candidates_pending = []
+                    for entry in state["pending"]:
+                        (candidates_pending if entry[3] in candidates else untouched).append(entry)
+                    retained = candidates | {row["work"]["work_id"] for row in state["leases"]}
+                    loaded_state = state | {
+                        "pending": candidates_pending,
+                        "items": [row for row in state["items"] if row["work_id"] in retained],
+                    }
+                reference = (await asyncio.to_thread(self._reference, now, loaded_state)
+                             if large and not narrowed else self._reference(now, loaded_state))
                 runs = {lease.work.run_id for lease in reference._leases.values()}
                 if blocked_run:
                     runs.add(blocked_run)
@@ -121,13 +221,26 @@ class RedisDistributedScheduler:
                 for entry in other_queues:
                     heapq.heappush(reference._pending, entry)
                 snapshot = reference._dump_state_locked()
-                snapshot["_queues"] = {wid: queue for wid, queue in queues.items() if wid in reference._items}
+                if narrowed:
+                    # No expiry occurred, so a claim can only change the due
+                    # heap and leases. Keep the other work rows byte-for-byte.
+                    snapshot["items"] = state["items"]
+                    snapshot["pending"].extend(untouched)
+                    heapq.heapify(snapshot["pending"])
+                item_ids = {row["work_id"] for row in snapshot["items"]}
+                snapshot["_queues"] = {wid: queue for wid, queue in queues.items() if wid in item_ids}
                 snapshot["_limits"] = limits
-                if state == snapshot:
+                if indexed and (state == snapshot or (narrowed and result is None)):
                     return False, result
-                encoded = json.dumps(snapshot, separators=(",", ":"))
+                epoch = uuid.uuid4().hex
+                if large:
+                    body = await asyncio.to_thread(json.dumps, snapshot, separators=(",", ":"))
+                else:
+                    body = json.dumps(snapshot, separators=(",", ":"))
+                encoded = self._claim_prefix(epoch) + body[1:]
                 pipe.multi()
                 pipe.set(state_key, encoded)
+                self._publish_claim_index(pipe, reference, state, snapshot, epoch, indexed=indexed, prior_counts=counts)
                 await pipe.execute()
                 return False, result
 
@@ -180,12 +293,16 @@ class RedisDistributedScheduler:
         return await self._mutate(lambda value: value.restore_queued(work), submitted_work=work)
 
     async def claim(self, worker_id, *, lease_duration, policy=None, wait_timeout=None):
+        if lease_duration.total_seconds() <= 0:
+            raise ValueError("lease_duration must be positive")
         if wait_timeout is not None and wait_timeout < 0:
             raise ValueError("wait_timeout must be nonnegative")
         deadline = None if wait_timeout is None else time.monotonic() + wait_timeout
         while True:
-            result = await self._mutate(lambda value: value.claim(worker_id,
-                lease_duration=lease_duration, policy=policy, wait_timeout=0), claim_queue=True)
+            result = None
+            if await self._may_claim():
+                result = await self._mutate(lambda value: value.claim(worker_id,
+                    lease_duration=lease_duration, policy=policy, wait_timeout=0), claim_queue=True)
             if result is not None or (deadline is not None and time.monotonic() >= deadline):
                 return result
             delay = self.poll_seconds if deadline is None else min(self.poll_seconds, max(0, deadline - time.monotonic()))

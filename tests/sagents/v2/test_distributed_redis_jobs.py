@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import fakeredis
 import fakeredis.aioredis
@@ -90,6 +90,32 @@ async def test_remote_inspect_binary_output_cursor_and_wait(jobs_pair):
     assert completed.state == JobState.COMPLETED
     assert completed.exit_code == 7 and completed.error is None
     assert (await first.inspect(handle.job_id)).state == JobState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_inspect_by_id_observes_committed_output_and_recovers_legacy_writes(jobs_pair):
+    async def runner(spec, emit, cancelled):
+        await emit("stdout", b"test")
+        return JobCompletion(exit_code=7)
+
+    first, second = jobs_pair(runner)
+    handle = await first.submit(spec())
+    complete = await first.wait(handle.job_id)
+    assert complete.output_cursor.offset == 4
+    with patch.object(second, "_mutate", side_effect=AssertionError("registry payload read")):
+        assert await second.inspect(handle.job_id) == complete
+        assert await second.read_output(complete.output_cursor) == ()
+        with pytest.raises(SageV2Error) as missing:
+            await second.inspect("unknown")
+        assert missing.value.info.code == "job.not_found"
+
+    key = first.key_prefix + ":state"
+    legacy = json.loads(await first._redis.get(key))
+    legacy["rows"][handle.job_id]["exit_code"] = 8
+    await first._redis.set(key, json.dumps(legacy, sort_keys=True, separators=(",", ":")))
+    assert (await second.inspect(handle.job_id)).exit_code == 8
+    with patch.object(second, "_mutate", side_effect=AssertionError("index was not rebuilt")):
+        assert (await second.inspect(handle.job_id)).exit_code == 8
 
 
 @pytest.mark.asyncio

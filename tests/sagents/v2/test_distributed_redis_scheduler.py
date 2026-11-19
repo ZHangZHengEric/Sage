@@ -9,6 +9,8 @@ from typing import cast
 
 import asyncio
 from datetime import timedelta
+import json
+from unittest.mock import patch
 
 import fakeredis
 import fakeredis.aioredis
@@ -68,6 +70,36 @@ async def test_submit_and_claim_are_shared_and_idempotent_between_instances(sche
     await second.assert_fence(lease)
     await second.release(lease, LeaseReleaseReason.COMPLETED)
     assert await claim(first) is None
+
+
+@pytest.mark.asyncio
+async def test_indexed_claim_reads_only_due_work_and_repairs_legacy_state(scheduler_pair):
+    first, second = scheduler_pair()
+    for i in range(12):
+        assert await first.submit(work(f"later-{i}", available_at=utc_now() + timedelta(hours=1)))
+    with patch.object(second, "_mutate", side_effect=AssertionError("full queue read during idle poll")):
+        assert await claim(second) is None
+
+    ready = work("ready")
+    assert await first.submit(ready)
+    with patch.object(second, "_reference", wraps=second._reference) as reference:
+        lease = await claim(second)
+    assert lease is not None and lease.work == ready
+    snapshot = reference.call_args.args[1]
+    assert [item["work_id"] for item in snapshot["items"]] == [ready.work_id]
+    assert len(await first.existing_work_ids()) == 13
+
+    await first.release(lease, LeaseReleaseReason.COMPLETED)
+    ready = work("legacy")
+    assert await first.submit(ready)
+    key = first.key_prefix + ":state"
+    legacy = json.loads(await first._redis.get(key))
+    legacy.pop("claim_epoch")
+    await first._redis.set(key, json.dumps(legacy))
+    await first._redis.delete(first._claim_due_key("default"))
+    lease = await claim(second)
+    assert lease is not None and lease.work == ready
+    assert await first._redis.zcard(first._claim_due_key("default")) == 12
 
 
 @pytest.mark.asyncio
