@@ -301,3 +301,24 @@ async def test_restore_queued_reopens_retired_receipt_atomically_and_respects_le
     assert await first.submit(cancelled)
     assert await first.cancel(cancelled.work_id)
     assert not await second.restore_queued(cancelled)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retention", [0, 2])
+async def test_incremental_lease_updates_preserve_v1_arrays_and_receipts(scheduler_pair, retention):
+    owner, peer = scheduler_pair(max_retained_terminal_items=retention)
+    items = [work(str(i), tenant=str(i)) for i in range(5)]
+    for item in items:
+        await owner.submit(item)
+    leases = [await claim(owner) for _ in items]
+    with patch.object(peer, "_mutate", side_effect=AssertionError("full registry read")):
+        for index in (2, 0, 1, 4, 3):
+            lease = await peer.renew(leases[index], lease_duration=timedelta(seconds=60))
+            await peer.release(lease, LeaseReleaseReason.DEFERRED, requeue=True)
+            retry = await claim(peer)
+            assert retry.work.attempt == lease.work.attempt + 1
+            await peer.release(retry, LeaseReleaseReason.COMPLETED)
+            raw = json.loads(await owner._redis.get(owner.key_prefix + ":state"))
+            assert retry.work.work_id not in {row["work_id"] for row in raw["items"]}
+            assert len(raw["terminal_idempotency_keys"]) <= retention
+    assert set(raw["idempotency"]) == set(raw["terminal_idempotency_keys"])

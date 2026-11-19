@@ -181,12 +181,26 @@ class RedisDistributedScheduler:
     def _encode_layout(self, snapshot, epoch):
         # ASCII JSON makes string positions equal Redis byte offsets. Old
         # workers read the exact same v1 object through their normal decoder.
-        fixed = {k: v for k, v in snapshot.items() if k not in {"items", "pending", "leases", "fence_sequence"}}
-        chunks = [self._claim_prefix(epoch), json.dumps(fixed, separators=(",", ":"))[1:-1], ',"items":[']
+        tail_keys = ("leases", "fence_sequence", "sequence", "terminal_idempotency_keys", "cancelled")
+        fixed = {k: v for k, v in snapshot.items() if k not in {"items", "pending", "idempotency", *tail_keys}}
+        chunks = [self._claim_prefix(epoch), json.dumps(fixed, separators=(",", ":"))[1:-1], ',"idempotency":{']
         offset = sum(map(len, chunks))
+        layout = {}
+        positions = {"item": {}, "receipt": {}}
+        for index, (key, wid) in enumerate(snapshot["idempotency"].items()):
+            entry = json.dumps({key: wid}, separators=(",", ":"))[1:-1]
+            if index:
+                chunks.append(",")
+                offset += 1
+            positions["receipt"][key] = offset
+            layout["receipt:" + key] = json.dumps([offset, offset + len(entry) - 1, wid])
+            chunks.append(entry)
+            offset += len(entry)
+        chunks.append('},"items":[')
+        offset += len(chunks[-1])
         spans = {}
         for index, item in enumerate(snapshot["items"]):
-            raw = json.dumps(item, separators=(",", ":"))
+            raw = json.dumps(item, separators=(",", ":")) + " " * 32
             if index:
                 chunks.append(",")
                 offset += 1
@@ -196,54 +210,72 @@ class RedisDistributedScheduler:
         separator = '],"pending":['
         chunks.append(separator)
         offset += len(separator)
-        pending = (entry for entry in snapshot["pending"] if entry[3] in spans)
-        for index, entry in enumerate(pending):
-            raw = json.dumps(entry, separators=(",", ":"))
+        pending = [(entry[3], entry) for entry in snapshot["pending"] if entry[3] in spans]
+        pending_ids = {wid for wid, _ in pending}
+        # A queue rewrite may take place while a lease is active. Reserve
+        # that work's retry slot too, including space for its escaped ID.
+        for lease in snapshot["leases"]:
+            wid = lease["work"]["work_id"]
+            if wid in spans and wid not in pending_ids:
+                pending.append((wid, None))
+        for index, (wid, entry) in enumerate(pending):
+            if entry is None:
+                raw = '[0,0,0,""]' + " " * (64 + len(json.dumps(wid)))
+            else:
+                raw = json.dumps(entry, separators=(",", ":")) + " " * 32
             if index:
                 chunks.append(",")
                 offset += 1
-            if entry[3] in spans:
-                spans[entry[3]].extend((offset, offset + len(raw) - 1))
+            spans[wid].extend((offset, offset + len(raw) - 1))
             chunks.append(raw)
             offset += len(raw)
         chunks.append("],")
-        layout = {"work:" + wid: json.dumps(span) for wid, span in spans.items() if len(span) == 4}
-        layout.update({"epoch": epoch, "tail": str(offset + 2)})
-        chunks.append(json.dumps({"leases": snapshot["leases"], "fence_sequence": snapshot["fence_sequence"]},
-                                 separators=(",", ":"))[1:])
-        return "".join(chunks), layout
+        layout.update({"work:" + wid: json.dumps(span) for wid, span in spans.items() if len(span) == 4})
+        for wid, span in spans.items():
+            positions["item"][wid] = span[0]
+            layout["item:" + wid] = json.dumps([*span[:2], snapshot["_queues"].get(wid, "default")])
+        # Claims and heartbeats need only the bounded active lease suffix.
+        # Releases can also update the adjacent terminal receipt history.
+        history = json.dumps({key: snapshot[key] for key in tail_keys[2:]}, separators=(",", ":"))[1:-1] + ","
+        chunks.append(history)
+        layout.update({"epoch": epoch, "release-tail": str(offset + 2), "tail": str(offset + 2 + len(history))})
+        chunks.append(json.dumps({key: snapshot[key] for key in tail_keys[:2]}, separators=(",", ":"))[1:])
+        return "".join(chunks), layout, positions
 
     async def _indexed_claim(self, pipe, state_key, operation):
         layout_key = self.key_prefix + ":claim-layout"
-        epoch, tail = await pipe.hmget(layout_key, ("epoch", "tail"))
-        if not epoch or tail is None:
+        redis = await self._client()
+        due = self._claim_due_key(self.queue_id)
+        async with redis.pipeline(transaction=False) as reads:
+            reads.hmget(layout_key, ("epoch", "tail"))
+            reads.getrange(state_key, 0, len(self._claim_prefix("0"*32)) - 1)
+            reads.get(self._claim_head_key())
+            reads.time()
+            reads.zcard(due)
+            (epoch, tail), prefix, raw_head, (seconds, micros), due_count = await reads.execute()
+        if not epoch or tail is None or prefix != self._claim_prefix(epoch):
             return NotImplemented
-        prefix = self._claim_prefix(epoch)
-        if await pipe.getrange(state_key, 0, len(prefix) - 1) != prefix:
-            return NotImplemented
-        raw_head = await pipe.get(self._claim_head_key())
         if not raw_head:
             return NotImplemented
         version, limits, counts, leased, expiry = json.loads(raw_head)
-        seconds, micros = await pipe.time()
         now = datetime.fromtimestamp(seconds + micros / 1e6, timezone.utc)
         if version != epoch or limits != self._limits or now.timestamp() >= float(expiry):
             return NotImplemented
-        due = self._claim_due_key(self.queue_id)
-        if await pipe.zcard(due) != counts.get(self.queue_id, 0):
+        if due_count != counts.get(self.queue_id, 0):
             return NotImplemented
         ids = await pipe.zrangebyscore(due, "-inf", now.timestamp())
         if not ids or leased >= self.max_concurrent_runs:
             return None
-        raw_tail = await pipe.getrange(state_key, int(tail), -1)
+        async with redis.pipeline(transaction=False) as reads:
+            reads.getrange(state_key, int(tail), -1)
+            reads.hmget(layout_key, ["work:" + wid for wid in ids])
+            raw_tail, bounds = await reads.execute()
         if "\x1e" in raw_tail:
             return NotImplemented
         active = json.loads("{" + raw_tail)
-        bounds = await pipe.hmget(layout_key, ["work:" + wid for wid in ids])
         if not all(bounds):
             return NotImplemented
         spans = dict(zip(ids, map(json.loads, bounds)))
-        redis = await self._client()
         async with redis.pipeline(transaction=False) as reads:
             for start, end, entry_start, entry_end in spans.values():
                 reads.getrange(state_key, start, end)
@@ -385,13 +417,18 @@ class RedisDistributedScheduler:
                     return False, result
                 epoch = uuid.uuid4().hex
                 if large:
-                    encoded, layout = await asyncio.to_thread(self._encode_layout, snapshot, epoch)
+                    encoded, layout, positions = await asyncio.to_thread(self._encode_layout, snapshot, epoch)
                 else:
-                    encoded, layout = self._encode_layout(snapshot, epoch)
+                    encoded, layout, positions = self._encode_layout(snapshot, epoch)
                 pipe.multi()
                 layout_key = self.key_prefix + ":claim-layout"
                 pipe.delete(layout_key)
                 pipe.hset(layout_key, mapping=layout)
+                for name, scores in positions.items():
+                    order_key = self.key_prefix + ":" + name + "-positions"
+                    pipe.delete(order_key)
+                    if scores:
+                        pipe.zadd(order_key, scores)
                 pipe.set(state_key, encoded)
                 self._publish_claim_index(pipe, reference, state, snapshot, epoch, indexed=indexed, prior_counts=counts)
                 await pipe.execute()
@@ -465,12 +502,137 @@ class RedisDistributedScheduler:
             delay = self.poll_seconds if deadline is None else min(self.poll_seconds, max(0, deadline - time.monotonic()))
             await asyncio.sleep(delay)
 
+    @staticmethod
+    def _erase_json_entry(patches, key, start, end, first):
+        # Erase one adjacent comma too, keeping the array/object valid even
+        # after neighboring entries were previously blanked in place.
+        if first[0][0] != key:
+            start -= 1
+        elif len(first) > 1:
+            patches.append((int(first[1][1]) - 1, " "))
+        patches.append((start, " " * (end - start + 1)))
+
+    async def _update_lease(self, lease, operation, *, release=False, requeue=False):
+        """Patch the v1 document under the same fence used by snapshot writers."""
+        from redis.exceptions import WatchError
+
+        redis = await self._client()
+        state_key = self.key_prefix + ":state"
+        layout = self.key_prefix + ":claim-layout"
+        positions = self.key_prefix + ":item-positions"
+        wid = lease.work.work_id
+        guard = self._guard_key(lease.work.run_id)
+        for _ in range(32):
+            async with self._mutation_lock, redis.pipeline() as pipe:
+                try:
+                    await pipe.watch(state_key, guard)
+                    offset_field = "release-tail" if release else "tail"
+                    epoch, tail, item, pending = await pipe.hmget(layout, ("epoch", offset_field, "item:" + wid, "work:" + wid))
+                    if not item or not epoch or tail is None:
+                        return NotImplemented
+                    prefix = self._claim_prefix(epoch)
+                    async with redis.pipeline(transaction=True) as reads:
+                        reads.getrange(state_key, 0, len(prefix) - 1)
+                        reads.getrange(state_key, int(tail), -1)
+                        reads.get(self._claim_head_key())
+                        reads.exists(guard)
+                        reads.time()
+                        if release and not requeue:
+                            reads.zrange(positions, 0, 1, withscores=True)
+                        actual, raw, head, guarded, (seconds, micros), *order = await reads.execute()
+                    if actual != prefix:
+                        return NotImplemented
+                    # Validate reads before decoding variable offsets.
+                    expected_start = '"sequence":' if release else '"leases":'
+                    if not raw.startswith(expected_start) or "\x1e" in raw or not head:
+                        return NotImplemented
+                    active = json.loads("{" + raw)
+                    version, limits, counts, _, _ = json.loads(head)
+                    if version != epoch or limits != self._limits:
+                        return NotImplemented
+                    if guarded and release:
+                        return NotImplemented
+                    now = datetime.fromtimestamp(seconds + micros / 1e6, timezone.utc)
+                    reference = self._reference(now, {**active, "format": "sage.scheduler-state/v1"})
+                    if guarded:
+                        reference._fenced_runs.add(lease.work.run_id)
+                    result = await operation(reference)
+                    patches = []
+                    removed_receipt = None
+                    start, end, queue = json.loads(item)
+                    if release and requeue:
+                        if not pending:
+                            return NotImplemented
+                        _, _, low, high = json.loads(pending)
+                        retry = reference._items[wid]
+                        entry = reference._pending[0]
+                        for a, b, value in ((start, end, retry.model_dump(mode="json")), (low, high, entry)):
+                            encoded = json.dumps(value, separators=(",", ":"))
+                            if len(encoded) > b - a + 1:
+                                return NotImplemented
+                            patches.append((a, encoded.ljust(b - a + 1)))
+                        counts[queue] = counts.get(queue, 0) + 1
+                    elif release:
+                        first = order[0]
+                        if not first:
+                            return NotImplemented
+                        self._erase_json_entry(patches, wid, start, end, first)
+                        keys = active["terminal_idempotency_keys"]
+                        if len(keys) >= self.max_retained_terminal_items:
+                            retired = keys[0] if keys else lease.work.idempotency_key
+                            receipt = await pipe.hget(layout, "receipt:" + retired)
+                            if receipt is None:
+                                return NotImplemented
+                            low, high, prior_wid = json.loads(receipt)
+                            if prior_wid == wid or not await pipe.hexists(layout, "item:" + prior_wid):
+                                earliest = await pipe.zrange(self.key_prefix + ":receipt-positions", 0, 1, withscores=True)
+                                if not earliest:
+                                    return NotImplemented
+                                self._erase_json_entry(patches, retired, low, high, earliest)
+                                reference._cancelled.discard(prior_wid)
+                                removed_receipt = retired
+                    updated = reference._dump_state_locked()
+                    lease_tail = json.dumps({key: updated[key] for key in ("leases", "fence_sequence")},
+                                            separators=(",", ":"))[1:]
+                    history = ""
+                    if release:
+                        history = json.dumps({key: updated[key] for key in ("sequence", "terminal_idempotency_keys", "cancelled")},
+                                             separators=(",", ":"))[1:-1] + ","
+                    encoded = history + lease_tail
+                    expiry = min((row.expires_at.timestamp() for row in reference._leases.values()), default=float("inf"))
+                    pipe.multi()
+                    for offset, value in patches:
+                        pipe.setrange(state_key, offset, value)
+                    pipe.setrange(state_key, int(tail), encoded.ljust(len(raw)))
+                    if release:
+                        pipe.hset(layout, "tail", int(tail) + len(history))
+                    pipe.set(self._claim_head_key(), json.dumps([epoch, limits, counts, len(updated["leases"]), str(expiry)]))
+                    if removed_receipt is not None:
+                        pipe.zrem(self.key_prefix + ":receipt-positions", removed_receipt)
+                        pipe.hdel(layout, "receipt:" + removed_receipt)
+                    if release and requeue:
+                        pipe.zadd(self._claim_due_key(queue), {wid: entry[0]})
+                    elif release:
+                        pipe.zrem(positions, wid)
+                        pipe.hdel(layout, "item:" + wid, "work:" + wid)
+                    await pipe.execute()
+                    return result
+                except WatchError:
+                    continue
+        return NotImplemented
+
     async def renew(self, lease, *, lease_duration):
-        return await self._mutate(lambda value: value.renew(lease, lease_duration=lease_duration))
+        def update(value):
+            return value.renew(lease, lease_duration=lease_duration)
+        result = await self._update_lease(lease, update)
+        return await self._mutate(update) if result is NotImplemented else result
 
     async def release(self, lease, reason, *, requeue=False, available_at=None):
-        return await self._mutate(lambda value: value.release(lease, reason,
-            requeue=requeue, available_at=available_at), blocked_run=lease.work.run_id)
+        def update(value):
+            return value.release(lease, reason, requeue=requeue, available_at=available_at)
+        result = await self._update_lease(lease, update, release=True, requeue=requeue)
+        if result is NotImplemented:
+            await self._mutate(update, blocked_run=lease.work.run_id)
 
     async def assert_fence(self, lease):
         return await self._mutate(lambda value: value.assert_fence(lease))

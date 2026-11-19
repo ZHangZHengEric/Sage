@@ -102,16 +102,6 @@ class RedisManagedSessionHeads:
             found.update(archived | children)
         return found
 
-    async def has_nonterminal_sessions(self, session_ids):
-        from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
-
-        ids = tuple(dict.fromkeys(session_ids))
-        for start in range(0, len(ids), 128):
-            rows, _ = await self._run_metadata_batch(ids[start : start + 128])
-            if any(row.state not in TERMINAL_RUN_STATES for row in rows):
-                return True
-        return False
-
     async def _direct_child_ids_for_run(self, run_id):
         store = self
         await store._ensure_ready()

@@ -42,6 +42,41 @@ class SqlSessionArchive:
                     )
         return result
 
+    async def archived_cleanup_head(self, sid):
+        """Return the latest owner's JSON and whether the Session has no attachments."""
+        # Every current delta upserts a complete Session head. A legacy or
+        # incomplete head cannot certify deletion and falls back to loading.
+        if self.json_type == "JSONB":
+            head = "CASE WHEN m.revision IS NULL THEN s.compact_state #> '{sessions,0}' ELSE m.mutation #> '{upserts,sessions,0}' END"
+            fields = "head->>'revision', head->'owner', head->'attachments' = '{}'::jsonb"
+        else:
+            head = "CASE WHEN m.revision IS NULL THEN JSON_EXTRACT(s.compact_state, '$.sessions[0]') ELSE JSON_EXTRACT(m.mutation, '$.upserts.sessions[0]') END"
+            fields = """JSON_UNQUOTE(JSON_EXTRACT(head, '$.revision')), JSON_EXTRACT(head, '$.owner'),
+                        JSON_TYPE(JSON_EXTRACT(head, '$.attachments')) = 'OBJECT' AND JSON_LENGTH(head, '$.attachments') = 0"""
+        async with self._reader_connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f"""
+                    SELECT revision, {fields} FROM (
+                        SELECT s.revision, {head} AS head FROM {self._table('sessions')} s
+                        LEFT JOIN {self._table('session_mutations')} m
+                        ON s.session_id = m.session_id AND s.revision = m.revision
+                        WHERE s.session_id = %s
+                    ) latest
+                """, (sid,))
+                row = await cursor.fetchone()
+        if row is None or str(row[0]) != str(row[1]):
+            return None
+        return (_decode_json(row[2]) if row[2] is not None else None), bool(row[3])
+
+    async def archived_cleanup_lookups(self, sid):
+        async with self._reader_connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f"SELECT kind, identity FROM {self._table('locations')} WHERE session_id = %s", (sid,))
+                locations = [_json(list(row)) for row in await cursor.fetchall()]
+                await cursor.execute(f"SELECT tenant_id, principal_id, idempotency_key FROM {self._table('start_idempotency')} WHERE session_id = %s", (sid,))
+                starts = [_json(list(row)) for row in await cursor.fetchall()]
+        return locations, starts
+
     async def archived_attachment_ids(self, sid):
         async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:

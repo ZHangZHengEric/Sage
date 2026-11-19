@@ -924,3 +924,25 @@ async def test_delete_during_slow_archive_keeps_tombstone_and_pending_delete():
         release.set()
         await archiving
         await value.close()
+
+
+@pytest.mark.asyncio
+async def test_activity_projection_survives_old_writer_and_deletion(monkeypatch):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    created = await value.create_run(command(), CONTEXT)
+    sid = created.handle.session_id
+    key = value._session_key(sid)
+    await transition(value, created, RunState.RUNNING, "running")
+    with monkeypatch.context() as patch:
+        patch.setattr(value, "_run_metadata_batch", AsyncMock(side_effect=AssertionError("ledger read")))
+        assert await value.has_nonterminal_sessions([sid])
+        assert await value.has_nonterminal_session_trees([sid])
+        assert not await value.filter_suspended_session_ids([sid])
+        # Older writers maintain the Run index but leave stale activity fields.
+        await redis.hset(key, mapping={"activity_revision": "0", "has_nonterminal": "0", "has_suspended": "1"})
+        assert await value.has_nonterminal_sessions([sid])
+        assert not await value.filter_suspended_session_ids([sid])
+        await redis.hset(key, "deleted", "1")
+        assert not await value.has_nonterminal_sessions([sid])
+    await value.close()

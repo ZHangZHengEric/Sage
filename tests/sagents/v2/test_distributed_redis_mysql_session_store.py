@@ -1143,3 +1143,25 @@ async def test_durable_event_tail_handles_revision_only_updates_and_reconnect(st
     await first._redis.hset(session_key, "event_index_revision", "0")
     assert await second.read_indexed_run_events(
         rid, sid, after_sequence=added.events[-2].run_sequence, limit=1) == added.events[-1:]
+
+
+async def test_indexed_terminal_deletion_preserves_authorization_without_hydration(stores):
+    first, reader = stores
+    created = await first.create_run(command("terminal-index"), CONTEXT)
+    sid, rid = created.handle.session_id, created.handle.run_id
+    run = await first.get_run(rid)
+    await first.commit_run(run_id=rid, expected_revision=run.revision, expected_states={run.state},
+                           new_state=RunState.CANCELLED, drafts=(), context=CONTEXT, idempotency_key="cancel")
+    await first.archive_pending()
+    if hasattr(first._archive, "archived_cleanup_head"):
+        # A cold Redis miss after SQL ack must use the current archived head.
+        await first._redis.delete(first._session_key(sid))
+    with patch.object(reader, "_ensure_session_loaded", side_effect=AssertionError("loaded history")):
+        other = CONTEXT.model_copy(update={"actor": CONTEXT.actor.model_copy(update={"principal_id": "other"})})
+        with pytest.raises(SageV2Error) as denied:
+            await reader.authorize_session_actor(sid, other)
+        assert denied.value.info.code == "session.actor_not_authorized"
+        await reader.authorize_session_actor(sid, CONTEXT)
+        await reader.delete_session(sid)
+        await reader.finish_session_deletions({sid})
+    assert await reader._archive.revision(sid) is None
