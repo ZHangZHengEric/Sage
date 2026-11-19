@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent
+RELEASE_LOCK = Path('/tmp/palune-sage-production-release.lock')
 
 
 def run(*args, **kwargs):
@@ -204,26 +205,30 @@ def main():
     parser.add_argument('action', choices=['prepare', 'verify', 'cutover', 'rollback'])
     parser.add_argument('manifest', type=Path)
     args = parser.parse_args()
-    m = json.loads(args.manifest.read_text())
-    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}', m['release']):
-        parser.error('release must be a unique lowercase slug')
-    if args.action in ('prepare', 'cutover') and 'previous_release' not in m:
-        parser.error('previous_release is required (null only for the first handoff-enabled deployment)')
-    previous = m.get('previous_release')
-    if previous is not None and (
-        not isinstance(previous, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}', previous)
-        or previous == m['release']
-    ):
-        parser.error('previous_release must be a different release slug')
-    directory = Path(m.get('state_root', '/data/sage_v2/releases')) / m['release']
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with open('/tmp/palune-sage-production-release.lock', 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.action == 'prepare':
-            prepare(m, directory)
-        elif args.action == 'verify':
+    verify_only = args.action == 'verify'
+    with RELEASE_LOCK.open('a') as lock:
+        # The monitor manifest and public routes can change during cutover.
+        mode = fcntl.LOCK_SH if verify_only else fcntl.LOCK_EX | fcntl.LOCK_NB
+        fcntl.flock(lock, mode)
+        m = json.loads(args.manifest.read_text())
+        if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}', m['release']):
+            parser.error('release must be a unique lowercase slug')
+        if verify_only:
             local_verify(m)
             public_verify(m)
+            return
+        if args.action in ('prepare', 'cutover') and 'previous_release' not in m:
+            parser.error('previous_release is required (null only for the first handoff-enabled deployment)')
+        previous = m.get('previous_release')
+        if previous is not None and (
+            not isinstance(previous, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}', previous)
+            or previous == m['release']
+        ):
+            parser.error('previous_release must be a different release slug')
+        directory = Path(m.get('state_root', '/data/sage_v2/releases')) / m['release']
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if args.action == 'prepare':
+            prepare(m, directory)
         elif args.action == 'cutover':
             cutover(m, directory)
         else:

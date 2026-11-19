@@ -57,6 +57,24 @@ def test_web_html_cannot_pass_readiness():
             release.verify('http://api', 'http://web')
 
 
+def test_verify_reads_current_manifest_after_shared_lock(tmp_path, monkeypatch):
+    manifest = tmp_path / 'current.json'
+    manifest.write_text('{"release": "previous"}')
+
+    def wait_for_release(_lock, mode):
+        assert mode == release.fcntl.LOCK_SH
+        manifest.write_text('{"release": "current"}')
+
+    monkeypatch.setattr(release, 'RELEASE_LOCK', tmp_path / 'release.lock')
+    monkeypatch.setattr('sys.argv', ['release_v2.py', 'verify', str(manifest)])
+    with patch.object(release.fcntl, 'flock', side_effect=wait_for_release), \
+            patch.object(release, 'local_verify') as local, \
+            patch.object(release, 'public_verify') as public:
+        release.main()
+    local.assert_called_once_with({'release': 'current'})
+    public.assert_called_once_with({'release': 'current'})
+
+
 @pytest.mark.parametrize('subnet', (None, '10.250.64.16/28'))
 def test_prepare_generates_isolated_pair_and_proxy_healthcheck(tmp_path, subnet):
     from types import SimpleNamespace

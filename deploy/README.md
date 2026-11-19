@@ -98,6 +98,6 @@ python3 deploy/release_v2.py rollback /path/to/release.json
 
 新版通过观察期后，安全排空旧 worker，再停止并移除上一版 Sage v2 的前后端容器，删除对应的旧版镜像。核对旧容器和镜像引用均已消失、共享 Redis 队列只由当前版本领取任务，并再次验证公网入口。完成这些检查后才算发布结束。清理范围为上一版容器和镜像，生产共享数据卷及发布记录继续保留。若清理后需要回滚，先重建或拉取对应版本的镜像，再依照发布记录恢复旧实例和入口。
 
-持续监测可通过 systemd timer 每分钟运行当前 release 的 `verify` 命令，失败以非零退出码写入 journal，接入现有告警平台。Docker unhealthy 只提供状态，不代表会自动重启或发送告警。
+持续监测可通过 systemd timer 每分钟运行当前 release 的 `verify` 命令。巡检等待发布锁释放后读取最新清单，然后检查本机和公网入口。检查失败以非零退出码写入 journal，接入现有告警平台。Docker unhealthy 只提供状态，不代表会自动重启或发送告警。
 
 withling 已安装工具至 `/opt/sage-release/deploy/release_v2.py`，当前巡检清单为 `/opt/sage-release/current.json`，定时器为 `sage-v2-verify.timer`。示例中的 `monitor_manifest` 指向这份已存在的巡检清单；切流和回滚会一起更新它，使巡检跟随当前版本。其他主机未安装巡检时可删除该字段。查看最近结果：`journalctl -u sage-v2-verify.service -n 30`。当前巡检不发送外部通知。
