@@ -524,6 +524,8 @@ async def test_private_chat_video_object_is_reused_and_signed_with_the_aws_sdk(m
         S3VideoStorageConfig,
         publish_videos,
     )
+    from sagents.v2.runtime.artifact import InMemoryArtifactStore
+    from sagents.v2.runtime.artifact.video_storage import bind_video_copy_owner
 
     client = boto3.session.Session(
         aws_access_key_id="test-key", aws_secret_access_key="test-secret", region_name="us-east-1"
@@ -536,7 +538,7 @@ async def test_private_chat_video_object_is_reused_and_signed_with_the_aws_sdk(m
         "ContentType": "video/mp4", "IfNoneMatch": "*",
     }
     expected_head = {"Bucket": "private-video", "Key": ANY}
-    with Stubber(client) as stub:
+    with bind_video_copy_owner("owner-run", InMemoryArtifactStore(), lambda upload: upload()), Stubber(client) as stub:
         stub.add_client_error(
             "head_object", service_error_code="403", http_status_code=403,
             expected_params=expected_head,
@@ -557,7 +559,7 @@ async def test_private_chat_video_object_is_reused_and_signed_with_the_aws_sdk(m
         stub.assert_no_pending_responses()
 
     assert first.path == replay.path == concurrent.path
-    assert first.path.startswith("/sage/model-video/") and first.path.endswith(".mp4")
+    assert first.path.startswith("/sage/model-video/runs/") and first.path.endswith(".mp4")
     query = parse_qs(replay.query)
     assert query["X-Amz-Expires"] == ["300"]
     assert query["X-Amz-Signature"]
@@ -573,6 +575,8 @@ async def test_video_storage_skips_failed_history_but_fails_the_current_video(mo
         S3VideoStorageConfig,
         publish_videos,
     )
+    from sagents.v2.runtime.artifact import InMemoryArtifactStore
+    from sagents.v2.runtime.artifact.video_storage import bind_video_copy_owner
 
     client = boto3.session.Session(
         aws_access_key_id="test-key", aws_secret_access_key="test-secret", region_name="us-east-1"
@@ -582,7 +586,7 @@ async def test_video_storage_skips_failed_history_but_fails_the_current_video(mo
     videos = {history: "video/mp4", VIDEO.uri: "video/mp4"}
     config = S3VideoStorageConfig(bucket="private-video")
     head = {"Bucket": "private-video", "Key": ANY}
-    with Stubber(client) as stub:
+    with bind_video_copy_owner("owner-run", InMemoryArtifactStore(), lambda upload: upload()), Stubber(client) as stub:
         stub.add_client_error("head_object", http_status_code=503, expected_params=head)
         stub.add_response("head_object", {}, head)
         signed = await publish_videos(config, videos, required={VIDEO.uri})
@@ -815,3 +819,79 @@ async def test_step_request_hides_media_tools_for_primary_binding():
 
     assert {tool.name for tool in prepared.request.tools} == {"read_file", "analyze_video"}
     assert model.bindings == ["model.omni"]
+
+
+@pytest.mark.parametrize("kind", ["audio", "video"])
+async def test_step_request_reads_only_media_that_fits_the_model(kind):
+    from sagents.v2.context import DefaultContextAssembler
+    from sagents.v2.runtime.artifact import InMemoryArtifactStore
+    from sagents.v2.runtime.artifact.media import snapshot_media
+
+    class TrackingStore(InMemoryArtifactStore):
+        def __init__(self):
+            super().__init__()
+            self.reads = []
+
+        async def get(self, artifact_id):
+            self.reads.append(artifact_id)
+            return await super().get(artifact_id)
+
+    store = TrackingStore()
+    mime_type = "audio/wav" if kind == "audio" else "video/mp4"
+    uris = [
+        await snapshot_media(store, bytes([index]) * 384, mime_type)
+        for index in range(3)
+    ]
+    blocks = [
+        AudioBlock(uri=uri, mime_type=mime_type) if kind == "audio"
+        else FileBlock(uri=uri, mime_type=mime_type, name="clip.mp4")
+        for uri in uris
+    ]
+    ledger = tuple(ModelMessage(role="user", content=(block,)) for block in blocks)
+    command = StartRun(
+        agent_id="agent",
+        input=(InputItem(role="user", content=(TextBlock(text="inspect"),)),),
+        idempotency_key="media-budget",
+        resolved_spec_hash="sha256:spec",
+    )
+    assembler = DefaultContextAssembler(artifact_store=store)
+
+    async def prepare(provider):
+        return await DefaultAgentStepRequestBuilder(
+            context_assembler=assembler,
+            tool_catalog=InMemoryToolCatalog(()),
+            tool_selection_policy=DirectToolSelectionPolicy(),
+            model=provider,
+        ).prepare(
+            command=command, run_id="run", turn_id="turn", step_id="step",
+            messages=ledger, pending_continuation_reason=None, language=None,
+        )
+
+    text_only = _gemini(_caps(supports_multimodal_input=False))
+    unsupported = await prepare(text_only)
+    assert store.reads == []
+    assert sum(
+        isinstance(block, TextBlock) and "does not accept" in block.text
+        for message in unsupported.request.messages for block in message.content
+    ) == 3
+
+    # Audio hits the byte budget. Video has spare bytes and hits the part limit.
+    model = GeminiGenerateContentModelProvider(
+        GeminiGenerateContentConfig(
+            model="test", capabilities=_caps(**BOTH), max_inline_videos=1,
+            max_request_bytes=1024 if kind == "audio" else 20_000_000,
+        ),
+        client=object(),
+    )
+    supported = await prepare(model)
+    newest_id = uris[-1].removeprefix("sage-media:").partition(":")[0]
+    assert store.reads == [newest_id]
+    assert sum(
+        isinstance(block, (AudioBlock, FileBlock)) and block.uri.startswith("data:")
+        for message in supported.request.messages for block in message.content
+    ) == 1
+    assert sum(
+        isinstance(block, TextBlock) and "request limits" in block.text
+        for message in supported.request.messages for block in message.content
+    ) == 2
+    assert [message.content[0].uri for message in ledger] == uris

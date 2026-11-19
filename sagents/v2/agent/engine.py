@@ -2551,7 +2551,19 @@ class AgentLoopEngine:
         )
 
     async def _stream_model(self, run, request, context, state, step_id) -> tuple[RunSnapshot, ModelResponse | None, RunSnapshot | None]:
-        return await self.stream_model_step(run, request, context, state, step_id)
+        from functools import partial
+
+        from sagents.v2.runtime.artifact import SessionArtifactStore
+        from sagents.v2.runtime.artifact.video_storage import bind_video_copy_owner
+
+        session_store = self.runtime.session_store
+        if getattr(session_store, "supports_video_copy_cleanup", False) is not True:
+            return await self.stream_model_step(run, request, context, state, step_id)
+        with bind_video_copy_owner(
+            run.run_id, SessionArtifactStore(session_store, run.run_id),
+            partial(session_store.run_with_hosted_video_copy, run.run_id),
+        ):
+            return await self.stream_model_step(run, request, context, state, step_id)
 
     async def _recover_model_failure(self, run, state, step_id, error, command, context):
         import random

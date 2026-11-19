@@ -127,6 +127,12 @@ class LeaseFencedSessionStore:
             ),
         )
 
+    async def run_with_hosted_video_copy(self, run_id, operation):
+        return await self._execute_fenced(
+            run_id,
+            lambda: self.session_store.run_with_hosted_video_copy(run_id, operation),
+        )
+
     async def put_attachment(self, session_id, **kwargs):
         return await self._execute_session_fenced(
             session_id,

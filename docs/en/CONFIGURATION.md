@@ -92,9 +92,10 @@ matching input. Declare it with `audio_input` and `video_input` under
 - `openai-responses` and `anthropic-messages`: never supported; the declaration
   is ignored.
 
-After switching to a model without support, earlier audio or video in the
-history is replaced with a one-line omission notice. Raw data is never sent, and
-the request does not fail because of it.
+Sage selects recent Session attachments by model capability, configured request
+limits, and a 32 MB aggregate Base64 budget before loading payloads. A short
+notice represents unsupported attachments and attachments that exceed these
+limits. The Session keeps their original snapshots.
 
 ### Chat Completions video URLs
 
@@ -115,13 +116,16 @@ request:
 ```
 
 For existing HTTPS video URLs, set only `video_url_format`. To host workspace
-videos, install `sage[s3-video]` and provide `s3:PutObject` and `s3:GetObject`
-permissions for the selected prefix through the AWS SDK credential chain. You
-can set an HTTPS `endpoint_url` for S3-compatible storage. Sage saves the
-object in the private bucket and generates a short-lived read URL for each
-model request. The Session keeps the original attachment reference. Use the
-bucket lifecycle policy to expire hosted copies. The workspace tool still
-accepts files up to 12 MiB each.
+videos, install `sage[s3-video]` and configure the AWS SDK credential chain.
+Grant `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, and
+`s3:DeleteObjectVersion` under the configured prefix, plus `s3:ListBucket` and
+`s3:ListBucketVersions` scoped to that prefix. You can set an HTTPS
+`endpoint_url` for S3-compatible storage. Sage records ownership in the Session
+before the upload and stores copies under a per-Run prefix. Session deletion,
+including tenant cleanup, removes these copies and their object versions. If
+cleanup fails, the Session retains its record so deletion can be retried with
+access to the original bucket. The bucket lifecycle can expire old copies as a
+backstop. The workspace tool accepts files up to 12 MiB each.
 
 Chat Completions also replaces older videos beyond `max_inline_videos`
 (default 10) with text references. When the body exceeds `max_request_bytes`,

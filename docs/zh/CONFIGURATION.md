@@ -84,8 +84,8 @@ models:
   部分 OpenRouter 模型）设为 `true`，音频以 `input_audio`、视频以 `video_url` 发送。
 - `openai-responses`、`anthropic-messages`：始终不支持，声明会被忽略。
 
-切换到不支持的模型后，历史中的音视频会替换为一行省略说明，不会发送原始数据，
-也不会因此导致请求失败。
+Sage 会按模型能力、请求限额和 32 MB 的附件 Base64 总预算优先选择近期附件，再加载
+选中的内容。不支持或超出限额的附件会替换为一行省略说明，会话仍保留原始附件快照。
 
 ### Chat Completions 视频 URL
 
@@ -106,10 +106,12 @@ request:
 ```
 
 已有可直读的 HTTPS 视频 URL 时，只需设置 `video_url_format`。工作区视频使用对象存储
-时需安装 `sage[s3-video]`，并通过 AWS SDK 的凭据链提供所选前缀的
-`s3:PutObject` 和 `s3:GetObject` 权限。S3 兼容存储可设置 HTTPS `endpoint_url`。
-Sage 将文件存入私有桶，在每轮请求时签发临时读取 URL。会话保留原始附件引用，所选桶可
-通过生命周期规则清理副本。工作区工具的单文件上限仍为 12 MiB。
+时需安装 `sage[s3-video]`，并配置 AWS SDK 凭据链。所选前缀需要 `s3:PutObject`、
+`s3:GetObject`、`s3:DeleteObject` 和 `s3:DeleteObjectVersion`，其桶需要限定此前缀的
+`s3:ListBucket` 和 `s3:ListBucketVersions` 权限。S3 兼容存储可设置 HTTPS
+`endpoint_url`。Sage 在上传前将归属持久化到会话，副本存放在 Run 独立前缀下。
+删除会话或清理租户时，会删除副本及其对象版本。清理失败时会话保留归属记录，可恢复对原桶
+的访问后重试。桶生命周期仍可作为兜底。工作区工具的单文件上限为 12 MiB。
 
 Chat Completions 同样先按 `max_inline_videos`（默认 10）把较早的视频替换为文字引用，
 再在请求体超过 `max_request_bytes` 时，按从早到晚的顺序把内联音频和视频替换为文字

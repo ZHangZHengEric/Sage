@@ -11,12 +11,13 @@ import json
 from dataclasses import dataclass
 from typing import Protocol
 
-from sagents.v2.context import ContextAssembler
+from sagents.v2.context import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.contracts import ContextBudget
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.i18n import tr
 from sagents.v2.model.contracts import (
+    ModelCapabilities,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -88,9 +89,8 @@ class DefaultAgentStepRequestBuilder:
             catalog_tools, command.invocation_mode
         )
         model_binding = command.config.model_bindings.get("primary", "primary")
-        catalog_tools = await tools_for_model_inputs(
-            catalog_tools, self.model, model_binding
-        )
+        capabilities = await media_capabilities(self.model, model_binding)
+        catalog_tools = filter_media_tools(catalog_tools, capabilities)
         window = getattr(self.context_assembler, "windowed_ledger", None)
         selection = self.tool_selection_policy.select(
             ToolSelectionRequest(
@@ -129,11 +129,14 @@ class DefaultAgentStepRequestBuilder:
             else ()
         )
         suffix_messages = (*hidden_index_messages, *continuation_messages)
-        prepared_messages = await self.context_assembler.prepare_messages(
-            command,
-            messages,
-            run_id=run_id,
-        )
+        if isinstance(self.context_assembler, DefaultContextAssembler):
+            prepared_messages = await self.context_assembler.prepare_messages(
+                command, messages, run_id=run_id, media_capabilities=capabilities
+            )
+        else:
+            prepared_messages = await self.context_assembler.prepare_messages(
+                command, messages, run_id=run_id
+            )
         prepared_messages = (*prepared_messages, *suffix_messages)
         request = ModelRequest(
             request_id=new_id("model_request"),
@@ -255,32 +258,51 @@ def tools_for_invocation_mode(
     )
 
 
+async def media_capabilities(
+    model: ModelProvider | None, model_binding: str
+) -> ModelCapabilities | None:
+    if model is None:
+        return None
+    try:
+        return await model.capabilities(model_binding)
+    except Exception:
+        # Continue serving text when capability discovery is unavailable.
+        return ModelCapabilities(
+            supports_streaming=True,
+            supports_tools=False,
+            supports_parallel_tool_calls=False,
+            supports_reasoning=False,
+            supports_multimodal_input=False,
+            supports_structured_output=False,
+        )
+
+
+def filter_media_tools(
+    tools: tuple[ToolDefinition, ...], capabilities: ModelCapabilities | None
+) -> tuple[ToolDefinition, ...]:
+    if capabilities is None:
+        return tools
+    accepted = {
+        kind
+        for kind, supported in (
+            ("audio", capabilities.supports_audio_input),
+            ("video", capabilities.supports_video_input),
+        )
+        if supported is True
+    }
+    return tuple(
+        tool for tool in tools if accepted.issuperset(tool.required_model_inputs)
+    )
+
+
 async def tools_for_model_inputs(
     tools: tuple[ToolDefinition, ...],
     model: ModelProvider | None,
     model_binding: str,
 ) -> tuple[ToolDefinition, ...]:
-    """Hide Tools whose required media inputs the bound model cannot accept."""
-
-    if model is None or not any(tool.required_model_inputs for tool in tools):
+    if not any(tool.required_model_inputs for tool in tools):
         return tools
-    try:
-        capabilities = await model.capabilities(model_binding)
-    except Exception:
-        # Tool projection must not fail the step; hide inputs we cannot confirm.
-        accepted: set[str] = set()
-    else:
-        accepted = {
-            kind
-            for kind, value in (
-                ("audio", capabilities.supports_audio_input),
-                ("video", capabilities.supports_video_input),
-            )
-            if value is True
-        }
-    return tuple(
-        tool for tool in tools if accepted.issuperset(tool.required_model_inputs)
-    )
+    return filter_media_tools(tools, await media_capabilities(model, model_binding))
 
 
 __all__ = [

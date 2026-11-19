@@ -160,7 +160,11 @@ class GeminiGenerateContentModelProvider:
         return "budget" if model.startswith("gemini-2.5") else "level"
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self._effective_capabilities()
+        return self._effective_capabilities().model_copy(update={
+            "media_request_bytes": self.config.max_request_bytes,
+            "max_video_parts": self.config.max_inline_videos,
+            "hosts_inline_video": self.config.video_storage is not None,
+        })
 
     def _effective_capabilities(self) -> ModelCapabilities:
         capabilities = self.config.capabilities

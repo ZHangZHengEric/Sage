@@ -225,7 +225,11 @@ class OpenAICompatibleModelProvider:
         return self._resolved_max_output_tokens_field
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self._effective_capabilities()
+        return self._effective_capabilities().model_copy(update={
+            "media_request_bytes": openai_request_limit(self.config),
+            "max_video_parts": self.config.max_inline_videos,
+            "hosts_inline_video": self.config.video_storage is not None,
+        })
 
     def _effective_capabilities(self) -> ModelCapabilities:
         # Audio/video support depends on the model behind the gateway.
