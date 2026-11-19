@@ -43,6 +43,7 @@ from sagents.v2.model.recovery_policy import (
 from sagents.v2.agent.step_request import (
     AgentStepRequestBuilder,
     DefaultAgentStepRequestBuilder,
+    media_capabilities,
     tools_for_invocation_mode,
     tools_for_model_inputs,
 )
@@ -3195,7 +3196,21 @@ class AgentLoopEngine:
             restore_history_search = getattr(self.context_assembler, "restore_history_search", None)
             if restore_history_search is not None:
                 await restore_history_search(command, state.messages, run_id=run.run_id)
-        execution = asyncio.create_task(self.tool_executor.execute(call, context))
+        if call.tool_name == "analyze_audio":
+            from sagents.v2.tool.contracts import remote_audio_input
+
+            capabilities = await media_capabilities(
+                self.model, command.config.model_bindings.get("primary", "primary")
+            )
+            token = remote_audio_input.set(
+                capabilities is not None and capabilities.supports_remote_audio_input
+            )
+            try:
+                execution = asyncio.create_task(self.tool_executor.execute(call, context))
+            finally:
+                remote_audio_input.reset(token)
+        else:
+            execution = asyncio.create_task(self.tool_executor.execute(call, context))
         cancellable = definition.cancel_semantics in {
             CancelSemantics.COOPERATIVE,
             CancelSemantics.FORCEABLE,

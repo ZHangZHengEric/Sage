@@ -129,6 +129,7 @@ class ServerHost:
             mcp_plugins=self.mcp_plugins,
             a2a_plugins=self.a2a_plugins,
             skills=self.skill_catalog,
+            video_storage_profiles=settings.video_storage_profiles,
         )
         self.catalog.extensions = self.extensions
         self.credentials = CredentialService(
@@ -273,7 +274,10 @@ class ServerHost:
         try:
             self._run_quota = run_quota
             self.execution.model_budget = model_budget
-            host_models = ServerModelClients(max_clients=self.settings.max_model_clients)
+            host_models = ServerModelClients(
+                max_clients=self.settings.max_model_clients,
+                video_storage_profiles=self.settings.video_storage_profiles,
+            )
             self.execution.model_pool = host_models
             from app.v2.server.runtime.sdk_plugins import server_registrations, service_registration, service_selection, SCHEDULER_CONFIG_SCHEMA
             builder = SAgentBuilder()

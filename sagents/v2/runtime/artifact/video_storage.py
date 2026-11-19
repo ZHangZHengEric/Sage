@@ -6,8 +6,9 @@ import asyncio
 import base64
 import hashlib
 from collections.abc import Collection
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import partial
 from urllib.parse import urlsplit
 
@@ -115,30 +116,43 @@ async def publish_videos(
             raise _storage_error("Video storage requires a Session-owned model request.")
         return {}
     run_id, store, dispatch = owner
-    serialized = config.model_dump_json()
-    identity = hashlib.sha256(f"{run_id}\0{serialized}".encode()).hexdigest()
-
-    async def empty_receipt():
-        # The receipt is small metadata; no media is duplicated here.
-        yield b""
-
-    try:
-        await store.put(
-            artifact_id=VIDEO_COPY_RECEIPT_PREFIX + identity,
-            media_type="application/x-sage-video-copy",
-            content=empty_receipt(),
-            metadata={"run_id": run_id, "storage": config.model_dump(mode="json")},
-        )
-    except (SageV2Error, OSError):
-        if set(required).intersection(videos):
-            raise _storage_error("Could not record ownership of the video copy.", retryable=True) from None
-        return {}
-    async def upload():
-        return await _settle_object_operation(partial(
-            _upload_and_sign, config, _copy_prefix(config, run_id), videos, frozenset(required)
+    required = frozenset(required)
+    prefix = _copy_prefix(config, run_id)
+    # Client setup, decoding and read-only checks cannot create a copy. Keep
+    # the client alive across preparation and upload, even on cancellation.
+    with ExitStack() as resources:
+        plan = await _settle_object_operation(partial(
+            _prepare_upload, config, prefix, videos, required, resources
         ))
+        if plan is None:
+            return {}
+        client, copies = plan
+        operation = partial(_upload_and_sign, client, config, copies, required)
+        if not any(copy.payload is not None for copy in copies.values()):
+            return await _settle_object_operation(operation)
 
-    return await dispatch(upload)
+        serialized = config.model_dump_json()
+        identity = hashlib.sha256(f"{run_id}\0{serialized}".encode()).hexdigest()
+
+        async def empty_receipt():
+            yield b""
+
+        try:
+            await store.put(
+                artifact_id=VIDEO_COPY_RECEIPT_PREFIX + identity,
+                media_type="application/x-sage-video-copy",
+                content=empty_receipt(),
+                metadata={"run_id": run_id, "storage": config.model_dump(mode="json")},
+            )
+        except (SageV2Error, OSError):
+            if required.intersection(copies):
+                raise _storage_error("Could not record ownership of the video copy.", retryable=True) from None
+            return {}
+
+        async def upload():
+            return await _settle_object_operation(operation)
+
+        return await dispatch(upload)
 
 
 async def _settle_object_operation(operation):
@@ -177,77 +191,108 @@ def _client(config: S3VideoStorageConfig):
     )
 
 
-def _upload_and_sign(
-    config: S3VideoStorageConfig, prefix: str, videos: dict[str, str], required: frozenset[str],
-) -> dict[str, str]:
-    def give_up(error: SageV2Error) -> dict[str, str]:
-        if required.intersection(videos):
-            raise error
-        return {}
+@dataclass(frozen=True, slots=True)
+class _VideoCopy:
+    key: str
+    mime_type: str
+    payload: bytes | None  # Existing objects only need a fresh signature.
 
-    from botocore.exceptions import BotoCoreError, ClientError, ConnectionError, HTTPClientError
 
-    def translate(exc: SageV2Error | ClientError | BotoCoreError) -> SageV2Error:
-        if isinstance(exc, SageV2Error):
-            return exc
-        if isinstance(exc, ClientError):
-            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0
-            return _storage_error(
-                "Could not upload the video to the configured object storage.",
-                retryable=status in {409, 429} or status >= 500,
-            )
-        if isinstance(exc, (ConnectionError, HTTPClientError)):
-            return _storage_error("Could not reach video object storage.", retryable=True)
-        return _storage_error("Could not use the configured video object storage.")
+def _storage_failure(exc):
+    from botocore.exceptions import ClientError, ConnectionError, HTTPClientError
 
-    def store(client, uri: str, mime_type: str) -> str:
-        payload = _decode_video(uri, mime_type)
-        key = _object_key(prefix, payload, mime_type)
-        try:
-            client.head_object(Bucket=config.bucket, Key=key)
-        except ClientError as error:
-            status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            # A missing key can return 403 when the principal has no ListBucket grant.
-            if status not in {403, 404}:
-                raise
-            try:
-                client.put_object(
-                    Bucket=config.bucket, Key=key, Body=payload,
-                    ContentType=mime_type, IfNoneMatch="*",
-                )
-            except ClientError as conflict:
-                if conflict.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
-                    raise
-        return key
+    if isinstance(exc, SageV2Error):
+        return exc
+    if isinstance(exc, ClientError):
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0
+        return _storage_error(
+            "Could not access the configured video object storage.",
+            retryable=status in {409, 429} or status >= 500,
+        )
+    if isinstance(exc, (ConnectionError, HTTPClientError)):
+        return _storage_error("Could not reach video object storage.", retryable=True)
+    return _storage_error("Could not use the configured video object storage.")
+
+
+def _prepare_upload(config, prefix, videos, required, resources):
+    from botocore.exceptions import BotoCoreError, ClientError
 
     try:
-        with closing(_client(config)) as client:
-            keys = {}
-            for uri, mime_type in videos.items():
-                try:
-                    keys[uri] = store(client, uri, mime_type)
-                except (SageV2Error, ClientError, BotoCoreError) as exc:
-                    if uri in required:
-                        raise translate(exc) from None
-            # Give every video the full TTL after all uploads have finished.
-            urls = {
-                uri: client.generate_presigned_url(
-                    "get_object", Params={"Bucket": config.bucket, "Key": key},
-                    ExpiresIn=config.url_ttl_seconds,
-                )
-                for uri, key in keys.items()
-            }
-    except SageV2Error:
-        raise
+        client = resources.enter_context(closing(_client(config)))
     except (ClientError, BotoCoreError) as exc:
-        return give_up(translate(exc))
+        if required.intersection(videos):
+            raise _storage_failure(exc) from None
+        return None
 
-    for uri, url in list(urls.items()):
-        parsed = urlsplit(url)
-        if parsed.scheme != "https" or not parsed.hostname or not parsed.query:
+    copies = {}
+    pending = set()
+    for uri, mime_type in videos.items():
+        try:
+            payload = _decode_video(uri, mime_type)
+            key = _object_key(prefix, payload, mime_type)
+            try:
+                client.head_object(Bucket=config.bucket, Key=key)
+            except ClientError as error:
+                status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                if status not in {403, 404}:
+                    raise
+                pending.add(uri)
+            else:
+                payload = None
+            copies[uri] = _VideoCopy(key, mime_type, payload)
+        except (SageV2Error, ClientError, BotoCoreError) as exc:
             if uri in required:
+                raise _storage_failure(exc) from None
+
+    if pending:
+        # Verify the exact cleanup scope can be listed before arming a
+        # receipt or issuing a PUT. An inaccessible bucket must not make
+        # its Session undeletable without ever storing any bytes.
+        try:
+            client.list_object_versions(Bucket=config.bucket, Prefix=prefix, MaxKeys=1)
+            client.list_objects_v2(Bucket=config.bucket, Prefix=prefix, MaxKeys=1)
+        except (ClientError, BotoCoreError) as exc:
+            if required.intersection(pending):
+                raise _storage_failure(exc) from None
+            copies = {uri: copy for uri, copy in copies.items() if uri not in pending}
+    return (client, copies) if copies else None
+
+
+def _upload_and_sign(client, config, copies, required) -> dict[str, str]:
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    uploaded = {}
+    for uri, copy in copies.items():
+        try:
+            if copy.payload is not None:
+                try:
+                    client.put_object(
+                        Bucket=config.bucket, Key=copy.key, Body=copy.payload,
+                        ContentType=copy.mime_type, IfNoneMatch="*",
+                    )
+                except ClientError as conflict:
+                    if conflict.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
+                        raise
+            uploaded[uri] = copy.key
+        except (ClientError, BotoCoreError) as exc:
+            if uri in required:
+                raise _storage_failure(exc) from None
+
+    # Give every video its full TTL after all uploads finish.
+    urls = {}
+    for uri, key in uploaded.items():
+        try:
+            url = client.generate_presigned_url(
+                "get_object", Params={"Bucket": config.bucket, "Key": key},
+                ExpiresIn=config.url_ttl_seconds,
+            )
+            parsed = urlsplit(url)
+            if parsed.scheme != "https" or not parsed.hostname or not parsed.query:
                 raise _storage_error("Video storage did not return a signed HTTPS URL.")
-            del urls[uri]
+            urls[uri] = url
+        except (SageV2Error, ClientError, BotoCoreError) as exc:
+            if uri in required:
+                raise _storage_failure(exc) from None
     return urls
 
 

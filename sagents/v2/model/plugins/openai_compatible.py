@@ -58,6 +58,7 @@ from sagents.v2.model.plugins._shared.media import (
     media_kind,
     media_reference_text,
     omitted_media_text,
+    omit_historical_remote_media,
     resolve_media_capabilities,
 )
 from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
@@ -226,6 +227,7 @@ class OpenAICompatibleModelProvider:
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
         return self._effective_capabilities().model_copy(update={
+            "supports_remote_audio_input": False,
             "media_request_bytes": openai_request_limit(self.config),
             "max_video_parts": self.config.max_inline_videos,
             "hosts_inline_video": self.config.video_storage is not None,
@@ -251,7 +253,10 @@ class OpenAICompatibleModelProvider:
         """Build the payload template before upload and request sizing."""
         kwargs: dict[str, Any] = {
             "model": self.config.model,
-            "messages": [self._message(message) for message in request.messages],
+            "messages": [
+                self._message(message)
+                for message in omit_historical_remote_media(request.messages)
+            ],
             "stream": True,
             "stream_options": {"include_usage": True},
         }

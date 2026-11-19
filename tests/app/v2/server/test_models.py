@@ -121,3 +121,48 @@ def test_model_detail_exposes_key_only_in_authorized_detail_scope(client):
     admin_view = {"Authorization": f"Bearer {admin_token}", "X-Sage-View-User": alice_id}
     assert client.get(path, headers=admin_view).json()["data"]["api_key"] == "detail-test-key"
     assert client.get("/api/models/missing", headers=alice_headers).status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/api/models", "/api/models/probe"])
+@pytest.mark.parametrize("extra", [
+    {"video_storage": {"bucket": "unmanaged"}},
+    {"video_storage_profile": "not-granted"},
+])
+def test_model_api_rejects_unapproved_video_storage(client, path, extra):
+    headers = {"Authorization": f"Bearer {register_and_login(client)}"}
+    response = client.post(path, headers=headers, json={
+        "protocol": "gemini-generate-content",
+        "model": "test",
+        "api_key": "test-key",
+        "request": {"extra": extra},
+    })
+    assert response.status_code == 403
+    assert response.json()["message"] == "Choose a Server video storage profile authorized for this model owner."
+
+
+@pytest.mark.asyncio
+async def test_video_storage_grant_is_bound_to_model_owner():
+    from app.v2.server.config.video_storage import VideoStorageProfile
+    from sagents.v2.contracts.errors import SageV2Error
+    from sagents.v2.runtime.artifact.video_storage import S3VideoStorageConfig
+
+    config = S3VideoStorageConfig(bucket="host-approved")
+    pool = ServerModelClients(video_storage_profiles={
+        "team": VideoStorageProfile(owner_ids=frozenset({"alice"}), storage=config)
+    })
+    record, _ = apply_upsert(empty_catalog(), {
+        "protocol": "gemini-generate-content", "model": "test", "api_key": "test-key",
+        "request": {"extra": {"video_storage_profile": "team"}},
+    })
+    try:
+        lease = await pool.acquire("alice", record)
+        try:
+            assert lease.provider.config.video_storage == config
+            assert lease.provider.config.extra_body == {}
+            with pytest.raises(SageV2Error) as denied:
+                await pool.acquire("bob", record)
+            assert denied.value.info.code == "server.model_video_storage_forbidden"
+        finally:
+            await lease.close()
+    finally:
+        await pool.close()

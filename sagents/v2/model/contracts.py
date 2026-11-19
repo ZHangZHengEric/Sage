@@ -29,6 +29,7 @@ class ModelCapabilities(StrictModel):
     # None defers to the wire protocol plugin, which resolves a concrete value.
     supports_audio_input: bool | None = None
     supports_video_input: bool | None = None
+    supports_remote_audio_input: bool = False
     media_request_bytes: int | None = Field(default=None, gt=0)
     max_video_parts: int | None = Field(default=None, gt=0)
     hosts_inline_video: bool = False

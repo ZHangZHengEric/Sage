@@ -97,7 +97,7 @@ class ModelClientPool:
             json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
         ).hexdigest()
 
-    async def acquire(self, user_id, record) -> ModelLease:
+    async def acquire(self, user_id, record, *, factory=None) -> ModelLease:
         key = self._key(user_id, record)
         while True:
             retiring = None
@@ -136,7 +136,7 @@ class ModelClientPool:
                         retiring = self._retire(idle[1])
                     else:
                         building = asyncio.create_task(
-                            self._factory(record.model_copy(deep=True))
+                            (factory or self._factory)(record.model_copy(deep=True))
                         )
                         building.add_done_callback(_consume)
                         entry = _Entry(building)

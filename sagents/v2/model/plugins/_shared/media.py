@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from sagents.v2.contracts.items import AudioBlock, FileBlock
-from sagents.v2.model.contracts import ModelCapabilities
+from sagents.v2.contracts.items import AudioBlock, FileBlock, TextBlock
+from sagents.v2.model.contracts import ModelCapabilities, ModelMessage
 from sagents.v2.runtime.artifact.workspace_images import materialize_inline_media
 
 MediaKind = Literal["audio", "video"]
@@ -19,6 +19,35 @@ def media_kind(block: object) -> MediaKind | None:
         if prefix == "audio" or prefix == "video":
             return prefix
     return None
+
+
+def omit_historical_remote_media(
+    messages: tuple[ModelMessage, ...],
+) -> tuple[ModelMessage, ...]:
+    """Keep history intact while limiting remote media fetches to their turn."""
+    last_reply = next(
+        (index for index in range(len(messages) - 1, -1, -1)
+         if messages[index].role == "assistant"),
+        -1,
+    )
+    if last_reply < 0:
+        return messages
+    history = []
+    for message in messages[:last_reply + 1]:
+        content = []
+        for block in message.content:
+            kind = media_kind(block)
+            if kind and block.uri.lstrip()[:8].lower().startswith(("http://", "https://", "gs://")):
+                block = TextBlock(
+                    text=f"[Earlier {kind} attachment omitted from the model request.]"
+                )
+            content.append(block)
+        history.append(
+            message if tuple(content) == message.content
+            else message.model_copy(update={"content": tuple(content)})
+        )
+    return (*history, *messages[last_reply + 1:])
+
 
 
 def accepts_media(capabilities: ModelCapabilities, kind: MediaKind) -> bool:

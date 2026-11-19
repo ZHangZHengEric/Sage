@@ -46,6 +46,7 @@ from sagents.v2.model.plugins._shared.media import (
     media_kind,
     media_reference_text,
     omitted_media_text,
+    omit_historical_remote_media,
     resolve_media_capabilities,
 )
 from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
@@ -160,7 +161,9 @@ class GeminiGenerateContentModelProvider:
         return "budget" if model.startswith("gemini-2.5") else "level"
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self._effective_capabilities().model_copy(update={
+        capabilities = self._effective_capabilities()
+        return capabilities.model_copy(update={
+            "supports_remote_audio_input": capabilities.supports_audio_input is True,
             "media_request_bytes": self.config.max_request_bytes,
             "max_video_parts": self.config.max_inline_videos,
             "hosts_inline_video": self.config.video_storage is not None,
@@ -270,7 +273,7 @@ class GeminiGenerateContentModelProvider:
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         self._validate_request(request)
-        system, contents = self._contents(request.messages)
+        system, contents = self._contents(omit_historical_remote_media(request.messages))
         generation: dict[str, Any] = {"candidateCount": 1}
         maximum = request.max_output_tokens or self.config.default_max_output_tokens
         if maximum is not None:

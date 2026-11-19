@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from enum import Enum
 from typing import Any, Literal
 
@@ -10,6 +11,10 @@ from pydantic import Field
 from sagents.v2.contracts.common import Identifier, StrictModel, ToolName
 from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.items import ContentBlock
+
+
+# Bound to the active model for the lifetime of an audio tool invocation.
+remote_audio_input: ContextVar[bool] = ContextVar("tool_remote_audio_input", default=False)
 
 
 class SideEffectLevel(str, Enum):

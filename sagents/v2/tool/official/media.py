@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import io
 import mimetypes
 from pathlib import PurePosixPath
@@ -17,6 +18,7 @@ from sagents.v2.runtime.artifact.images import snapshot_image
 from sagents.v2.runtime.artifact.media import MAX_INLINE_MEDIA_BYTES, snapshot_media
 from sagents.v2.tool import SideEffectLevel, ToolExecutionResult, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
+from sagents.v2.tool.contracts import remote_audio_input
 
 # V2 carries its own copy rather than importing the V1 helper: V2 is built to
 # stand alone, and a model-facing byte budget is not a detail worth coupling
@@ -157,6 +159,12 @@ class MediaTools:
                 "error", f"Invalid {kind} path or URL.", reason="invalid_path"
             )
         remote = parsed.scheme in {"http", "https", "gs"} and bool(parsed.netloc)
+        if kind == "audio" and remote and not remote_audio_input.get():
+            return result(
+                "error",
+                "The current model cannot read a remote audio URL. Use a workspace audio file.",
+                reason="remote_audio_unsupported",
+            )
         name = PurePosixPath(parsed.path if remote else path).name
         mime_type = _MEDIA_TYPES.get(PurePosixPath(name).suffix.lower(), "")
         if not mime_type.startswith(kind + "/"):

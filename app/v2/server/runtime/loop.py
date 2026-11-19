@@ -68,7 +68,7 @@ async def open_model_lease(
     if record is None:
         return None, None
     if execution.model_pool is not None:
-        lease = await execution.model_pool.pool.acquire(user_id, record)
+        lease = await execution.model_pool.acquire(user_id, record)
         return lease.provider, lease
     if not allow_standalone:
         raise RuntimeError("model pool is not started")

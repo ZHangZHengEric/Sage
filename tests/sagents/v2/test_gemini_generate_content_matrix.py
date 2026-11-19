@@ -161,7 +161,9 @@ async def test_video_limit_preserves_newest_parts_and_original_history(
 
     assert events[-1].response is not None
     contents = json.loads(captured[0].content)["contents"]
-    assert contents[0]["parts"][0] == {"text": f"[Video reference: {old_uri}]"}
+    assert contents[0]["parts"][0] == {
+        "text": "[Earlier video attachment omitted from the model request.]"
+    }
     inline_text = contents[0]["parts"][1]["text"]
     if has_workspace:
         path = inline_text.removeprefix("[Workspace video: ").removesuffix("]")

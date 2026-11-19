@@ -216,7 +216,8 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
 
 
 @pytest.mark.asyncio
-async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path):
+@pytest.mark.parametrize("audio_mode", ["local", "remote-supported", "remote-unsupported"])
+async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path, audio_mode):
     import base64
     import json
 
@@ -232,11 +233,14 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
     (workspace / "speech.wav").write_bytes(b"audio fixture")
     (workspace / "clip.mp4").write_bytes(b"video fixture")
     tools = ("analyze_audio", "analyze_video")
+    remote_audio = "https://media.example.test/speech.wav"
+    audio_path = "speech.wav" if audio_mode == "local" else remote_audio
+    audio_attached = audio_mode != "remote-unsupported"
     calls = (
         ModelToolCall(
             tool_call_id="audio_call",
             name="analyze_audio",
-            arguments={"audio_path": "speech.wav", "prompt": "Transcribe"},
+            arguments={"audio_path": audio_path, "prompt": "Transcribe"},
         ),
         ModelToolCall(
             tool_call_id="video_call",
@@ -259,7 +263,11 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
             )
         ),
         capabilities=FULL_MODEL_CAPABILITIES.model_copy(
-            update={"supports_audio_input": True, "supports_video_input": True}
+            update={
+                "supports_audio_input": True,
+                "supports_video_input": True,
+                "supports_remote_audio_input": audio_mode == "remote-supported",
+            }
         ),
     )
     package = BuiltinPackageFactory.create("assistant", package_id="test.durable-media")
@@ -325,15 +333,20 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
         assert run.state == RunState.COMPLETED
         assert set(tools) <= {tool.name for tool in model.requests[0].tools}
         next_request = model.requests[-1]
-        assert [message.role for message in next_request.messages[-4:]] == [
-            "tool",
-            "tool",
-            "user",
-            "user",
-        ]
-        assert all(
-            message.metadata["tool_context"] for message in next_request.messages[-2:]
+        followups = 2 if audio_attached else 1
+        assert [message.role for message in next_request.messages[-(2 + followups):]] == (
+            ["tool", "tool"] + ["user"] * followups
         )
+        assert all(
+            message.metadata["tool_context"] for message in next_request.messages[-followups:]
+        )
+        if not audio_attached:
+            from sagents.v2.contracts.items import JsonBlock
+
+            result = cast(JsonBlock, next_request.messages[-3].content[0]).value
+            assert result["status"] == "error"
+            assert result["data"]["reason"] == "remote_audio_unsupported"
+            assert "workspace audio file" in result["message"]
 
         gemini = GeminiGenerateContentModelProvider(
             GeminiGenerateContentConfig(
@@ -345,14 +358,18 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
         assert tool_content["role"] == user_content["role"] == "user"
         assert [part["functionResponse"]["name"] for part in tool_content["parts"]] == list(tools)
         parts = user_content["parts"]
-        assert [{"text": "Transcribe"}, {"text": "Describe"}] == parts[::2]
-        assert [part["inlineData"]["mimeType"] for part in parts[1::2]] == [
-            "audio/wav",
-            "video/mp4",
-        ]
-        assert [
-            base64.b64decode(part["inlineData"]["data"]) for part in parts[1::2]
-        ] == [b"audio fixture", b"video fixture"]
+        assert parts[-2] == {"text": "Describe"}
+        assert parts[-1]["inlineData"]["mimeType"] == "video/mp4"
+        assert base64.b64decode(parts[-1]["inlineData"]["data"]) == b"video fixture"
+        if audio_attached:
+            assert parts[0] == {"text": "Transcribe"}
+            if audio_mode == "local":
+                assert parts[1]["inlineData"]["mimeType"] == "audio/wav"
+                assert base64.b64decode(parts[1]["inlineData"]["data"]) == b"audio fixture"
+            else:
+                assert parts[1] == {"fileData": {"mimeType": "audio/wav", "fileUri": remote_audio}}
+        else:
+            assert len(parts) == 2
         serialized = json.dumps(
             [
                 item.model_dump(mode="json")
@@ -361,7 +378,7 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
                 )
             ]
         )
-        assert serialized.count("sage-media:") >= 2
+        assert serialized.count("sage-media:") >= (2 if audio_mode == "local" else 1)
         assert "data:audio" not in serialized
         assert "data:video" not in serialized
     finally:

@@ -93,8 +93,7 @@ Sage 会按模型能力、请求限额和 32 MB 的附件 Base64 总预算优先
 
 ### Chat Completions 视频 URL
 
-对于通过 `image_url.url` 读取 MP4 的兼容网关（例如 85），在
-`models.<binding>` 中配置：
+Server 使用通过 `image_url.url` 读取 MP4 的兼容网关（例如 85）时，选择服务端授权的存储配置：
 
 ```yaml
 capabilities:
@@ -102,32 +101,36 @@ capabilities:
 request:
   extra:
     video_url_format: image_url
-    video_storage:
-      bucket: private-video-bucket
-      region: ap-southeast-1
-      prefix: sage/model-video
-      url_ttl_seconds: 900
+    video_storage_profile: gateway-video
 ```
 
-已有可直读的 HTTPS 视频 URL 时，只需设置 `video_url_format`。工作区视频使用对象存储
-时需安装 `sage[s3-video]`，并配置 AWS SDK 凭据链。所选前缀需要 `s3:PutObject`、
+服务端运维通过 `SAGE_SERVER_VIDEO_STORAGE_PROFILES` 注册配置。每项包含
+`owner_ids`（授权的 Server 用户 ID）和 `storage`（S3 存储配置）。
+
+```json
+{"gateway-video":{"owner_ids":["user-id"],"storage":{"bucket":"private-video-bucket","region":"ap-southeast-1","prefix":"sage/model-video"}}}
+```
+
+SDK 宿主可通过 `create_registered_model_provider` 的 `video_storage` 参数注入可信配置。
+模型路由参数只接受 Server 授权的配置别名。已有可直读的 HTTPS 视频 URL 时，只需设置
+`video_url_format`。工作区视频上传需安装 `sage[s3-video]` 并配置 AWS SDK 凭据链。所选前缀需要 `s3:PutObject`、
 `s3:GetObject`、`s3:DeleteObject` 和 `s3:DeleteObjectVersion`，其桶需要限定此前缀的
 `s3:ListBucket` 和 `s3:ListBucketVersions` 权限。S3 兼容存储可设置 HTTPS
-`endpoint_url`。Sage 在上传前将归属持久化到会话，副本存放在 Run 独立前缀下。
+`endpoint_url`。Sage 先对存储目标做只读检查，再持久化归属并上传。副本存放在 Run 独立前缀下。
 删除会话或清理租户时，会删除副本及其对象版本。清理失败时会话保留归属记录，可恢复对原桶
 的访问后重试。桶生命周期仍可作为兜底。工作区工具的单文件上限为 12 MiB。
 
 Chat Completions 同样先按 `max_inline_videos`（默认 10）把较早的视频替换为文字引用，
 再在请求体超过 `max_request_bytes` 时，按从早到晚的顺序把内联音频和视频替换为文字
 引用。网关转发到 Gemini 时，建议把 `max_request_bytes` 设为 `20000000`。
-`input_audio` 只接受 base64 数据，远程音频 URL 会替换为一行省略说明。
+`input_audio` 接受 base64 数据，Chat Completions 的 `analyze_audio` 接到远程 URL 时会提示使用工作区文件。
 
 ### Gemini 视频存储
 
-`gemini-generate-content` 路由使用相同的 `request.extra.video_storage` 配置，
-无需设置 `video_url_format`。Sage 上传每个内联视频，并以 `fileData.fileUri`
-发送签名 URL。已上传的视频不计入 `max_request_bytes`。已有的远程视频 URL 原样
-发送。诊断记录和错误信息会隐去 URL 签名。
+`gemini-generate-content` 路由使用相同的 Server 存储配置别名，无需填写
+`video_url_format`。Sage 以 `fileData.fileUri` 发送托管视频的签名 URL。
+用户提供的远程媒体 URL 只在当前推理轮次发送。后续请求用文字保留历史附件提示，
+会话仍保留原始附件。诊断记录和错误信息会隐去 Sage 生成的 URL 签名。
 
 两种协议都只在当前轮（最近一次模型回复之后）的视频上传失败时返回
 `model.video_storage_failed`。更早的视频上传失败时替换为一行省略说明，请求照常发送，

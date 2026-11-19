@@ -106,8 +106,8 @@ limits. The Session keeps their original snapshots.
 
 ### Chat Completions video URLs
 
-For a compatible gateway that reads MP4 URLs from `image_url.url` (such as
-gateway 85), configure `models.<binding>`:
+For a Server model using a gateway that reads MP4 URLs from `image_url.url`
+(such as gateway 85), select a host-authorized profile:
 
 ```yaml
 capabilities:
@@ -115,20 +115,28 @@ capabilities:
 request:
   extra:
     video_url_format: image_url
-    video_storage:
-      bucket: private-video-bucket
-      region: ap-southeast-1
-      prefix: sage/model-video
-      url_ttl_seconds: 900
+    video_storage_profile: gateway-video
 ```
 
-For existing HTTPS video URLs, set only `video_url_format`. To host workspace
-videos, install `sage[s3-video]` and configure the AWS SDK credential chain.
+The Server operator defines profiles in `SAGE_SERVER_VIDEO_STORAGE_PROFILES`.
+Each profile contains authorized Server user IDs in `owner_ids` and an
+`S3VideoStorageConfig` object in `storage`:
+
+```json
+{"gateway-video":{"owner_ids":["user-id"],"storage":{"bucket":"private-video-bucket","region":"ap-southeast-1","prefix":"sage/model-video"}}}
+```
+
+SDK hosts can pass a trusted `S3VideoStorageConfig` as the `video_storage`
+argument to `create_registered_model_provider`. Model route extras cannot
+supply raw storage targets. For existing HTTPS video URLs, set only
+`video_url_format`. For workspace uploads, install `sage[s3-video]` and
+configure the AWS SDK credential chain.
 Grant `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, and
 `s3:DeleteObjectVersion` under the configured prefix, plus `s3:ListBucket` and
 `s3:ListBucketVersions` scoped to that prefix. You can set an HTTPS
-`endpoint_url` for S3-compatible storage. Sage records ownership in the Session
-before the upload and stores copies under a per-Run prefix. Session deletion,
+`endpoint_url` for S3-compatible storage. Sage checks the storage target with
+read-only operations, then records ownership before issuing an upload. Copies
+are stored under a per-Run prefix. Session deletion,
 including tenant cleanup, removes these copies and their object versions. If
 cleanup fails, the Session retains its record so deletion can be retried with
 access to the original bucket. The bucket lifecycle can expire old copies as a
@@ -138,16 +146,16 @@ Chat Completions also replaces older videos beyond `max_inline_videos`
 (default 10) with text references. When the body exceeds `max_request_bytes`,
 it then replaces the oldest inline audio and video with text references. For a
 gateway that forwards to Gemini, set `max_request_bytes` to `20000000`.
-`input_audio` accepts only base64 data, so remote audio URLs are replaced with a
-one-line omission notice.
+`input_audio` accepts base64 data. For Chat Completions, `analyze_audio`
+asks for a workspace file when given a remote URL.
 
 ### Gemini video storage
 
-`gemini-generate-content` routes accept the same `request.extra.video_storage`
-setting without `video_url_format`. Sage uploads each inline video and sends
-the signed URL as `fileData.fileUri`. Hosted videos do not count toward
-`max_request_bytes`. Existing remote video URLs are sent unchanged.
-Diagnostics and errors redact the URL signature.
+`gemini-generate-content` routes accept the same Server profile without
+`video_url_format`. Sage sends hosted videos as signed `fileData.fileUri`
+references. User-provided remote media URLs are sent only in the current
+inference turn. History keeps the attachment and sends a short omission notice
+in later turns. Diagnostics and errors redact Sage-generated URL signatures.
 
 Both protocols return `model.video_storage_failed` only when a video in the
 current turn (after the latest model reply) cannot be uploaded. An earlier

@@ -24,8 +24,9 @@ from sagents.v2.runtime.extensions import ExtensionRegistry
 
 
 class CatalogService:
-    def __init__(self, store, *, mcp_plugins, a2a_plugins, skills) -> None:
+    def __init__(self, store, *, mcp_plugins, a2a_plugins, skills, video_storage_profiles=None) -> None:
         self.store = store
+        self.video_storage_profiles = dict(video_storage_profiles or {})
         self.extensions: ExtensionRegistry | None = None
         self.locks = tuple(asyncio.Lock() for _ in range(64))
         self.mcp_plugins = mcp_plugins
@@ -85,6 +86,10 @@ class CatalogService:
                 self._probing_users.discard(user_id)
 
     async def upsert_model(self, user_id: str, payload: dict) -> ModelRecord:
+        from app.v2.server.config.video_storage import authorize_video_storage
+
+        request = payload.get("request") or {}
+        authorize_video_storage(request.get("extra", {}), user_id, self.video_storage_profiles)
         async with self._lock(user_id, "models"):
             return await self.store.upsert_model(user_id, payload)
 

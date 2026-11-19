@@ -29,6 +29,7 @@ from sagents.v2.model.plugins.openai_compatible import REMOTE_AUDIO_OMITTED_TEXT
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture
 from sagents.v2.package.manifest.models import ModelCapabilityDeclaration, ModelRoute
+from sagents.v2.runtime.artifact.video_storage import S3VideoStorageConfig
 from sagents.v2.tool import DirectToolSelectionPolicy, ToolDefinition
 from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog
 from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES
@@ -237,11 +238,11 @@ async def test_chat_video_storage_publishes_local_media_and_keeps_each_prompt(mo
             "capabilities": {"multimodal": True, "video_input": True},
             "request": {"extra": {
                 "video_url_format": "image_url",
-                "video_storage": {"bucket": "private-video"},
                 "max_inline_images": 0,
             }},
         }),
         client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        video_storage=S3VideoStorageConfig(bucket="private-video"),
     )
     request = _request().model_copy(update={"messages": (
         ModelMessage(role="user", content=(TextBlock(text="Describe the first"), VIDEO)),
@@ -273,7 +274,7 @@ async def test_chat_video_storage_publishes_local_media_and_keeps_each_prompt(mo
     assert "first.mp4?[redacted]" in captured
 
 
-def _chat_media_provider(extra, sent):
+def _chat_media_provider(extra, sent, *, video_storage=None):
     async def create(**kwargs):
         sent.append(kwargs)
 
@@ -291,6 +292,7 @@ def _chat_media_provider(extra, sent):
             "request": {"extra": extra},
         }),
         client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        video_storage=video_storage,
     )
 
 
@@ -315,10 +317,9 @@ async def test_chat_video_storage_skips_videos_evicted_by_the_inline_cap(monkeyp
     sent = []
     provider = _chat_media_provider({
         "video_url_format": "image_url",
-        "video_storage": {"bucket": "private-video"},
         "max_inline_videos": 2,
         "max_inline_images": 0,
-    }, sent)
+    }, sent, video_storage=S3VideoStorageConfig(bucket="private-video"))
     request = _request().model_copy(update={"messages": (
         ModelMessage(role="user", content=(TextBlock(text="Compare"), *videos)),
     )})
@@ -418,11 +419,11 @@ async def test_gemini_video_storage_sends_signed_file_data_and_redacts_diagnosti
             "base_url": "https://gemini.example/v1beta",
             "model": "gemini-4-argon",
             "capabilities": {"multimodal": True},
-            "request": {"extra": {"video_storage": {"bucket": "private-video"}}},
         }),
         client=httpx.AsyncClient(
             base_url="https://gemini.example/v1beta/", transport=httpx.MockTransport(handler)
         ),
+        video_storage=S3VideoStorageConfig(bucket="private-video"),
     )
     request = _request().model_copy(update={"messages": (
         ModelMessage(role="user", content=(
@@ -490,13 +491,12 @@ async def test_gemini_video_storage_skips_videos_evicted_by_the_inline_cap(monke
             "base_url": "https://gemini.example/v1beta",
             "model": "gemini-4-argon",
             "capabilities": {"multimodal": True},
-            "request": {"extra": {
-                "video_storage": {"bucket": "private-video"}, "max_inline_videos": 2,
-            }},
+            "request": {"extra": {"max_inline_videos": 2}},
         }),
         client=httpx.AsyncClient(
             base_url="https://gemini.example/v1beta/", transport=httpx.MockTransport(handler)
         ),
+        video_storage=S3VideoStorageConfig(bucket="private-video"),
     )
     request = _request().model_copy(update={"messages": tuple(
         ModelMessage(role="user", content=(TextBlock(text=f"clip {index}"), video))
@@ -543,12 +543,17 @@ async def test_private_chat_video_object_is_reused_and_signed_with_the_aws_sdk(m
             "head_object", service_error_code="403", http_status_code=403,
             expected_params=expected_head,
         )
+        scope = {"Bucket": "private-video", "Prefix": ANY, "MaxKeys": 1}
+        stub.add_response("list_object_versions", {}, scope)
+        stub.add_response("list_objects_v2", {}, scope)
         stub.add_response("put_object", {}, expected_put)
         stub.add_response("head_object", {}, expected_head)
         stub.add_client_error(
             "head_object", service_error_code="404", http_status_code=404,
             expected_params=expected_head,
         )
+        stub.add_response("list_object_versions", {}, scope)
+        stub.add_response("list_objects_v2", {}, scope)
         stub.add_client_error(
             "put_object", service_error_code="PreconditionFailed", http_status_code=412,
             expected_params=expected_put,
@@ -644,7 +649,7 @@ async def test_history_video_upload_failure_is_omitted_not_fatal(monkeypatch, pr
         ModelMessage(role="assistant", content=(TextBlock(text="Seen"),)),
         ModelMessage(role="user", content=(TextBlock(text="Now"), VIDEO)),
     )})
-    extra = {"video_storage": {"bucket": "private-video"}}
+    extra = {}
     sent = []
     if protocol == "openai-chat-completions":
         extra["video_url_format"] = "image_url"
@@ -682,6 +687,7 @@ async def test_history_video_upload_failure_is_omitted_not_fatal(monkeypatch, pr
             "request": {"extra": extra},
         }),
         client=client,
+        video_storage=S3VideoStorageConfig(bucket="private-video"),
     )
     capture = WireCapture()
     token = wire_capture.set(capture)
@@ -895,3 +901,88 @@ async def test_step_request_reads_only_media_that_fits_the_model(kind):
         for message in supported.request.messages for block in message.content
     ) == 2
     assert [message.content[0].uri for message in ledger] == uris
+
+
+@pytest.mark.parametrize("key", ["video_storage", "video_storage_profile"])
+def test_generic_model_route_cannot_grant_video_storage(key):
+    route = ModelRoute.model_validate({
+        "provider": "gemini-generate-content", "model": "test",
+        "request": {"extra": {key: {"bucket": "tenant-target"}}},
+    })
+    with pytest.raises(ValueError, match="resolved by the model host"):
+        create_registered_model_provider(route, client=object())
+
+
+@pytest.mark.parametrize("protocol", ["gemini-generate-content", "openai-chat-completions"])
+async def test_remote_media_is_only_sent_before_the_first_model_reply(protocol):
+    import httpx
+
+    old_url = "https://media.example.test/temporary.mp4"
+    available = True
+    sent = []
+
+    def inspect_wire(payload):
+        sent.append(payload)
+        assert available or old_url not in json.dumps(payload)
+
+    async def create(**kwargs):
+        inspect_wire(kwargs)
+
+        async def chunks():
+            yield {"id": "test", "choices": [
+                {"delta": {"content": "ok"}, "finish_reason": "stop"},
+            ]}
+
+        return chunks()
+
+    def handler(request):
+        inspect_wire(json.loads(request.content))
+        event = {"candidates": [{
+            "content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP",
+        }]}
+        return httpx.Response(
+            200, text=f"data: {json.dumps(event)}\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    if protocol == "gemini-generate-content":
+        client = httpx.AsyncClient(
+            base_url="https://mock.invalid/v1beta/", transport=httpx.MockTransport(handler)
+        )
+        provider = GeminiGenerateContentModelProvider(
+            GeminiGenerateContentConfig(model="test", capabilities=_caps(**BOTH)),
+            client=client,
+        )
+    else:
+        client = None
+        provider = OpenAIChatCompletionsModelProvider(
+            OpenAIChatCompletionsConfig(
+                model="test", base_url="https://mock.invalid/v1", capabilities=_caps(**BOTH),
+            ),
+            client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        )
+
+    media = (VIDEO.model_copy(update={"uri": old_url}),)
+    if client is not None:
+        media += (AUDIO.model_copy(update={"uri": "gs://fixture/temporary.wav"}),)
+    first = ModelMessage(role="user", content=media)
+    request = _request().model_copy(update={"messages": (first,)})
+    try:
+        assert [event async for event in provider.stream(request)][-1].response.text == "ok"
+        assert old_url in json.dumps(sent[-1])
+        if client is not None:
+            assert "gs://fixture/temporary.wav" in json.dumps(sent[-1])
+        available = False
+        followup = request.model_copy(update={"messages": (
+            first,
+            ModelMessage(role="assistant", content=(TextBlock(text="analyzed"),)),
+            ModelMessage(role="user", content=(TextBlock(text="plain text question"),)),
+        )})
+        for _ in range(2):
+            assert [event async for event in provider.stream(followup)][-1].response.text == "ok"
+            assert "Earlier video attachment omitted" in json.dumps(sent[-1])
+            assert "gs://fixture/temporary.wav" not in json.dumps(sent[-1])
+        assert first.content[0].uri == old_url
+    finally:
+        if client is not None:
+            await client.aclose()
