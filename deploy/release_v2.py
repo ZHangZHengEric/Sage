@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -71,10 +72,29 @@ def local_verify(m):
     verify(f"http://127.0.0.1:{m['api_port']}", f"http://127.0.0.1:{m['web_port']}")
 
 
-def reload_caddy(m):
+def validate_caddy(m):
     run('caddy', 'validate', '--config', m.get('caddy_config', '/etc/caddy/Caddyfile'),
         '--adapter', 'caddyfile', stdout=subprocess.DEVNULL)
+
+
+def reload_caddy(m):
+    validate_caddy(m)
     run('systemctl', 'reload', 'caddy')
+
+
+def scheduler_release(m, directory, action, *, rollback=False):
+    command = ['-m', 'app.v2.server.runtime.release_handoff', action, m['previous_release'] or '']
+    if rollback:
+        command.append('--rollback')
+    container = f"sage-server-v2-{m['release']}"
+    try:
+        run('docker', 'exec', container, 'python', *command)
+    except subprocess.CalledProcessError:
+        if not rollback:
+            raise
+        # Restore the Redis gate even if the candidate server exited during observation.
+        run('docker', 'compose', '-f', str(directory / 'compose.json'), 'run',
+            '--rm', '--no-deps', '-T', '--entrypoint', 'python', 'sage-server', *command)
 
 
 def prepare(m, directory):
@@ -96,6 +116,7 @@ def prepare(m, directory):
         service['image'] = m[kind + '_image']
         service['container_name'] = f"sage-{kind}-v2-{m['release']}"
         service['ports'] = [{'target': target, 'published': str(port), 'host_ip': '127.0.0.1'}]
+    config['services']['sage-server']['environment']['SAGE_SCHEDULER_RELEASE_ID'] = m['release']
     nginx = (ROOT / 'standalone/nginx.conf').read_text().replace(
         'set $sage_backend sage-server:8090;',
         f"set $sage_backend sage-server-v2-{m['release']}:8090;")
@@ -109,13 +130,16 @@ def prepare(m, directory):
     atomic_write(directory / 'manifest.json', json.dumps(m, sort_keys=True, indent=2))
     run('docker', 'compose', '-f', str(directory / 'compose.json'), 'up', '-d', '--wait', '--wait-timeout', '180')
     local_verify(m)
+    scheduler_release(m, directory, 'check')
 
 
-def restore(m, state):
+def restore(m, state, directory):
     # Refuse to overwrite a subsequent deployment or unrelated operator edit.
     for file, item in state.items():
         if Path(file).read_text() not in (item['before'], item['after']):
             raise RuntimeError(f'{file} changed since cutover; refusing stale rollback')
+    if 'previous_release' in m:
+        scheduler_release(m, directory, 'change', rollback=True)
     for file, item in state.items():
         atomic_write(file, item['before'])
     reload_caddy(m)
@@ -126,9 +150,16 @@ def cutover(m, directory):
     if not (directory / 'manifest.json').exists() or json.loads((directory / 'manifest.json').read_text()) != m:
         raise RuntimeError('Run prepare with this exact manifest before cutover')
     local_verify(m)
+    scheduler_release(m, directory, 'check')
     backup = directory / 'rollback.json'
     if backup.exists():
         raise RuntimeError('Cutover already attempted; use rollback or a new release ID')
+    if m['previous_release'] is None:
+        for port in {route['old_api_port'] for route in m['routes']}:
+            with socket.socket() as old_backend:
+                old_backend.settimeout(2)
+                if old_backend.connect_ex(('127.0.0.1', int(port))) == 0:
+                    raise RuntimeError(f'Legacy backend still accepts connections on {port}; drain and stop it first')
     state = {}
     for route in m['routes']:
         file = route['file']
@@ -148,7 +179,9 @@ def cutover(m, directory):
             if Path(file).read_text() != item['before']:
                 raise RuntimeError(f'{file} changed while preparing cutover')
             atomic_write(file, item['after'])
-        reload_caddy(m)
+        validate_caddy(m)
+        scheduler_release(m, directory, 'change')
+        run('systemctl', 'reload', 'caddy')
         # Keep the release lock throughout the observation window.
         deadline = time.monotonic() + max(0, m.get('observe_seconds', 60))
         while True:
@@ -157,9 +190,9 @@ def cutover(m, directory):
                 break
             time.sleep(5)
     except BaseException:
-        restore(m, state)
+        restore(m, state, directory)
         raise
-    print('Cutover verified. Previous containers retained; no automatic cleanup.')
+    print('Cutover verified. Drain the previous release and remove its containers and images.')
 
 
 def main():
@@ -170,6 +203,14 @@ def main():
     m = json.loads(args.manifest.read_text())
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}', m['release']):
         parser.error('release must be a unique lowercase slug')
+    if args.action in ('prepare', 'cutover') and 'previous_release' not in m:
+        parser.error('previous_release is required (null only for the first handoff-enabled deployment)')
+    previous = m.get('previous_release')
+    if previous is not None and (
+        not isinstance(previous, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}', previous)
+        or previous == m['release']
+    ):
+        parser.error('previous_release must be a different release slug')
     directory = Path(m.get('state_root', '/data/sage_v2/releases')) / m['release']
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     with open('/tmp/palune-sage-production-release.lock', 'a') as lock:
@@ -182,7 +223,10 @@ def main():
         elif args.action == 'cutover':
             cutover(m, directory)
         else:
-            restore(m, json.loads((directory / 'rollback.json').read_text()))
+            prepared = json.loads((directory / 'manifest.json').read_text())
+            if prepared != m:
+                raise RuntimeError('Rollback requires the exact manifest used for prepare')
+            restore(m, json.loads((directory / 'rollback.json').read_text()), directory)
 
 
 if __name__ == '__main__':

@@ -38,7 +38,8 @@ class RedisDistributedScheduler:
     def __init__(self, *, redis_url, key_prefix="sage:scheduler:{distributed}",
                  max_pending_items=1024, max_retained_terminal_items=4096,
                  max_concurrent_runs=8, max_concurrent_runs_per_tenant=2,
-                 coordination_ttl_seconds=30, poll_seconds=0.05, queue_id="default"):
+                 coordination_ttl_seconds=30, poll_seconds=0.05, queue_id="default",
+                 release_id=None):
         if not redis_url or not key_prefix or min(max_pending_items, max_concurrent_runs,
                 max_concurrent_runs_per_tenant, coordination_ttl_seconds, poll_seconds) <= 0:
             raise ValueError("Redis URL, prefix and positive Scheduler limits are required")
@@ -51,6 +52,7 @@ class RedisDistributedScheduler:
         self.max_concurrent_runs_per_tenant = max_concurrent_runs_per_tenant
         self.coordination_ttl_seconds, self.poll_seconds = coordination_ttl_seconds, poll_seconds
         self.queue_id = queue_id
+        self.release_id = release_id
         self._redis = None
         self._closed = False
         self._namespace_lock = None
@@ -90,6 +92,18 @@ class RedisDistributedScheduler:
 
     def _claim_head_key(self):
         return self.key_prefix + ":claim-head:v1"
+
+    @staticmethod
+    def active_release_key(key_prefix):
+        return key_prefix + ":active-release"
+
+    async def _watch_claim(self, pipe, state_key):
+        if self.release_id is not None:
+            key = self.active_release_key(self.key_prefix)
+            await pipe.watch(state_key, key)
+            return await pipe.get(key) == self.release_id
+        await pipe.watch(state_key)
+        return True
 
     def _claim_due_key(self, queue):
         return self.key_prefix + ":claim-due:v1:" + queue
@@ -135,7 +149,11 @@ class RedisDistributedScheduler:
             pipe.zrange(due_key, 0, 0, withscores=True)
             pipe.zcard(due_key)
             pipe.time()
-            prefix, head, earliest, count, (seconds, micros) = await pipe.execute()
+            if self.release_id is not None:
+                pipe.get(self.active_release_key(self.key_prefix))
+            prefix, head, earliest, count, (seconds, micros), *release = await pipe.execute()
+        if release and release[0] != self.release_id:
+            return False
         if not head:
             return True
         epoch, limits, counts, leased, expiry = json.loads(head)
@@ -322,7 +340,8 @@ class RedisDistributedScheduler:
         for _ in range(16):
             async with self._mutation_lock, redis.pipeline() as pipe:
                 try:
-                    await pipe.watch(state_key)
+                    if not await self._watch_claim(pipe, state_key):
+                        return None
                     try:
                         result = await self._indexed_claim(pipe, state_key, operation)
                         if result is NotImplemented:
@@ -358,7 +377,11 @@ class RedisDistributedScheduler:
                 if claim_queue and not await self._may_claim():
                     return False, None
                 await watch_fence(pipe, writer)
-                await pipe.watch(state_key)
+                if claim_queue:
+                    if not await self._watch_claim(pipe, state_key):
+                        return False, None
+                else:
+                    await pipe.watch(state_key)
                 # The optimistic claim already declined this layout. Older
                 # writers do not take queue-updates and can move byte ranges
                 # under this guard. Read one canonical value and let WATCH

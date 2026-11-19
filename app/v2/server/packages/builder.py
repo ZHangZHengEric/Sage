@@ -130,7 +130,8 @@ class ServerPackageBuilderFactory:
                 "max_pending_items": self.settings.max_pending_runs,
             } if scheduler_port else None)
         settings = replace(self.settings, mysql_url=None, postgres_url=None, redis_url=None, session_store_plugin=None,
-            session_store_key_prefix=None, scheduler_plugin="sage.scheduler.ephemeral") if root.name.startswith("validate-") else self.settings
+            session_store_key_prefix=None, scheduler_plugin="sage.scheduler.ephemeral",
+            release_id=None) if root.name.startswith("validate-") else self.settings
         runtime = server_v2_manifest(settings).runtime
         capabilities = select_run_capabilities(runtime.capabilities, bundle.manifest.runtime, choices)
         if capabilities.get("session.store") and settings.session_database_url:

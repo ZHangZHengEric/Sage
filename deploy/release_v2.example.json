@@ -1,5 +1,6 @@
 {
   "release": "replace-with-unique-release-id",
+  "previous_release": "replace-with-active-release-id",
   "env_file": "/srv/Sage/deploy/standalone/.env",
   "data_root": "/data/sage_v2",
   "server_image": "sage-server:replace-with-release-tag",

@@ -12,24 +12,11 @@ from sagents.v2.package.manifest.root import (
 )
 from sagents.v2.package.manifest.runtime import CapabilityBinding, CapabilitySelection, RuntimeConfig
 
+from app.v2.server.config.redis_namespace import distributed_runtime_prefix
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.catalog.records import AgentRecord
 from app.v2.server.runtime.official import default_agent_tools
 from app.v2.server.memory.libsql import LIBSQL_MEMORY_PLUGIN, LIBSQL_SESSION_MEMORY_PLUGIN
-
-
-def distributed_runtime_prefix(settings, component):
-    import hashlib
-    import json
-    if settings.postgres_url:
-        from sagents.v2.runtime.session.plugins.postgres.identity import postgres_storage_identity
-        identity = postgres_storage_identity(settings.postgres_url)
-    else:
-        from sagents.v2.runtime.session.plugins.mysql import parse_mysql_dsn
-        identity = parse_mysql_dsn(settings.mysql_url)
-        identity.pop("password")
-    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
-    return f"sage:{component}:{{{digest}}}:distributed"
 
 
 def server_v2_run_manifest(

@@ -36,12 +36,12 @@ async def scheduler_pair():
     server = fakeredis.FakeServer()
     pairs = []
 
-    def create(*, queue_ids=("default", "default"), **options):
+    def create(*, queue_ids=("default", "default"), release_ids=None, **options):
         pair = []
-        for queue_id in queue_ids:
+        for queue_id, release_id in zip(queue_ids, release_ids or (None,) * len(queue_ids), strict=True):
             value = RedisDistributedScheduler(
                 redis_url="redis://unused/0", key_prefix=f"scheduler-test-{len(pairs)}",
-                queue_id=queue_id, **options)
+                queue_id=queue_id, release_id=release_id, **options)
             value._redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
             pair.append(value)
         pairs.append(pair)
@@ -70,6 +70,56 @@ async def test_submit_and_claim_are_shared_and_idempotent_between_instances(sche
     await second.assert_fence(lease)
     await second.release(lease, LeaseReleaseReason.COMPLETED)
     assert await claim(first) is None
+
+
+@pytest.mark.asyncio
+async def test_release_handoff_allows_active_replicas_and_preserves_inflight_lease(scheduler_pair):
+    old, first, second = scheduler_pair(queue_ids=("server",) * 3,
+                                        release_ids=("blue", "green", "green"))
+    key = old.active_release_key(old.key_prefix)
+    await old.submit(work("inflight"))
+    assert await claim(old) is None
+    await old._redis.set(key, "blue")
+    lease = await claim(old, "old")
+    await old.submit(work("queued"))
+    assert await claim(first) is None
+    await old._redis.set(key, "green")
+    assert await claim(old) is None
+    renewed = await old.renew(lease, lease_duration=timedelta(seconds=60))
+    assert renewed.expires_at > lease.expires_at
+    await old.release(renewed, LeaseReleaseReason.COMPLETED)
+
+    leases = await asyncio.gather(claim(first, "green-a"), claim(second, "green-b"))
+    assert [row.work.work_id for row in leases if row] == ["work-queued"]
+    await first.submit(work("another"))
+    idle_replica = second if leases[0] else first
+    assert (await claim(idle_replica)).work.work_id == "work-another"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fallback", (False, True))
+async def test_handoff_rejects_claim_that_was_already_in_progress(scheduler_pair, fallback):
+    old, new = scheduler_pair(queue_ids=("managed_agent",) * 2, release_ids=("old", "new"))
+    key = old.active_release_key(old.key_prefix)
+    await old._redis.set(key, "old")
+    item = work("racing")
+    await old.submit(item)
+    watch = old._watch_claim
+
+    async def switch_after_check(pipe, state_key):
+        eligible = await watch(pipe, state_key)
+        if eligible:
+            await new._redis.set(key, "new")
+        return eligible
+
+    with patch.object(old, "_watch_claim", side_effect=switch_after_check) as watched:
+        if fallback:
+            with patch.object(old, "_try_claim", return_value=NotImplemented):
+                assert await claim(old) is None
+        else:
+            assert await claim(old) is None
+    assert watched.await_count >= 1
+    assert (await claim(new)).work == item
 
 
 @pytest.mark.asyncio
