@@ -369,3 +369,36 @@ async def test_a_released_run_forgets_its_calls():
     await plugin.execute(call, CONTEXT)
 
     assert len(transport.sent) == 2
+
+
+async def test_optional_peer_backoff_keeps_healthy_catalog_and_coalesces_recovery(monkeypatch):
+    from collections import Counter
+    from sagents.v2.tool.plugins import a2a
+
+    now = 0.0
+    available = False
+    calls = Counter()
+
+    class TwoPeers(FakePeer):
+        async def card(self, config):
+            calls[config.name] += 1
+            if config.name == "offline" and not available:
+                raise ConnectionError("synthetic outage")
+            return CARD
+
+    monkeypatch.setattr(a2a, "monotonic", lambda: now)
+    plugin = A2AToolPlugin(
+        (peer().model_copy(update={"name": "healthy"}),
+         peer().model_copy(update={"name": "offline"})), transport=TwoPeers())
+    for step in range(747):
+        now = step * (1807.55 / 746)
+        assert len(await plugin.list_tools(run_id="catalog")) == 1
+    assert calls["healthy"] == 1
+    failed = calls["offline"]
+    assert 1 < failed < 70
+    available = True
+    now += 31
+    result = await asyncio.gather(*(plugin.list_tools(run_id="catalog") for _ in range(16)))
+    assert all(len(catalog) == 2 for catalog in result)
+    assert calls == {"healthy": 1, "offline": failed + 1}
+    assert not plugin.discovery_errors()

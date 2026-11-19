@@ -19,6 +19,7 @@ import json
 import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from time import monotonic
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -145,8 +146,11 @@ class A2AToolPlugin:
         self._discovery_errors: dict[str, RuntimeErrorInfo] = {}
         self._lock = asyncio.Lock()
         self._discovery_fingerprint = self.servers_fingerprint(self.agents)
-        self._discovery_complete = False
-        self._discovery_task: asyncio.Task[tuple[ToolDefinition, ...]] | None = None
+        self._node_catalogs: dict[str, tuple[
+            dict[str, ToolDefinition], dict[str, tuple[A2AAgentConfig, str]], str,
+        ]] = {}
+        self._discovery_retry: dict[str, tuple[int, float]] = {}
+        self._discovery_task: asyncio.Task[None] | None = None
         self._discovery_generation = 0
 
     @staticmethod
@@ -172,7 +176,8 @@ class A2AToolPlugin:
 
     def invalidate_discovery(self) -> None:
         self._discovery_generation += 1
-        self._discovery_complete = False
+        self._node_catalogs.clear()
+        self._discovery_retry.clear()
         self._definitions = {}
         self._routes = {}
         self._endpoints = {}
@@ -185,72 +190,85 @@ class A2AToolPlugin:
         while True:
             fingerprint = self.servers_fingerprint(self.agents)
             async with self._lock:
-                if (
-                    self._discovery_complete
-                    and self._discovery_fingerprint == fingerprint
-                ):
-                    return tuple(
-                        self._definitions[name] for name in sorted(self._definitions)
-                    )
                 if self._discovery_fingerprint != fingerprint:
                     self.invalidate_discovery()
                 generation = self._discovery_generation
                 if self._discovery_task is None:
+                    now = monotonic()
+                    pending = tuple(
+                        agent for agent in self.agents
+                        if agent.name not in self._node_catalogs
+                        and self._discovery_retry.get(agent.name, (0, 0.0))[1] <= now
+                    )
+                    if not pending:
+                        return self._catalog_result()
                     self._discovery_task = asyncio.create_task(
-                        self._discover(self.agents, generation)
+                        self._discover(pending, generation, fingerprint)
                     )
                     self._discovery_task.add_done_callback(self._discovery_finished)
                 task = self._discovery_task
-            # Observers do not own this shared read-only discovery task.
-            result = await asyncio.shield(task)
-            if (
-                generation == self._discovery_generation
-                and fingerprint == self.servers_fingerprint(self.agents)
-            ):
-                return result
+            await asyncio.shield(task)
+            if generation == self._discovery_generation and fingerprint == self.servers_fingerprint(self.agents):
+                return self._catalog_result()
+
+    def _catalog_result(self) -> tuple[ToolDefinition, ...]:
+        for agent in self.agents:
+            if agent.required and agent.name in self._discovery_errors:
+                raise SageV2Error(self._discovery_errors[agent.name])
+        return tuple(self._definitions[name] for name in sorted(self._definitions))
 
     def _discovery_finished(self, task) -> None:
         if self._discovery_task is task:
             self._discovery_task = None
         if not task.cancelled():
-            task.exception()  # Retrieve failures even when all observers detached.
+            task.exception()
 
-    async def _discover(
-        self, agents: tuple[A2AAgentConfig, ...], generation: int
-    ) -> tuple[ToolDefinition, ...]:
-        results = await asyncio.gather(*(self._discover_agent(item) for item in agents))
-        discovered: dict[str, ToolDefinition] = {}
-        routes: dict[str, tuple[A2AAgentConfig, str]] = {}
-        endpoints: dict[str, str] = {}
-        discovery_errors: dict[str, RuntimeErrorInfo] = {}
-        for config, card, error in results:
-            if error is not None:
-                discovery_errors[config.name] = error
-                continue
-            try:
-                definitions, agent_routes = self._project_skills(
-                    config, card or {}, existing_names=frozenset(discovered)
-                )
-                endpoints[config.name] = self._endpoint(config, card or {})
-            except SageV2Error as exc:
-                if config.required:
-                    raise
-                discovery_errors[config.name] = exc.info
-                continue
-            discovered.update(definitions)
-            routes.update(agent_routes)
+    def _record_discovery_error(self, name: str, error: RuntimeErrorInfo) -> None:
+        self._node_catalogs.pop(name, None)
+        self._discovery_errors[name] = error
+        attempts = min(self._discovery_retry.get(name, (0, 0.0))[0] + 1, 6)
+        self._discovery_retry[name] = (attempts, monotonic() + min(30, 2 ** (attempts - 1)))
+
+    async def _discover(self, pending: tuple[A2AAgentConfig, ...], generation: int, fingerprint: str) -> None:
+        results = await asyncio.gather(*(self._discover_agent(agent) for agent in pending))
         async with self._lock:
-            if generation == self._discovery_generation and self.servers_fingerprint(
-                agents
-            ) == self.servers_fingerprint(self.agents):
-                self._definitions = discovered
-                self._routes = routes
-                self._endpoints = endpoints
-                self._discovery_errors = discovery_errors
-                # A peer that was temporarily unreachable must be discoverable
-                # on a later request without requiring a settings change.
-                self._discovery_complete = not discovery_errors
-        return tuple(discovered[name] for name in sorted(discovered))
+            if (generation != self._discovery_generation
+                    or fingerprint != self.servers_fingerprint(self.agents)):
+                return
+            for agent, card, error in results:
+                name = agent.name
+                if error is not None:
+                    self._record_discovery_error(name, error)
+                    continue
+                try:
+                    definitions, routes = self._project_skills(agent, card or {})
+                    self._node_catalogs[name] = definitions, routes, self._endpoint(agent, card or {})
+                except SageV2Error as exc:
+                    self._record_discovery_error(name, exc.info)
+
+            definitions: dict[str, ToolDefinition] = {}
+            routes: dict[str, tuple[A2AAgentConfig, str]] = {}
+            endpoints: dict[str, str] = {}
+            for agent in self.agents:
+                catalog = self._node_catalogs.get(agent.name)
+                if catalog is None:
+                    continue
+                node_definitions, node_routes, endpoint = catalog
+                collisions = definitions.keys() & node_definitions.keys()
+                if collisions:
+                    error = self._error("a2a.skill_name_collision",
+                        f"multiple A2A skills map to {min(collisions)!r}",
+                        ErrorCategory.CONFLICT, metadata={"agent": agent.name})
+                    self._record_discovery_error(agent.name, error.info)
+                    continue
+                definitions.update(node_definitions)
+                routes.update(node_routes)
+                endpoints[agent.name] = endpoint
+                self._discovery_errors.pop(agent.name, None)
+                self._discovery_retry.pop(agent.name, None)
+            if any(agent.required and agent.name in self._discovery_errors for agent in self.agents):
+                definitions, routes, endpoints = {}, {}, {}
+            self._definitions, self._routes, self._endpoints = definitions, routes, endpoints
 
     async def _discover_agent(
         self, config: A2AAgentConfig
@@ -260,8 +278,6 @@ class A2AToolPlugin:
                 self.transport.card(config), timeout=config.timeout_seconds
             )
         except SageV2Error as error:
-            if config.required:
-                raise
             return config, None, error.info
         except Exception as exc:
             # Reading a card is a GET that happens before any call is
@@ -272,8 +288,6 @@ class A2AToolPlugin:
                 exc,
                 category=ErrorCategory.PROVIDER_TRANSIENT,
             )
-            if config.required:
-                raise error from exc
             return config, None, error.info
         return config, card, None
 
@@ -282,8 +296,6 @@ class A2AToolPlugin:
         cls,
         config: A2AAgentConfig,
         card: dict[str, Any],
-        *,
-        existing_names: frozenset[str],
     ) -> tuple[dict[str, ToolDefinition], dict[str, tuple[A2AAgentConfig, str]]]:
         skills = card.get("skills") or ()
         if not isinstance(skills, Sequence) or isinstance(skills, str | bytes):
@@ -310,7 +322,7 @@ class A2AToolPlugin:
             if not skill_id:
                 continue
             public_name = cls._public_name(config.name, skill_id)
-            if public_name in existing_names or public_name in definitions:
+            if public_name in definitions:
                 raise cls._error(
                     "a2a.skill_name_collision",
                     f"multiple A2A skills map to {public_name!r}",

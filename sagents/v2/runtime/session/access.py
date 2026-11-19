@@ -294,6 +294,33 @@ class AuthorizedSessionAccess:
             if close is not None:
                 await close()
 
+    async def durable_event_reader(self, run_id: str, context: RequestContext):
+        run = await self._session_store.get_run(run_id)
+        await self._authorize(run.session_id, context)
+        indexed = getattr(self._session_store, "read_indexed_run_events", None)
+
+        async def read(*, after_sequence: int, limit: int):
+            if callable(indexed):
+                return await indexed(run_id, run.session_id, after_sequence=after_sequence, limit=limit)
+            return await self._session_store.read_events(run_id, after_sequence=after_sequence, limit=limit)
+
+        return read
+
+    async def subscribe_durable_events(self, cursor: EventCursor, context: RequestContext) -> AsyncIterator:
+        native = getattr(self._session_store, "subscribe_durable_events", None)
+        if callable(native):
+            run = await self._session_store.get_run(cursor.run_id)
+            await self._authorize(run.session_id, context)
+            events = native(cursor, run.session_id)
+        else:
+            events = self.subscribe_events(cursor, context)
+        try:
+            async for event in events:
+                if event.preview_sequence is None:
+                    yield event
+        finally:
+            await events.aclose()
+
     async def subscribe_session_tree(
         self,
         session_id: str,

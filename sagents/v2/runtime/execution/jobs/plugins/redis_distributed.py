@@ -75,6 +75,9 @@ class RedisDistributedJobRuntime(JobRuntimeState):
     def _output_key(self, job_id):
         return self.key_prefix + ":output:" + job_id
 
+    def _output_index_key(self, job_id):
+        return self.key_prefix + ":output-offsets:" + job_id
+
     def _limits(self):
         return [self._max_concurrent, self._max_admitted, self._max_job_output_bytes,
             self._max_job_output_chunks, self._max_buffered_output_bytes,
@@ -83,7 +86,7 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             self._output_reconnect_window.total_seconds(), self.lease_seconds]
 
     async def _mutate(self, operation, *, admission=False):
-        from redis.exceptions import WatchError
+        from redis.exceptions import ResponseError, WatchError
         redis = await self._client()
         key = self.key_prefix + ":state"
         for _ in range(100):
@@ -129,7 +132,7 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                         if raw is None or updated_occupied != occupied:
                             pipe.set(self.key_prefix + ":occupied", updated_occupied)
                         for job_id in removed:
-                            pipe.delete(self._output_key(job_id))
+                            pipe.delete(self._output_key(job_id), self._output_index_key(job_id))
                             pipe.delete(self.key_prefix + ":worker:" + job_id)
                         for job_id, row in rows.items():
                             if original_rows.get(job_id) != (row["owner"], row["state"], row["lease_until"]):
@@ -138,7 +141,15 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                         if output:
                             job_id, chunk = output
                             pipe.rpush(self._output_key(job_id), json.dumps(chunk, separators=(",", ":")))
-                        await pipe.execute()
+                            pipe.zadd(self._output_index_key(job_id), {str(rows[job_id]["chunks"] - 1): chunk["offset"]})
+                            # The index is derived. A failed index command
+                            # must not turn a committed output into a failed Job.
+                            committed = await pipe.execute(raise_on_error=False)
+                            for response in committed[:-1]:
+                                if isinstance(response, ResponseError):
+                                    raise response
+                        else:
+                            await pipe.execute()
                     if operation_error is not None:
                         raise operation_error
                     return result
@@ -398,25 +409,71 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             return snapshot
         return await self.wait(job_id)
 
+    async def _seek_output(self, redis, key, count, offset):
+        # Legacy and mixed-version writers may not have indexed every chunk.
+        left, right = 0, count
+        while left < right:
+            mid = (left + right) // 2
+            raw = await redis.lindex(key, mid)
+            if raw is None:  # The output was removed by retention.
+                return count
+            if json.loads(raw)["next_offset"] <= offset:
+                left = mid + 1
+            else:
+                right = mid
+        return left
+
     async def read_output(self, cursor, *, max_bytes=65536):
         if max_bytes < 1:
             raise ValueError("max_bytes must be positive")
         snapshot = await self.inspect(cursor.job_id)
-        values = await (await self._client()).lrange(self._output_key(cursor.job_id), 0, -1)
-        chunks, remaining = [], max_bytes
-        for value in values:
-            chunk = json.loads(value)
-            if chunk["next_offset"] <= cursor.offset or chunk["offset"] >= snapshot.output_cursor.offset:
-                continue
-            start = max(0, cursor.offset - chunk["offset"])
-            data = base64.b64decode(chunk["data"])[start:start+remaining]
-            if data:
-                chunk.update(offset=chunk["offset"]+start, data=data)
-                chunk["next_offset"] = chunk["offset"] + len(data)
-                chunks.append(JobOutputChunk.model_validate(chunk))
-                remaining -= len(data)
-            if not remaining:
+        stop = snapshot.output_cursor.offset
+        if cursor.offset >= stop:
+            return ()
+        redis = await self._client()
+        key = self._output_key(cursor.job_id)
+        count = await redis.llen(key)
+        from redis.exceptions import ResponseError
+        try:
+            positions = await redis.zrevrangebyscore(
+                self._output_index_key(cursor.job_id), cursor.offset, "-inf", start=0, num=1
+            )
+        except ResponseError as exc:
+            if "WRONGTYPE" not in str(exc):
+                raise
+            positions = ()
+        first = None
+        if positions and str(positions[0]).isdecimal():
+            position = int(positions[0])
+            raw = await redis.lindex(key, position) if position < count else None
+            if raw is not None:
+                candidate = json.loads(raw)
+                if candidate["offset"] <= cursor.offset < candidate["next_offset"]:
+                    first = candidate
+        if first is None:
+            position = await self._seek_output(redis, key, count, cursor.offset)
+            raw = await redis.lindex(key, position) if position < count else None
+            if raw is None:
+                return ()
+            first = json.loads(raw)
+
+        chunks, remaining = [], min(max_bytes, stop - cursor.offset)
+        pending = (first,)
+        while pending:
+            for chunk in pending:
+                if chunk["offset"] >= stop or not remaining:
+                    return tuple(chunks)
+                start = max(0, cursor.offset - chunk["offset"])
+                data = base64.b64decode(chunk["data"])[start:start + remaining]
+                if data:
+                    chunk.update(offset=chunk["offset"] + start, data=data)
+                    chunk["next_offset"] = chunk["offset"] + len(data)
+                    chunks.append(JobOutputChunk.model_validate(chunk))
+                    remaining -= len(data)
+                position += 1
+            if not remaining or position >= count:
                 break
+            pending = tuple(json.loads(raw) for raw in await redis.lrange(key, position, min(position + 7, count - 1)))
         return tuple(chunks)
 
     async def list_run_jobs(self, run_id):

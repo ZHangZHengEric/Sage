@@ -21,7 +21,7 @@ from sagents.v2.contracts.events import (
     ProtocolEventData,
     RuntimeEvent,
 )
-from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.runtime.distributed.redis_coordination import (
     RedisGuard,
     active_worker_fence,
@@ -284,10 +284,10 @@ class RedisSessionCoordination:
         )
 
     async def list_dispatchable_runs(self):
+        from redis.exceptions import ResponseError
         from sagents.v2.contracts.principals import RequestContext
         from sagents.v2.contracts.run_state import RunSnapshot
         from sagents.v2.runtime.session.contracts import DispatchableRun
-        from sagents.v2.runtime.session.state import SessionStoreCoordinator
         from .redis_metadata import _read_redis_fields_batched
 
         await self._ensure_ready()
@@ -297,31 +297,61 @@ class RedisSessionCoordination:
         heads = await _read_redis_fields_batched(self, [
             ("hmget", self._session_key(sid), ("revision", "dispatch_revision", "dispatch_intents", "deleted"))
             for sid in candidates
-        ])
-        intents, legacy = [], set()
-        for sid, (revision, indexed, encoded, deleted) in zip(candidates, heads, strict=True):
+        ], raise_on_error=False)
+        intents = []
+        for sid, fields in zip(candidates, heads, strict=True):
+            if isinstance(fields, ResponseError):
+                if "WRONGTYPE" not in str(fields):
+                    raise fields
+                get_logger(__name__).warning("scheduler.recovery.session_unreadable",
+                    "Isolated unreadable Session during recovery", session_id=sid)
+                continue
+            revision, indexed, encoded, deleted = fields
             if deleted == "1":
                 continue
-            if revision is not None and indexed == revision and encoded is not None:
-                intents.extend(
-                    DispatchableRun(run=RunSnapshot.model_validate(row["run"]),
-                                    context=RequestContext.model_validate(row["context"]))
-                    for row in json.loads(encoded)
-                )
-            else:
-                # Old snapshots do not carry the derived intent fields.
+            if revision is None:
+                # A stale index must never make an older SQL checkpoint executable.
+                get_logger(__name__).warning("scheduler.recovery.session_missing",
+                    "Recovery intent has no hot Session", session_id=sid)
+                continue
+            if indexed == revision and encoded is not None:
                 try:
-                    await self.get_session(sid)
-                except SageV2Error as exc:
-                    if exc.info.code != "session.not_found":
-                        raise
+                    decoded = json.loads(encoded)
+                    if not isinstance(decoded, list):
+                        raise ValueError("dispatch index must be a list")
+                    indexed_intents = tuple(
+                        DispatchableRun(run=RunSnapshot.model_validate(row["run"]),
+                                        context=RequestContext.model_validate(row["context"]))
+                        for row in decoded
+                    )
+                    if any(intent.run.session_id != sid for intent in indexed_intents):
+                        raise ValueError("dispatch index references another Session")
+                except (ValueError, TypeError, KeyError):
+                    get_logger(__name__).warning("scheduler.recovery.index_invalid",
+                        "Reading authoritative Session after invalid recovery index", session_id=sid)
                 else:
-                    legacy.add(sid)
-        if legacy:
-            intents.extend(
-                intent for intent in await SessionStoreCoordinator.list_dispatchable_runs(self)
-                if intent.run.session_id in legacy
-            )
+                    intents.extend(indexed_intents)
+                    continue
+            try:
+                await self.get_session(sid)
+                async with self._session_read(sid):
+                    intents.extend(
+                        DispatchableRun(run=self._run_snapshot(row), context=row.request_context)
+                        for rid in self._session_run_ids_locked(sid)
+                        if (row := self._runs[rid]).request_context is not None
+                        and self._is_dispatchable_run(row)
+                    )
+            except SageV2Error as exc:
+                if exc.info.code == "session.not_found":
+                    continue
+                if (exc.info.code != "session.revision_conflict"
+                        and exc.info.category not in {ErrorCategory.CORRUPT_STATE, ErrorCategory.UNSUPPORTED_SCHEMA}):
+                    raise
+                get_logger(__name__).warning("scheduler.recovery.session_unreadable",
+                    "Isolated unreadable Session during recovery", session_id=sid, error_code=exc.info.code)
+            except (ValueError, TypeError, KeyError):
+                get_logger(__name__).warning("scheduler.recovery.session_unreadable",
+                    "Isolated unreadable Session during recovery", session_id=sid)
         return tuple(sorted(intents, key=lambda intent: (intent.run.created_at, intent.run.run_id)))
 
     async def has_nonterminal_runs(self):
@@ -567,6 +597,58 @@ class RedisSessionCoordination:
                 partial_items={},
             ),
         )
+
+    async def read_indexed_run_events(self, run_id, session_id, *, after_sequence=0, limit=None):
+        """Read the recent committed range; the ledger is the fallback for any gap."""
+        from redis.exceptions import ResponseError
+        from .redis_persistence import _EVENT_TAIL_ROWS
+
+        if after_sequence < 0 or (limit is not None and limit < 1):
+            raise ValueError("invalid event page")
+        await self._ensure_ready()
+        try:
+            async with self._redis.pipeline(transaction=True) as pipe:
+                pipe.hmget(self._session_key(session_id), ("revision", "event_index_revision",
+                    "event_index_epoch", "deleted", self._event_head_field(run_id)))
+                pipe.zrangebyscore(self._durable_event_tail(run_id), f"({after_sequence}", "+inf",
+                                  start=0, num=min(limit or _EVENT_TAIL_ROWS, _EVENT_TAIL_ROWS))
+                header, rows = await pipe.execute()
+        except ResponseError as exc:
+            if "WRONGTYPE" not in str(exc):
+                raise
+        else:
+            revision, indexed, epoch, deleted, head = header
+            if deleted == "1":
+                raise self._not_found("run.not_found", run_id)
+            if revision is not None and indexed == revision and epoch and head:
+                stored_epoch, _, offset = head.partition(":")
+                if stored_epoch == epoch and offset.isdecimal():
+                    remaining = max(0, int(offset) - after_sequence)
+                    count = min(remaining, limit) if limit is not None else remaining
+                    if count == 0:
+                        return ()
+                    if count == len(rows):
+                        try:
+                            events = tuple(RuntimeEvent.model_validate_json(row) for row in rows)
+                        except ValueError:
+                            pass
+                        else:
+                            if all(event.run_id == run_id and event.session_id == session_id
+                                   and event.run_sequence == sequence and event.preview_sequence is None
+                                   for sequence, event in enumerate(events, after_sequence + 1)):
+                                return events
+        return await self.read_events(run_id, after_sequence=after_sequence, limit=limit)
+
+    async def subscribe_durable_events(self, cursor, session_id):
+        sequence = cursor.run_sequence
+        while not self._closed:
+            events = await self.read_indexed_run_events(cursor.run_id, session_id,
+                after_sequence=sequence, limit=self._subscriber_queue_size)
+            for event in events:
+                sequence = event.run_sequence
+                yield event
+            if len(events) < self._subscriber_queue_size:
+                await asyncio.sleep(self.event_poll_seconds)
 
     async def subscribe_events(self, cursor):
         # Canonical events are the replay authority. Polling is deliberately

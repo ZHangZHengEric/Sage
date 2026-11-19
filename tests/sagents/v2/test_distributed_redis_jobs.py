@@ -647,3 +647,64 @@ async def test_cancelling_a_close_caller_does_not_cancel_actual_runner_cleanup(
         finish_cleanup.set()
         await asyncio.gather(closing, return_exceptions=True)
         await first.close()
+
+
+@pytest.mark.asyncio
+async def test_output_seek_is_bounded_with_index_and_with_legacy_list(jobs_pair, monkeypatch):
+    expected = b"".join(bytes([i]) * 8192 for i in range(64))
+
+    async def runner(spec, emit, cancelled):
+        for i in range(64):
+            await emit("stdout", bytes([i]) * 8192)
+        return JobCompletion(exit_code=0)
+
+    first, second = jobs_pair(runner, lease_seconds=5, max_job_output_bytes=len(expected))
+    job = (await first.submit(spec())).job_id
+    done = await asyncio.wait_for(second.wait(job), 10)
+    assert done.output_cursor.offset == len(expected)
+    redis = second._redis
+    native_one, native_page = redis.lindex, redis.lrange
+
+    async def one(*args):
+        return await native_one(*args)
+
+    async def batch(*args):
+        return await native_page(*args)
+
+    get_one = AsyncMock(wraps=one)
+    page = AsyncMock(wraps=batch)
+    monkeypatch.setattr(redis, "lindex", get_one)
+    monkeypatch.setattr(redis, "lrange", page)
+    assert await output(second, job, offset=len(expected), max_bytes=1) == ((), b"")
+    assert get_one.await_count == page.await_count == 0
+    offset = len(expected) - 8194
+    assert (await output(second, job, offset=offset, max_bytes=7))[1] == expected[offset:offset+7]
+    assert get_one.await_count == 1 and page.await_count == 1
+    assert page.await_args.args[1:] == (63, 63)
+
+    await redis.delete(second._output_index_key(job))
+    get_one.reset_mock()
+    page.reset_mock()
+    assert (await output(second, job, offset=offset, max_bytes=7))[1] == expected[offset:offset+7]
+    assert get_one.await_count <= 8 and page.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_corrupted_output_index_cannot_fail_a_job_with_committed_output(jobs_pair):
+    first_chunk, continue_output = asyncio.Event(), asyncio.Event()
+
+    async def runner(spec, emit, cancelled):
+        await emit("stdout", b"before")
+        first_chunk.set()
+        await continue_output.wait()
+        await emit("stdout", b"after")
+        return JobCompletion(exit_code=0)
+
+    first, second = jobs_pair(runner)
+    job = (await first.submit(spec())).job_id
+    await asyncio.wait_for(first_chunk.wait(), 5)
+    await second._redis.set(second._output_index_key(job), "corrupt")
+    continue_output.set()
+    finished = await asyncio.wait_for(second.wait(job), 5)
+    assert finished.state == JobState.COMPLETED
+    assert (await output(second, job, offset=5, max_bytes=3))[1] == b"eaf"

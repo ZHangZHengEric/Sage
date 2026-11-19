@@ -28,6 +28,8 @@ from .redis_archive import RedisArchiveProtocol
 
 LOGGER = get_logger(__name__)
 _STOPPED = TERMINAL_RUN_STATES | {RunState.SUSPENDED}
+_EVENT_TAIL_ROWS = 256
+_EVENT_TAIL_ROW_BYTES = 16 * 1024
 
 
 class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
@@ -116,6 +118,31 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
     def _lookup_key(values):
         return _json(list(values))
 
+    def _durable_event_tail(self, run_id):
+        return self._key("durable-event-tail:" + run_id)
+
+    @staticmethod
+    def _event_head_field(run_id):
+        return "event_head:" + run_id
+
+    def _event_tail_changes(self, mutation):
+        appends = mutation["appends"].get("run_events", {})
+        replacements = mutation["replacements"].get("run_events", {})
+        changed_runs = {
+            row["run_id"]: row["last_run_sequence"]
+            for row in (*mutation["upserts"].get("runs", ()), *mutation["patches"].get("runs", ()))
+        }
+        tails = {}
+        for rid, head in changed_runs.items():
+            events = replacements.get(rid, appends.get(rid, ()))
+            members = {}
+            for event in events[-_EVENT_TAIL_ROWS:]:
+                raw = _json(event)
+                if len(raw.encode("utf-8")) <= _EVENT_TAIL_ROW_BYTES:
+                    members[raw] = event["run_sequence"]
+            tails[rid] = (head, members, rid in replacements)
+        return tails
+
     async def _commit_storage_locked(self, sid):
         await self._ensure_ready()
         started = time.perf_counter()
@@ -165,12 +192,16 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         }
         commit_id = uuid.uuid4().hex
         key = self._session_key(sid)
+        tails = self._event_tail_changes(mutation)
+        deleted_runs = [row[0] for row in mutation["deletes"].get("runs", ())]
 
         async def write():
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
                 await pipe.watch(key)
-                previous = await pipe.hget(key, "revision")
+                previous, indexed_revision, index_epoch = await pipe.hmget(
+                    key, ("revision", "event_index_revision", "event_index_epoch")
+                )
                 restoring = expected is None and sid in self._backup_restores.get()
                 if restoring and await pipe.hget(key, "deleted") == "1":
                     previous = None
@@ -189,6 +220,13 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                         raise self._storage_error(
                             "Redis snapshot staging expired before publication"
                         )
+                # A mixed-version writer can advance the ledger without
+                # maintaining the derived tail. Retire those heads on the
+                # first subsequent indexed commit.
+                if compact or previous != indexed_revision or not index_epoch:
+                    index_epoch = commit_id
+                fields = [self._event_head_field(rid) for rid in tails]
+                old_heads = await pipe.hmget(key, fields) if fields else ()
                 pipe.multi()
                 if restoring:
                     pipe.hdel(
@@ -214,7 +252,21 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     "quiescent": "1" if quiescent else "0",
                     "dispatch_revision": revision,
                     "dispatch_intents": _json(intents),
+                    "event_index_revision": revision,
+                    "event_index_epoch": index_epoch,
                 }
+                for (rid, (event_head, members, replaced)), old_head in zip(tails.items(), old_heads, strict=True):
+                    tail = self._durable_event_tail(rid)
+                    if replaced or not old_head or old_head.partition(":")[0] != index_epoch:
+                        pipe.delete(tail)
+                    if members:
+                        pipe.zadd(tail, members)
+                    pipe.zremrangebyscore(tail, "-inf", event_head - _EVENT_TAIL_ROWS)
+                    pipe.expire(tail, min(self.retention_seconds, 300))
+                    values[self._event_head_field(rid)] = f"{index_epoch}:{event_head}"
+                for rid in deleted_runs:
+                    pipe.hdel(key, self._event_head_field(rid))
+                    pipe.delete(self._durable_event_tail(rid))
                 if staged_base:
                     token, parts = staged_base
                     values.update(

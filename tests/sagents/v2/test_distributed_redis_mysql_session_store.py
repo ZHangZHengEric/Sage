@@ -850,6 +850,11 @@ async def test_two_recovery_workers_requeue_original_runs_without_stealing_live_
     first, second = stores
     handles = [(await first.create_run(command(f"lost-handoff-{index}"), CONTEXT)).handle
                for index in range(8)]
+    broken = (await first.create_run(command("unreadable-sibling"), CONTEXT)).handle
+    broken_key = first._session_key(broken.session_id)
+    broken_base = await first._redis.hget(broken_key, "base")
+    original_intents = await first._redis.hget(broken_key, "dispatch_intents")
+
     executions = Counter()
 
     class CompletingAgent:
@@ -897,6 +902,8 @@ async def test_two_recovery_workers_requeue_original_runs_without_stealing_live_
         await schedulers[0].submit(dispatchers[0]._work_item(handles[0], CONTEXT, resume=False))
         live = await schedulers[0].claim("original-worker", lease_duration=timedelta(seconds=45), wait_timeout=0)
         assert live is not None
+        await first._redis.hset(broken_key, mapping={"dispatch_intents": "{", "base": "{"})
+        first._recovery_required.add(broken.session_id)
         await asyncio.gather(*(dispatcher.start(recover=False) for dispatcher in dispatchers))
         await wait_completed([run.run_id for run in handles[1:]])
         assert executions[handles[0].run_id] == 0
@@ -907,5 +914,114 @@ async def test_two_recovery_workers_requeue_original_runs_without_stealing_live_
         assert executions == Counter({run.run_id: 1 for run in handles})
         await asyncio.gather(*(dispatcher.refresh_recovery() for dispatcher in dispatchers))
         assert await schedulers[0].pending_count() == 0
+        assert broken.run_id not in executions
     finally:
         await asyncio.gather(*(dispatcher.close() for dispatcher in dispatchers))
+        await first._redis.hset(broken_key, mapping={"dispatch_intents": original_intents, "base": broken_base})
+        first._recovery_required.discard(broken.session_id)
+
+
+@pytest.mark.asyncio
+async def test_recovery_isolates_bad_session_and_rebuilds_only_derived_index(stores):
+    first, second = stores
+    good = (await first.create_run(command("good"), CONTEXT)).handle
+    repairable = (await first.create_run(command("repairable"), CONTEXT)).handle
+    unreadable = (await first.create_run(command("unreadable"), CONTEXT)).handle
+    wrong_type = (await first.create_run(command("wrong-type"), CONTEXT)).handle
+    repairable_key = first._session_key(repairable.session_id)
+    unreadable_key = first._session_key(unreadable.session_id)
+    wrong_type_key = first._session_key(wrong_type.session_id)
+    original_base = await first._redis.hget(unreadable_key, "base")
+    original_hash = await first._redis.hgetall(wrong_type_key)
+    await first._redis.hset(repairable_key, "dispatch_intents", "{")
+    await first._redis.hset(unreadable_key, mapping={"dispatch_intents": "{", "base": "{"})
+    await first._redis.set(wrong_type_key, "not a hash")
+    try:
+        intents = await second.list_dispatchable_runs()
+        assert {intent.run.run_id for intent in intents} == {good.run_id, repairable.run_id}
+        assert all(intent.context == CONTEXT for intent in intents)
+    finally:
+        await first._redis.hset(unreadable_key, "base", original_base)
+        await first._redis.delete(wrong_type_key)
+        await first._redis.hset(wrong_type_key, mapping=original_hash)
+
+
+@pytest.mark.asyncio
+async def test_durable_event_tail_handles_revision_only_updates_and_reconnect(stores, monkeypatch):
+    first, second = stores
+    handle = (await first.create_run(command(), CONTEXT)).handle
+    rid, sid = handle.run_id, handle.session_id
+    await transition(first, rid, RunState.RUNNING, "running")
+    before = await first.get_run(rid)
+    canonical = second.read_events
+
+    async def no_aggregate(*args, **kwargs):
+        pytest.fail("recent durable event page loaded an aggregate")
+
+    async def no_previews(*args, **kwargs):
+        pytest.fail("durable subscription read live previews")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(second, "read_events", no_aggregate)
+        for revision in range(8):
+            current = await first.get_run(rid)
+            await first.commit_run(run_id=rid, expected_revision=current.revision,
+                expected_states={RunState.RUNNING}, new_state=RunState.RUNNING, drafts=(),
+                context=CONTEXT, idempotency_key=f"revision-only-{revision}")
+            assert await second.read_indexed_run_events(
+                rid, sid, after_sequence=before.last_run_sequence, limit=5) == ()
+
+    await publish_preview(first, rid, "preview")
+    current = await first.get_run(rid)
+    added = await first.commit_run(run_id=rid, expected_revision=current.revision,
+        expected_states={RunState.RUNNING}, new_state=RunState.RUNNING, context=CONTEXT,
+        idempotency_key="event-burst", drafts=tuple(
+            EventDraft(type="message.delta", item_id="durable-message",
+                       data=ItemEventData(operation="delta", delta="x"*18000 if i == 100 else str(i)))
+            for i in range(320)))
+    # Both a cold gap and an individually oversized event use canonical replay.
+    assert await second.read_indexed_run_events(
+        rid, sid, after_sequence=before.last_run_sequence, limit=3) == added.events[:3]
+    large = added.events[100]
+    assert await second.read_indexed_run_events(rid, sid, after_sequence=large.run_sequence-1, limit=1) == (large,)
+    assert await canonical(rid, after_sequence=before.last_run_sequence) == added.events
+
+    # Disconnection after delivering 31 events must resume from the exact next event.
+    with monkeypatch.context() as patch:
+        patch.setattr(second, "read_events", no_aggregate)
+        patch.setattr(second, "_read_preview_page", no_previews)
+        async def reconnect():
+            cursor = added.events[-64].run_sequence - 1
+            stream = second.subscribe_durable_events(EventCursor(run_id=rid, run_sequence=cursor), sid)
+            first_page = tuple([await asyncio.wait_for(anext(stream), 5) for _ in range(31)])
+            await stream.aclose()
+            stream = second.subscribe_durable_events(
+                EventCursor(run_id=rid, run_sequence=first_page[-1].run_sequence), sid)
+            remaining = tuple([await asyncio.wait_for(anext(stream), 5) for _ in range(33)])
+            await stream.aclose()
+            assert (*first_page, *remaining) == added.events[-64:]
+
+        await asyncio.gather(*(reconnect() for _ in range(16)))
+        streams = [second.subscribe_durable_events(
+            EventCursor(run_id=rid, run_sequence=added.events[-1].run_sequence), sid) for _ in range(16)]
+        waiting = [asyncio.create_task(anext(stream)) for stream in streams]
+        try:
+            await asyncio.sleep(.05)
+            current = await first.get_run(rid)
+            live = await first.commit_run(run_id=rid, expected_revision=current.revision,
+                expected_states={RunState.RUNNING}, new_state=RunState.RUNNING, context=CONTEXT,
+                idempotency_key="live-event", drafts=(EventDraft(type="message.delta", item_id="durable-message",
+                    data=ItemEventData(operation="delta", delta="after-reconnect")),))
+            assert await asyncio.wait_for(asyncio.gather(*waiting), 5) == [live.events[0]] * len(streams)
+        finally:
+            for task in waiting:
+                task.cancel()
+            await asyncio.gather(*waiting, return_exceptions=True)
+            await asyncio.gather(*(stream.aclose() for stream in streams))
+
+    # If an old writer advances past the index marker, never mistake a stale
+    # indexed head for a caught-up cursor.
+    session_key = first._session_key(sid)
+    await first._redis.hset(session_key, "event_index_revision", "0")
+    assert await second.read_indexed_run_events(
+        rid, sid, after_sequence=added.events[-2].run_sequence, limit=1) == added.events[-1:]

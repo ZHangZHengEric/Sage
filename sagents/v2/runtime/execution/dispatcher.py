@@ -238,13 +238,36 @@ class LocalWorkerDispatcher:
                 if self.recovery_filter is not None and not self.recovery_filter(run):
                     continue
                 try:
-                    work = self._work_item(run, intent.context, resume=run.state == RunState.RESUMING)
+                    # The index selects candidates; only the current durable
+                    # Run and its original request authorize a new work item.
+                    current = await runtime.get_run(run.run_id)
+                    if (current.session_id != run.session_id or current.state != run.state
+                            or current.revision != run.revision or current.resolved_spec_hash != run.resolved_spec_hash):
+                        continue
+                    context = await store.get_run_context(run.run_id)
+                    command = await store.get_start_command(run.run_id)
+                    if context != intent.context or command.parent_run_id is not None:
+                        _LOGGER.warning("scheduler.recovery.context_mismatch",
+                            "Ignored inconsistent Run recovery intent", run_id=run.run_id)
+                        continue
+                    wake_at = (
+                        await self._automatic_resume_at(store, run.run_id)
+                        if run.state == RunState.RUNNING else None
+                    )
+                except (ValueError, TypeError, KeyError):
+                    _LOGGER.warning("scheduler.recovery.run_unreadable",
+                        "Isolated unreadable Run during recovery", run_id=run.run_id)
+                    continue
+                except SageV2Error as exc:
+                    if (exc.info.code not in {"run.not_found", "run.header_not_found", "session.owner_unknown", "session.revision_conflict"}
+                            and exc.info.category not in {ErrorCategory.CORRUPT_STATE, ErrorCategory.UNSUPPORTED_SCHEMA}):
+                        raise
+                    _LOGGER.warning("scheduler.recovery.run_unreadable",
+                        "Isolated unreadable Run during recovery", run_id=run.run_id, error_code=exc.info.code)
+                    continue
+                try:
+                    work = self._work_item(current, context, resume=current.state == RunState.RESUMING)
                     if run.state == RunState.QUEUED:
-                        # A stale scan cannot authorize reopening a different
-                        # generation. The worker checks the durable state again.
-                        current = await runtime.get_run(run.run_id)
-                        if current.state != RunState.QUEUED or current.revision != run.revision:
-                            continue
                         if await restore_queued(work):
                             _LOGGER.info(
                                 "scheduler.recovery.requeued", "Restored queued Run",
@@ -252,8 +275,7 @@ class LocalWorkerDispatcher:
                                 revision=run.revision,
                             )
                         continue
-                    wake_at = await self._automatic_resume_at(store, run.run_id)
-                    if wake_at is not None and run.state == RunState.RUNNING:
+                    if wake_at is not None:
                         work = work.model_copy(update={"available_at": wake_at})
                     await self.scheduler.submit(work)
                 except SageV2Error as exc:

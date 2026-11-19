@@ -29,7 +29,7 @@ def decode_redis_metadata(
     return state
 
 
-async def _read_redis_fields_batched(store, operations):
+async def _read_redis_fields_batched(store, operations, *, raise_on_error=True):
     """Cap each Redis reply batch at 32 commands and 256 projected fields."""
     results = []
     for start in range(0, len(operations), 32):
@@ -39,7 +39,7 @@ async def _read_redis_fields_batched(store, operations):
                     pipe.hget(key, fields)
                 else:
                     pipe.hmget(key, fields)
-            results.extend(await pipe.execute())
+            results.extend(await pipe.execute(raise_on_error=raise_on_error))
     return results
 
 

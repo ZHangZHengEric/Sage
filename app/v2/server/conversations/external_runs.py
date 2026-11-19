@@ -15,7 +15,7 @@ from sagents.v2.contracts.events import RunEventData, RuntimeEvent, ToolEventDat
 from sagents.v2.contracts.run_state import EventCursor, RunSnapshot, RunState, TERMINAL_RUN_STATES
 
 
-_RECOVERY_PAGE_SIZE = 500
+_RECOVERY_PAGE_SIZE = 256
 _RECENT_TOOL_EVENTS = 100
 _RECOVERY_STOP_STATES = TERMINAL_RUN_STATES | {RunState.SUSPENDED}
 _RECOVERY_RUN_STATES = frozenset(RunState)
@@ -91,13 +91,12 @@ def _recovery_event(event: RuntimeEvent, identity: dict[str, str]) -> str | None
     return None
 
 
-async def _recent_tool_frames(access, context, run: RunSnapshot, identity: dict[str, str]):
+async def _recent_tool_frames(read, run: RunSnapshot, identity: dict[str, str]):
     frames = []
     end = run.last_run_sequence
     while end:
         start = max(0, end - _RECOVERY_PAGE_SIZE)
-        events = await access.read_events(run.run_id, context, after_sequence=start,
-                                          limit=end - start)
+        events = await read(after_sequence=start, limit=end - start)
         for event in reversed(events):
             if event.run_sequence <= end and isinstance(event.data, ToolEventData):
                 frames.append(_recovery_event(event, identity))
@@ -113,14 +112,15 @@ async def _recover_events(access, context, run: RunSnapshot,
     head = run.last_run_sequence
     stopped = run.state in _RECOVERY_STOP_STATES
     head_state_delivered = after == (head, True)
+    read = await access.durable_event_reader(run.run_id, context)
     if after is None:
-        for frame in await _recent_tool_frames(access, context, run, identity):
+        for frame in await _recent_tool_frames(read, run, identity):
             yield frame
     else:
         sequence, _ = after
         while sequence < head:
-            events = await access.read_events(
-                run.run_id, context, after_sequence=sequence,
+            events = await read(
+                after_sequence=sequence,
                 limit=min(_RECOVERY_PAGE_SIZE, head - sequence),
             )
             if not events:
@@ -145,13 +145,11 @@ async def _recover_events(access, context, run: RunSnapshot,
         return
 
     # The durable cursor bridges the snapshot read and subscription setup.
-    events = access.subscribe_events(EventCursor(run_id=run.run_id, run_sequence=head), context)
+    events = access.subscribe_durable_events(EventCursor(run_id=run.run_id, run_sequence=head), context)
     async with aclosing(events_with_heartbeats(events, heartbeat_seconds=20)) as stream:
         async for event in stream:
             if event is None:
                 yield ": heartbeat\n\n"
-                continue
-            if event.preview_sequence is not None:
                 continue
             frame = _recovery_event(event, identity)
             if frame is not None:
