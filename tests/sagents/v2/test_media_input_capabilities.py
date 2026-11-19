@@ -560,10 +560,15 @@ async def test_private_chat_video_object_is_reused_and_signed_with_the_aws_sdk(m
         )
         first = urlsplit((await publish_videos(config, video))[VIDEO.uri])
         replay = urlsplit((await publish_videos(config, video))[VIDEO.uri])
-        concurrent = urlsplit((await publish_videos(config, video))[VIDEO.uri])
+        # A competing conditional write can win before a new Run's first PUT.
+        with bind_video_copy_owner(
+            "other-run", InMemoryArtifactStore(), lambda upload: upload()
+        ):
+            concurrent = urlsplit((await publish_videos(config, video))[VIDEO.uri])
         stub.assert_no_pending_responses()
 
-    assert first.path == replay.path == concurrent.path
+    assert first.path == replay.path
+    assert first.path != concurrent.path
     assert first.path.startswith("/sage/model-video/runs/") and first.path.endswith(".mp4")
     query = parse_qs(replay.query)
     assert query["X-Amz-Expires"] == ["300"]
@@ -914,7 +919,8 @@ def test_generic_model_route_cannot_grant_video_storage(key):
 
 
 @pytest.mark.parametrize("protocol", ["gemini-generate-content", "openai-chat-completions"])
-async def test_remote_media_is_only_sent_before_the_first_model_reply(protocol):
+@pytest.mark.parametrize("answered", [True, False])
+async def test_remote_media_is_only_sent_in_its_user_turn(protocol, answered):
     import httpx
 
     old_url = "https://media.example.test/temporary.mp4"
@@ -975,7 +981,7 @@ async def test_remote_media_is_only_sent_before_the_first_model_reply(protocol):
         available = False
         followup = request.model_copy(update={"messages": (
             first,
-            ModelMessage(role="assistant", content=(TextBlock(text="analyzed"),)),
+            *((ModelMessage(role="assistant", content=(TextBlock(text="analyzed"),)),) if answered else ()),
             ModelMessage(role="user", content=(TextBlock(text="plain text question"),)),
         )})
         for _ in range(2):

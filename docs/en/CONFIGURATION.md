@@ -129,8 +129,9 @@ Each profile contains authorized Server user IDs in `owner_ids` and an
 SDK hosts can pass a trusted `S3VideoStorageConfig` as the `video_storage`
 argument to `create_registered_model_provider`. Model route extras cannot
 supply raw storage targets. For existing HTTPS video URLs, set only
-`video_url_format`. For workspace uploads, install `sage[s3-video]` and
-configure the AWS SDK credential chain.
+`video_url_format`. The standard Server image includes the S3 dependency.
+Other SDK installations can use `sage[s3-video]`. Configure the AWS SDK
+credential chain for workspace uploads.
 Grant `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, and
 `s3:DeleteObjectVersion` under the configured prefix, plus `s3:ListBucket` and
 `s3:ListBucketVersions` scoped to that prefix. You can set an HTTPS
@@ -139,8 +140,11 @@ read-only operations, then records ownership before issuing an upload. Copies
 are stored under a per-Run prefix. Session deletion,
 including tenant cleanup, removes these copies and their object versions. If
 cleanup fails, the Session retains its record so deletion can be retried with
-access to the original bucket. The bucket lifecycle can expire old copies as a
-backstop. The workspace tool accepts files up to 12 MiB each.
+access to the original bucket. When a PUT times out, the Session retains its
+record until the exact object can be confirmed. An empty listing does not
+resolve a timed-out write. Preview records created before per-object tracking
+require storage reconciliation. The bucket lifecycle can expire old copies as
+a backstop. The workspace tool accepts files up to 12 MiB each.
 
 Chat Completions also replaces older videos beyond `max_inline_videos`
 (default 10) with text references. When the body exceeds `max_request_bytes`,

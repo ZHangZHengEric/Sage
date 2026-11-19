@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.contracts.items import AudioBlock, FileBlock, TextBlock
 from sagents.v2.model.contracts import ModelCapabilities, ModelMessage
 from sagents.v2.runtime.artifact.workspace_images import materialize_inline_media
@@ -30,10 +31,24 @@ def omit_historical_remote_media(
          if messages[index].role == "assistant"),
         -1,
     )
-    if last_reply < 0:
+    current_start = last_reply + 1
+    user_indices = [
+        index for index in range(current_start, len(messages))
+        if is_user_request(messages[index])
+    ]
+    if user_indices:
+        latest = user_indices[-1]
+        source_run = messages[latest].metadata.get("source_run_id")
+        if source_run is not None:
+            # One Run can admit several adjacent user Items together.
+            while (latest > current_start and is_user_request(messages[latest - 1])
+                   and messages[latest - 1].metadata.get("source_run_id") == source_run):
+                latest -= 1
+        current_start = latest
+    if current_start == 0:
         return messages
     history = []
-    for message in messages[:last_reply + 1]:
+    for message in messages[:current_start]:
         content = []
         for block in message.content:
             kind = media_kind(block)
@@ -46,7 +61,7 @@ def omit_historical_remote_media(
             message if tuple(content) == message.content
             else message.model_copy(update={"content": tuple(content)})
         )
-    return (*history, *messages[last_reply + 1:])
+    return (*history, *messages[current_start:])
 
 
 

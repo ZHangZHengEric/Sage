@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from anyio import CancelScope
 from pydantic import AnyHttpUrl, Field, field_validator
@@ -127,53 +128,106 @@ async def publish_videos(
         if plan is None:
             return {}
         client, copies = plan
-        operation = partial(_upload_and_sign, client, config, copies, required)
-        if not any(copy.payload is not None for copy in copies.values()):
-            return await _settle_object_operation(operation)
+        available = {}
+        for uri, copy in copies.items():
+            if copy.payload is not None:
+                try:
+                    await _publish_video_copy(config, run_id, client, copy, store, dispatch)
+                except SageV2Error:
+                    if uri in required:
+                        raise
+                    continue
+            available[uri] = copy.key
+        return await _settle_object_operation(
+            partial(_sign_video_urls, client, config, available, required)
+        )
 
-        serialized = config.model_dump_json()
-        identity = hashlib.sha256(f"{run_id}\0{serialized}".encode()).hexdigest()
 
-        async def empty_receipt():
-            yield b""
+def video_copy_outcome_id(receipt_id: str) -> str:
+    return receipt_id + "-outcome"
 
-        try:
-            await store.put(
-                artifact_id=VIDEO_COPY_RECEIPT_PREFIX + identity,
-                media_type="application/x-sage-video-copy",
-                content=empty_receipt(),
-                metadata={"run_id": run_id, "storage": config.model_dump(mode="json")},
-            )
-        except (SageV2Error, OSError):
-            if required.intersection(copies):
-                raise _storage_error("Could not record ownership of the video copy.", retryable=True) from None
-            return {}
 
-        async def upload():
-            return await _settle_object_operation(operation)
+def video_copy_outcome(receipt_id: str, outcome: str) -> ArtifactRef:
+    return ArtifactRef(
+        artifact_id=video_copy_outcome_id(receipt_id),
+        media_type="application/x-sage-video-copy-outcome",
+        size_bytes=0,
+        digest="sha256:" + hashlib.sha256(b"").hexdigest(),
+        metadata={"outcome": outcome},
+    )
 
-        return await dispatch(upload)
+
+async def _empty():
+    yield b""
+
+
+async def _publish_video_copy(config, run_id, client, copy, store, dispatch):
+    endpoint = str(config.endpoint_url or "").rstrip("/")
+    identity = hashlib.sha256(f"{endpoint}\0{config.bucket}\0{copy.key}".encode()).hexdigest()
+    receipt_id = VIDEO_COPY_RECEIPT_PREFIX + identity
+    try:
+        await store.put(
+            artifact_id=receipt_id,
+            media_type="application/x-sage-video-copy",
+            content=_empty(),
+            metadata={
+                "run_id": run_id,
+                "storage": config.model_dump(mode="json"),
+                "key": copy.key,
+                # A different caller may inspect an earlier attempt, but must
+                # not use its receipt to submit another PUT for this key.
+                "attempt": uuid4().hex,
+            },
+        )
+    except SageV2Error as exc:
+        if exc.info.code == "artifact.id_conflict":
+            raise _storage_error("A prior video upload for this key requires reconciliation.") from None
+        raise _storage_error("Could not record ownership of the video copy.", retryable=True) from None
+    except OSError:
+        raise _storage_error("Could not record ownership of the video copy.", retryable=True) from None
+
+    attempt = _VideoWriteAttempt()
+
+    async def upload():
+        return await _settle_object_operation(
+            partial(_put_video_copy, client, config, copy, attempt)
+        )
+
+    try:
+        await dispatch(upload)
+    finally:
+        if attempt.outcome is not None:
+            outcome = video_copy_outcome(receipt_id, attempt.outcome)
+            await _settle(store.put(
+                artifact_id=outcome.artifact_id,
+                media_type=outcome.media_type,
+                content=_empty(),
+                metadata=outcome.metadata,
+            ))
 
 
 async def _settle_object_operation(operation):
-    # A Run cannot become terminal while its upload worker can still publish.
-    # Likewise, Session deletion must retain its locks until cleanup settles.
+    # Cancellation must keep the owning Session lock until the worker returns.
     async with auxiliary_capacity("model-media"):
-        task = asyncio.create_task(asyncio.to_thread(operation))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            with CancelScope(shield=True):
-                while not task.done():
-                    try:
-                        await asyncio.shield(task)
-                    except asyncio.CancelledError:
-                        continue
-                    except Exception:
-                        break
-            if not task.cancelled():
-                task.exception()
-            raise
+        return await _settle(asyncio.to_thread(operation))
+
+
+async def _settle(operation):
+    task = asyncio.create_task(operation)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        with CancelScope(shield=True):
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+        if not task.cancelled():
+            task.exception()
+        raise
 
 
 def _client(config: S3VideoStorageConfig):
@@ -186,7 +240,8 @@ def _client(config: S3VideoStorageConfig):
         endpoint_url=str(config.endpoint_url) if config.endpoint_url else None,
         config=Config(
             signature_version="s3v4", connect_timeout=5, read_timeout=30,
-            retries={"mode": "standard", "total_max_attempts": 3},
+            # A timed-out PUT can still complete remotely. Never submit it again.
+            retries={"mode": "standard", "total_max_attempts": 1},
         ),
     )
 
@@ -258,25 +313,50 @@ def _prepare_upload(config, prefix, videos, required, resources):
     return (client, copies) if copies else None
 
 
-def _upload_and_sign(client, config, copies, required) -> dict[str, str]:
-    from botocore.exceptions import BotoCoreError, ClientError
+@dataclass(slots=True)
+class _VideoWriteAttempt:
+    # Until the worker starts, no request can have been sent.
+    outcome: str | None = "not_written"
 
-    uploaded = {}
-    for uri, copy in copies.items():
-        try:
-            if copy.payload is not None:
-                try:
-                    client.put_object(
-                        Bucket=config.bucket, Key=copy.key, Body=copy.payload,
-                        ContentType=copy.mime_type, IfNoneMatch="*",
-                    )
-                except ClientError as conflict:
-                    if conflict.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
-                        raise
-            uploaded[uri] = copy.key
-        except (ClientError, BotoCoreError) as exc:
-            if uri in required:
-                raise _storage_failure(exc) from None
+
+def _put_video_copy(client, config, copy, attempt) -> None:
+    from botocore.exceptions import (
+        BotoCoreError,
+        ClientError,
+        NoCredentialsError,
+        ParamValidationError,
+        PartialCredentialsError,
+    )
+
+    attempt.outcome = None
+    try:
+        client.put_object(
+            Bucket=config.bucket, Key=copy.key, Body=copy.payload,
+            ContentType=copy.mime_type, IfNoneMatch="*",
+        )
+    except (NoCredentialsError, PartialCredentialsError, ParamValidationError) as exc:
+        attempt.outcome = "not_written"
+        raise _storage_failure(exc) from None
+    except ClientError as exc:
+        response = exc.response
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if status == 412:
+            attempt.outcome = "committed"
+            return
+        if response.get("Error", {}).get("Code") in {
+            "AccessDenied", "ExpiredToken", "InvalidAccessKeyId", "InvalidArgument",
+            "InvalidRequest", "InvalidToken", "NoSuchBucket", "SignatureDoesNotMatch",
+        }:
+            attempt.outcome = "not_written"
+            raise _storage_failure(exc) from None
+        raise _storage_error("Video upload outcome is unresolved.") from None
+    except BotoCoreError:
+        raise _storage_error("Video upload outcome is unresolved.") from None
+    attempt.outcome = "committed"
+
+
+def _sign_video_urls(client, config, uploaded, required) -> dict[str, str]:
+    from botocore.exceptions import BotoCoreError, ClientError
 
     # Give every video its full TTL after all uploads finish.
     urls = {}
@@ -294,6 +374,42 @@ def _upload_and_sign(client, config, copies, required) -> dict[str, str]:
             if uri in required:
                 raise _storage_failure(exc) from None
     return urls
+
+
+async def confirm_video_copy(receipt: ArtifactRef) -> None:
+    """Resolve an uncertain PUT only when its exact object is visible."""
+    config = S3VideoStorageConfig.model_validate(receipt.metadata["storage"])
+    key = receipt.metadata.get("key")
+    if not key:
+        raise SageV2Error(RuntimeErrorInfo(
+            code="session.video_upload_unresolved",
+            category=ErrorCategory.CONFLICT,
+            message="This preview video receipt has no object-level outcome. Storage reconciliation is required.",
+        ))
+    prefix = _copy_prefix(config, receipt.metadata["run_id"])
+    try:
+        if key.startswith(prefix) and await _settle_object_operation(
+            partial(_video_copy_exists, config, key)
+        ):
+            return
+    except Exception:
+        pass
+    raise SageV2Error(RuntimeErrorInfo(
+        code="session.video_upload_unresolved",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="A video upload may still complete. Retry Session deletion after storage settles.",
+        retryable=True,
+    )) from None
+
+
+def _video_copy_exists(config: S3VideoStorageConfig, key: str) -> bool:
+    # A current delete marker can hide a committed version, so inspect versions.
+    with closing(_client(config)) as client:
+        versions = client.list_object_versions(Bucket=config.bucket, Prefix=key, MaxKeys=1000)
+        if any(item["Key"] == key for item in versions.get("Versions", ())):
+            return True
+        objects = client.list_objects_v2(Bucket=config.bucket, Prefix=key, MaxKeys=1000)
+        return any(item["Key"] == key for item in objects.get("Contents", ()))
 
 
 async def delete_video_copies(receipt: ArtifactRef) -> None:

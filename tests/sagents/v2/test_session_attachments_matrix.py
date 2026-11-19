@@ -505,12 +505,14 @@ async def test_hosted_video_deletion_is_scoped_durable_and_retryable(tmp_path, m
     objects = {}
     reject_delete = True
 
-    def upload(client, config, copies, required):
-        for copy in copies.values():
-            objects[copy.key] = {"version-1", "delete-marker"}
+    def upload(client, config, copy, attempt):
+        objects[copy.key] = {"version-1", "delete-marker"}
+        attempt.outcome = "committed"
+
+    def sign(client, config, uploaded, required):
         return {
-            uri: "https://bucket.example.test/" + copy.key + "?signature=test"
-            for uri, copy in copies.items()
+            uri: "https://bucket.example.test/" + key + "?signature=test"
+            for uri, key in uploaded.items()
         }
 
     class Bucket:
@@ -545,7 +547,8 @@ async def test_hosted_video_deletion_is_scoped_durable_and_retryable(tmp_path, m
 
     monkeypatch.setitem(sys.modules, "boto3", object())
     monkeypatch.setattr(video_storage, "_prepare_upload", _plan_hosted_video_upload)
-    monkeypatch.setattr(video_storage, "_upload_and_sign", upload)
+    monkeypatch.setattr(video_storage, "_put_video_copy", upload)
+    monkeypatch.setattr(video_storage, "_sign_video_urls", sign)
     monkeypatch.setattr(video_storage, "_client", lambda config: Bucket())
     config = video_storage.S3VideoStorageConfig(bucket="private-videos")
     uri = "data:video/mp4;base64,Y2xpcA=="
@@ -624,7 +627,7 @@ async def test_hosted_video_upload_requires_a_durable_receipt(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "boto3", object())
     monkeypatch.setattr(video_storage, "_prepare_upload", _plan_hosted_video_upload)
-    monkeypatch.setattr(video_storage, "_upload_and_sign", upload)
+    monkeypatch.setattr(video_storage, "_put_video_copy", upload)
     config = video_storage.S3VideoStorageConfig(bucket="private-videos")
     uri = "data:video/mp4;base64,Y2xpcA=="
     with pytest.raises(SageV2Error, match="Session-owned"):
@@ -646,14 +649,14 @@ async def test_cancelling_hosted_video_request_waits_for_the_s3_write(monkeypatc
     started = asyncio.Event()
     unblock = threading.Event()
 
-    def upload(*args):
+    def upload(client, config, copy, attempt):
         loop.call_soon_threadsafe(started.set)
         assert unblock.wait(timeout=5)
-        return {}
+        attempt.outcome = "committed"
 
     monkeypatch.setitem(sys.modules, "boto3", object())
     monkeypatch.setattr(video_storage, "_prepare_upload", _plan_hosted_video_upload)
-    monkeypatch.setattr(video_storage, "_upload_and_sign", upload)
+    monkeypatch.setattr(video_storage, "_put_video_copy", upload)
     config = video_storage.S3VideoStorageConfig(bucket="private-videos")
     store = EphemeralSessionStore()
     created = await create(store, "video-cancel")
@@ -684,8 +687,8 @@ async def test_cancelling_hosted_video_request_waits_for_the_s3_write(monkeypatc
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["credentials", "list-denied", "put-timeout"])
-async def test_video_upload_registers_cleanup_only_after_read_only_checks(failure, monkeypatch):
+@pytest.mark.parametrize("failure", ["credentials", "list-denied", "put-signing", "put-timeout", "late-put"])
+async def test_video_upload_tracks_only_possible_writes(failure, tmp_path, monkeypatch):
     pytest.importorskip("boto3")
     from botocore.exceptions import ClientError, NoCredentialsError, ReadTimeoutError
 
@@ -696,6 +699,8 @@ async def test_video_upload_registers_cleanup_only_after_read_only_checks(failur
     client_calls = 0
     put_calls = 0
     deny_cleanup = False
+    lose_delete_response = False
+    pending_key = None
 
     def http_error(code, status, operation):
         return ClientError({
@@ -721,25 +726,33 @@ async def test_video_upload_registers_cleanup_only_after_read_only_checks(failur
             return {"Contents": [{"Key": key} for key in objects if key.startswith(Prefix)]}
 
         def put_object(self, *, Key, **kwargs):
-            nonlocal put_calls
+            nonlocal put_calls, pending_key
             put_calls += 1
-            objects.add(Key)
+            if failure == "put-signing":
+                raise NoCredentialsError()
+            if failure == "late-put":
+                pending_key = Key
+            else:
+                objects.add(Key)
             raise ReadTimeoutError(endpoint_url="https://fixture.invalid")
 
         def delete_objects(self, *, Delete, **kwargs):
             for item in Delete["Objects"]:
                 objects.remove(item["Key"])
+            if lose_delete_response:
+                raise ReadTimeoutError(endpoint_url="https://fixture.invalid")
             return {}
 
     def client(config):
         nonlocal client_calls
         client_calls += 1
-        if failure == "credentials":
+        if failure == "credentials" or (failure == "put-signing" and put_calls):
             raise NoCredentialsError()
         return Bucket()
 
     monkeypatch.setattr(video_storage, "_client", client)
-    store = EphemeralSessionStore()
+    root = tmp_path / "video-copy-state"
+    store = FilesystemSessionStore(root)
     try:
         run = await create(store, "video-preflight")
         run_id, session_id = run.handle.run_id, run.handle.session_id
@@ -751,24 +764,78 @@ async def test_video_upload_registers_cleanup_only_after_read_only_checks(failur
         ):
             with pytest.raises(SageV2Error) as failed:
                 await video_storage.publish_videos(config, {uri: "video/mp4"}, required={uri})
-        assert failed.value.info.code == "model.video_storage_failed"
+            assert failed.value.info.code == "model.video_storage_failed"
+            if failure == "late-put":
+                with pytest.raises(SageV2Error, match="requires reconciliation"):
+                    await video_storage.publish_videos(
+                        config.model_copy(update={"url_ttl_seconds": 60}),
+                        {uri: "video/mp4"}, required={uri},
+                    )
+                assert put_calls == 1
         await cancel(store, run)
         access = AuthorizedSessionAccess(store)
-        if failure == "put-timeout":
-            assert put_calls == 1 and objects
-            deny_cleanup = True
+        if failure in {"put-timeout", "late-put"}:
+            assert put_calls == 1
+            deny_cleanup = failure == "put-timeout"
             with pytest.raises(SageV2Error) as failed:
                 await access.delete_session(session_id, CONTEXT)
-            assert failed.value.info.code == "session.video_cleanup_failed"
-            assert (await store.get_session(session_id)).session_id == session_id
+            assert failed.value.info.code == "session.video_upload_unresolved"
+            assert await store.get_session(session_id)
             deny_cleanup = False
+            if failure == "late-put":
+                assert pending_key and not objects
+                objects.add(pending_key)
+                lose_delete_response = True
+                # The late commit is positively observed, and the subsequent
+                # remote deletion happens even though its response is lost.
+                with pytest.raises(SageV2Error) as failed:
+                    await access.delete_session(session_id, CONTEXT)
+                assert failed.value.info.code == "session.video_cleanup_failed"
+                assert not objects
+                lose_delete_response = False
+                await store.close()
+                store = FilesystemSessionStore(root)
+                access = AuthorizedSessionAccess(store)
         else:
-            assert put_calls == 0
+            assert put_calls == int(failure == "put-signing")
         await access.delete_session(session_id, CONTEXT)
         assert not objects
-        assert client_calls == (3 if failure == "put-timeout" else 1)
+        if failure in {"credentials", "list-denied", "put-signing"}:
+            assert client_calls == 1
         with pytest.raises(SageV2Error) as missing:
             await store.get_session(session_id)
         assert missing.value.info.code == "session.not_found"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_video_receipt_cannot_acknowledge_an_unknown_write(monkeypatch):
+    from sagents.v2.runtime.artifact import video_storage
+
+    def unexpected_client(config):
+        pytest.fail("A prefix-only preview receipt cannot prove the write settled")
+
+    monkeypatch.setattr(video_storage, "_client", unexpected_client)
+    store = EphemeralSessionStore()
+    try:
+        run = await create(store, "legacy-video-receipt")
+        session_id = run.handle.session_id
+        await store.put_attachment(
+            session_id,
+            artifact_id=video_storage.VIDEO_COPY_RECEIPT_PREFIX + "legacy",
+            media_type="application/x-sage-video-copy",
+            content=content(b""),
+            context=CONTEXT,
+            metadata={
+                "run_id": run.handle.run_id,
+                "storage": {"bucket": "test-preview"},
+            },
+        )
+        await cancel(store, run)
+        with pytest.raises(SageV2Error) as failed:
+            await store.delete_session(session_id)
+        assert failed.value.info.code == "session.video_upload_unresolved"
+        assert await store.get_session(session_id)
     finally:
         await store.close()

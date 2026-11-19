@@ -113,12 +113,15 @@ request:
 
 SDK 宿主可通过 `create_registered_model_provider` 的 `video_storage` 参数注入可信配置。
 模型路由参数只接受 Server 授权的配置别名。已有可直读的 HTTPS 视频 URL 时，只需设置
-`video_url_format`。工作区视频上传需安装 `sage[s3-video]` 并配置 AWS SDK 凭据链。所选前缀需要 `s3:PutObject`、
+`video_url_format`。标准 Server 镜像已包含 S3 依赖，独立 SDK 安装可使用
+`sage[s3-video]`。工作区视频上传需配置 AWS SDK 凭据链。所选前缀需要 `s3:PutObject`、
 `s3:GetObject`、`s3:DeleteObject` 和 `s3:DeleteObjectVersion`，其桶需要限定此前缀的
 `s3:ListBucket` 和 `s3:ListBucketVersions` 权限。S3 兼容存储可设置 HTTPS
 `endpoint_url`。Sage 先对存储目标做只读检查，再持久化归属并上传。副本存放在 Run 独立前缀下。
 删除会话或清理租户时，会删除副本及其对象版本。清理失败时会话保留归属记录，可恢复对原桶
-的访问后重试。桶生命周期仍可作为兜底。工作区工具的单文件上限为 12 MiB。
+的访问后重试。PUT 超时后，会话保留记录，直到存储端确认对应对象。列表为空时继续保留记录。
+采用逐对象跟踪前生成的预览记录需要存储端对账。桶生命周期仍可作为兜底。
+工作区工具的单文件上限为 12 MiB。
 
 Chat Completions 同样先按 `max_inline_videos`（默认 10）把较早的视频替换为文字引用，
 再在请求体超过 `max_request_bytes` 时，按从早到晚的顺序把内联音频和视频替换为文字

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 import base64
 import hashlib
+import json
 from copy import deepcopy
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -23,7 +24,10 @@ from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.artifact.contracts import ArtifactRef
 from sagents.v2.runtime.artifact.video_storage import (
     VIDEO_COPY_RECEIPT_PREFIX,
+    confirm_video_copy,
     delete_video_copies,
+    video_copy_outcome,
+    video_copy_outcome_id,
 )
 
 
@@ -40,7 +44,8 @@ class SessionAttachmentMixin:
                     "media.run_inactive", "The video copy no longer has an active owning Run."
                 )
             # A racing terminal transition or tree deletion must wait until
-            # the network write settles. The receipt was committed separately.
+            # the local upload worker settles. Remote completion after a
+            # timeout is reconciled using the separately committed receipt.
             return await operation()
 
     async def put_attachment(
@@ -135,10 +140,30 @@ class SessionAttachmentMixin:
 
     async def _delete_hosted_video_copies_locked(self, session_ids):
         store = cast("SessionStoreCoordinator", self)
+        scopes = {}
         for session_id in sorted(session_ids):
-            for artifact_id, reference in store._sessions[session_id].attachments.items():
-                if artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX):
-                    await delete_video_copies(reference)
+            attachments = store._sessions[session_id].attachments
+            for artifact_id, receipt in tuple(attachments.items()):
+                if not artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX) or "storage" not in receipt.metadata:
+                    continue
+                outcome = attachments.get(video_copy_outcome_id(artifact_id))
+                if outcome is not None and outcome.metadata["outcome"] == "not_written":
+                    continue
+                if outcome is None:
+                    await confirm_video_copy(receipt)
+                    await store._put_attachment_locked(
+                        session_id, video_copy_outcome(artifact_id, "committed"), b""
+                    )
+                    # The proof must survive a later partial S3 delete or a
+                    # canonical deletion failure. Rebase rollback to the
+                    # durable attachment revision before further side effects.
+                    operation = store._operation.get()
+                    if operation is not None and operation.undos is not None:
+                        operation.undos[session_id] = store._capture_session_undo_locked(session_id)
+                scope = (receipt.metadata["run_id"], json.dumps(receipt.metadata["storage"], sort_keys=True))
+                scopes[scope] = receipt
+        for receipt in scopes.values():
+            await delete_video_copies(receipt)
 
     async def _read_attachment_bytes(self, session_id, artifact_id):
         store = cast("SessionStoreCoordinator", self)

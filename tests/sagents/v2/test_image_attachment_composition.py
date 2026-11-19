@@ -215,6 +215,47 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         await reopened.close()
 
 
+async def _media_application(tmp_path, model):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    tools = ("analyze_audio", "analyze_video")
+    package = BuiltinPackageFactory.create("assistant", package_id="test.durable-media")
+    agent_id = package.entrypoint.agent
+    package = package.model_copy(
+        update={
+            "agents": {
+                agent_id: package.agents[agent_id].model_copy(update={"tools": tools})
+            },
+            "runtime": package.runtime.model_copy(
+                update={
+                    "capabilities": {
+                        **package.runtime.capabilities,
+                        "tool.provider": CapabilitySelection(
+                            plugin="sage.tool.official", name="official"
+                        ),
+                        "tool.selection-policy": CapabilitySelection(
+                            plugin="sage.tool-selection.direct"
+                        ),
+                        "agent.continuation-policy": CapabilitySelection(
+                            plugin="sage.agent.continuation.deterministic"
+                        ),
+                        "execution.binding": CapabilitySelection(
+                            plugin="sage.execution.binding.local-workspace",
+                            config={
+                                "workspace": str(workspace),
+                                "policy": {"process": {"enabled": False}},
+                            },
+                        ),
+                    }
+                }
+            ),
+        }
+    )
+    return await build_registered_package(
+        tmp_path / "sessions", models=TEST_MODELS, model=model, package=package
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audio_mode", ["local", "remote-supported", "remote-unsupported"])
 async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path, audio_mode):
@@ -270,41 +311,7 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
             }
         ),
     )
-    package = BuiltinPackageFactory.create("assistant", package_id="test.durable-media")
-    agent_id = package.entrypoint.agent
-    package = package.model_copy(
-        update={
-            "agents": {
-                agent_id: package.agents[agent_id].model_copy(update={"tools": tools})
-            },
-            "runtime": package.runtime.model_copy(
-                update={
-                    "capabilities": {
-                        **package.runtime.capabilities,
-                        "tool.provider": CapabilitySelection(
-                            plugin="sage.tool.official", name="official"
-                        ),
-                        "tool.selection-policy": CapabilitySelection(
-                            plugin="sage.tool-selection.direct"
-                        ),
-                        "agent.continuation-policy": CapabilitySelection(
-                            plugin="sage.agent.continuation.deterministic"
-                        ),
-                        "execution.binding": CapabilitySelection(
-                            plugin="sage.execution.binding.local-workspace",
-                            config={
-                                "workspace": str(workspace),
-                                "policy": {"process": {"enabled": False}},
-                            },
-                        ),
-                    }
-                }
-            ),
-        }
-    )
-    application = await build_registered_package(
-        tmp_path / "sessions", models=TEST_MODELS, model=model, package=package
-    )
+    application = await _media_application(tmp_path, model)
     try:
         agent = application.loaded_agents[-1]
         entrypoint = cast(ApplicationEntrypoint, application.entrypoint())
@@ -383,3 +390,94 @@ async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path
         assert "data:video" not in serialized
     finally:
         await application.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_media_failure_does_not_break_next_user_run(tmp_path):
+    import json
+
+    import httpx
+
+    from sagents.v2.model import GeminiGenerateContentConfig, GeminiGenerateContentModelProvider
+    from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES
+
+    uri = "https://fixture.invalid/expired.mp4"
+    sent = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        old_video = any(
+            part.get("fileData", {}).get("fileUri") == uri
+            for message in payload["contents"] for part in message["parts"]
+        )
+        sent.append(old_video)
+        if old_video:
+            return httpx.Response(400, json={"error": {"code": 400, "message": "Expired test media"}})
+        event = {"candidates": [
+            {"content": {"parts": [{"text": "4"}]}, "finishReason": "STOP"}
+        ]}
+        return httpx.Response(
+            200, text=f"data: {json.dumps(event)}\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://mock.invalid/v1beta/", transport=httpx.MockTransport(handler)
+    ) as client:
+        provider = GeminiGenerateContentModelProvider(
+            GeminiGenerateContentConfig(model="fixture", capabilities=FULL_MODEL_CAPABILITIES),
+            client=client,
+        )
+
+        class Model:
+            first = True
+
+            async def capabilities(self, binding):
+                return await provider.capabilities(binding)
+
+            async def stream(self, request):
+                if self.first:
+                    self.first = False
+                    yield ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="attach", finish_reason="tool_calls", tool_calls=(
+                                ModelToolCall(
+                                    tool_call_id="video",
+                                    name="analyze_video",
+                                    arguments={"video_path": uri},
+                                ),
+                            ),
+                        ),
+                    )
+                else:
+                    async for event in provider.stream(request):
+                        yield event
+
+        application = await _media_application(tmp_path, Model())
+        try:
+            agent = application.loaded_agents[-1]
+            entrypoint = cast(ApplicationEntrypoint, application.entrypoint())
+            context = RequestContext(actor=ActorRef(
+                principal_id="owner", principal_type=PrincipalType.USER, tenant_id="tenant",
+            ))
+
+            async def run(text, key, session_id=None):
+                stream = await entrypoint.run_stream(StartRun(
+                    session_id=session_id,
+                    agent_id=agent.id,
+                    input=(InputItem(role="user", content=(TextBlock(text=text),)),),
+                    resolved_spec_hash=agent.composition_hash,
+                    idempotency_key=key,
+                ), context, agent=agent)
+                return await stream.wait()
+
+            first = await run("Analyze my clip", "failed-media")
+            assert first.state == RunState.FAILED
+            assert sent == [True]
+
+            followup = await run("What is 2+2?", "text-after-media", first.session_id)
+            assert followup.state == RunState.COMPLETED
+            assert sent == [True, False]
+        finally:
+            await application.close()
