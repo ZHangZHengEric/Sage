@@ -957,7 +957,17 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         async def write():
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
+                root_key = self._session_key(sid)
+                await pipe.watch(root_key)
+                first_deletion = await pipe.hget(root_key, "deleted") != "1"
                 pipe.multi()
+                if first_deletion and sid in deleted_session_ids:
+                    # The root tombstone owns the manifest. Old workers may
+                    # overwrite or acknowledge it; readers verify delete_id.
+                    pipe.hset(root_key, mapping={
+                        "delete_manifest_id": delete_id,
+                        "delete_members": _json(list(deleted_session_ids)),
+                    })
                 for deleted in deleted_session_ids:
                     pipe.hset(
                         self._session_key(deleted),

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from sagents.v2.runtime.observability.logs import get_logger
 from .aggregate import _json
-from .redis_metadata import metadata_index_keys
+from .redis_metadata import _read_redis_fields_batched, metadata_index_keys
 
 LOGGER = get_logger(__name__)
 
@@ -69,17 +69,52 @@ class RedisArchiveProtocol:
             pending = self._key("pending")
             # A child can remain pending after its root was already acknowledged.
             # The root marker travels with every tombstone until its own ack.
-            for sid in await self._redis.smembers(pending):
-                deleted, root = await self._redis.hmget(self._session_key(sid), "deleted", "delete_root")
-                if deleted == "1" and (sid in roots or root in roots):
-                    await self._archive_session(sid)
-                    if await self._redis.sismember(pending, sid):
-                        raise self._storage_error(f"Session deletion is still pending: {sid}")
+
+            async def find_tombstones():
+                # Each tree deletion writes its root and children atomically.
+                # Retry if a requested root changed during SSCAN, including a
+                # deletion which added children behind the scan cursor.
+                async with self._redis.pipeline() as guard:
+                    await guard.watch(*(self._session_key(root) for root in roots))
+                    matches = set()
+                    root_ids = tuple(roots)
+                    manifests = await _read_redis_fields_batched(self, [
+                        ("hmget", self._session_key(root),
+                         ("delete_id", "delete_manifest_id", "delete_members"))
+                        for root in root_ids
+                    ])
+                    unindexed = set()
+                    for root, (delete_id, manifest_id, members) in zip(root_ids, manifests, strict=True):
+                        if delete_id and manifest_id == delete_id and members:
+                            matches.update(json.loads(members))
+                        else:
+                            unindexed.add(root)
+                    cursor = 0
+                    while unindexed:
+                        cursor, batch = await self._redis.sscan(pending, cursor=cursor, count=128)
+                        headers = await _read_redis_fields_batched(self, [
+                            ("hmget", self._session_key(sid), ("deleted", "delete_root"))
+                            for sid in batch
+                        ])
+                        matches.update(
+                            sid for sid, (deleted, root) in zip(batch, headers, strict=True)
+                            if deleted == "1" and (sid in unindexed or root in unindexed)
+                        )
+                        if not cursor:
+                            break
+                    guard.multi()
+                    guard.ping()
+                    await guard.execute()
+                    return matches
+
+            for sid in await self._retry_transaction(find_tombstones):
+                await self._archive_session(sid)
+                if await self._redis.sismember(pending, sid):
+                    raise self._storage_error(f"Session deletion is still pending: {sid}")
 
     async def _compact_hot(self, sid, fields):
         """Stage small immutable chunks, then atomically publish the new base."""
-        payload = await asyncio.to_thread(self._decode_hot, fields)
-        encoded = await asyncio.to_thread(_json, payload)
+        encoded = await asyncio.to_thread(lambda: _json(self._decode_hot(fields)))
         token, parts = await self._stage_snapshot(encoded)
         snapshot_key = self._key(f"snapshot:{token}")
         key = self._session_key(sid)
@@ -123,7 +158,6 @@ class RedisArchiveProtocol:
             await self._retry_transaction(publish)
         if published and fields.get("base_snapshot"):
             await self._redis.delete(self._key(f"snapshot:{fields['base_snapshot']}"))
-        return payload
 
     async def _write_archive_snapshot(self, sid, fields):
         """Write an immutable snapshot while SQL serialization remains held."""
@@ -141,7 +175,7 @@ class RedisArchiveProtocol:
             attachment_key = self._key(f"attachments:{sid}")
             missing = set(await self._redis.hkeys(attachment_key))
             if missing and previous is not None:
-                missing.difference_update(await self._archive.archived_attachment_ids(sid))
+                missing.difference_update(await self._archive.archived_attachment_ids(sid, missing))
             if previous is None or previous < base_revision:
                 # New sessions have a small initial base. Legacy compact snapshots
                 # need a one-time baseline before their retained journal can append.
@@ -194,7 +228,7 @@ class RedisArchiveProtocol:
                     "deleted"
                 ) or base_snapshot != fields.get("base_snapshot"):
                     return
-                token = await pipe.hget(key, "base_snapshot")
+                token = base_snapshot
                 parent = await pipe.hget(self._key("parents"), sid) if deleted else None
                 pipe.multi()
                 pipe.srem(self._key("pending"), sid)

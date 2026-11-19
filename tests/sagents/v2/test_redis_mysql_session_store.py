@@ -64,8 +64,8 @@ class Archive:
     async def archive_attachments(self, sid, attachments):
         self.attachments.update({(sid, key): value for key, value in attachments.items()})
 
-    async def archived_attachment_ids(self, sid):
-        return {identity for owner, identity in self.attachments if owner == sid}
+    async def archived_attachment_ids(self, sid, candidates):
+        return {identity for identity in candidates if (sid, identity) in self.attachments}
 
     async def archive_session(self, payload, attachments):
         if self.fail:

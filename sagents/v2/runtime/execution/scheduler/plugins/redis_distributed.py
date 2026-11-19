@@ -470,7 +470,34 @@ class RedisDistributedScheduler:
 
     async def existing_work_ids(self):
         redis = await self._client()
-        raw = await redis.get(self.key_prefix + ":state")
+        state_key = self.key_prefix + ":state"
+        layout = self.key_prefix + ":claim-layout"
+        fields = ("epoch", "release-tail", "tail")
+        # Older layout-aware workers also update item positions on release.
+        # Read their canonical cancellations and the index at one instant:
+        # retiring a receipt can drop a cancelled ID without rotating epoch.
+        for _ in range(3):
+            offsets = await redis.hmget(layout, fields)
+            epoch, start, end = offsets
+            if epoch is None or start is None or end is None:
+                break
+            prefix = self._claim_prefix(epoch)
+            async with redis.pipeline(transaction=True) as reads:
+                reads.hmget(layout, fields)
+                reads.getrange(state_key, 0, len(prefix) - 1)
+                reads.zrange(self.key_prefix + ":item-positions", 0, -1)
+                reads.getrange(state_key, int(start), int(end) - 1)
+                current, actual, items, history = await reads.execute()
+            if current != offsets:
+                continue
+            if actual != prefix:
+                break
+            cancelled = json.loads("{" + history.removesuffix(",") + "}")["cancelled"]
+            return frozenset(items).union(cancelled)
+
+        # Unindexed v1 writers publish only the canonical document. A single
+        # GET is also a consistent snapshot if all optimistic reads collided.
+        raw = await redis.get(state_key)
         if not raw:
             return frozenset()
 

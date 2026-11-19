@@ -135,8 +135,8 @@ class Archive:
     async def archive_attachments(self, sid, attachments):
         self.attachments.update({(sid, identity): value for identity, value in attachments.items()})
 
-    async def archived_attachment_ids(self, sid):
-        return {identity for owner, identity in self.attachments if owner == sid}
+    async def archived_attachment_ids(self, sid, candidates):
+        return {identity for identity in candidates if (sid, identity) in self.attachments}
 
     async def _read_attachment_bytes(self, sid, identity):
         return self.attachments[(sid, identity)]
@@ -1163,5 +1163,44 @@ async def test_indexed_terminal_deletion_preserves_authorization_without_hydrati
         assert denied.value.info.code == "session.actor_not_authorized"
         await reader.authorize_session_actor(sid, CONTEXT)
         await reader.delete_session(sid)
-        await reader.finish_session_deletions({sid})
+        with patch.object(reader._redis, "sscan", side_effect=AssertionError("scanned unrelated sessions")):
+            await reader.finish_session_deletions({sid})
     assert await reader._archive.revision(sid) is None
+
+
+async def test_finish_retries_tree_deleted_during_last_scan_page(stores):
+    writer, reader = stores
+    root = (await writer.create_run(command("scan-root"), CONTEXT)).handle
+    handles = [root]
+    for i in range(16):
+        child = await writer.create_run(command(f"scan-child-{i}").model_copy(
+            update={"parent_run_id": root.run_id}), CONTEXT)
+        handles.append(child.handle)
+    for handle in reversed(handles):
+        run = await writer.get_run(handle.run_id)
+        await writer.commit_run(run_id=run.run_id, expected_revision=run.revision,
+                                expected_states={run.state}, new_state=RunState.CANCELLED,
+                                drafts=(), context=CONTEXT, idempotency_key="stop-" + run.run_id)
+    await writer.archive_pending()
+    pending = writer._key("pending")
+    unrelated = [f"unrelated-{i}" for i in range(1000)]
+    await writer._redis.sadd(pending, *unrelated)
+    scan = reader._redis.sscan
+    deleted = False
+
+    async def race(*args, **kwargs):
+        nonlocal deleted
+        page = await scan(*args, **kwargs)
+        if not page[0] and not deleted:
+            deleted = True
+            await writer.delete_session(root.session_id)
+        return page
+
+    with patch.object(reader._redis, "sscan", side_effect=race):
+        await reader.finish_session_deletions({root.session_id})
+    assert deleted
+    for handle in handles:
+        assert await reader._archive.revision(handle.session_id) is None
+        assert not await reader._redis.sismember(pending, handle.session_id)
+    assert await reader._redis.scard(pending) == len(unrelated)
+    await writer._redis.srem(pending, *unrelated)

@@ -77,12 +77,21 @@ class SqlSessionArchive:
                 starts = [_json(list(row)) for row in await cursor.fetchall()]
         return locations, starts
 
-    async def archived_attachment_ids(self, sid):
+    async def archived_attachment_ids(self, sid, candidates=None):
+        # For small hot sets, probe the composite primary key. For large sets,
+        # one session range scan avoids many round trips after a cold start.
+        predicate = "session_id = %s"
+        params = (sid,)
+        if candidates is not None and len(candidates) <= self.batch_rows:
+            if not candidates:
+                return set()
+            predicate += " AND artifact_id IN (" + ", ".join(["%s"] * len(candidates)) + ")"
+            params = (sid, *candidates)
         async with self._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute(
-                    f"SELECT artifact_id FROM {self._table('attachments')} WHERE session_id = %s",
-                    (sid,),
+                    f"SELECT artifact_id FROM {self._table('attachments')} WHERE {predicate}",
+                    params,
                 )
                 return {row[0] for row in await cursor.fetchall()}
 

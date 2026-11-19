@@ -346,3 +346,27 @@ async def test_claim_fallback_uses_one_canonical_value_after_legacy_rewrite(sche
     await producer.assert_fence(lease)
     assert await claim(producer) is None
     await reader.release(lease, LeaseReleaseReason.COMPLETED)
+
+
+@pytest.mark.asyncio
+async def test_existing_ids_follow_cancellation_release_and_legacy_overwrite(scheduler_pair):
+    first, reader = scheduler_pair()
+    ready, cancelled = work("ready"), work("cancelled")
+    await first.submit(ready)
+    await first.submit(cancelled)
+    await first.cancel(cancelled.work_id)
+    key = first.key_prefix + ":state"
+    with patch.object(reader._redis, "get", side_effect=AssertionError("full queue read")):
+        assert await reader.existing_work_ids() == {ready.work_id, cancelled.work_id}
+        lease = await claim(first)
+        assert lease and lease.work == ready
+        assert await reader.existing_work_ids() == {ready.work_id, cancelled.work_id}
+        await first.release(lease, LeaseReleaseReason.COMPLETED)
+        assert await reader.existing_work_ids() == {cancelled.work_id}
+
+    # A pre-index writer replaces the document and leaves the old index behind.
+    legacy = json.loads(await first._redis.get(key))
+    legacy.pop("claim_epoch")
+    legacy["cancelled"] = ["legacy-id"]
+    await first._redis.set(key, json.dumps(legacy))
+    assert await reader.existing_work_ids() == {"legacy-id"}
