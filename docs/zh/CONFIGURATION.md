@@ -65,6 +65,80 @@ models:
 并进入现有重试预算。诊断字段 `stream_idle_phase` 在首次有效分片前为
 `first_chunk`，已有进展后为 `mid_stream`。连接和 Run 时限仍然生效。
 
+## Gemini GenerateContent 请求体大小
+
+原生 `gemini-generate-content` 路由默认将序列化请求体限制为 20,000,000 字节。
+可通过 `models.<binding>.request.extra.max_request_bytes` 按端点调整。
+适配器先应用 `max_inline_videos` 限制，再按从早到晚的顺序把内联视频和音频替换成
+文字引用，直到请求体低于或等于上限。`analyze_audio`/`analyze_video` 单个文件最大
+12 MiB，保证默认上限下单个附件能完整发送。处理后仍超限时，Sage 会在发送前返回
+`model.request_too_large`。文字、工具和所有媒体都计入请求体预算。
+
+## 音频与视频输入
+
+`analyze_audio` 和 `analyze_video` 只对能接收对应输入的模型可见。可在
+`models.<binding>.capabilities` 中用 `audio_input`、`video_input` 显式声明：
+
+- `gemini-generate-content`：省略时跟随 `multimodal`。
+- `openai-chat-completions`：省略时为 `false`。后端模型支持时（如 Qwen-Omni、
+  部分 OpenRouter 模型）设为 `true`，音频以 `input_audio`、视频以 `video_url` 发送。
+- `openai-responses`、`anthropic-messages`：始终不支持，声明会被忽略。
+
+模型能力探测分别测试图片输入、WAV 音频和内联 MP4 视频。保存探测结果后，未手动声明的
+`audio_input` 和 `video_input` 采用明确的支持或不支持结果。显式声明优先。连接错误
+会保留未校验状态。对象存储托管的视频上传需要归属 Run，设置中的探测会跳过该路径。
+
+Sage 会按模型能力、请求限额和 32 MB 的附件 Base64 总预算优先选择近期附件，再加载
+选中的内容。不支持或超出限额的附件会替换为一行省略说明，会话仍保留原始附件快照。
+
+### Chat Completions 视频 URL
+
+Server 使用通过 `image_url.url` 读取 MP4 的兼容网关（例如 85）时，选择服务端授权的存储配置：
+
+```yaml
+capabilities:
+  video_input: true
+request:
+  extra:
+    video_url_format: image_url
+    video_storage_profile: gateway-video
+```
+
+服务端运维通过 `SAGE_SERVER_VIDEO_STORAGE_PROFILES` 注册配置。每项包含
+`owner_ids`（授权的 Server 用户 ID）和 `storage`（S3 存储配置）。
+
+```json
+{"gateway-video":{"owner_ids":["user-id"],"storage":{"bucket":"private-video-bucket","region":"ap-southeast-1","prefix":"sage/model-video"}}}
+```
+
+SDK 宿主可通过 `create_registered_model_provider` 的 `video_storage` 参数注入可信配置。
+模型路由参数只接受 Server 授权的配置别名。已有可直读的 HTTPS 视频 URL 时，只需设置
+`video_url_format`。标准 Server 镜像已包含 S3 依赖，独立 SDK 安装可使用
+`sage[s3-video]`。工作区视频上传需配置 AWS SDK 凭据链。所选前缀需要 `s3:PutObject`、
+`s3:GetObject`、`s3:DeleteObject` 和 `s3:DeleteObjectVersion`，其桶需要限定此前缀的
+`s3:ListBucket` 和 `s3:ListBucketVersions` 权限。S3 兼容存储可设置 HTTPS
+`endpoint_url`。Sage 先对存储目标做只读检查，再持久化归属并上传。副本存放在 Run 独立前缀下。
+删除会话或清理租户时，会删除副本及其对象版本。清理失败时会话保留归属记录，可恢复对原桶
+的访问后重试。PUT 超时后，会话保留记录，直到存储端确认对应对象。列表为空时继续保留记录。
+采用逐对象跟踪前生成的预览记录需要存储端对账。桶生命周期仍可作为兜底。
+工作区工具的单文件上限为 12 MiB。
+
+Chat Completions 同样先按 `max_inline_videos`（默认 10）把较早的视频替换为文字引用，
+再在请求体超过 `max_request_bytes` 时，按从早到晚的顺序把内联音频和视频替换为文字
+引用。网关转发到 Gemini 时，建议把 `max_request_bytes` 设为 `20000000`。
+`input_audio` 接受 base64 数据，Chat Completions 的 `analyze_audio` 接到远程 URL 时会提示使用工作区文件。
+
+### Gemini 视频存储
+
+`gemini-generate-content` 路由使用相同的 Server 存储配置别名，无需填写
+`video_url_format`。Sage 以 `fileData.fileUri` 发送托管视频的签名 URL。
+用户提供的远程媒体 URL 只在当前推理轮次发送。后续请求用文字保留历史附件提示，
+会话仍保留原始附件。诊断记录和错误信息会隐去 Sage 生成的 URL 签名。
+
+两种协议都只在当前轮（最近一次模型回复之后）的视频上传失败时返回
+`model.video_storage_failed`。更早的视频上传失败时替换为一行省略说明，请求照常发送，
+并记录诊断事件 `video_storage_omitted`。
+
 ## 通过 OpenAI 兼容接口调用 Gemini 工具
 
 Gemini 模型使用 `openai-chat-completions` 时，Sage 会将文档定义的

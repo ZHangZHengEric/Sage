@@ -14,7 +14,6 @@ from pydantic import Field
 from sagents.v2.contracts.errors import SageV2Error, RuntimeErrorInfo, ErrorCategory
 from sagents.v2.contracts.common import StrictModel, new_id
 from sagents.v2.contracts.items import (
-    AudioBlock,
     FileBlock,
     ImageBlock,
     JsonBlock,
@@ -24,6 +23,11 @@ from sagents.v2.contracts.items import (
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.model.plugins._shared.media import (
+    media_kind,
+    omitted_media_text,
+    resolve_media_capabilities,
+)
 from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
 from sagents.v2.model.plugins._shared.wire import (
     compact_json,
@@ -179,7 +183,9 @@ class OpenAIResponsesModelProvider:
             await result
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self.config.capabilities
+        return resolve_media_capabilities(
+            self.config.capabilities, native=False, default=False
+        )
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
@@ -618,7 +624,7 @@ class OpenAIResponsesModelProvider:
     def _validate_request(self, request: ModelRequest) -> None:
         capabilities = self.config.capabilities
         if not capabilities.supports_multimodal_input and any(
-            isinstance(block, (ImageBlock, AudioBlock))
+            isinstance(block, ImageBlock)
             for message in request.messages
             for block in message.content
         ):
@@ -738,6 +744,9 @@ class OpenAIResponsesModelProvider:
         text_type = "output_text" if role == "assistant" else "input_text"
         if isinstance(block, TextBlock):
             return {"type": text_type, "text": block.text}
+        kind = media_kind(block)
+        if kind is not None:
+            return {"type": text_type, "text": omitted_media_text(kind)}
         if isinstance(block, ImageBlock):
             return {
                 "type": "input_image",
@@ -750,8 +759,6 @@ class OpenAIResponsesModelProvider:
             return {"type": text_type, "text": compact_json(block.value)}
         if isinstance(block, ResourceRefBlock):
             return {"type": text_type, "text": f"[resource: {block.uri}]"}
-        if isinstance(block, AudioBlock):
-            return {"type": "input_audio", "audio_url": block.uri}
         raise TypeError(f"unsupported content block {type(block)!r}")
 
     @staticmethod

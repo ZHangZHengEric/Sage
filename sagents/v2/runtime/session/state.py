@@ -2611,6 +2611,9 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                         },
                     )
                 )
+            # Keep references durable on any cleanup failure. Holding the
+            # Session tree locks also excludes a concurrent Run admission.
+            await self._delete_hosted_video_copies_locked(session_ids)
             removed_interactions = {
                 interaction_id
                 for interaction_id, value in self._interactions.items()

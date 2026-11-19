@@ -15,6 +15,7 @@ from pydantic import Field
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.runtime.artifact.video_storage import S3VideoStorageConfig
 from sagents.v2.model.plugins.anthropic_messages import (
     AnthropicMessagesConfig,
     AnthropicMessagesModelProvider,
@@ -168,6 +169,7 @@ def create_registered_model_provider(
     client: Any | None = None,
     provider_instance_id: str | None = None,
     capability_profile: ModelCapabilityProfile | None = None,
+    video_storage: S3VideoStorageConfig | None = None,
 ) -> ModelProvider:
     """Construct the implementation selected by a real plugin registration."""
 
@@ -188,6 +190,16 @@ def create_registered_model_provider(
         supports_parallel_tool_calls=bool(declaration.parallel_tool_calls),
         supports_reasoning=bool(declaration.reasoning),
         supports_multimodal_input=bool(declaration.multimodal),
+        supports_audio_input=(
+            capability_profile.media_support("audio_input")
+            if declaration.audio_input is None and capability_profile is not None
+            else declaration.audio_input
+        ),
+        supports_video_input=(
+            capability_profile.media_support("video_input")
+            if declaration.video_input is None and capability_profile is not None
+            else declaration.video_input
+        ),
         supports_structured_output=bool(declaration.structured_output),
         max_input_tokens=route.limits.context_window,
         max_output_tokens=route.limits.max_output_tokens,
@@ -206,6 +218,13 @@ def create_registered_model_provider(
         # max_tokens) when a catalog/manifest leaves the request limit unset.
         common.pop("default_max_output_tokens")
     extra = dict(route.request.extra)
+    if {"video_storage", "video_storage_profile"}.intersection(extra):
+        raise ValueError("Video storage must be resolved by the model host.")
+    if video_storage is not None and protocol not in {
+        BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS,
+        BuiltinModelProtocol.GEMINI_GENERATE_CONTENT,
+    }:
+        raise ValueError("This model protocol does not support hosted video.")
     common["stream_idle_timeout_seconds"] = extra.pop("stream_idle_timeout_seconds", None)
     image_limits = {}
     if protocol in {BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS, BuiltinModelProtocol.OPENAI_RESPONSES}:
@@ -234,6 +253,9 @@ def create_registered_model_provider(
             reasoning_parameter_fallback=bool(
                 extra.pop("reasoning_parameter_fallback", False)
             ),
+            video_url_format=extra.pop("video_url_format", "video_url"),
+            video_storage=video_storage,
+            max_inline_videos=extra.pop("max_inline_videos", 10),
             extra_body=extra,
         )
         if capability_profile is not None:
@@ -254,12 +276,16 @@ def create_registered_model_provider(
             config = implementation.apply_capability_profile(config, capability_profile)
         return OpenAIResponsesModelProvider(config, credential, client=client)
     if protocol == BuiltinModelProtocol.GEMINI_GENERATE_CONTENT:
+        request_limits = {"max_request_bytes": extra.pop("max_request_bytes")} if "max_request_bytes" in extra else {}
         config = GeminiGenerateContentConfig(
             **common,
+            **request_limits,
             reasoning_effort=route.request.reasoning_effort,
             thinking_control=extra.pop("thinking_control", "auto"),
             thinking_budget=extra.pop("thinking_budget", None),
             include_thoughts=extra.pop("include_thoughts", True),
+            max_inline_videos=extra.pop("max_inline_videos", 10),
+            video_storage=video_storage,
             extra_body=extra,
         )
         if capability_profile is not None:

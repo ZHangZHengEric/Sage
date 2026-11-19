@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.v2.server.config.video_storage import VideoStorageProfile, parse_video_storage_profiles
+
 DEFAULT_JWT_SECRET = "dev-only-change-me-sage-server-jwt-secret"
 
 
@@ -78,6 +80,7 @@ class ServerSettings:
     max_concurrent_runs_per_user: int = 2
     max_pending_runs: int = 1024
     max_model_clients: int = 64
+    video_storage_profiles: dict[str, VideoStorageProfile] = field(default_factory=dict, repr=False)
     max_managed_applications: int = 32
     max_managed_builds: int = 4
     execution_shell_mode: str = "sandboxed"
@@ -258,6 +261,9 @@ class ServerSettings:
             ),
             max_pending_runs=int(_env("SAGE_SERVER_MAX_PENDING_RUNS", "1024")),
             max_model_clients=int(_env("SAGE_SERVER_MAX_MODEL_CLIENTS", "64")),
+            video_storage_profiles=parse_video_storage_profiles(
+                _env("SAGE_SERVER_VIDEO_STORAGE_PROFILES", "{}")
+            ),
             max_managed_applications=int(_env("SAGE_SERVER_MAX_MANAGED_APPLICATIONS", "32")),
             max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
             execution_shell_mode=_choice_env("SAGE_SERVER_EXECUTION_SHELL_MODE", "sandboxed", frozenset({"ask", "sandboxed", "deny"})),

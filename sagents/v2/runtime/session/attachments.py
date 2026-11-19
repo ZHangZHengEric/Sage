@@ -16,13 +16,38 @@ if TYPE_CHECKING:
 
 import base64
 import hashlib
+import json
 from copy import deepcopy
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.artifact.contracts import ArtifactRef
+from sagents.v2.runtime.artifact.video_storage import (
+    VIDEO_COPY_RECEIPT_PREFIX,
+    confirm_video_copy,
+    delete_video_copies,
+    video_copy_outcome,
+    video_copy_outcome_id,
+)
 
 
 class SessionAttachmentMixin:
+    supports_video_copy_cleanup = True
+
+    async def run_with_hosted_video_copy(self, run_id, operation):
+        store = cast("SessionStoreCoordinator", self)
+        run = await store.get_run(run_id)
+        async with store._session_operation(run.session_id):
+            current = store._runs.get(run_id)
+            if current is None or current.state in TERMINAL_RUN_STATES:
+                raise store._attachment_error(
+                    "media.run_inactive", "The video copy no longer has an active owning Run."
+                )
+            # A racing terminal transition or tree deletion must wait until
+            # the local upload worker settles. Remote completion after a
+            # timeout is reconciled using the separately committed receipt.
+            return await operation()
+
     async def put_attachment(
         self, session_id, *, artifact_id, media_type, content, context, metadata=None
     ):
@@ -91,7 +116,7 @@ class SessionAttachmentMixin:
             store._authorize_session_actor_locked(source_session_id, context)
             store._authorize_session_actor_locked(target_session_id, context)
             reference = store._sessions[source_session_id].attachments.get(artifact_id)
-            if reference is None:
+            if reference is None or artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX):
                 raise store._attachment_error(
                     "artifact.not_found", "Source session attachment was not found."
                 )
@@ -106,10 +131,39 @@ class SessionAttachmentMixin:
         source = store._sessions[source_session_id]
         target = store._sessions[target_session_id]
         for artifact_id, reference in source.attachments.items():
+            if artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX):
+                continue
             payload = await store._read_attachment_bytes(source_session_id, artifact_id)
             store._validate_attachment(reference, payload)
             target.attachments[artifact_id] = reference.model_copy(deep=True)
             store._attachment_payloads[(target_session_id, artifact_id)] = payload
+
+    async def _delete_hosted_video_copies_locked(self, session_ids):
+        store = cast("SessionStoreCoordinator", self)
+        scopes = {}
+        for session_id in sorted(session_ids):
+            attachments = store._sessions[session_id].attachments
+            for artifact_id, receipt in tuple(attachments.items()):
+                if not artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX) or "storage" not in receipt.metadata:
+                    continue
+                outcome = attachments.get(video_copy_outcome_id(artifact_id))
+                if outcome is not None and outcome.metadata["outcome"] == "not_written":
+                    continue
+                if outcome is None:
+                    await confirm_video_copy(receipt)
+                    await store._put_attachment_locked(
+                        session_id, video_copy_outcome(artifact_id, "committed"), b""
+                    )
+                    # The proof must survive a later partial S3 delete or a
+                    # canonical deletion failure. Rebase rollback to the
+                    # durable attachment revision before further side effects.
+                    operation = store._operation.get()
+                    if operation is not None and operation.undos is not None:
+                        operation.undos[session_id] = store._capture_session_undo_locked(session_id)
+                scope = (receipt.metadata["run_id"], json.dumps(receipt.metadata["storage"], sort_keys=True))
+                scopes[scope] = receipt
+        for receipt in scopes.values():
+            await delete_video_copies(receipt)
 
     async def _read_attachment_bytes(self, session_id, artifact_id):
         store = cast("SessionStoreCoordinator", self)
@@ -155,7 +209,11 @@ class SessionAttachmentMixin:
             for owner in ids:
                 store._authorize_session_actor_locked(owner, context)
                 attachments = []
+                state = store._dump_session_state_locked(owner)
                 for artifact_id, reference in store._sessions[owner].attachments.items():
+                    if artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX):
+                        state["sessions"][0]["attachments"].pop(artifact_id)
+                        continue
                     payload = await store._read_attachment_bytes(owner, artifact_id)
                     store._validate_attachment(reference, payload)
                     attachments.append(
@@ -167,7 +225,7 @@ class SessionAttachmentMixin:
                 entries.append(
                     {
                         "format": "sage.session-backup/v1",
-                        "state": store._dump_session_state_locked(owner),
+                        "state": state,
                         "attachments": attachments,
                     }
                 )
@@ -204,6 +262,8 @@ class SessionAttachmentMixin:
         try:
             for entry in backup.get("attachments", ()):
                 reference = ArtifactRef.model_validate(entry["reference"])
+                if reference.artifact_id.startswith(VIDEO_COPY_RECEIPT_PREFIX):
+                    raise ValueError("backup cannot register hosted video copies")
                 payload = base64.b64decode(entry["content_base64"], validate=True)
                 store._validate_attachment(reference, payload)
                 if (

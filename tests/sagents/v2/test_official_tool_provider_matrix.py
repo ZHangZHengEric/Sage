@@ -56,7 +56,9 @@ from sagents.v2.tool.plugins.official import (
 
 
 EXPECTED_LOCAL_TOOLS = {
+    "analyze_audio",
     "analyze_image",
+    "analyze_video",
     "apply_patch",
     "await_shell",
     "execute_shell_command",

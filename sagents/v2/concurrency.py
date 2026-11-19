@@ -1,7 +1,7 @@
 """Public admission helpers for auxiliary work, scoped to each asyncio event loop.
 
 Groups: context-cpu (2), skill-io (8), context-summary (4), memory-io (8),
-model-init (4). These helpers do not schedule or drive Agent Runs. Cancellation
+model-init (4), model-media (4). These helpers do not schedule or drive Agent Runs. Cancellation
 of a bounded thread observer retains its slot until the worker actually exits.
 """
 
@@ -22,6 +22,7 @@ _LIMITS = {
     "context-summary": 4,
     "memory-io": 8,
     "model-init": 4,
+    "model-media": 4,
 }
 
 

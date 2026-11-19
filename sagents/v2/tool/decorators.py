@@ -32,6 +32,7 @@ def tool(
     requires_approval: bool = False,
     plan_safe: bool = False,
     required_scopes: tuple[str, ...] = (),
+    required_model_inputs: tuple[Literal["audio", "video"], ...] = (),
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Attach a complete ToolDefinition to one implementation method.
 
@@ -55,6 +56,7 @@ def tool(
             requires_approval=requires_approval,
             plan_safe=plan_safe,
             required_scopes=required_scopes,
+            required_model_inputs=required_model_inputs,
         )
 
         @wraps(function)

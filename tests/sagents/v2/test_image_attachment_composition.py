@@ -213,3 +213,271 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         assert cast(ImageBlock, restored_messages[0].content[0]).uri == images[0].uri
     finally:
         await reopened.close()
+
+
+async def _media_application(tmp_path, model):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    tools = ("analyze_audio", "analyze_video")
+    package = BuiltinPackageFactory.create("assistant", package_id="test.durable-media")
+    agent_id = package.entrypoint.agent
+    package = package.model_copy(
+        update={
+            "agents": {
+                agent_id: package.agents[agent_id].model_copy(update={"tools": tools})
+            },
+            "runtime": package.runtime.model_copy(
+                update={
+                    "capabilities": {
+                        **package.runtime.capabilities,
+                        "tool.provider": CapabilitySelection(
+                            plugin="sage.tool.official", name="official"
+                        ),
+                        "tool.selection-policy": CapabilitySelection(
+                            plugin="sage.tool-selection.direct"
+                        ),
+                        "agent.continuation-policy": CapabilitySelection(
+                            plugin="sage.agent.continuation.deterministic"
+                        ),
+                        "execution.binding": CapabilitySelection(
+                            plugin="sage.execution.binding.local-workspace",
+                            config={
+                                "workspace": str(workspace),
+                                "policy": {"process": {"enabled": False}},
+                            },
+                        ),
+                    }
+                }
+            ),
+        }
+    )
+    return await build_registered_package(
+        tmp_path / "sessions", models=TEST_MODELS, model=model, package=package
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audio_mode", ["local", "remote-supported", "remote-unsupported"])
+async def test_audio_and_video_tools_attach_to_next_gemini_user_content(tmp_path, audio_mode):
+    import base64
+    import json
+
+    from sagents.v2.model import (
+        GeminiGenerateContentConfig,
+        GeminiGenerateContentModelProvider,
+    )
+    from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    # The codec is handled upstream. The test checks preservation and wire placement.
+    (workspace / "speech.wav").write_bytes(b"audio fixture")
+    (workspace / "clip.mp4").write_bytes(b"video fixture")
+    tools = ("analyze_audio", "analyze_video")
+    remote_audio = "https://media.example.test/speech.wav"
+    audio_path = "speech.wav" if audio_mode == "local" else remote_audio
+    audio_attached = audio_mode != "remote-unsupported"
+    calls = (
+        ModelToolCall(
+            tool_call_id="audio_call",
+            name="analyze_audio",
+            arguments={"audio_path": audio_path, "prompt": "Transcribe"},
+        ),
+        ModelToolCall(
+            tool_call_id="video_call",
+            name="analyze_video",
+            arguments={"video_path": "clip.mp4", "prompt": "Describe"},
+        ),
+    )
+    model = ScriptedModelProvider(
+        tuple(
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response),
+                )
+            )
+            for response in (
+                ModelResponse(
+                    response_id="attach", finish_reason="tool_calls", tool_calls=calls
+                ),
+                ModelResponse(response_id="done", finish_reason="stop", text="done"),
+            )
+        ),
+        capabilities=FULL_MODEL_CAPABILITIES.model_copy(
+            update={
+                "supports_audio_input": True,
+                "supports_video_input": True,
+                "supports_remote_audio_input": audio_mode == "remote-supported",
+            }
+        ),
+    )
+    application = await _media_application(tmp_path, model)
+    try:
+        agent = application.loaded_agents[-1]
+        entrypoint = cast(ApplicationEntrypoint, application.entrypoint())
+        context = RequestContext(
+            actor=ActorRef(
+                principal_id="owner",
+                principal_type=PrincipalType.USER,
+                tenant_id="tenant",
+            )
+        )
+        stream = await entrypoint.run_stream(
+            StartRun(
+                agent_id=agent.id,
+                input=(
+                    InputItem(
+                        role="user", content=(TextBlock(text="Analyze the media"),)
+                    ),
+                ),
+                resolved_spec_hash=agent.composition_hash,
+                idempotency_key="media-run",
+            ),
+            context,
+            agent=agent,
+        )
+        run = await stream.wait()
+        assert run.state == RunState.COMPLETED
+        assert set(tools) <= {tool.name for tool in model.requests[0].tools}
+        next_request = model.requests[-1]
+        followups = 2 if audio_attached else 1
+        assert [message.role for message in next_request.messages[-(2 + followups):]] == (
+            ["tool", "tool"] + ["user"] * followups
+        )
+        assert all(
+            message.metadata["tool_context"] for message in next_request.messages[-followups:]
+        )
+        if not audio_attached:
+            from sagents.v2.contracts.items import JsonBlock
+
+            result = cast(JsonBlock, next_request.messages[-3].content[0]).value
+            assert result["status"] == "error"
+            assert result["data"]["reason"] == "remote_audio_unsupported"
+            assert "workspace audio file" in result["message"]
+
+        gemini = GeminiGenerateContentModelProvider(
+            GeminiGenerateContentConfig(
+                model="gemini-test", capabilities=FULL_MODEL_CAPABILITIES
+            ),
+            client=object(),
+        )
+        tool_content, user_content = gemini.diagnostic_request(next_request)["contents"][-2:]
+        assert tool_content["role"] == user_content["role"] == "user"
+        assert [part["functionResponse"]["name"] for part in tool_content["parts"]] == list(tools)
+        parts = user_content["parts"]
+        assert parts[-2] == {"text": "Describe"}
+        assert parts[-1]["inlineData"]["mimeType"] == "video/mp4"
+        assert base64.b64decode(parts[-1]["inlineData"]["data"]) == b"video fixture"
+        if audio_attached:
+            assert parts[0] == {"text": "Transcribe"}
+            if audio_mode == "local":
+                assert parts[1]["inlineData"]["mimeType"] == "audio/wav"
+                assert base64.b64decode(parts[1]["inlineData"]["data"]) == b"audio fixture"
+            else:
+                assert parts[1] == {"fileData": {"mimeType": "audio/wav", "fileUri": remote_audio}}
+        else:
+            assert len(parts) == 2
+        serialized = json.dumps(
+            [
+                item.model_dump(mode="json")
+                for item in await entrypoint.runtime.session_store.read_events(
+                    run.run_id
+                )
+            ]
+        )
+        assert serialized.count("sage-media:") >= (2 if audio_mode == "local" else 1)
+        assert "data:audio" not in serialized
+        assert "data:video" not in serialized
+    finally:
+        await application.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_media_failure_does_not_break_next_user_run(tmp_path):
+    import json
+
+    import httpx
+
+    from sagents.v2.model import GeminiGenerateContentConfig, GeminiGenerateContentModelProvider
+    from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES
+
+    uri = "https://fixture.invalid/expired.mp4"
+    sent = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        old_video = any(
+            part.get("fileData", {}).get("fileUri") == uri
+            for message in payload["contents"] for part in message["parts"]
+        )
+        sent.append(old_video)
+        if old_video:
+            return httpx.Response(400, json={"error": {"code": 400, "message": "Expired test media"}})
+        event = {"candidates": [
+            {"content": {"parts": [{"text": "4"}]}, "finishReason": "STOP"}
+        ]}
+        return httpx.Response(
+            200, text=f"data: {json.dumps(event)}\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://mock.invalid/v1beta/", transport=httpx.MockTransport(handler)
+    ) as client:
+        provider = GeminiGenerateContentModelProvider(
+            GeminiGenerateContentConfig(model="fixture", capabilities=FULL_MODEL_CAPABILITIES),
+            client=client,
+        )
+
+        class Model:
+            first = True
+
+            async def capabilities(self, binding):
+                return await provider.capabilities(binding)
+
+            async def stream(self, request):
+                if self.first:
+                    self.first = False
+                    yield ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="attach", finish_reason="tool_calls", tool_calls=(
+                                ModelToolCall(
+                                    tool_call_id="video",
+                                    name="analyze_video",
+                                    arguments={"video_path": uri},
+                                ),
+                            ),
+                        ),
+                    )
+                else:
+                    async for event in provider.stream(request):
+                        yield event
+
+        application = await _media_application(tmp_path, Model())
+        try:
+            agent = application.loaded_agents[-1]
+            entrypoint = cast(ApplicationEntrypoint, application.entrypoint())
+            context = RequestContext(actor=ActorRef(
+                principal_id="owner", principal_type=PrincipalType.USER, tenant_id="tenant",
+            ))
+
+            async def run(text, key, session_id=None):
+                stream = await entrypoint.run_stream(StartRun(
+                    session_id=session_id,
+                    agent_id=agent.id,
+                    input=(InputItem(role="user", content=(TextBlock(text=text),)),),
+                    resolved_spec_hash=agent.composition_hash,
+                    idempotency_key=key,
+                ), context, agent=agent)
+                return await stream.wait()
+
+            first = await run("Analyze my clip", "failed-media")
+            assert first.state == RunState.FAILED
+            assert sent == [True]
+
+            followup = await run("What is 2+2?", "text-after-media", first.session_id)
+            assert followup.state == RunState.COMPLETED
+            assert sent == [True, False]
+        finally:
+            await application.close()

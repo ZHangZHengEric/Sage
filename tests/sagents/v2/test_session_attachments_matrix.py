@@ -29,7 +29,9 @@ async def content(value=b"image snapshot"):
     yield value
 
 
-async def create(store, key, *, session_id=None, mode=SessionConcurrencyMode.SERIAL):
+async def create(
+    store, key, *, session_id=None, mode=SessionConcurrencyMode.SERIAL, context=CONTEXT
+):
     return await store.create_run(
         StartRun(
             session_id=session_id,
@@ -39,11 +41,11 @@ async def create(store, key, *, session_id=None, mode=SessionConcurrencyMode.SER
             resolved_spec_hash="sha256:spec",
             idempotency_key=key,
         ),
-        CONTEXT,
+        context,
     )
 
 
-async def cancel(store, created):
+async def cancel(store, created, *, context=CONTEXT):
     run = await store.get_run(created.handle.run_id)
     await store.commit_run(
         run_id=run.run_id,
@@ -51,7 +53,7 @@ async def cancel(store, created):
         expected_states={run.state},
         new_state=RunState.CANCELLED,
         drafts=(),
-        context=CONTEXT,
+        context=context,
         idempotency_key="cancel:" + run.run_id,
     )
 
@@ -484,3 +486,356 @@ async def test_live_sql_attachment_restart_copy_backup_and_delete():
         await source.delete_session(b.handle.session_id)
     finally:
         await source.close()
+
+
+def _plan_hosted_video_upload(config, prefix, videos, required, resources):
+    from sagents.v2.runtime.artifact.video_storage import _VideoCopy
+
+    return None, {uri: _VideoCopy(prefix + "clip.mp4", mime, b"clip") for uri, mime in videos.items()}
+
+
+@pytest.mark.asyncio
+async def test_hosted_video_deletion_is_scoped_durable_and_retryable(tmp_path, monkeypatch):
+    import sys
+
+    from sagents.v2.runtime.artifact import SessionArtifactStore
+    from sagents.v2.runtime.artifact import video_storage
+    from sagents.v2.runtime.session.access import AuthorizedSessionAccess
+
+    objects = {}
+    reject_delete = True
+
+    def upload(client, config, copy, attempt):
+        objects[copy.key] = {"version-1", "delete-marker"}
+        attempt.outcome = "committed"
+
+    def sign(client, config, uploaded, required):
+        return {
+            uri: "https://bucket.example.test/" + key + "?signature=test"
+            for uri, key in uploaded.items()
+        }
+
+    class Bucket:
+        def close(self):
+            pass
+
+        def list_object_versions(self, *, Bucket, Prefix, MaxKeys):
+            keys = [key for key in objects if key.startswith(Prefix)]
+            return {
+                "Versions": [
+                    {"Key": key, "VersionId": version}
+                    for key in keys for version in objects[key] if version != "delete-marker"
+                ],
+                "DeleteMarkers": [
+                    {"Key": key, "VersionId": "delete-marker"}
+                    for key in keys if "delete-marker" in objects[key]
+                ],
+            }
+
+        def list_objects_v2(self, *, Bucket, Prefix, MaxKeys):
+            return {"Contents": [{"Key": key} for key in objects if key.startswith(Prefix)]}
+
+        def delete_objects(self, *, Bucket, Delete):
+            if reject_delete:
+                return {"Errors": [{"Code": "AccessDenied"}]}
+            for item in Delete["Objects"]:
+                key = item["Key"]
+                objects[key].remove(item["VersionId"])
+                if not objects[key]:
+                    del objects[key]
+            return {}
+
+    monkeypatch.setitem(sys.modules, "boto3", object())
+    monkeypatch.setattr(video_storage, "_prepare_upload", _plan_hosted_video_upload)
+    monkeypatch.setattr(video_storage, "_put_video_copy", upload)
+    monkeypatch.setattr(video_storage, "_sign_video_urls", sign)
+    monkeypatch.setattr(video_storage, "_client", lambda config: Bucket())
+    config = video_storage.S3VideoStorageConfig(bucket="private-videos")
+    uri = "data:video/mp4;base64,Y2xpcA=="
+
+    other_tenant = CONTEXT.model_copy(
+        update={"actor": CONTEXT.actor.model_copy(update={"tenant_id": "other"})}
+    )
+    root = tmp_path / "video-sessions"
+    original = FilesystemSessionStore(root)
+    try:
+        source = await create(original, "source-video")
+        other = await create(original, "other-video", context=other_tenant)
+        access = AuthorizedSessionAccess(original)
+
+        async def host_video(created):
+            run_id = created.handle.run_id
+            with video_storage.bind_video_copy_owner(
+                run_id, SessionArtifactStore(original, run_id),
+                lambda upload: original.run_with_hosted_video_copy(run_id, upload),
+            ):
+                signed = await video_storage.publish_videos(config, {uri: "video/mp4"}, required={uri})
+            return signed[uri].partition("?")[0].removeprefix("https://bucket.example.test/")
+
+        source_key = await host_video(source)
+        other_key = await host_video(other)
+        assert source_key != other_key
+        with pytest.raises(SageV2Error) as active:
+            await access.delete_session(source.handle.session_id, CONTEXT)
+        assert active.value.info.code == "session.active_run"
+        assert set(objects) == {source_key, other_key}
+        await cancel(original, source)
+        await cancel(original, other, context=other_tenant)
+        backup = await original.export_session_backup(source.handle.session_id, context=CONTEXT)
+        assert backup["attachments"] == []
+        assert backup["state"]["sessions"][0]["attachments"] == {}
+    finally:
+        await original.close()
+
+    reopened = FilesystemSessionStore(root)
+    try:
+        access = AuthorizedSessionAccess(reopened)
+        with pytest.raises(SageV2Error) as failure:
+            await access.delete_session(source.handle.session_id, CONTEXT, require_derived_cleanup=True)
+        assert failure.value.info.code == "session.video_cleanup_failed"
+        assert failure.value.info.retryable
+        assert (await reopened.get_session(source.handle.session_id)).session_id == source.handle.session_id
+        assert set(objects) == {source_key, other_key}
+
+        reject_delete = False
+        await access.delete_session(source.handle.session_id, CONTEXT, require_derived_cleanup=True)
+        with pytest.raises(SageV2Error) as missing:
+            await reopened.get_session(source.handle.session_id)
+        assert missing.value.info.code == "session.not_found"
+        assert set(objects) == {other_key}
+        with pytest.raises(SageV2Error):
+            await access.delete_session(other.handle.session_id, CONTEXT)
+        assert set(objects) == {other_key}
+        await access.delete_session(other.handle.session_id, other_tenant)
+        assert objects == {}
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_hosted_video_upload_requires_a_durable_receipt(monkeypatch):
+    import sys
+
+    from sagents.v2.runtime.artifact import video_storage
+
+    class UnavailableStore:
+        async def put(self, **kwargs):
+            raise OSError("storage unavailable")
+
+    def upload(*args):
+        pytest.fail("S3 must not be called before its cleanup receipt is durable")
+
+    monkeypatch.setitem(sys.modules, "boto3", object())
+    monkeypatch.setattr(video_storage, "_prepare_upload", _plan_hosted_video_upload)
+    monkeypatch.setattr(video_storage, "_put_video_copy", upload)
+    config = video_storage.S3VideoStorageConfig(bucket="private-videos")
+    uri = "data:video/mp4;base64,Y2xpcA=="
+    with pytest.raises(SageV2Error, match="Session-owned"):
+        await video_storage.publish_videos(config, {uri: "video/mp4"}, required={uri})
+    with video_storage.bind_video_copy_owner("run", UnavailableStore(), lambda upload: upload()):
+        with pytest.raises(SageV2Error, match="record ownership"):
+            await video_storage.publish_videos(config, {uri: "video/mp4"}, required={uri})
+
+
+@pytest.mark.asyncio
+async def test_cancelling_hosted_video_request_waits_for_the_s3_write(monkeypatch):
+    import asyncio
+    import sys
+    import threading
+
+    from sagents.v2.runtime.artifact import SessionArtifactStore, video_storage
+
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    unblock = threading.Event()
+
+    def upload(client, config, copy, attempt):
+        loop.call_soon_threadsafe(started.set)
+        assert unblock.wait(timeout=5)
+        attempt.outcome = "committed"
+
+    monkeypatch.setitem(sys.modules, "boto3", object())
+    monkeypatch.setattr(video_storage, "_prepare_upload", _plan_hosted_video_upload)
+    monkeypatch.setattr(video_storage, "_put_video_copy", upload)
+    config = video_storage.S3VideoStorageConfig(bucket="private-videos")
+    store = EphemeralSessionStore()
+    created = await create(store, "video-cancel")
+    run_id = created.handle.run_id
+    try:
+        with video_storage.bind_video_copy_owner(
+            run_id, SessionArtifactStore(store, run_id),
+            lambda operation: store.run_with_hosted_video_copy(run_id, operation),
+        ):
+            task = asyncio.create_task(
+                video_storage.publish_videos(config, {"data:video/mp4;base64,Y2xpcA==": "video/mp4"})
+            )
+            try:
+                await asyncio.wait_for(started.wait(), timeout=3)
+                cancel_run = asyncio.create_task(cancel(store, created))
+                task.cancel()
+                await asyncio.sleep(0)
+                assert not task.done()
+                assert not cancel_run.done()
+            finally:
+                unblock.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await cancel_run
+        assert (await store.get_run(run_id)).state == RunState.CANCELLED
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["credentials", "list-denied", "put-signing", "put-timeout", "late-put"])
+async def test_video_upload_tracks_only_possible_writes(failure, tmp_path, monkeypatch):
+    pytest.importorskip("boto3")
+    from botocore.exceptions import ClientError, NoCredentialsError, ReadTimeoutError
+
+    from sagents.v2.runtime.artifact import SessionArtifactStore, video_storage
+    from sagents.v2.runtime.session.access import AuthorizedSessionAccess
+
+    objects = set()
+    client_calls = 0
+    put_calls = 0
+    deny_cleanup = False
+    lose_delete_response = False
+    pending_key = None
+
+    def http_error(code, status, operation):
+        return ClientError({
+            "Error": {"Code": code},
+            "ResponseMetadata": {"HTTPStatusCode": status},
+        }, operation)
+
+    class Bucket:
+        def close(self):
+            pass
+
+        def head_object(self, **kwargs):
+            raise http_error("NotFound", 404, "HeadObject")
+
+        def list_object_versions(self, *, Prefix, **kwargs):
+            if failure == "list-denied" or deny_cleanup:
+                raise http_error("AccessDenied", 403, "ListObjectVersions")
+            return {"Versions": [
+                {"Key": key, "VersionId": "null"} for key in objects if key.startswith(Prefix)
+            ]}
+
+        def list_objects_v2(self, *, Prefix, **kwargs):
+            return {"Contents": [{"Key": key} for key in objects if key.startswith(Prefix)]}
+
+        def put_object(self, *, Key, **kwargs):
+            nonlocal put_calls, pending_key
+            put_calls += 1
+            if failure == "put-signing":
+                raise NoCredentialsError()
+            if failure == "late-put":
+                pending_key = Key
+            else:
+                objects.add(Key)
+            raise ReadTimeoutError(endpoint_url="https://fixture.invalid")
+
+        def delete_objects(self, *, Delete, **kwargs):
+            for item in Delete["Objects"]:
+                objects.remove(item["Key"])
+            if lose_delete_response:
+                raise ReadTimeoutError(endpoint_url="https://fixture.invalid")
+            return {}
+
+    def client(config):
+        nonlocal client_calls
+        client_calls += 1
+        if failure == "credentials" or (failure == "put-signing" and put_calls):
+            raise NoCredentialsError()
+        return Bucket()
+
+    monkeypatch.setattr(video_storage, "_client", client)
+    root = tmp_path / "video-copy-state"
+    store = FilesystemSessionStore(root)
+    try:
+        run = await create(store, "video-preflight")
+        run_id, session_id = run.handle.run_id, run.handle.session_id
+        config = video_storage.S3VideoStorageConfig(bucket="test-video")
+        uri = "data:video/mp4;base64,Y2xpcA=="
+        with video_storage.bind_video_copy_owner(
+            run_id, SessionArtifactStore(store, run_id),
+            lambda operation: store.run_with_hosted_video_copy(run_id, operation),
+        ):
+            with pytest.raises(SageV2Error) as failed:
+                await video_storage.publish_videos(config, {uri: "video/mp4"}, required={uri})
+            assert failed.value.info.code == "model.video_storage_failed"
+            if failure == "late-put":
+                with pytest.raises(SageV2Error, match="requires reconciliation"):
+                    await video_storage.publish_videos(
+                        config.model_copy(update={"url_ttl_seconds": 60}),
+                        {uri: "video/mp4"}, required={uri},
+                    )
+                assert put_calls == 1
+        await cancel(store, run)
+        access = AuthorizedSessionAccess(store)
+        if failure in {"put-timeout", "late-put"}:
+            assert put_calls == 1
+            deny_cleanup = failure == "put-timeout"
+            with pytest.raises(SageV2Error) as failed:
+                await access.delete_session(session_id, CONTEXT)
+            assert failed.value.info.code == "session.video_upload_unresolved"
+            assert await store.get_session(session_id)
+            deny_cleanup = False
+            if failure == "late-put":
+                assert pending_key and not objects
+                objects.add(pending_key)
+                lose_delete_response = True
+                # The late commit is positively observed, and the subsequent
+                # remote deletion happens even though its response is lost.
+                with pytest.raises(SageV2Error) as failed:
+                    await access.delete_session(session_id, CONTEXT)
+                assert failed.value.info.code == "session.video_cleanup_failed"
+                assert not objects
+                lose_delete_response = False
+                await store.close()
+                store = FilesystemSessionStore(root)
+                access = AuthorizedSessionAccess(store)
+        else:
+            assert put_calls == int(failure == "put-signing")
+        await access.delete_session(session_id, CONTEXT)
+        assert not objects
+        if failure in {"credentials", "list-denied", "put-signing"}:
+            assert client_calls == 1
+        with pytest.raises(SageV2Error) as missing:
+            await store.get_session(session_id)
+        assert missing.value.info.code == "session.not_found"
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_video_receipt_cannot_acknowledge_an_unknown_write(monkeypatch):
+    from sagents.v2.runtime.artifact import video_storage
+
+    def unexpected_client(config):
+        pytest.fail("A prefix-only preview receipt cannot prove the write settled")
+
+    monkeypatch.setattr(video_storage, "_client", unexpected_client)
+    store = EphemeralSessionStore()
+    try:
+        run = await create(store, "legacy-video-receipt")
+        session_id = run.handle.session_id
+        await store.put_attachment(
+            session_id,
+            artifact_id=video_storage.VIDEO_COPY_RECEIPT_PREFIX + "legacy",
+            media_type="application/x-sage-video-copy",
+            content=content(b""),
+            context=CONTEXT,
+            metadata={
+                "run_id": run.handle.run_id,
+                "storage": {"bucket": "test-preview"},
+            },
+        )
+        await cancel(store, run)
+        with pytest.raises(SageV2Error) as failed:
+            await store.delete_session(session_id)
+        assert failed.value.info.code == "session.video_upload_unresolved"
+        assert await store.get_session(session_id)
+    finally:
+        await store.close()

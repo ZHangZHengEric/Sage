@@ -11,9 +11,15 @@ from pydantic import Field, model_validator
 from sagents.v2.contracts.common import StrictModel
 
 
+MediaProbeName = Literal["audio_input", "video_input"]
+MEDIA_PROBES: tuple[MediaProbeName, ...] = ("audio_input", "video_input")
+
+
 ProbeName = Literal[
     "connection",
     "multimodal",
+    "audio_input",
+    "video_input",
     "structured_output",
     "json_object",
     "tool_calling",
@@ -110,6 +116,17 @@ class ModelCapabilityProfile(StrictModel):
     def supports(self, name: ProbeName) -> bool:
         return self.outcome(name).supported
 
+    def media_support(self, name: MediaProbeName) -> bool | None:
+        """Return only conclusive facts, including for profiles saved before media probes."""
+        outcome = next((value for value in self.outcomes if value.name == name), None)
+        if outcome is None:
+            return None
+        if outcome.status == ModelCapabilityProbeStatus.SUPPORTED:
+            return True
+        if outcome.status == ModelCapabilityProbeStatus.UNSUPPORTED:
+            return False
+        return None
+
     @model_validator(mode="after")
     def validate_standard_outcomes(self):
         expected = {
@@ -123,7 +140,8 @@ class ModelCapabilityProfile(StrictModel):
         names = [value.name for value in self.outcomes]
         if len(names) != len(set(names)):
             raise ValueError("model capability profile outcomes must be unique")
-        if set(names) != expected:
+        # Profiles already persisted at schema version 1 lack these two outcomes.
+        if not expected.issubset(names):
             raise ValueError(
                 "model capability profile must include every standard outcome"
             )

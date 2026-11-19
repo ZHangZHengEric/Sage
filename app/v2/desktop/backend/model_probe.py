@@ -299,6 +299,8 @@ async def probe_model_provider_capabilities(
                     plugin_profile.effective_max_output_tokens
                 ),
                 "supports_multimodal": plugin_profile.supports("multimodal"),
+                "supports_audio_input": plugin_profile.media_support("audio_input"),
+                "supports_video_input": plugin_profile.media_support("video_input"),
                 "supports_structured_output": (
                     plugin_profile.supports("structured_output")
                     or (

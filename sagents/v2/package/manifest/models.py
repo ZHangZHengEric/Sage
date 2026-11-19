@@ -26,6 +26,8 @@ class ModelLimits(StrictModel):
 
 class ModelCapabilityDeclaration(StrictModel):
     multimodal: bool = False
+    audio_input: bool | None = None
+    video_input: bool | None = None
     structured_output: bool = False
     tool_calling: bool = True
     reasoning: bool = False

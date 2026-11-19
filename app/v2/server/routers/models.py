@@ -31,6 +31,7 @@ async def probe_model(
     body: ModelBody, user: CurrentUser, service: CatalogDep, response: Response
 ):
     from app.v2.server.catalog.records import apply_upsert
+    from app.v2.server.config.video_storage import authorize_video_storage
     from app.v2.server.runtime.models import (
         create_catalog_provider,
         close_model_provider,
@@ -42,8 +43,14 @@ async def probe_model(
     record, _ = apply_upsert(
         catalog, {**body.model_dump(exclude_unset=True), "capability_profile": None}
     )
+    storage = authorize_video_storage(
+        record.request.extra, user.user_id, service.video_storage_profiles
+    )
     async with service.model_probe_slot(user.user_id):
-        provider = await create_catalog_provider(record)
+        provider = (
+            await create_catalog_provider(record) if storage is None
+            else await create_catalog_provider(record, video_storage=storage)
+        )
         response.headers["Cache-Control"] = "no-store"
         try:
             profile = await provider.probe_capabilities(

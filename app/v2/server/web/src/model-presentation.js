@@ -9,7 +9,7 @@ export const modelCapabilities = [
   ['multimodal', '多模态'], ['structured_output', 'JSON / Schema 输出'], ['tool_calling', '工具调用'],
   ['reasoning', '推理'], ['parallel_tool_calls', '并行工具调用'],
 ]
-export const modelProbeNames = { connection: '连接', multimodal: '多模态', structured_output: '严格 Schema 输出', json_object: 'JSON 输出', tool_calling: '工具调用', reasoning_control: '推理控制' }
+export const modelProbeNames = { connection: '连接', multimodal: '图片输入', audio_input: '音频输入', video_input: '视频输入', structured_output: '严格 Schema 输出', json_object: 'JSON 输出', tool_calling: '工具调用', reasoning_control: '推理控制' }
 export function modelCapabilityLabels(item) {
   return modelCapabilities.flatMap(([key, label]) => {
     if (key === 'structured_output') {

@@ -43,7 +43,9 @@ from sagents.v2.model.recovery_policy import (
 from sagents.v2.agent.step_request import (
     AgentStepRequestBuilder,
     DefaultAgentStepRequestBuilder,
+    media_capabilities,
     tools_for_invocation_mode,
+    tools_for_model_inputs,
 )
 from sagents.v2.context import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.system_context import with_session_context
@@ -127,6 +129,8 @@ from sagents.v2.contracts.interactions import (
     InteractionType,
 )
 from sagents.v2.contracts.items import (
+    AudioBlock,
+    FileBlock,
     ImageBlock,
     ItemSnapshot,
     ItemStatus,
@@ -296,6 +300,7 @@ class AgentLoopEngine:
                 tool_catalog=self.tool_catalog,
                 tool_selection_policy=self.tool_selection_policy,
                 context_budget=getattr(self.context_assembler, "budget", None),
+                model=model,
             )
         )
         self.ledger_rebuilder = ledger_rebuilder or SessionHistoryLedgerBuilder(
@@ -522,6 +527,11 @@ class AgentLoopEngine:
         catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
         catalog_tools = tools_for_invocation_mode(
             catalog_tools, command.invocation_mode
+        )
+        catalog_tools = await tools_for_model_inputs(
+            catalog_tools,
+            self.model,
+            command.config.model_bindings.get("primary", "primary"),
         )
         await self.tool_selection_policy.prepare(
             ToolSelectionPrepareContext(
@@ -2542,7 +2552,19 @@ class AgentLoopEngine:
         )
 
     async def _stream_model(self, run, request, context, state, step_id) -> tuple[RunSnapshot, ModelResponse | None, RunSnapshot | None]:
-        return await self.stream_model_step(run, request, context, state, step_id)
+        from functools import partial
+
+        from sagents.v2.runtime.artifact import SessionArtifactStore
+        from sagents.v2.runtime.artifact.video_storage import bind_video_copy_owner
+
+        session_store = self.runtime.session_store
+        if getattr(session_store, "supports_video_copy_cleanup", False) is not True:
+            return await self.stream_model_step(run, request, context, state, step_id)
+        with bind_video_copy_owner(
+            run.run_id, SessionArtifactStore(session_store, run.run_id),
+            partial(session_store.run_with_hosted_video_copy, run.run_id),
+        ):
+            return await self.stream_model_step(run, request, context, state, step_id)
 
     async def _recover_model_failure(self, run, state, step_id, error, command, context):
         import random
@@ -3174,7 +3196,21 @@ class AgentLoopEngine:
             restore_history_search = getattr(self.context_assembler, "restore_history_search", None)
             if restore_history_search is not None:
                 await restore_history_search(command, state.messages, run_id=run.run_id)
-        execution = asyncio.create_task(self.tool_executor.execute(call, context))
+        if call.tool_name == "analyze_audio":
+            from sagents.v2.tool.contracts import remote_audio_input
+
+            capabilities = await media_capabilities(
+                self.model, command.config.model_bindings.get("primary", "primary")
+            )
+            token = remote_audio_input.set(
+                capabilities is not None and capabilities.supports_remote_audio_input
+            )
+            try:
+                execution = asyncio.create_task(self.tool_executor.execute(call, context))
+            finally:
+                remote_audio_input.reset(token)
+        else:
+            execution = asyncio.create_task(self.tool_executor.execute(call, context))
         cancellable = definition.cancel_semantics in {
             CancelSemantics.COOPERATIVE,
             CancelSemantics.FORCEABLE,
@@ -5352,6 +5388,13 @@ class AgentLoopEngine:
                         alt=block.get("alt"),
                     )
                 )
+            elif kind == "audio" and block.get("uri") and block.get("mime_type"):
+                blocks.append(AudioBlock(uri=block["uri"], mime_type=block["mime_type"]))
+            elif kind == "file" and block.get("uri") and block.get("name"):
+                blocks.append(FileBlock(
+                    uri=block["uri"], name=block["name"], mime_type=block.get("mime_type"),
+                    size=block.get("size"),
+                ))
         if not blocks:
             return ()
         metadata = raw.get("metadata")

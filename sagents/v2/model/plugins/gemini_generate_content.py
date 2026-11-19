@@ -40,7 +40,24 @@ from sagents.v2.model.contracts import (
     ModelResponse,
     ModelStreamEvent,
 )
+from sagents.v2.model.plugins._shared.image_limits import request_too_large
+from sagents.v2.model.plugins._shared.media import (
+    accepts_media,
+    media_kind,
+    media_reference_text,
+    omitted_media_text,
+    omit_historical_remote_media,
+    resolve_media_capabilities,
+)
 from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
+from sagents.v2.model.plugins._shared.video_storage import (
+    STORAGE_OMITTED_TEXT,
+    S3VideoStorageConfig,
+    current_turn_start,
+    publish_videos,
+    redact_error_info,
+    redact_signed_urls,
+)
 from sagents.v2.model.plugins._shared.wire import (
     compact_json,
     minimum_reasoning_control,
@@ -65,6 +82,14 @@ _HOST_OWNED_FIELDS = frozenset(
     }
 )
 _EFFORT_BUDGETS = {"minimal": 128, "low": 1024, "medium": 4096, "high": 8192}
+# The GenerateContent video guide recommends the Files API above 20 MB.
+_DEFAULT_MAX_REQUEST_BYTES = 20_000_000
+_WIRE_JSON = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def _wire_bytes(value: Any) -> int:
+    # Match httpx's JSON encoding without allocating the full oversized body.
+    return sum(len(chunk.encode("utf-8")) for chunk in _WIRE_JSON.iterencode(value))
 
 
 class GeminiGenerateContentConfig(StrictModel):
@@ -82,10 +107,13 @@ class GeminiGenerateContentConfig(StrictModel):
     thinking_control: Literal["auto", "level", "budget"] = "auto"
     thinking_budget: int | None = Field(default=None, ge=-1)
     include_thoughts: bool = True
+    max_inline_videos: int = Field(default=10, ge=1, le=10)
+    max_request_bytes: int = Field(default=_DEFAULT_MAX_REQUEST_BYTES, gt=0)
     timeout_seconds: float = Field(default=120, gt=0)
     stream_idle_timeout_seconds: float | None = Field(
         default=None, gt=0, allow_inf_nan=False
     )
+    video_storage: S3VideoStorageConfig | None = None
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -133,7 +161,19 @@ class GeminiGenerateContentModelProvider:
         return "budget" if model.startswith("gemini-2.5") else "level"
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self.config.capabilities
+        capabilities = self._effective_capabilities()
+        return capabilities.model_copy(update={
+            "supports_remote_audio_input": capabilities.supports_audio_input is True,
+            "media_request_bytes": self.config.max_request_bytes,
+            "max_video_parts": self.config.max_inline_videos,
+            "hosts_inline_video": self.config.video_storage is not None,
+        })
+
+    def _effective_capabilities(self) -> ModelCapabilities:
+        capabilities = self.config.capabilities
+        return resolve_media_capabilities(
+            capabilities, native=True, default=capabilities.supports_multimodal_input
+        )
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
@@ -190,6 +230,11 @@ class GeminiGenerateContentModelProvider:
             model_binding=request.model_binding,
             max_output_tokens=effective,
             timeout_seconds=request.timeout_seconds,
+            media_inputs=(
+                ("audio_input", "video_input")
+                if self.config.video_storage is None else ("audio_input",)
+            ),
+            hosted_video=self.config.video_storage is not None,
         )
         reasoning, metadata = await probe_model_reasoning_controls(
             base_provider=base,
@@ -228,7 +273,7 @@ class GeminiGenerateContentModelProvider:
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:
         self._validate_request(request)
-        system, contents = self._contents(request.messages)
+        system, contents = self._contents(omit_historical_remote_media(request.messages))
         generation: dict[str, Any] = {"candidateCount": 1}
         maximum = request.max_output_tokens or self.config.default_max_output_tokens
         if maximum is not None:
@@ -320,6 +365,8 @@ class GeminiGenerateContentModelProvider:
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         payload = self.diagnostic_request(request)
+        signed_urls = await self._publish_videos(payload)
+        await self._limit_media_parts(payload)
         model = quote(self.config.model.removeprefix("models/"), safe="-._")
         path = f"models/{model}:streamGenerateContent?alt=sse"
         response_id = new_id("model_response")
@@ -333,6 +380,7 @@ class GeminiGenerateContentModelProvider:
         )
         finish_reason = "completed"
         def stream_failure(error):
+            error = redact_error_info(error, signed_urls)
             thoughts = self._counter(provider_usage, "thoughtsTokenCount")
             cached = self._counter(provider_usage, "cachedContentTokenCount")
             observed_usage = UsageSummary(
@@ -349,11 +397,12 @@ class GeminiGenerateContentModelProvider:
             ))
 
         try:
+            diagnostic_payload = redact_signed_urls(payload, signed_urls)
             await record_wire_request(
-                payload, model=self.config.model, provider=self.config.provider_id,
+                diagnostic_payload, model=self.config.model, provider=self.config.provider_id,
             )
             record_wire_event(
-                {"diagnostic_event": "request_attempt", "payload": payload}
+                {"diagnostic_event": "request_attempt", "payload": diagnostic_payload}
             )
             async with self._client.stream("POST", path, json=payload) as response:
                 if response.status_code >= 400:
@@ -364,7 +413,7 @@ class GeminiGenerateContentModelProvider:
                         response=response,
                     )
                 async for event in idle.iterate(self._events(response)):
-                    record_wire_event(event)
+                    record_wire_event(redact_signed_urls(event, signed_urls))
                     if event.get("error"):
                         error = event["error"]
                         failed = httpx.Response(
@@ -462,7 +511,10 @@ class GeminiGenerateContentModelProvider:
         except SageV2Error as exc:
             raise stream_failure(exc.info) from exc
         except Exception as exc:
-            raise stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info) from exc
+            failure = stream_failure(provider_error(exc, response_started=idle.response_started, provider=self.config.provider_id).info)
+            if signed_urls:
+                raise failure from None
+            raise failure from exc
         if not terminal:
             raise stream_failure(stream_incomplete_error(
                 provider=self.config.provider_id, response_started=idle.response_started
@@ -522,10 +574,91 @@ class GeminiGenerateContentModelProvider:
                 raise ValueError("Gemini SSE data must be an object")
             yield value
 
+    async def _publish_videos(self, payload: dict[str, Any]) -> frozenset[str]:
+        if self.config.video_storage is None:
+            return frozenset()
+        contents = payload["contents"]
+        turn_start = current_turn_start([content.get("role") for content in contents], "model")
+        videos = [
+            (part, index >= turn_start)
+            for index, content in enumerate(contents)
+            for part in content["parts"]
+            if str(
+                (part.get("inlineData") or part.get("fileData") or {}).get("mimeType", "")
+            ).lower().startswith("video/")
+        ]
+        # Older videos beyond the inline cap become text references without uploading.
+        parts = [
+            (part, current) for part, current in videos[-self.config.max_inline_videos:]
+            if isinstance(part.get("inlineData"), dict)
+        ]
+        sources = {
+            id(part): f"data:{part['inlineData']['mimeType']};base64,{part['inlineData']['data']}"
+            for part, _ in parts
+        }
+        signed = await publish_videos(
+            self.config.video_storage,
+            {sources[id(part)]: part["inlineData"]["mimeType"] for part, _ in parts},
+            required={sources[id(part)] for part, current in parts if current},
+        )
+        omitted = 0
+        for part, _ in parts:
+            media = part.pop("inlineData")
+            url = signed.get(sources[id(part)])
+            if url is None:
+                part["text"] = STORAGE_OMITTED_TEXT
+                omitted += 1
+            else:
+                part["fileData"] = {"mimeType": media["mimeType"], "fileUri": url}
+        if omitted:
+            record_wire_event({"diagnostic_event": "video_storage_omitted", "videos": omitted})
+        return frozenset(signed.values())
+
+    async def _limit_media_parts(self, payload: dict[str, Any]) -> None:
+        media_parts = []
+        for content in payload["contents"]:
+            parts = content["parts"]
+            for index, part in enumerate(parts):
+                media = part.get("inlineData") or part.get("fileData")
+                mime_type = media.get("mimeType") if isinstance(media, dict) else None
+                kind = mime_type.lower().partition("/")[0] if isinstance(mime_type, str) else ""
+                if kind in {"audio", "video"}:
+                    media_parts.append((parts, index, media, mime_type, kind))
+
+        videos = [item for item in media_parts if item[4] == "video"]
+        overflow = videos[: max(0, len(videos) - self.config.max_inline_videos)]
+        for parts, index, media, mime_type, kind in overflow:
+            parts[index] = await self._media_reference(media, mime_type, kind)
+        replaced = {id(item[2]) for item in overflow}
+
+        size = _wire_bytes(payload)
+        limit = self.config.max_request_bytes
+        for parts, index, media, mime_type, kind in media_parts:
+            if size <= limit:
+                break
+            if id(media) in replaced or "data" not in media:
+                continue  # Remote file references do not carry media bytes.
+            replacement = await self._media_reference(media, mime_type, kind)
+            saved = _wire_bytes(parts[index]) - _wire_bytes(replacement)
+            if saved > 0:
+                parts[index] = replacement
+                size -= saved
+        if size > limit:
+            raise request_too_large(size, limit)
+
+    @staticmethod
+    async def _media_reference(
+        media: dict[str, Any], mime_type: str, kind: str
+    ) -> dict[str, str]:
+        return {"text": await media_reference_text(
+            kind, mime_type, data=media.get("data"), uri=media.get("fileUri"),
+        )}
+
     def _contents(self, messages: tuple[ModelMessage, ...]):
         system: list[dict[str, Any]] = []
         contents: list[dict[str, Any]] = []
         call_map: dict[str, dict[str, Any]] = {}
+        previous_role = None
         for message in messages:
             if message.role in {"system", "developer"}:
                 if any(
@@ -552,7 +685,7 @@ class GeminiGenerateContentModelProvider:
                     else message.content[0].text
                     if len(message.content) == 1
                     and isinstance(message.content[0], TextBlock)
-                    else [self._part(block) for block in message.content]
+                    else [self._request_part(block) for block in message.content]
                 )
                 result = {
                     "name": original["name"],
@@ -592,7 +725,7 @@ class GeminiGenerateContentModelProvider:
                         )
                     call_map.update(zip(ids, native_calls, strict=True))
                 else:
-                    parts = [self._part(block) for block in message.content]
+                    parts = [self._request_part(block) for block in message.content]
                     for call in message.tool_calls:
                         native = {"name": call.name, "args": call.arguments}
                         parts.append({"functionCall": native})
@@ -600,12 +733,19 @@ class GeminiGenerateContentModelProvider:
             if not parts:
                 continue
             role = "model" if message.role == "assistant" else "user"
-            # Batch parallel results into one user Content, after all model calls.
-            if role == "user" and contents and contents[-1]["role"] == role:
+            # Batch parallel results, but keep their Content separate from user input.
+            if role == "user" and message.role == previous_role:
                 contents[-1]["parts"].extend(parts)
             else:
                 contents.append({"role": role, "parts": parts})
+            previous_role = message.role
         return system, contents
+
+    def _request_part(self, block) -> dict[str, Any]:
+        kind = media_kind(block)
+        if kind is not None and not accepts_media(self._effective_capabilities(), kind):
+            return {"text": omitted_media_text(kind)}
+        return self._part(block)
 
     @classmethod
     def _part(cls, block) -> dict[str, Any]:
@@ -646,7 +786,7 @@ class GeminiGenerateContentModelProvider:
                 "model binding does not support structured_output",
             )
         if not caps.supports_multimodal_input and any(
-            isinstance(block, (ImageBlock, AudioBlock, FileBlock))
+            isinstance(block, (ImageBlock, FileBlock)) and media_kind(block) is None
             for message in request.messages
             for block in message.content
         ):

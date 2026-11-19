@@ -26,6 +26,13 @@ class ModelCapabilities(StrictModel):
     supports_parallel_tool_calls: bool
     supports_reasoning: bool
     supports_multimodal_input: bool
+    # None defers to the wire protocol plugin, which resolves a concrete value.
+    supports_audio_input: bool | None = None
+    supports_video_input: bool | None = None
+    supports_remote_audio_input: bool = False
+    media_request_bytes: int | None = Field(default=None, gt=0)
+    max_video_parts: int | None = Field(default=None, gt=0)
+    hosts_inline_video: bool = False
     supports_structured_output: bool
     supports_continuation: bool = False
     max_input_tokens: int | None = Field(default=None, gt=0)

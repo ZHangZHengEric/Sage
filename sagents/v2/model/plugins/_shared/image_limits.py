@@ -38,6 +38,17 @@ def _openai_request_body(payload):
     return body
 
 
+def openai_request_bytes(payload) -> int:
+    return json_bytes(_openai_request_body(payload))
+
+
+def openai_request_limit(config) -> int:
+    if config.max_request_bytes is not None:
+        return config.max_request_bytes
+    direct = urlsplit(config.base_url).hostname == "api.openai.com"
+    return OPENAI_MAX_REQUEST_BYTES if direct else COMPATIBLE_MAX_REQUEST_BYTES
+
+
 def request_too_large(size: int, limit: int) -> SageV2Error:
     return SageV2Error(RuntimeErrorInfo(
         code="model.request_too_large",
@@ -177,7 +188,7 @@ def _reference_block(image, text_type, path):
 
 async def limit_openai_images(
     payload, config, *, responses: bool, original_sources=None, retry_below=None,
-    already_compressed=False,
+    already_compressed=False, excluded_image_ids=(),
 ) -> int:
     field, image_type, text_type = (
         ("input", "input_image", "input_text") if responses
@@ -190,12 +201,10 @@ async def limit_openai_images(
         if isinstance(message.get(key), list)
         for part in message[key]
         if isinstance(part, dict) and part.get("type") == image_type
+        and id(part) not in excluded_image_ids
     ]
     body = _openai_request_body(payload)
-    limit = config.max_request_bytes
-    if limit is None:
-        direct = urlsplit(config.base_url).hostname == "api.openai.com"
-        limit = OPENAI_MAX_REQUEST_BYTES if direct else COMPATIBLE_MAX_REQUEST_BYTES
+    limit = openai_request_limit(config)
     if retry_below is not None:
         limit = min(limit, retry_below // 2)
 
@@ -239,13 +248,16 @@ async def limit_openai_images(
     return size
 
 
-async def retry_openai_image_payload(payload, config, *, responses, original_sources, rejected_bytes, error):
+async def retry_openai_image_payload(
+    payload, config, *, responses, original_sources, rejected_bytes, error,
+    excluded_image_ids=(),
+):
     """Reserve at most one retry and only when the request actually shrank."""
     from sagents.v2.model.recovery_scope import reserve_additional_request
 
     smaller_bytes = await limit_openai_images(
         payload, config, responses=responses, original_sources=original_sources,
-        retry_below=rejected_bytes,
+        retry_below=rejected_bytes, excluded_image_ids=excluded_image_ids,
     )
     if smaller_bytes >= rejected_bytes:
         return None

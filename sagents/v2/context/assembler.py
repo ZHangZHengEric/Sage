@@ -30,9 +30,10 @@ from sagents.v2.context.plugins.summary_only import (
 from sagents.v2.context.plugins.summary_ephemeral import (
     InMemoryConversationSummaryStore,
 )
-from sagents.v2.model import ModelMessage
+from sagents.v2.model import ModelCapabilities, ModelMessage
 from sagents.v2.runtime.artifact.contracts import ArtifactStore
 from sagents.v2.runtime.artifact.images import hydrate_image_blocks, hydrate_wishseen_history
+from sagents.v2.runtime.artifact.media import hydrate_media_blocks
 from sagents.v2.contracts.items import ContentBlock, ImageBlock
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -231,6 +232,7 @@ class DefaultContextAssembler:
         *,
         run_id: str | None = None,
         reservation: ContextRequestReservation | None = None,
+        media_capabilities: ModelCapabilities | None = None,
     ) -> tuple[ModelMessage, ...]:
         return (
             await self.prepare_projection(
@@ -238,6 +240,7 @@ class DefaultContextAssembler:
                 ledger,
                 run_id=run_id,
                 reservation=reservation,
+                media_capabilities=media_capabilities,
             )
         ).messages
 
@@ -248,6 +251,7 @@ class DefaultContextAssembler:
         *,
         run_id: str | None = None,
         reservation: ContextRequestReservation | None = None,
+        media_capabilities: ModelCapabilities | None = None,
     ) -> ContextProjection:
         """Create a fresh request view with deterministic context ordering.
 
@@ -256,7 +260,9 @@ class DefaultContextAssembler:
         of Agent instructions. Volatile runtime context is injected into the
         latest user message while preserving the original multimodal block order.
         """
-        return await self._project_context(command, ledger, run_id=run_id)
+        return await self._project_context(
+            command, ledger, run_id=run_id, media_capabilities=media_capabilities
+        )
 
     async def _project_context(
         self,
@@ -265,6 +271,7 @@ class DefaultContextAssembler:
         *,
         run_id: str | None,
         history_only: bool = False,
+        media_capabilities: ModelCapabilities | None = None,
     ) -> ContextProjection:
         source_ledger = ledger
         start = await self._history_start(command, run_id)
@@ -449,6 +456,7 @@ class DefaultContextAssembler:
         # coverage/digests must depend on immutable ledger content, not files.
         view = await hydrate_wishseen_history(view, command.config.metadata)
         view = await hydrate_image_blocks(view, artifact_store)
+        view = await hydrate_media_blocks(view, artifact_store, media_capabilities)
         if view != projection.messages:
             projection = projection.model_copy(
                 update={

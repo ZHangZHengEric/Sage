@@ -36,6 +36,11 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
 )
 from sagents.v2.model.plugins._shared.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.media import (
+    media_kind,
+    omitted_media_text,
+    resolve_media_capabilities,
+)
 from sagents.v2.model.plugins._shared.stream_idle import StreamIdleTimeout
 from sagents.v2.model.plugins._shared.wire import (
     ProviderStreamFailure,
@@ -170,7 +175,9 @@ class AnthropicMessagesModelProvider:
         return self._client
 
     async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        return self.config.capabilities
+        return resolve_media_capabilities(
+            self.config.capabilities, native=False, default=False
+        )
 
     def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         return self._stream(request)
@@ -826,7 +833,7 @@ class AnthropicMessagesModelProvider:
     def _validate_request(self, request: ModelRequest) -> None:
         capabilities = self.config.capabilities
         if not capabilities.supports_multimodal_input and any(
-            isinstance(block, (ImageBlock, AudioBlock))
+            isinstance(block, ImageBlock)
             for message in request.messages
             for block in message.content
         ):
@@ -980,6 +987,9 @@ class AnthropicMessagesModelProvider:
             return compact_json(block.value)
         if isinstance(block, ImageBlock) and block.uri.startswith("data:"):
             return "[Image reference: unavailable]"
+        kind = media_kind(block)
+        if kind is not None:
+            return omitted_media_text(kind)
         if isinstance(block, (ImageBlock, AudioBlock, FileBlock, ResourceRefBlock)):
             return f"[{block.kind}: {block.uri}]"
         raise TypeError(f"unsupported content block {type(block)!r}")
@@ -1005,13 +1015,15 @@ class AnthropicMessagesModelProvider:
                     },
                 }
             return {"type": "image", "source": {"type": "url", "url": block.uri}}
+        if media_kind(block) is not None:
+            return {"type": "text", "text": cls._block_text(block)}
         if isinstance(block, FileBlock):
             return {
                 "type": "document",
                 "source": {"type": "url", "url": block.uri},
                 "title": block.name,
             }
-        if isinstance(block, (AudioBlock, ResourceRefBlock)):
+        if isinstance(block, ResourceRefBlock):
             return {"type": "text", "text": cls._block_text(block)}
         raise TypeError(f"unsupported content block {type(block)!r}")
 

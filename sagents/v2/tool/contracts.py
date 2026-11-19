@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from sagents.v2.contracts.common import Identifier, StrictModel, ToolName
 from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.items import ContentBlock
+
+
+# Bound to the active model for the lifetime of an audio tool invocation.
+remote_audio_input: ContextVar[bool] = ContextVar("tool_remote_audio_input", default=False)
 
 
 class SideEffectLevel(str, Enum):
@@ -79,6 +84,8 @@ class ToolDefinition(StrictModel):
     # Ordinary write tools remain forbidden in Plan mode even after approval.
     plan_safe: bool = False
     required_scopes: tuple[Identifier, ...] = ()
+    # Hidden from the model when the bound model cannot accept these inputs.
+    required_model_inputs: tuple[Literal["audio", "video"], ...] = ()
 
 
 class ToolCall(StrictModel):
