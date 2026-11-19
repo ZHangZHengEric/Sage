@@ -322,3 +322,27 @@ async def test_incremental_lease_updates_preserve_v1_arrays_and_receipts(schedul
             assert retry.work.work_id not in {row["work_id"] for row in raw["items"]}
             assert len(raw["terminal_idempotency_keys"]) <= retention
     assert set(raw["idempotency"]) == set(raw["terminal_idempotency_keys"])
+
+
+@pytest.mark.asyncio
+async def test_claim_fallback_uses_one_canonical_value_after_legacy_rewrite(scheduler_pair):
+    producer, reader = scheduler_pair()
+    item = work("legacy-rewrite")
+    await producer.submit(item)
+    key = producer.key_prefix + ":state"
+
+    async def legacy_write(_operation):
+        state = json.loads(await producer._redis.get(key))
+        state.pop("claim_epoch")
+        await producer._redis.set(key, json.dumps(state))
+        return NotImplemented
+
+    with (
+        patch.object(reader, "_try_claim", side_effect=legacy_write),
+        patch.object(reader, "_indexed_claim", side_effect=AssertionError("retried stale byte ranges")),
+    ):
+        lease = await claim(reader)
+    assert lease.work == item
+    await producer.assert_fence(lease)
+    assert await claim(producer) is None
+    await reader.release(lease, LeaseReleaseReason.COMPLETED)

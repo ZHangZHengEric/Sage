@@ -359,10 +359,10 @@ class RedisDistributedScheduler:
                     return False, None
                 await watch_fence(pipe, writer)
                 await pipe.watch(state_key)
-                if claim_queue:
-                    lease = await self._indexed_claim(pipe, state_key, operation)
-                    if lease is not NotImplemented:
-                        return False, lease
+                # The optimistic claim already declined this layout. Older
+                # writers do not take queue-updates and can move byte ranges
+                # under this guard. Read one canonical value and let WATCH
+                # reject its replacement before publishing a lease.
                 raw = await pipe.get(state_key)
                 large = raw is not None and len(raw) > 256 * 1024
                 state = (await asyncio.to_thread(self._decode_state, raw) if large else self._decode_state(raw)) if raw else None
