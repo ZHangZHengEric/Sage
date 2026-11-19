@@ -57,7 +57,8 @@ def test_web_html_cannot_pass_readiness():
             release.verify('http://api', 'http://web')
 
 
-def test_prepare_generates_isolated_pair_and_proxy_healthcheck(tmp_path):
+@pytest.mark.parametrize('subnet', (None, '10.250.64.16/28'))
+def test_prepare_generates_isolated_pair_and_proxy_healthcheck(tmp_path, subnet):
     from types import SimpleNamespace
     rendered = {'name': 'sage_standalone', 'networks': {'default': {'name': 'sage_standalone_default'}},
                 'services': {name: {'build': {}, 'image': 'old', 'container_name': name,
@@ -67,12 +68,14 @@ def test_prepare_generates_isolated_pair_and_proxy_healthcheck(tmp_path):
                 'env_file': '/tmp/env', 'data_root': '/data/sage_v2',
                 'server_image': 'server:release', 'web_image': 'web:release',
                 'api_port': 32008, 'web_port': 32009}
+    if subnet:
+        manifest['network_subnet'] = subnet
     with patch.object(release, 'run', return_value=SimpleNamespace(stdout=json.dumps(rendered))), \
             patch.object(release, 'scheduler_release') as scheduler, \
             patch.object(release, 'local_verify') as verify:
         release.prepare(manifest, tmp_path)
     compose = json.loads((tmp_path / 'compose.json').read_text())
-    assert compose['networks'] == {'default': {}}
+    assert compose['networks'] == {'default': {'ipam': {'config': [{'subnet': subnet}]}} if subnet else {}}
     assert compose['name'] == 'sage-release-test-green'
     assert 'sage-server-v2-test-green:8090' in (tmp_path / 'web.conf').read_text()
     assert '/readyz' in compose['services']['sage-web']['healthcheck']['test'][1]

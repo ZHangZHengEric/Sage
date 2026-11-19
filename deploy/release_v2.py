@@ -2,6 +2,7 @@
 """Paired Compose releases with checked Caddy cutover; Linux deployment host only."""
 import argparse
 import fcntl
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -110,6 +111,9 @@ def prepare(m, directory):
     config = json.loads(rendered.stdout)
     config['name'] = 'sage-release-' + m['release']
     config['networks'] = {'default': {}}
+    if subnet := m.get('network_subnet'):
+        network = ipaddress.IPv4Network(subnet)
+        config['networks']['default']['ipam'] = {'config': [{'subnet': str(network)}]}
     for kind, target, port in [('server', 8090, m['api_port']), ('web', 80, m['web_port'])]:
         service = config['services']['sage-' + kind]
         service.pop('build', None)
