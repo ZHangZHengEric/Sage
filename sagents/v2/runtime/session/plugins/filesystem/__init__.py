@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import threading
+from contextlib import aclosing, asynccontextmanager
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
@@ -27,13 +28,21 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
+from sagents.v2.contracts.checkpoint import SuspensionReason, SuspensionStatus
+from sagents.v2.contracts.interactions import InteractionStatus
+from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.plugins._shared.aggregate import (
+    install_session_objects, SessionStoreCorruptionError as AggregateCorruptionError,
+)
+from sagents.v2.runtime.session.plugins._shared.cache import IdleSessionCache, cached_session_operation
 from sagents.v2.runtime.session.plugins._shared.facade import CoordinatorFacade
+from sagents.v2.runtime.session.plugins.filesystem import history
 from sagents.v2.runtime.session.plugins.filesystem.layout import (
     SESSION_LAYOUT_FORMAT,
     resolve_session_directory,
 )
+from sagents.v2.runtime.session.plugins.filesystem.ownership import record_owner
 from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
@@ -121,6 +130,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         root: str | Path,
         *,
         durable_stream_deltas: bool = False,
+        max_cached_sessions: int = 256,
+        max_cached_bytes: int = 256 * 1024**2,
+        cache_idle_seconds: float = 300,
+        evict_manually_paused_sessions: bool = False,
         **kwargs: Any,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
@@ -133,6 +146,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         self.trash_root = self.control_root / "trash"
         self._durable_stream_deltas = durable_stream_deltas
         self._filesystem_lock = threading.RLock()
+        self._history_build_lock = threading.Lock()
         # Summaries of every persisted Session, keyed by session_id. The writer
         # lock makes this process the only mutator, so an unloaded Session can
         # change only through ``_write_session_state``, which refreshes it.
@@ -149,6 +163,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         # replace the compact snapshot instead of deriving a delta from an
         # uncertain baseline.
         self._storage_recovery_required: set[str] = set()
+        self._legacy_rewrite_required: set[str] = set()
         self._journal_commits: dict[str, int] = {}
         self._storage_locks: dict[str, asyncio.Lock] = {}
         self._load_lock = asyncio.Lock()
@@ -164,6 +179,13 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             self._scan_session_index()
             self._normalize_existing_session_locations()
             super().__init__(**kwargs)
+            self._session_cache = IdleSessionCache(
+                self, max_sessions=max_cached_sessions, max_bytes=max_cached_bytes,
+                idle_seconds=cache_idle_seconds, eligible=self._cache_can_evict,
+                allow_suspended=evict_manually_paused_sessions,
+            )
+            self._cache_timer: asyncio.TimerHandle | None = None
+            self._cache_task: asyncio.Task[None] | None = None
         except Exception:
             self._release_writer_lock()
             raise
@@ -192,7 +214,10 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         async with storage_lock:
             durable = self._persisted_states.get(session_id)
             previous = (
-                None if session_id in self._storage_recovery_required else durable
+                None if (
+                    session_id in self._storage_recovery_required
+                    or session_id in self._legacy_rewrite_required
+                ) else durable
             )
             try:
                 state = await asyncio.to_thread(
@@ -213,7 +238,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                     # The canonical snapshot/journal was committed and only a
                     # recoverable auxiliary write failed. Treat the operation
                     # as durable after rebuilding those indexes.
-                    self._persisted_states[session_id] = deepcopy(state)
+                    self._persisted_states[session_id] = state
                     self._storage_recovery_required.discard(session_id)
                 else:
                     # The coordinator operation guard restores only this
@@ -226,7 +251,9 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 # revision after a transient I/O failure.
                 self._persisted_states[session_id] = state
                 self._storage_recovery_required.discard(session_id)
+        self._legacy_rewrite_required.discard(session_id)
         self._loaded_session_ids.add(session_id)
+        self._charge_cache(session_id)
         self._forget_attachment_bytes(session_id)
 
     def _attachment_files(self, session_id):
@@ -280,7 +307,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         state = self._state_from_mutation(durable, mutation)
         prepared.append(state)
         self._write_session_state(session_id, state, start_entries, previous)
-        return deepcopy(state)
+        return state
 
     @staticmethod
     def _state_from_mutation(
@@ -366,7 +393,9 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             self._storage_locks.pop(value, None)
             self._persisted_states.pop(value, None)
             self._storage_recovery_required.discard(value)
+            self._legacy_rewrite_required.discard(value)
             self._journal_commits.pop(value, None)
+            self._session_cache.forget(value)
 
     async def get_derived_state(
         self, session_id: str, namespace: str, key: str
@@ -415,6 +444,93 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         path = self._session_dir(session_id) / "derived"
         await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
 
+    def _cache_can_evict(self, session_id):
+        durable = self._persisted_states.get(session_id)
+        lock = self._storage_locks.get(session_id)
+        if (
+            durable is None or session_id in self._storage_recovery_required
+            or (lock is not None and lock.locked())
+        ):
+            return False
+        suspended = [run for run in durable["runs"] if run["state"] == RunState.SUSPENDED]
+        return not suspended or (
+            self._session_cache.allow_suspended
+            and all(self._can_reload_manual_pause(run) for run in suspended)
+        )
+
+    def _can_reload_manual_pause(self, run):
+        current = self._runs.get(run["run_id"])
+        if current is None or current.revision != run["revision"]:
+            return False
+        suspension = self._suspensions.get(current.suspension_id)
+        checkpoint = self._checkpoints.get(current.checkpoint_id)
+        return (
+            suspension is not None and checkpoint is not None
+            and suspension.reason == SuspensionReason.MANUAL_PAUSE
+            and suspension.status == SuspensionStatus.PENDING
+            and suspension.resume_policy == "explicit_resume"
+            and suspension.interaction_id is None
+            and suspension.run_id == current.run_id
+            and checkpoint.run_id == current.run_id
+            and checkpoint.session_id == current.session_id
+            and suspension.checkpoint_id == checkpoint.checkpoint_id
+            and suspension.checkpoint_sequence == checkpoint.run_sequence
+            and checkpoint.resolved_spec_hash == current.resolved_spec_hash
+            and not any(
+                interaction.run_id == current.run_id and interaction.status == InteractionStatus.PENDING
+                for interaction in self._interactions.values()
+            )
+        )
+
+    def _charge_cache(self, session_id):
+        fingerprint = self._storage_fingerprint(self._session_dir(session_id))
+        if fingerprint is None:
+            size = self._session_cache.max_bytes
+        else:
+            # Canonical bytes provide a low-cost estimate for the two retained
+            # representations. Journal bytes also charge uncompacted updates.
+            size = 8 * sum(entry[1] for entry in fingerprint if entry is not None)
+        self._session_cache.touch(session_id, size=size)
+        self._schedule_cache_prune()
+
+    def _schedule_cache_prune(self):
+        if (
+            self._closed or self._cache_timer is not None or self._cache_task is not None
+            or not self._session_cache.entries
+        ):
+            return
+        interval = min(30, max(0.05, self._session_cache.idle_seconds / 2))
+        self._cache_timer = asyncio.get_running_loop().call_later(
+            interval, self._start_cache_prune
+        )
+
+    def _start_cache_prune(self):
+        self._cache_timer = None
+        self._cache_task = asyncio.create_task(self._prune_cache())
+
+    async def _prune_cache(self):
+        try:
+            await self._session_cache.prune()
+        finally:
+            self._cache_task = None
+            self._schedule_cache_prune()
+
+    def _evict_session_locked(self, session_id):
+        run_ids = self._session_run_ids_locked(session_id)
+        self._drop_session_objects_locked(session_id)
+        self._loaded_session_ids.discard(session_id)
+        self._persisted_states.pop(session_id, None)
+        self._journal_commits.pop(session_id, None)
+        self._legacy_rewrite_required.discard(session_id)
+        self._storage_locks.pop(session_id, None)
+        self._session_cache.forget(session_id)
+        self._session_cache.evicted_suspended.discard(session_id)
+        for run_id in run_ids:
+            self._subscribers.pop(run_id, None)
+        for key in tuple(self._derived_state):
+            if key[0] == session_id:
+                self._derived_state.pop(key)
+
     async def close(self) -> None:
         """Release the process writer lock. Calling close twice is safe."""
 
@@ -422,13 +538,20 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             return
         self._closed = True
         try:
+            if self._cache_timer is not None:
+                self._cache_timer.cancel()
+            if self._cache_task is not None:
+                await self._cache_task
             await asyncio.to_thread(self._flush_session_index)
         finally:
             await asyncio.to_thread(self._release_writer_lock)
 
+    @cached_session_operation
     async def create_run(self, command, context):
         """Load only the explicitly addressed parent/Session before mutation."""
 
+        if command.parent_run_id is not None:
+            await self._ensure_resource_loaded("runs", "run_id", command.parent_run_id)
         if command.session_id is not None:
             await self._ensure_session_loaded(command.session_id, missing_ok=True)
         else:
@@ -437,18 +560,23 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 await self._ensure_session_loaded(lookup["session_id"])
         return await super().create_run(command, context)
 
+    @cached_session_operation
     async def export_session_state(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().export_session_state(session_id)
 
+    @cached_session_operation
     async def get_session(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().get_session(session_id)
 
     async def authorize_session_actor(self, session_id, context):
-        await self._ensure_session_loaded(session_id)
-        return await super().authorize_session_actor(session_id, context)
+        def authorize():
+            with history.open_history(self, session_id, context):
+                pass
+        await asyncio.to_thread(authorize)
 
+    @cached_session_operation
     async def delete_session(self, session_id):
         await self._ensure_session_loaded(session_id)
         await self._ensure_descendants_loaded(session_id)
@@ -456,13 +584,20 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         self._loaded_session_ids.intersection_update(self._sessions)
         return result
 
+    @cached_session_operation
     async def latest_authorized_session_command(self, session_id, context):
         await self._ensure_session_loaded(session_id)
         return await super().latest_authorized_session_command(session_id, context)
 
     async def list_session_runs(self, session_id):
-        await self._ensure_session_loaded(session_id)
-        return await super().list_session_runs(session_id)
+        from sagents.v2.contracts.run_state import RunSnapshot
+
+        def read():
+            with history.open_history(self, session_id) as (_, _, runs):
+                values = (RunSnapshot.model_validate(row) for row in json.loads(runs))
+                return tuple(sorted(values, key=lambda run: (run.created_at, run.run_id)))
+
+        return await asyncio.to_thread(read)
 
     async def read_session_views(self, session_ids, **options):
         from functools import partial
@@ -513,23 +648,24 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         return report
 
     async def _run_metadata_batch(self, session_ids):
-        from sagents.v2.runtime.session.run_metadata import metadata_from_payload
-        from sagents.v2.runtime.session.plugins.filesystem.metadata import read_filesystem_metadata
         rows, owners = await super()._run_metadata_batch(session_ids)
-        loaded = set(owners)
+
         def read():
             result, heads = list(rows), dict(owners)
             for sid in session_ids:
-                if sid in loaded:
+                if sid in heads:
                     continue
-                path = self._session_dir(sid) / 'state.json'
-                if not path.is_file():
-                    continue
-                payload = read_filesystem_metadata(self, path)
-                current, owner = metadata_from_payload(payload)
-                result.extend(current)
-                heads.update(owner)
+                try:
+                    with history.open_history(self, sid) as (db, _, _):
+                        current, owner = history.run_metadata(db)
+                except SageV2Error as exc:
+                    if exc.info.code != "session.not_found":
+                        raise
+                else:
+                    result.extend(current)
+                    heads.update(owner)
             return tuple(result), heads
+
         return await asyncio.to_thread(read)
 
     async def has_nonterminal_session_trees(self, session_ids):
@@ -600,6 +736,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 return True
         return False
 
+    @cached_session_operation
     async def list_dispatchable_runs(self):
         """Load only Sessions whose summary advertises a root execution intent."""
 
@@ -616,6 +753,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             await self._ensure_session_loaded(session_id, missing_ok=True)
         return await super().list_dispatchable_runs()
 
+    @cached_session_operation
     async def commit_model_stream_batch(self, *, run, drafts, context, idempotency_key):
         await self._ensure_resource_loaded("runs", "run_id", run.run_id)
         if self._durable_stream_deltas:
@@ -632,129 +770,254 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             idempotency_key=idempotency_key,
         )
 
+    @cached_session_operation
     async def publish_stream_preview(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().publish_stream_preview(run_id=run_id, **kwargs)
 
+    @cached_session_operation
     async def list_descendant_sessions(self, session_id):
         await self._ensure_session_loaded(session_id)
         await self._ensure_descendants_loaded(session_id)
         return await super().list_descendant_sessions(session_id)
 
-    async def read_session_events(self, session_id, **kwargs):
-        await self._ensure_session_loaded(session_id)
-        return await super().read_session_events(session_id, **kwargs)
+    def _history_page(self, session_id, context, **options):
+        with history.open_history(self, session_id, context) as (db, session, _):
+            return history.read_page(db, session.last_sequence, **options)
 
+    async def read_authorized_session_page(self, session_id, context, *, after_sequence, limit):
+        return await asyncio.to_thread(
+            self._history_page, session_id, context, after_sequence=after_sequence, limit=limit
+        )
+
+    async def read_authorized_session_page_before(self, session_id, context, *, before_sequence, limit):
+        return await asyncio.to_thread(
+            self._history_page, session_id, context, before_sequence=before_sequence, limit=limit
+        )
+
+    async def read_authorized_session_events(
+        self, session_id, context, *, after_sequence=0, limit=None,
+    ):
+        if after_sequence < 0 or (limit is not None and limit < 1):
+            raise ValueError("invalid Session event range")
+        page = await self.read_authorized_session_page(
+            session_id, context, after_sequence=after_sequence, limit=limit
+        )
+        return page.events
+
+    async def read_session_events(self, session_id, **kwargs):
+        return await self.read_authorized_session_events(session_id, None, **kwargs)
+
+    async def read_authorized_history_metadata(self, session_id, context):
+        return await asyncio.to_thread(history.metadata, self, session_id, context)
+
+    async def read_authorized_tool_activity(self, session_ids, context, **options):
+        from sagents.v2.contracts.errors import SageV2Error
+
+        def read():
+            result = []
+            for session_id in session_ids:
+                try:
+                    with history.open_history(self, session_id, context) as (db, _, _):
+                        result.extend(history.tool_activity(
+                            db, session_id, **{**options, "limit": options["limit"] - len(result)},
+                        ))
+                except SageV2Error as exc:
+                    if exc.info.category != ErrorCategory.AUTHORIZATION and exc.info.code != "session.not_found":
+                        raise
+                if len(result) == options["limit"]:
+                    break
+            return tuple(result)
+
+        return await asyncio.to_thread(read)
+
+    @cached_session_operation
     async def list_session_commit_proposals(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_commit_proposals(session_id)
 
+    @cached_session_operation
+    async def put_attachment(self, session_id, **kwargs):
+        return await super().put_attachment(session_id, **kwargs)
+
+    @cached_session_operation
+    async def get_attachment(self, session_id, artifact_id, **kwargs):
+        return await super().get_attachment(session_id, artifact_id, **kwargs)
+
+    @cached_session_operation
+    async def copy_attachment(self, source_session_id, target_session_id, artifact_id, **kwargs):
+        return await super().copy_attachment(source_session_id, target_session_id, artifact_id, **kwargs)
+
+    @cached_session_operation
+    async def export_session_backup(self, session_id, **kwargs):
+        return await super().export_session_backup(session_id, **kwargs)
+
+    @cached_session_operation
+    async def get_run_context(self, run_id):
+        return await super().get_run_context(run_id)
+
+    @cached_session_operation
+    async def get_execution_resource(self, run_id):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        return await super().get_execution_resource(run_id)
+
+    @cached_session_operation
+    async def commit_execution_resource(self, *, record, **kwargs):
+        await self._ensure_resource_loaded("runs", "run_id", record.run_id)
+        return await super().commit_execution_resource(record=record, **kwargs)
+
+    @cached_session_operation
     async def get_run(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_run(run_id)
 
+    @cached_session_operation
     async def get_run_result(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_run_result(run_id)
 
+    @cached_session_operation
     async def find_start_run(self, session_id, idempotency_key, context):
         await self._ensure_session_loaded(session_id, missing_ok=True)
         return await super().find_start_run(session_id, idempotency_key, context)
 
+    @cached_session_operation
     async def get_start_command(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_start_command(run_id)
 
+    @cached_session_operation
     async def get_latest_checkpoint(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_latest_checkpoint(run_id)
 
+    @cached_session_operation
     async def read_events(self, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_events(run_id, **kwargs)
 
+    @cached_session_operation
     async def read_stream_previews(self, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_stream_previews(run_id, **kwargs)
 
+    @cached_session_operation
     async def read_fork_base_events(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_fork_base_events(run_id)
 
+    @cached_session_operation
     async def commit_run(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().commit_run(run_id=run_id, **kwargs)
 
+    @cached_session_operation
     async def propose_session_commit(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().propose_session_commit(command, context)
 
+    @cached_session_operation
     async def publish_session_commit(self, command, context):
         await self._ensure_resource_loaded(
             "session_commit_proposals", "proposal_id", command.proposal_id
         )
         return await super().publish_session_commit(command, context)
 
+    @cached_session_operation
     async def reject_session_commit(self, command, context):
         await self._ensure_resource_loaded(
             "session_commit_proposals", "proposal_id", command.proposal_id
         )
         return await super().reject_session_commit(command, context)
 
+    @cached_session_operation
     async def get_session_commit_proposal(self, proposal_id):
         await self._ensure_resource_loaded(
             "session_commit_proposals", "proposal_id", proposal_id
         )
         return await super().get_session_commit_proposal(proposal_id)
 
+    @cached_session_operation
     async def get_checkpoint(self, checkpoint_id):
         await self._ensure_resource_loaded(
             "checkpoints", "checkpoint_id", checkpoint_id
         )
         return await super().get_checkpoint(checkpoint_id)
 
+    @cached_session_operation
     async def get_suspension(self, suspension_id):
         await self._ensure_resource_loaded(
             "suspensions", "suspension_id", suspension_id
         )
         return await super().get_suspension(suspension_id)
 
+    @cached_session_operation
     async def get_interaction(self, interaction_id):
         await self._ensure_resource_loaded(
             "interactions", "interaction_id", interaction_id
         )
         return await super().get_interaction(interaction_id)
 
+    @cached_session_operation
     async def get_interaction_resolution(self, interaction_id):
         await self._ensure_resource_loaded(
             "interactions", "interaction_id", interaction_id
         )
         return await super().get_interaction_resolution(interaction_id)
 
+    @cached_session_operation
     async def enqueue_steer(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().enqueue_steer(command, context)
 
+    @cached_session_operation
     async def claim_steers(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().claim_steers(run_id=run_id, **kwargs)
 
+    @cached_session_operation
     async def list_steers(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().list_steers(run_id)
 
+    @cached_session_operation
     async def resolve_interaction(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().resolve_interaction(command, context)
 
+    @cached_session_operation
     async def request_resume(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().request_resume(command, context)
 
+    @asynccontextmanager
+    async def retain_session_tree(self):
+        pinned = set()
+
+        def pin(session_id):
+            if session_id not in pinned:
+                self._session_cache.retain(session_id)
+                pinned.add(session_id)
+
+        try:
+            yield pin
+        finally:
+            for session_id in pinned:
+                self._session_cache.release(session_id)
+            await self._session_cache.prune()
+
     async def subscribe_events(self, cursor):
-        await self._ensure_resource_loaded("runs", "run_id", cursor.run_id)
-        async for event in super().subscribe_events(cursor):
-            yield event
+        async with self._session_cache.operation():
+            await self._ensure_resource_loaded("runs", "run_id", cursor.run_id)
+            session_id = self._runs[cursor.run_id].session_id
+            self._session_cache.retain(session_id)
+        try:
+            async with aclosing(super().subscribe_events(cursor)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            self._session_cache.release(session_id)
+            await self._session_cache.prune()
 
     def _prepare_root(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -1145,6 +1408,8 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             "checksum": self._checksum(normalized),
         }
         self._atomic_json_write(path, payload)
+        if typed_state.sessions[0].owner is not None:
+            record_owner(path, self._atomic_json_write)
 
     @classmethod
     def _matches_legacy_unordered_checksum(cls, payload: dict[str, Any]) -> bool:
@@ -1469,6 +1734,8 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 (session_dir / "derived").mkdir(exist_ok=True)
 
             journal = session_dir / "journal.jsonl"
+            fingerprint = self._storage_fingerprint(session_dir)
+            event_appends = None
             compacted = is_new or previous is None
             if is_new or previous is None:
                 self._write_snapshot(snapshot, state)
@@ -1476,6 +1743,8 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 self._journal_commits[session_id] = 0
             else:
                 delta = self._state_delta(previous, state)
+                if not delta["replacements"].get("run_events") and not delta["map_deletes"].get("run_events"):
+                    event_appends = delta["appends"].get("run_events", {})
                 mutation = SessionStateDeltaMutation(kind="state_delta", **delta)
                 previous_revision = int(previous["sessions"][0]["revision"])
                 current_revision = int(state["sessions"][0]["revision"])
@@ -1516,6 +1785,18 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             if transaction is not None:
                 transaction.unlink(missing_ok=True)
                 self._fsync_directory(self.transactions_root)
+            try:
+                history.publish(
+                    session_dir, state, self._storage_fingerprint(session_dir),
+                    appends=event_appends, previous_fingerprint=fingerprint,
+                )
+            except Exception as exc:
+                LOGGER.exception(
+                    "session.filesystem.history_refresh_failed",
+                    "The Session history index will be rebuilt on the next read",
+                    exc,
+                    session_id=session_id,
+                )
             return session_dir
 
     @classmethod
@@ -1665,116 +1946,90 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
     async def _ensure_session_loaded(
         self, session_id: str, *, missing_ok: bool = False
     ) -> None:
-        if session_id in self._loaded_session_ids:
-            return
-        async with self._load_lock:
-            if session_id in self._loaded_session_ids:
-                return
-            async with self._lock:
-                if self._repair_loaded_session_marker_locked(session_id):
-                    return
-                snapshot = self._session_dir(session_id) / "state.json"
-                if not snapshot.exists():
-                    if missing_ok:
-                        return
-                    raise self._not_found("session.not_found", session_id)
-                await asyncio.to_thread(self._load_one_session, snapshot, session_id)
+        if session_id not in self._loaded_session_ids:
+            async with self._load_lock:
+                async with self._lock:
+                    if not self._repair_loaded_session_marker_locked(session_id):
+                        snapshot = self._session_dir(session_id) / "state.json"
+                        if not snapshot.exists():
+                            if missing_ok:
+                                return
+                            raise self._not_found("session.not_found", session_id)
+                        await self._install_from_disk(snapshot, session_id)
+        self._session_cache.pin(session_id)
 
     async def _ensure_descendants_loaded(self, session_id: str) -> None:
-        """Load the physical child tree before applying standard cascade delete."""
-
         root = self._session_dir(session_id)
         snapshots = sorted(
             (
-                path
-                for path in root.rglob("state.json")
-                if path.parent != root
-                and "sub_sessions" in path.relative_to(root).parts
+                path for path in root.rglob("state.json")
+                if path.parent != root and "sub_sessions" in path.relative_to(root).parts
             ),
             key=lambda path: len(path.parts),
         )
-        if not snapshots:
-            return
         with self._index_lock:
             indexed = {path: value for value, path in self._index_paths.items()}
         async with self._load_lock:
             async with self._lock:
                 for snapshot in snapshots:
-                    known_session_id = indexed.get(snapshot.parent)
-                    if known_session_id is not None and (
-                        known_session_id in self._loaded_session_ids
-                        or self._repair_loaded_session_marker_locked(known_session_id)
-                    ):
-                        continue
-                    state = await asyncio.to_thread(self._peek_snapshot_state, snapshot)
-                    rows = state.get("sessions", ())
-                    if len(rows) != 1:
-                        await asyncio.to_thread(
-                            self._load_one_session, snapshot, expected_session_id=None
-                        )
-                        continue
-                    child_session_id = str(rows[0].get("session_id", ""))
-                    if child_session_id in self._loaded_session_ids:
-                        continue
-                    if self._repair_loaded_session_marker_locked(child_session_id):
-                        continue
-                    await asyncio.to_thread(
-                        self._load_one_session,
-                        snapshot,
-                        expected_session_id=child_session_id,
-                    )
+                    child = indexed.get(snapshot.parent)
+                    if child is None or not self._repair_loaded_session_marker_locked(child):
+                        child = await self._install_from_disk(snapshot, child)
+                    self._session_cache.pin(child)
 
     def _repair_loaded_session_marker_locked(self, session_id: str) -> bool:
-        """Treat the in-memory aggregate as authoritative for this process.
-
-        Loading a Session is atomic under ``_lock``.  If its aggregate is
-        already present, a missing lazy-load marker is stale bookkeeping, not
-        permission to merge the same durable aggregate a second time.
-        """
-
         if session_id not in self._sessions:
             return False
         self._loaded_session_ids.add(session_id)
         return True
 
-    async def _ensure_resource_loaded(
-        self, collection: str, identity_key: str, identity: str
-    ) -> None:
-        if self._resource_is_loaded(collection, identity_key, identity):
-            return
-        async with self._load_lock:
-            if self._resource_is_loaded(collection, identity_key, identity):
-                return
-            match = await asyncio.to_thread(
-                self._locate_resource_snapshot, collection, identity_key, identity
-            )
-            if match is None:
-                raise self._not_found(f"{identity_key}.not_found", identity)
-            async with self._lock:
-                await asyncio.to_thread(
-                    self._load_one_session, match, expected_session_id=None
-                )
+    async def _ensure_resource_loaded(self, collection, identity_key, identity) -> None:
+        def owner():
+            mappings = {
+                "runs": self._runs,
+                "checkpoints": self._checkpoints,
+                "suspensions": self._suspensions,
+                "interactions": self._interactions,
+                "session_commit_proposals": self._session_commit_proposals,
+            }
+            row = mappings[collection].get(identity)
+            if row is None:
+                return None
+            if collection in {"suspensions", "interactions"}:
+                return self._runs[row.run_id].session_id
+            return row.session_id
 
-    def _resource_is_loaded(
-        self, collection: str, identity_key: str, identity: str
-    ) -> bool:
-        mappings = {
-            "runs": self._runs,
-            "checkpoints": self._checkpoints,
-            "suspensions": self._suspensions,
-            "interactions": self._interactions,
-            "session_commit_proposals": self._session_commit_proposals,
-        }
-        mapping: Any = mappings[collection]
-        if identity_key in {
-            "run_id",
-            "checkpoint_id",
-            "suspension_id",
-            "interaction_id",
-            "proposal_id",
-        }:
-            return identity in mapping
-        return False
+        session_id = owner()
+        if session_id is None:
+            async with self._load_lock:
+                session_id = owner()
+                if session_id is None:
+                    match = await asyncio.to_thread(
+                        self._locate_resource_snapshot, collection, identity_key, identity
+                    )
+                    if match is None:
+                        raise self._not_found(f"{identity_key}.not_found", identity)
+                    async with self._lock:
+                        session_id = owner()
+                        if session_id is None:
+                            session_id = await self._install_from_disk(match, None)
+        self._session_cache.pin(session_id)
+
+    async def _install_from_disk(self, snapshot, expected_session_id):
+        session_id, durable, prepared, journal_count, snapshot_format = await asyncio.to_thread(
+            self._load_one_session, snapshot, expected_session_id
+        )
+        try:
+            install_session_objects(self, prepared)
+        except AggregateCorruptionError as exc:
+            raise SessionStoreCorruptionError(exc.info) from exc
+        self._loaded_session_ids.add(session_id)
+        self._persisted_states[session_id] = durable
+        self._journal_commits[session_id] = journal_count
+        if snapshot_format != self.format_version:
+            self._legacy_rewrite_required.add(session_id)
+        self._charge_cache(session_id)
+        return session_id
 
     def _locate_resource_snapshot(
         self, collection: str, identity_key: str, identity: str
@@ -1831,7 +2086,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
     def _load_one_session(
         self, snapshot: Path, expected_session_id: str | None
-    ) -> None:
+    ):
         aggregate_state, journal_count, snapshot_format = (
             self._read_session_aggregate_with_format(snapshot)
         )
@@ -1853,28 +2108,13 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 f"Session {session_id!r} is stored under the wrong directory",
             )
 
-        combined = self._dump_state_locked()
-        try:
-            self._merge_state(combined, aggregate_state)
-        except ValueError as exc:
-            raise self._corrupt("session_store.aggregate_duplicate", str(exc)) from exc
-        subscribers = self._subscribers
-        derived = self._derived_state
-        self._load_state_locked(combined)
-        self._subscribers.update(subscribers)
-        self._derived_state.update(derived)
-        self._loaded_session_ids.add(session_id)
-        self._persisted_states[session_id] = deepcopy(aggregate_state)
-        self._journal_commits[session_id] = journal_count
-        if snapshot_format != self.format_version:
-            # A legacy aggregate is safe to read but must never receive a v4
-            # delta. Its first mutation atomically rewrites a v4 snapshot and
-            # resets the journal before normal incremental writes resume.
-            self._storage_recovery_required.add(session_id)
+        prepared = SessionStoreCoordinator()
+        prepared._load_state_locked(aggregate_state)
         for entry in aggregate_state.get("start_idempotency", ()):
             self._write_start_idempotency(entry, session_id)
         if not self._session_views_current(snapshot.parent, aggregate_state):
             self._refresh_session_views(session_id, aggregate_state)
+        return session_id, deepcopy(aggregate_state), prepared, journal_count, snapshot_format
 
     def _read_start_lookup(self, command, context) -> dict[str, Any] | None:
         identity = {
@@ -1911,7 +2151,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             )
         return value
 
-    def _read_snapshot_payload(self, snapshot: Path) -> dict[str, Any]:
+    def _read_snapshot_payload(self, snapshot: Path, *, read_only=False) -> dict[str, Any]:
         try:
             payload = json.loads(snapshot.read_bytes())
         except Exception as exc:
@@ -1933,7 +2173,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                     f"snapshot {snapshot} checksum mismatch",
                 )
             payload["checksum"] = self._checksum(unsigned)
-            if not getattr(self, "_history_read_only", False):
+            if not read_only and not getattr(self, "_history_read_only", False):
                 self._atomic_json_write(snapshot, payload)
             LOGGER.warning(
                 "session.filesystem.checksum_normalized",

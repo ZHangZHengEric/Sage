@@ -7,12 +7,17 @@ from sagents.v2.runtime.session.metadata_replay import (
 
 
 def read_filesystem_metadata(
-    store, snapshot, *, project=project_metadata_state, apply=apply_metadata_delta
+    store, snapshot, *, project=project_metadata_state, apply=apply_metadata_delta,
+    read_only=False,
 ):
     import json
 
-    payload = store._read_snapshot_payload(snapshot)
-    if payload.get("format") not in {
+    payload = (
+        store._read_snapshot_payload(snapshot, read_only=True)
+        if read_only else store._read_snapshot_payload(snapshot)
+    )
+    snapshot_format = payload.get("format")
+    if snapshot_format not in {
         "sage.filesystem-session-store/v2",
         "sage.filesystem-session-store/v3",
         "sage.filesystem-session-store/v4",
@@ -20,13 +25,25 @@ def read_filesystem_metadata(
         raise ValueError("unsupported metadata snapshot format")
     revision = int(payload["current_session_revision"])
     state = project(payload["state"])
+    del payload
     journal = snapshot.parent / "journal.jsonl"
     if journal.exists():
         with journal.open("rb") as stream:
             for line in stream:
+                if snapshot_format == "sage.filesystem-session-store/v2":
+                    if line.strip():
+                        raise store._corrupt(
+                            "session_store.journal_corrupt", "v2 snapshot unexpectedly has a journal"
+                        )
+                    continue
                 if not line.endswith(b"\n"):
                     break
                 entry = json.loads(line)
+                version = snapshot_format[-2:]
+                if entry.get("format") != f"sage.filesystem-session-journal/{version}":
+                    raise store._corrupt(
+                        "session_store.journal_corrupt", "metadata journal has an invalid format"
+                    )
                 unsigned = {
                     key: value for key, value in entry.items() if key != "checksum"
                 }

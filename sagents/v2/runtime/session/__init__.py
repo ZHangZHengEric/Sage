@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore as MysqlSessionStore
     from sagents.v2.runtime.session.contracts import RunCreationResult as RunCreationResult
     from sagents.v2.runtime.session.aggregate import SessionAggregate as SessionAggregate
+    from sagents.v2.runtime.session.contracts import SessionEventPage as SessionEventPage
+    from sagents.v2.runtime.session.contracts import SessionHistoryMetadata as SessionHistoryMetadata
+    from sagents.v2.runtime.session.contracts import SessionToolActivity as SessionToolActivity
     from sagents.v2.runtime.session.contracts import SessionStore as SessionStore
     from sagents.v2.runtime.session.state import SessionStoreCoordinator as SessionStoreCoordinator
     from sagents.v2.runtime.session.plugins.filesystem import SessionStoreCorruptionError as SessionStoreCorruptionError
@@ -83,6 +86,9 @@ _EXPORTS = {
         "sagents.v2.runtime.session.aggregate",
         "SessionAggregate",
     ),
+    "SessionEventPage": ("sagents.v2.runtime.session.contracts", "SessionEventPage"),
+    "SessionHistoryMetadata": ("sagents.v2.runtime.session.contracts", "SessionHistoryMetadata"),
+    "SessionToolActivity": ("sagents.v2.runtime.session.contracts", "SessionToolActivity"),
     "SessionStore": ("sagents.v2.runtime.session.contracts", "SessionStore"),
     "SessionStoreCoordinator": (
         "sagents.v2.runtime.session.state",
@@ -127,6 +133,9 @@ __all__ = [
     "MysqlSessionStore",
     "RunCreationResult",
     "SessionAggregate",
+    "SessionEventPage",
+    "SessionHistoryMetadata",
+    "SessionToolActivity",
     "SessionStore",
     "SessionStoreCoordinator",
     "SessionStoreCorruptionError",

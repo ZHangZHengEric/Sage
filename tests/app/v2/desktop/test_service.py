@@ -648,7 +648,7 @@ async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
     healthy = SimpleNamespace(session_id="session_healthy")
     service.session_index.list = AsyncMock(return_value=(corrupt, healthy))
     setattr(service, 'session_access', SimpleNamespace(
-        get_session=AsyncMock(
+        authorize_session=AsyncMock(
             side_effect=(
                 SageV2Error(
                     RuntimeErrorInfo(
@@ -657,7 +657,7 @@ async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
                         message="snapshot checksum mismatch",
                     )
                 ),
-                SimpleNamespace(session_id="session_healthy"),
+                None,
             )
         )
     ))
@@ -687,7 +687,7 @@ async def test_usage_overview_skips_unreadable_session_but_counts_healthy_usage(
         corrupt = SimpleNamespace(session_id="corrupt")
         healthy = SimpleNamespace(session_id="healthy")
         service.session_index.list = AsyncMock(return_value=(corrupt, healthy))
-        service.session_access = SimpleNamespace(get_session=AsyncMock(side_effect=(failure, healthy)))
+        service.session_access = SimpleNamespace(authorize_session=AsyncMock(side_effect=(failure, None)))
         service.session_store.list_session_runs = AsyncMock(return_value=())
         service.session_store.read_session_events = AsyncMock(return_value=())
         service.observability.list_model_requests = AsyncMock(return_value=({

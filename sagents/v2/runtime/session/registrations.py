@@ -47,6 +47,10 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                     "type": "object",
                     "properties": {
                         "root": {"type": "string", "minLength": 1},
+                        "max_cached_sessions": {"type": "integer", "minimum": 1, "default": 256},
+                        "max_cached_bytes": {"type": "integer", "minimum": 1, "default": 268435456},
+                        "cache_idle_seconds": {"type": "number", "minimum": 0, "default": 300},
+                        "evict_manually_paused_sessions": {"type": "boolean", "default": False},
                     },
                     "required": ["root"],
                     "additionalProperties": False,
@@ -64,7 +68,7 @@ def register_session_plugins(registry: ExtensionRegistry) -> None:
                 built_in=True,
             ),
             factory=lambda context, dependencies: FilesystemSessionStore(
-                context.config["root"],
+                **context.config,
             ),
         )
     )

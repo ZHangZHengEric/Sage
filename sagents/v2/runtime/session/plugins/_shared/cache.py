@@ -30,11 +30,15 @@ class IdleSessionCache:
         max_sessions=256,
         max_bytes=256 * 1024**2,
         idle_seconds: float = 300,
+        eligible=None,
+        allow_suspended=True,
     ):
         if max_sessions < 1 or max_bytes < 1 or idle_seconds < 0:
             raise ValueError("invalid Session cache limits")
         self.state, self.max_sessions, self.max_bytes = state, max_sessions, max_bytes
         self.idle_seconds = idle_seconds
+        self.eligible = eligible
+        self.allow_suspended = allow_suspended
         self.entries = OrderedDict()
         self.users = {}
         self.evicted_suspended = set()
@@ -97,7 +101,16 @@ class IdleSessionCache:
         async with state._lock:
             now = time.monotonic()
             total = sum(size for _, size in self.entries.values())
-            for sid, (used, size) in tuple(self.entries.items()):
+            entries = tuple(self.entries.items())
+            if self.eligible is not None and self.allow_suspended:
+                # The filesystem may allow explicit manual pauses, but only
+                # after the cheaper-to-reload terminal Sessions.
+                entries = sorted(entries, key=lambda entry: any(
+                    state._runs[run_id].state == RunState.SUSPENDED
+                    for run_id in state._session_run_ids_locked(entry[0])
+                ))
+            allowed = TERMINAL_RUN_STATES | {RunState.SUSPENDED} if self.allow_suspended else TERMINAL_RUN_STATES
+            for sid, (used, size) in entries:
                 if sid not in state._sessions:
                     self.forget(sid)
                     total -= size
@@ -111,11 +124,13 @@ class IdleSessionCache:
                 lock = state._session_locks.get(sid)
                 if self.users.get(sid) or (lock is not None and lock.locked()):
                     continue
+                if self.eligible is not None and not self.eligible(sid):
+                    continue
                 run_ids = state._session_run_ids_locked(sid)
                 if any(
                     state._subscribers.get(rid)
                     or state._runs[rid].state
-                    not in (TERMINAL_RUN_STATES | {RunState.SUSPENDED})
+                    not in allowed
                     for rid in run_ids
                 ):
                     continue

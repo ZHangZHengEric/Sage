@@ -17,6 +17,8 @@ from collections.abc import Iterable
 from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore, StoreInUseError
+from sagents.v2.contracts.principals import ActorRef
+from sagents.v2.runtime.session.plugins.filesystem.ownership import owner_confirmed, record_owner
 from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT,
     FILESYSTEM_SESSION_STORE_FORMAT_V2,
@@ -75,7 +77,13 @@ def adopt_unowned_sessions(
     lock = _lock_source(source)
     adopted = 0
     try:
-        for snapshot in sorted((source / "sessions").rglob("state.json")):
+        sessions_root = source / "sessions"
+        for snapshot in sorted(sessions_root.rglob("state.json")):
+            parent = snapshot.parent.parent
+            if parent != sessions_root and parent.name != "sub_sessions":
+                continue
+            if owner_confirmed(snapshot):
+                continue
             payload = _read_json(snapshot)
             if payload.get("format") not in {
                 FILESYSTEM_SESSION_STORE_FORMAT_V3,
@@ -98,13 +106,17 @@ def adopt_unowned_sessions(
                 continue
             session = cast(dict[str, Any], session)
             if session.get("owner") is not None:
+                # Already-owned snapshots remain outside adoption. Only a
+                # verified owner fact earns a stamp. Keep any corruption
+                # isolated to the Session's own storage reader.
+                try:
+                    ActorRef.model_validate(session["owner"])
+                    _verify_checksum(payload, snapshot)
+                except ValueError:
+                    continue
+                record_owner(snapshot, _atomic_json_replace)
                 continue
 
-            # Owner adoption is a one-time compatibility migration. An already
-            # owned aggregate is outside its scope, so leave integrity handling
-            # to the SessionStore's per-Session isolation instead of preventing
-            # every healthy Session (and the Desktop itself) from opening.
-            # Snapshots that still require mutation must remain fully trusted.
             _verify_checksum(payload, snapshot)
 
             owner: dict[str, Any] = {
@@ -130,6 +142,7 @@ def adopt_unowned_sessions(
             payload["checksum"] = FilesystemSessionStore._checksum(unsigned)
             _atomic_json_replace(snapshot, payload)
             _adopt_projected_session_owner(snapshot.parent / "session.json", owner)
+            record_owner(snapshot, _atomic_json_replace)
             adopted += 1
     finally:
         _unlock_source(lock)

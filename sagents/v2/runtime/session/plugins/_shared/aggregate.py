@@ -67,6 +67,47 @@ def _decode_json(value: Any) -> Any:
     return value
 
 
+def install_session_objects(coordinator, prepared):
+    # Publish only this Session. Replacing the complete coordinator would
+    # invalidate unrelated writers' row references across their DB awaits.
+    names = (
+        "_sessions",
+        "_runs",
+        "_run_events",
+        "_session_events",
+        "_fork_base_events",
+        "_start_idempotency",
+        "_start_idempotency_digests",
+        "_command_results",
+        "_command_digests",
+        "_execution_resources",
+        "_execution_resource_command_results",
+        "_execution_resource_command_digests",
+        "_checkpoints",
+        "_suspensions",
+        "_interactions",
+        "_interaction_resolutions",
+        "_steer_inbox",
+        "_session_commit_proposals",
+        "_session_commit_command_results",
+        "_session_commit_command_digests",
+    )
+    for name in names:
+        if getattr(coordinator, name).keys() & getattr(prepared, name).keys():
+            # All collision checks precede publication, leaving live state
+            # intact if a stored identity belongs to another Session.
+            raise SessionStoreCorruptionError(
+                RuntimeErrorInfo(
+                    code="session_store.aggregate_duplicate",
+                    category=ErrorCategory.CORRUPT_STATE,
+                    message=f"duplicate aggregate identities in {name}",
+                    safe_to_resume=False,
+                )
+            )
+    for name in names:
+        getattr(coordinator, name).update(getattr(prepared, name))
+
+
 class DurableAggregateCache:
     def __init__(
         self,
@@ -189,44 +230,7 @@ class DurableAggregateCache:
             prepared if prepared is not None else self._prepare_session(payload)
         )
         session_id = payload["sessions"][0]["session_id"]
-        # Publish only this Session. Replacing the complete coordinator would
-        # invalidate unrelated writers' row references across their DB awaits.
-        names = (
-            "_sessions",
-            "_runs",
-            "_run_events",
-            "_session_events",
-            "_fork_base_events",
-            "_start_idempotency",
-            "_start_idempotency_digests",
-            "_command_results",
-            "_command_digests",
-            "_execution_resources",
-            "_execution_resource_command_results",
-            "_execution_resource_command_digests",
-            "_checkpoints",
-            "_suspensions",
-            "_interactions",
-            "_interaction_resolutions",
-            "_steer_inbox",
-            "_session_commit_proposals",
-            "_session_commit_command_results",
-            "_session_commit_command_digests",
-        )
-        for name in names:
-            if getattr(self, name).keys() & getattr(prepared, name).keys():
-                # All collision checks precede publication, leaving live state
-                # intact if a stored identity belongs to another Session.
-                raise SessionStoreCorruptionError(
-                    RuntimeErrorInfo(
-                        code="session_store.aggregate_duplicate",
-                        category=ErrorCategory.CORRUPT_STATE,
-                        message=f"duplicate aggregate identities in {name}",
-                        safe_to_resume=False,
-                    )
-                )
-        for name in names:
-            getattr(self, name).update(getattr(prepared, name))
+        install_session_objects(self, prepared)
         self._remember_persisted_session(
             session_id,
             int(payload["sessions"][0]["revision"]),

@@ -15,7 +15,9 @@ from typing import Protocol, cast
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor
-from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore, SessionEventPage
+from sagents.v2.runtime.session.contracts import (
+    DerivedStateStore, SessionEventPage, SessionHistoryMetadata, SessionStore,
+)
 from sagents.v2.runtime.observability.logs import get_logger
 
 
@@ -58,6 +60,9 @@ class AuthorizedSessionAccess:
         run = await self._session_store.get_run(run_id)
         await self._authorize(run.session_id, context)
         return await self._session_store.get_run_result(run_id)
+
+    async def authorize_session(self, session_id: str, context: RequestContext) -> None:
+        await self._authorize(session_id, context)
 
     async def get_session(self, session_id: str, context: RequestContext):
         await self._authorize(session_id, context)
@@ -196,21 +201,72 @@ class AuthorizedSessionAccess:
         after_sequence: int = 0,
         limit: int | None = None,
     ):
+        query = getattr(self._session_store, "read_authorized_session_events", None)
+        if callable(query):
+            return await query(session_id, context, after_sequence=after_sequence, limit=limit)
         await self._authorize(session_id, context)
         return await self._session_store.read_session_events(
             session_id, after_sequence=after_sequence, limit=limit
         )
 
-    async def read_session_event_page(self, session_id, context, *, after_sequence=None, limit=500):
-        if not 1 <= limit <= 2000 or (after_sequence is not None and after_sequence < 0):
+    async def read_session_event_page(
+        self, session_id, context, *, after_sequence=None, before_sequence=None, limit=500,
+    ) -> SessionEventPage:
+        if (
+            not 1 <= limit <= 2000
+            or (after_sequence is not None and after_sequence < 0)
+            or (before_sequence is not None and before_sequence < 1)
+            or (before_sequence is not None and after_sequence is not None)
+        ):
             raise ValueError("invalid Session event page")
+        backward = getattr(self._session_store, "read_authorized_session_page_before", None)
+        if before_sequence is not None and callable(backward):
+            return await backward(session_id, context, before_sequence=before_sequence, limit=limit)
         query = getattr(self._session_store, "read_authorized_session_page", None)
-        if callable(query):
-            return await cast(Callable[..., Awaitable[SessionEventPage]], query)(session_id, context, after_sequence=after_sequence, limit=limit)
+        if before_sequence is None and callable(query):
+            return await cast(Callable[..., Awaitable[SessionEventPage]], query)(
+                session_id, context, after_sequence=after_sequence, limit=limit
+            )
         session = await self.get_session(session_id, context)
-        start = max(0, session.last_sequence - limit) if after_sequence is None else after_sequence
+        end = min(session.last_sequence, before_sequence - 1) if before_sequence else session.last_sequence
+        start = max(0, end - limit) if after_sequence is None else after_sequence
         events = await self.read_session_events(session_id, context, after_sequence=start, limit=limit)
+        if before_sequence is not None:
+            events = tuple(event for event in events if (event.session_sequence or 0) < before_sequence)
         return SessionEventPage(tuple(events), session.last_sequence, start)
+
+    async def read_session_history_metadata(self, session_id, context) -> SessionHistoryMetadata:
+        query = getattr(self._session_store, "read_authorized_history_metadata", None)
+        if callable(query):
+            return await query(session_id, context)
+        session = await self.get_session(session_id, context)
+        runs = await self.list_session_runs(session_id, context)
+        from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+
+        children = []
+        for child in await self.list_descendant_sessions(session_id, context):
+            if child.parent_session_id != session_id:
+                continue
+            try:
+                await self._authorize(child.session_id, context)
+            except SageV2Error as exc:
+                if exc.info.category != ErrorCategory.AUTHORIZATION:
+                    raise
+            else:
+                children.append(child.session_id)
+        return SessionHistoryMetadata(session, runs[-1] if runs else None, tuple(children))
+
+    async def read_session_tool_activity(
+        self, session_ids, context, *, tool_name=None, path=None, state=None, limit=100,
+    ):
+        """Search authorized Sessions supplied by the caller, in input order."""
+        ids = tuple(dict.fromkeys(session_ids))
+        if not 1 <= limit <= 1000 or len(ids) > 256:
+            raise ValueError("invalid Session activity query")
+        query = getattr(self._session_store, "read_authorized_tool_activity", None)
+        if not callable(query):
+            raise NotImplementedError("SessionStore does not support tool activity queries")
+        return await query(ids, context, tool_name=tool_name, path=path, state=state, limit=limit)
 
     async def latest_session_start_command(self, session_id, context):
         query = getattr(self._session_store, "latest_authorized_session_command", None)
@@ -249,12 +305,16 @@ class AuthorizedSessionAccess:
         await self._authorize(session_id, context)
         if self.runtime is None:
             raise TypeError("session-tree subscription requires a RuntimePort")
-        async for event in self.runtime.subscribe_session_tree(
-            session_id,
-            cursors=cursors,
-            include_root=include_root,
-        ):
-            yield event
+        events = self.runtime.subscribe_session_tree(
+            session_id, cursors=cursors, include_root=include_root,
+        )
+        try:
+            async for event in events:
+                yield event
+        finally:
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                await close()
 
     async def delete_session(self, session_id: str, context: RequestContext, *,
                              require_derived_cleanup: bool = False) -> None:

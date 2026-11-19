@@ -64,6 +64,26 @@ class SessionEventPage:
     after_sequence: int
 
 
+@dataclass(frozen=True, slots=True)
+class SessionHistoryMetadata:
+    """Small committed head for browsing a Session."""
+
+    session: SessionSnapshot
+    latest_run: RunSnapshot | None
+    child_session_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SessionToolActivity:
+    session_id: str
+    run_id: str
+    tool_call_id: str
+    tool_name: str
+    state: str
+    session_sequence: int
+    paths: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class EventDraft:
     """Unsequenced event submitted atomically through a :class:`SessionStore`.

@@ -1645,3 +1645,241 @@ async def test_interrupted_stream_keeps_partial_text_in_history(
     assert duplicate.events == stop.events
     assert await reopened.read_events(created.handle.run_id) == events
     await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_authorized_filesystem_history_pages_and_activity_use_disk_only(tmp_path, monkeypatch):
+    from sagents.v2.contracts.events import ToolEventData
+    from sagents.v2.runtime.session.access import AuthorizedSessionAccess
+    from sagents.v2.runtime.session.plugins.filesystem.history import HISTORY_FILENAME
+
+    store = FilesystemSessionStore(tmp_path)
+    runtime = HarnessRuntime(cast('SessionStore', store))
+    parent = await runtime.start_run(command("page-parent"), CONTEXT)
+    child = await runtime.start_run(
+        command("page-child", session_id=parent.session_id, mode=SessionConcurrencyMode.FORK),
+        CONTEXT,
+    )
+    running = await runtime.start_execution(
+        run_id=parent.run_id, expected_revision=parent.run_revision, context=CONTEXT,
+        idempotency_key="history-running",
+    )
+    await store.commit_run(
+        run_id=parent.run_id, expected_revision=running.revision,
+        expected_states={RunState.RUNNING}, new_state=RunState.RUNNING,
+        drafts=(
+            EventDraft(type="tool.call.proposed", data=ToolEventData(
+                tool_call_id="edit", tool_name="file_write", state="proposed",
+                arguments={"file_path": "cuts/../timeline.yaml"},
+            )),
+            EventDraft(type="tool.call.succeeded", data=ToolEventData(
+                tool_call_id="edit", tool_name="file_write", state="completed",
+            )),
+        ),
+        context=CONTEXT, idempotency_key="history-edit",
+    )
+    expected = await store.read_events(parent.run_id)
+    directory = await store.session_directory(parent.session_id)
+    await store.close()
+
+    (directory / HISTORY_FILENAME).unlink()
+    store = FilesystemSessionStore(tmp_path)
+    try:
+        def reject_execution_load(*args, **kwargs):
+            pytest.fail("history installed a Session in the execution cache")
+
+        monkeypatch.setattr(store, "_load_one_session", reject_execution_load)
+        access = AuthorizedSessionAccess(cast('SessionStore', store))
+        outsider = RequestContext(actor=CONTEXT.actor.model_copy(update={"tenant_id": "other"}))
+        with pytest.raises(SageV2Error, match="actor does not own"):
+            await access.read_session_event_page(parent.session_id, outsider)
+        assert not (directory / HISTORY_FILENAME).exists()
+
+        tail = await access.read_session_event_page(parent.session_id, CONTEXT, limit=2)
+
+        def reject_snapshot_load(*args, **kwargs):
+            pytest.fail("an indexed history read reopened the canonical snapshot")
+
+        monkeypatch.setattr(store, "_read_snapshot_payload", reject_snapshot_load)
+        older = await access.read_session_event_page(
+            parent.session_id, CONTEXT, before_sequence=tail.events[0].session_sequence, limit=20,
+        )
+        assert (*older.events, *tail.events) == expected
+        assert tail.total == older.total == len(expected)
+        assert (await access.read_session_event_page(
+            parent.session_id, CONTEXT, after_sequence=2, limit=1,
+        )).events == expected[2:3]
+        assert await access.read_session_events(parent.session_id, CONTEXT) == expected
+
+        metadata = await access.read_session_history_metadata(parent.session_id, CONTEXT)
+        assert metadata.latest_run is not None and metadata.latest_run.state == RunState.RUNNING
+        assert metadata.child_session_ids == (child.session_id,)
+        activity = await access.read_session_tool_activity(
+            [parent.session_id, child.session_id], CONTEXT,
+            tool_name="file_write", path="./timeline.yaml", state="succeeded",
+        )
+        assert [(record.tool_call_id, record.paths) for record in activity] == [
+            ("edit", ("timeline.yaml",)),
+        ]
+        assert not await access.read_session_tool_activity([parent.session_id], outsider)
+        assert not store._loaded_session_ids
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_filesystem_cache_idle_prunes_terminal_sessions_during_running_work_and_approval(tmp_path):
+    from sagents.v2.runtime.session.access import AuthorizedSessionAccess
+
+    store = FilesystemSessionStore(tmp_path, cache_idle_seconds=0.03, max_cached_sessions=3)
+    runtime = HarnessRuntime(cast('SessionStore', store))
+    access = AuthorizedSessionAccess(cast('SessionStore', store))
+    active = await runtime.start_run(command("working"), CONTEXT)
+    running = await runtime.start_execution(
+        run_id=active.run_id, expected_revision=active.run_revision, context=CONTEXT,
+        idempotency_key="start-working",
+    )
+    pending = await runtime.start_run(command("waiting-approval"), CONTEXT)
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed(calls=(
+        ModelToolCall(tool_call_id="call", name="write_value", arguments={"value": "1"}),
+    )),)),))
+    executor = InMemoryToolExecutor({"write_value": WRITE_TOOL}, {"write_value": handler})
+    suspended = await loop_for(runtime, model, executor).execute(pending.run_id, CONTEXT)
+    assert suspended.state == RunState.SUSPENDED
+    assert not executor.calls
+
+    archived = await runtime.start_run(command("archived"), CONTEXT)
+    active_archive = await runtime.start_execution(
+        run_id=archived.run_id, expected_revision=archived.run_revision, context=CONTEXT,
+        idempotency_key="start-archived",
+    )
+    stream = store.subscribe_events(EventCursor(run_id=archived.run_id))
+    tree = runtime.subscribe_session_tree(archived.session_id)
+    try:
+        first = await anext(stream)
+        assert first.run_id == archived.run_id
+        assert (await anext(tree)).kind == "session.discovered"
+        await runtime.complete_run(
+            run_id=archived.run_id, expected_revision=active_archive.revision, context=CONTEXT,
+            idempotency_key="finish-archived",
+        )
+        for _ in range(10):
+            await access.read_session_event_page(archived.session_id, CONTEXT, limit=2)
+        await asyncio.sleep(0.12)
+        assert archived.session_id in store._loaded_session_ids
+    finally:
+        await stream.aclose()
+        assert archived.session_id in store._loaded_session_ids
+        await tree.aclose()
+
+    try:
+        async with asyncio.timeout(2):
+            while archived.session_id in store._loaded_session_ids:
+                await asyncio.sleep(0.02)
+        assert archived.session_id not in store._persisted_states
+        assert {active.session_id, pending.session_id} <= store._loaded_session_ids
+        assert (await store.get_run(archived.run_id)).state == RunState.COMPLETED
+        assert (await store.get_run(pending.run_id)).suspension_id == suspended.suspension_id
+        assert (await store.get_run(active.run_id)).revision == running.revision
+        finished = await runtime.complete_run(
+            run_id=active.run_id, expected_revision=running.revision, context=CONTEXT,
+            idempotency_key="finish-working",
+        )
+        assert finished.state == RunState.COMPLETED
+
+        assert suspended.suspension_id is not None
+        suspension = await store.get_suspension(suspended.suspension_id)
+        assert suspension.interaction_id is not None
+        interaction = await store.get_interaction(suspension.interaction_id)
+        receipt = await runtime.reply_interaction(ReplyInteraction(
+            run_id=pending.run_id, suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id, expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="approve_once", idempotency_key="approve-after-cache-prune",
+        ), CONTEXT)
+        assert receipt.decision.value == "accepted"
+        finish_model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+        resumed = await loop_for(runtime, finish_model, executor).resume(pending.run_id, CONTEXT)
+        assert resumed.state == RunState.COMPLETED
+        assert len(executor.calls) == 1
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_owner_adoption_skips_only_fingerprint_matching_confirmed_snapshots(tmp_path, monkeypatch):
+    from sagents.v2.runtime.session import migration
+
+    store = FilesystemSessionStore(tmp_path)
+    first = await store.create_run(command("owned"), CONTEXT)
+    snapshot = await store.session_directory(first.handle.session_id) / "state.json"
+    await store.close()
+    read = migration._read_json
+    reads = []
+
+    def track(path):
+        reads.append(path)
+        return read(path)
+
+    monkeypatch.setattr(migration, "_read_json", track)
+    assert migration.adopt_unowned_sessions(tmp_path, principal_id="new-owner").adopted_sessions == 0
+    assert not reads
+    payload = read(snapshot)
+    payload["state"]["sessions"][0]["owner"] = None
+    payload["checksum"] = FilesystemSessionStore._checksum(
+        {key: value for key, value in payload.items() if key != "checksum"}
+    )
+    migration._atomic_json_replace(snapshot, payload)
+    assert migration.adopt_unowned_sessions(tmp_path, principal_id="new-owner").adopted_sessions == 1
+    assert snapshot in reads
+    reads.clear()
+    assert migration.adopt_unowned_sessions(tmp_path, principal_id="other").adopted_sessions == 0
+    assert not reads
+
+
+@pytest.mark.asyncio
+async def test_filesystem_opt_in_manual_pause_eviction_reloads_and_resumes(tmp_path):
+    from sagents.v2.agent.state import AgentLoopCheckpointState
+    from sagents.v2.contracts.commands import PauseRun, ResumeRun
+
+    store = FilesystemSessionStore(
+        tmp_path, cache_idle_seconds=0.03, evict_manually_paused_sessions=True,
+    )
+    try:
+        runtime = HarnessRuntime(cast('SessionStore', store))
+        model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+        executor = InMemoryToolExecutor({"write_value": WRITE_TOOL}, {"write_value": handler})
+        engine = loop_for(runtime, model, executor)
+        handle = await runtime.start_run(command("pausable"), CONTEXT)
+        running = await runtime.start_execution(
+            run_id=handle.run_id, expected_revision=handle.run_revision, context=CONTEXT,
+            idempotency_key="start-pausable",
+        )
+        await runtime.pause_run(PauseRun(
+            run_id=handle.run_id, expected_revision=running.revision, idempotency_key="pause",
+        ), CONTEXT)
+        state = AgentLoopCheckpointState(
+            turn_id="turn_1", step_number=1,
+            messages=await engine.context_assembler.initial_ledger(
+                await store.get_start_command(handle.run_id), run_id=handle.run_id,
+            ),
+        )
+        paused = await engine._suspend_at_safe_point(await store.get_run(handle.run_id), state, CONTEXT)
+        assert paused.suspension_id
+        suspension = await store.get_suspension(paused.suspension_id)
+        async with asyncio.timeout(2):
+            while handle.session_id in store._loaded_session_ids:
+                await asyncio.sleep(0.02)
+        assert await store.has_nonterminal_runs()
+        assert (await store.get_run(handle.run_id)).state == RunState.SUSPENDED
+        receipt = await runtime.resume_run(ResumeRun(
+            run_id=handle.run_id, suspension_id=suspension.suspension_id,
+            expected_revision=paused.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            idempotency_key="resume",
+        ), CONTEXT)
+        assert receipt.decision.value == "accepted"
+        assert (await engine.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+    finally:
+        await store.close()

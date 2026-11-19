@@ -1310,6 +1310,14 @@ Provides: `session.store:default`, `derived-state.store:default`, `artifact.stor
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `root` | `string` | Yes | Not declared | `{"minLength":1}` |
+| `max_cached_sessions` | `integer` | No | `256` | `{"minimum":1}` |
+| `max_cached_bytes` | `integer` | No | `268435456` | `{"minimum":1}` |
+| `cache_idle_seconds` | `number` | No | `300` | `{"minimum":0}` |
+| `evict_manually_paused_sessions` | `boolean` | No | `false` | {} |
+
+The cache budget estimates the size of loaded Sessions and their durable copies. Active Runs, pending approvals, subscriptions, in-flight writes, and uncertain durability are protected, so the process can exceed the configured budget. Sage evicts terminal Sessions first and prunes idle entries periodically. Enable `evict_manually_paused_sessions` to also evict manually paused Sessions that have a committed checkpoint, support explicit resume, and have no pending interaction.
+
+Use `session.access` to call `read_session_event_page` for the latest page, `before_sequence` for older pages, or `after_sequence` for incremental reads. Events are ordered by Session sequence within each page. `read_session_history_metadata` returns the latest Run and direct child IDs. `read_session_tool_activity` searches supplied Sessions by tool name, file path, and call state. These queries use a disk index that can be rebuilt from committed snapshots and the journal.
 
 ### sage.session.mysql
 

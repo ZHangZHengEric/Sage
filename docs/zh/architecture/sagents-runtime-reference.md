@@ -1277,6 +1277,14 @@ Compact authoritative checksummed state per Session.
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
+| `max_cached_sessions` | `integer` | 否 | `256` | `{"minimum":1}` |
+| `max_cached_bytes` | `integer` | 否 | `268435456` | `{"minimum":1}` |
+| `cache_idle_seconds` | `number` | 否 | `300` | `{"minimum":0}` |
+| `evict_manually_paused_sessions` | `boolean` | 否 | `false` | {} |
+
+缓存预算按已加载会话及其持久化副本估算，运行中、待审批、有订阅、写入中和持久化结果不确定的会话受保护，因此进程可能超过配置预算。Sage 优先回收已结束的会话，并定时回收空闲会话。开启 `evict_manually_paused_sessions` 可以进一步回收具有已提交 checkpoint、可显式恢复且没有待处理交互的手动暂停会话。
+
+通过 `session.access` 调用 `read_session_event_page` 默认读取最近一页，也可用 `before_sequence` 向前翻页或用 `after_sequence` 读取增量。页内按会话序号升序排列。 `read_session_history_metadata` 返回最新 Run 和直接子会话 ID，`read_session_tool_activity` 支持在传入的会话中按工具名称、文件路径和调用状态查找活动。这些历史读取通过可从已提交快照和 journal 重建的磁盘索引完成。
 
 ### sage.session.mysql
 

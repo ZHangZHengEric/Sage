@@ -7,7 +7,8 @@ that work and call this facade to make legal, atomic lifecycle transitions.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing, nullcontext
 
 from sagents.v2.contracts.checkpoint import (
     Checkpoint,
@@ -160,6 +161,25 @@ class HarnessRuntime:
         writing child events into the parent's canonical history.
         """
 
+        retain = getattr(self.session_store, "retain_session_tree", None)
+        retention = retain() if callable(retain) else nullcontext(None)
+        async with retention as pin:
+            async with aclosing(self._subscribe_session_tree(
+                session_id, cursors=cursors, include_root=include_root, pin=pin,
+            )) as events:
+                async for event in events:
+                    yield event
+
+    async def _subscribe_session_tree(
+        self,
+        session_id: str,
+        *,
+        cursors: dict[str, int] | None,
+        include_root: bool,
+        pin: Callable[[str], None] | None,
+    ) -> AsyncGenerator[RuntimeSessionTreeEvent, None]:
+        if pin is not None:
+            pin(session_id)
         root = await self.session_store.get_session(session_id)
         positions = dict(cursors or {})
         preview_positions: dict[str, int] = {}
@@ -168,6 +188,9 @@ class HarnessRuntime:
             descendants = await self.session_store.list_descendant_sessions(
                 session_id
             )
+            if pin is not None:
+                for descendant in descendants:
+                    pin(descendant.session_id)
             sessions = ((root,) if include_root else ()) + descendants
             # A descendant can be created at any point while the root Run is
             # active. Keep a descendants-only subscription alive during that

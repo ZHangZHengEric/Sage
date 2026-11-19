@@ -17,7 +17,7 @@ import secrets
 import time
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -1113,6 +1113,39 @@ def create_app(
                 )
             )
         )
+
+    @app.get("/api/v2/sessions/{session_id}/event-page")
+    async def read_session_event_page(
+        session_id: str,
+        request: Request,
+        after_sequence: int | None = None,
+        before_sequence: int | None = None,
+        limit: int = 500,
+    ):
+        return _success(await _safe(runtime_service.session_event_page(
+            session_id, get_desktop_user_id(request), after_sequence=after_sequence,
+            before_sequence=before_sequence, limit=limit,
+        )))
+
+    @app.get("/api/v2/sessions/{session_id}/history-metadata")
+    async def read_session_history_metadata(session_id: str, request: Request):
+        return _success(await _safe(runtime_service.session_history_metadata(
+            session_id, get_desktop_user_id(request),
+        )))
+
+    @app.get("/api/v2/session-tool-activity")
+    async def read_session_tool_activity(
+        request: Request,
+        session_ids: list[str] = Query(),
+        tool_name: str | None = None,
+        path: str | None = None,
+        state: str | None = None,
+        limit: int = 100,
+    ):
+        return _success(await _safe(runtime_service.session_tool_activity(
+            session_ids, get_desktop_user_id(request), tool_name=tool_name,
+            path=path, state=state, limit=limit,
+        )))
 
     @app.get("/api/v2/sessions/{session_id}/llm-requests")
     async def list_llm_requests(

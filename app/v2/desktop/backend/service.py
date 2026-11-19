@@ -409,7 +409,7 @@ class DesktopV2Service(
         visible = []
         for value in await self.session_index.list():
             try:
-                await self.session_access.get_session(value.session_id, context)
+                await self.session_access.authorize_session(value.session_id, context)
             except (OSError, ValueError, SageV2Error) as exc:
                 if (
                     isinstance(exc, SageV2Error) and (
@@ -715,6 +715,40 @@ class DesktopV2Service(
             limit=limit,
         )
         return [value.model_dump(mode="json") for value in values]
+
+    async def session_event_page(self, session_id, user_id, **options):
+        await self.start()
+        assert self.session_access is not None
+        page = await self.session_access.read_session_event_page(
+            session_id, self._context(user_id), **options,
+        )
+        return {
+            "events": [event.model_dump(mode="json") for event in page.events],
+            "total": page.total,
+            "after_sequence": page.after_sequence,
+        }
+
+    async def session_history_metadata(self, session_id, user_id):
+        await self.start()
+        assert self.session_access is not None
+        metadata = await self.session_access.read_session_history_metadata(
+            session_id, self._context(user_id),
+        )
+        return {
+            "session": metadata.session.model_dump(mode="json"),
+            "latest_run": metadata.latest_run.model_dump(mode="json") if metadata.latest_run else None,
+            "child_session_ids": metadata.child_session_ids,
+        }
+
+    async def session_tool_activity(self, session_ids, user_id, **options):
+        from dataclasses import asdict
+
+        await self.start()
+        assert self.session_access is not None
+        values = await self.session_access.read_session_tool_activity(
+            session_ids, self._context(user_id), **options,
+        )
+        return [asdict(value) for value in values]
 
     async def list_llm_requests(
         self, session_id: str, user_id: str, run_id: str | None = None
