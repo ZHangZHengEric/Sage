@@ -84,15 +84,27 @@ async def test_indexed_claim_reads_only_due_work_and_repairs_legacy_state(schedu
     assert await first.submit(ready)
     state_key = first.key_prefix + ":state"
     base = await first._redis.get(state_key)
-    with patch.object(second, "_reference", wraps=second._reference) as reference:
+    with (
+        patch.object(second, "_reference", wraps=second._reference) as reference,
+        patch.object(second, "_mutate", side_effect=AssertionError("full snapshot used for ready claim")),
+    ):
         lease = await claim(second)
     assert lease is not None and lease.work == ready
     snapshot = reference.call_args.args[1]
     assert [item["work_id"] for item in snapshot["items"]] == [ready.work_id]
-    stored_base, receipt = (await first._redis.get(state_key)).split("\x1e")
-    assert stored_base == base and json.loads(receipt)["lease"]["lease_id"] == lease.lease_id
+    stored = json.loads(await first._redis.get(state_key))
+    assert stored["leases"][0]["lease_id"] == lease.lease_id
+    assert stored["items"] == json.loads(base)["items"]
     assert len(await first.existing_work_ids()) == 13
 
+    # Reopen the previous journal format with its in-flight lease. After
+    # initialization even a plain JSON reader must observe the same fence.
+    await first._redis.set(state_key, base + "\x1e" + json.dumps({"lease": stored["leases"][0]}))
+    await first._mutate(lambda queue: queue.pending_count())
+    restored = json.loads(await first._redis.get(state_key))
+    assert restored["leases"] == stored["leases"]
+    await second.assert_fence(lease)
+    assert await claim(second) is None
     await first.release(lease, LeaseReleaseReason.COMPLETED)
     ready = work("legacy")
     assert await first.submit(ready)
