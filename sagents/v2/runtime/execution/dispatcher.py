@@ -112,6 +112,7 @@ class LocalWorkerDispatcher:
         self._recovery_interval_seconds = recovery_interval_seconds
         self._recovery_task: asyncio.Task[None] | None = None
         self._recovery_lock = asyncio.Lock()
+        self._missing_queued: set[tuple[str, int]] = set()
         self._recovery_retrying = False
         self._supports_deferred_work = "available_at" in inspect.signature(scheduler.release).parameters
         self._requests: dict[str, _DispatchRequest] = {}
@@ -205,7 +206,7 @@ class LocalWorkerDispatcher:
         while True:
             await asyncio.sleep(delay)
             try:
-                await self._restore_dispatchable_work(queued_only=not self.distributed_claims)
+                await self._restore_dispatchable_work(queued_only=not self.distributed_claims, reconcile=True)
             except Exception as exc:
                 self._recovery_retrying = True
                 delay = min(retry, self._recovery_interval_seconds)
@@ -216,7 +217,7 @@ class LocalWorkerDispatcher:
                 delay = self._recovery_interval_seconds
                 retry = 0.1
 
-    async def _restore_dispatchable_work(self, *, queued_only: bool = False) -> None:
+    async def _restore_dispatchable_work(self, *, queued_only: bool = False, reconcile: bool = False) -> None:
         """Rebuild missing Scheduler entries from authoritative Run intents."""
         async with self._recovery_lock:
             if self._closed or self._recovery_agent is None:
@@ -232,12 +233,23 @@ class LocalWorkerDispatcher:
             restore_queued = getattr(self.scheduler, "restore_queued", self.scheduler.submit)
             existing_reader = getattr(self.scheduler, "existing_work_ids", None)
             existing = await existing_reader() if existing_reader is not None and intents else ()
+            previous_missing = self._missing_queued
+            self._missing_queued = set()
             for intent in intents:
                 run = intent.run
                 if (queued_only and run.state != RunState.QUEUED) or f"work-{run.run_id}" in existing:
                     continue
                 if self.recovery_filter is not None and not self.recovery_filter(run):
                     continue
+                if reconcile and run.state == RunState.QUEUED:
+                    # Live admission persists the Run before submitting its
+                    # scheduler item. Only repair a gap that survived two
+                    # scans, so a concurrent submit keeps its original driver.
+                    # Explicit startup recovery can restore immediately.
+                    identity = (run.run_id, run.revision)
+                    self._missing_queued.add(identity)
+                    if identity not in previous_missing:
+                        continue
                 try:
                     # The index selects candidates; only the current durable
                     # Run and its original request authorize a new work item.

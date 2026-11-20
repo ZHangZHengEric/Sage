@@ -12,16 +12,12 @@ from sagents.v2.runtime.session.reporting import (
 async def replay_sql(store, *, start, end, agent_id, max_runs, max_events, exclude_sessions):
     usage_fields = ("reported", *TOKEN_FIELDS)
     if store.json_type == "JSONB":
-        from ..postgres.metadata import postgres_metadata_cte as metadata_cte
-
         event_type = "event->>'type'"
         tool_id = "event#>>'{data,tool_call_id}'"
         operation_id = "event#>>'{data,operation_id}'"
         step_id = "event->>'step_id'"
         usage = ", ".join(f"event#>>'{{data,usage,{field}}}'" for field in usage_fields)
     else:
-        from ..mysql.run_metadata import mysql_metadata_cte as metadata_cte
-
         event_type = "JSON_UNQUOTE(JSON_EXTRACT(event,'$.type'))"
         tool_id = "NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event,'$.data.tool_call_id')),'null')"
         operation_id = "NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event,'$.data.operation_id')),'null')"
@@ -56,7 +52,7 @@ async def replay_sql(store, *, start, end, agent_id, max_runs, max_events, exclu
                 marks = ",".join(["%s"] * len(sessions))
                 run_marks = ",".join(["%s"] * len(ids))
                 await cursor.execute(
-                    metadata_cte(store._table, marks) + f"SELECT session_id,run_id,created_at,state,agent_id FROM metadata WHERE run_id IN ({run_marks})",
+                    store._metadata_cte(store._table, marks) + f"SELECT session_id,run_id,created_at,state,agent_id FROM metadata WHERE run_id IN ({run_marks})",
                     (*(sessions * 4), *ids),
                 )
                 selected = {}
