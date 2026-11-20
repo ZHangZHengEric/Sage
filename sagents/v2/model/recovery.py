@@ -297,7 +297,12 @@ async def execute_recoverable_operation(operation, *, scope, key, purpose, trans
             decision = await schedule_failure_recovery(exc.info, purpose=purpose, key=key, transient_retries=transient_retries)
             if on_retry is not None:
                 on_retry(exc.info, decision)
-            state = await resume_pending_recovery(scope, key, purpose)
+            state = scope.states[key]
+            # A live retry waits the policy interval after recording the decision.
+            # A restarted operation resumes the remaining persisted wait on entry.
+            if decision.delay_seconds:
+                async with scope.enforce_deadline():
+                    await scope.wait(decision.delay_seconds)
         else:
             await scope.complete_call(key, state)
             return result
