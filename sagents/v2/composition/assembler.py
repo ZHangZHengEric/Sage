@@ -565,7 +565,7 @@ class ApplicationAssembler:
         root_descriptor = AgentDescriptor(
             agent_id=selected_agent,
             name=selected_definition.name,
-            description="",
+            description=selected_definition.description,
             instructions=selected_definition.instructions,
             mode=AgentMode(selected_definition.mode),
             tools=selected_definition.tools,
@@ -577,7 +577,7 @@ class ApplicationAssembler:
             AgentDescriptor(
                 agent_id=member_id,
                 name=resolved.agents[member_id].name,
-                description="",
+                description=resolved.agents[member_id].description,
                 instructions=resolved.agents[member_id].instructions,
                 mode=AgentMode(resolved.agents[member_id].mode),
                 tools=resolved.agents[member_id].tools,

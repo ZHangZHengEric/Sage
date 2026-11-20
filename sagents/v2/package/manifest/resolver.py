@@ -32,6 +32,7 @@ class ResolvedAgent(StrictModel):
     source_agent_id: str | None = None
     source_package_version: str | None = None
     name: str
+    description: str = ""
     instructions: VerbatimText
     mode: Literal["simple", "fibre", "team"] = "simple"
     model_bindings: dict[str, str] = Field(default_factory=dict)
@@ -51,6 +52,9 @@ class ResolvedAgent(StrictModel):
     @model_serializer(mode="wrap")
     def serialize_agent(self, handler):
         data = handler(self)
+        # Keep description-less archived graphs stable for Run recovery.
+        if not self.description:
+            data.pop("description", None)
         if self.default_visible_skills is None:
             data.pop("default_visible_skills", None)
         if self.default_visible_skills_limit == DEFAULT_VISIBLE_SKILLS_LIMIT:
@@ -212,6 +216,7 @@ class CompositionResolver:
                 source_package_id=manifest.metadata.id, source_agent_id=agent_id,
                 source_package_version=manifest.metadata.version,
                 name=agent.name,
+                description=agent.description or "",
                 instructions=agent.instructions.inline or "",
                 mode=agent.mode,
                 model_bindings=dict(agent.models),

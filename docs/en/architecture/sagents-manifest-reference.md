@@ -156,7 +156,7 @@ Although agents remains a mapping, public Packages contain exactly one entry. St
 | AgentDefinition field | Type | Default / required | Meaning |
 | --- | --- | --- | --- |
 | `name` | string | required | Agent display name |
-| `description` | string / null | null | Optional description |
+| `description` | string / null | null | Member capability description, preserved verbatim in Team/Fibre rosters separately from its instructions |
 | `instructions` | Instructions | required | Choose exactly inline or path |
 | `mode` | simple / fibre / team | simple | Execution mode; subagent declarations do not grant delegation |
 | `models` | slot → App model ID | `{}` | Agent model bindings |
@@ -170,6 +170,8 @@ Although agents remains a mapping, public Packages contain exactly one entry. St
 | `budgets` | AgentBudgets | all fields null | Agent budgets merged with Package ceilings |
 | `memory` | AgentMemoryBehavior | see below | Memory behavior flags |
 | `sandbox` | AgentSandboxConfig | network=none | Requested network scope, not execution authorization |
+
+`description` is frozen with the loaded revision and persisted in Run snapshots. Nested delegation and restart recovery retain that Run's description. Missing or empty descriptions use the roster language's “no description” label.
 
 `preload_skills` is independent per Agent:
 

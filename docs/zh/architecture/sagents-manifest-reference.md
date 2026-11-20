@@ -144,7 +144,7 @@ agents:
 | AgentDefinition 字段 | 类型 | 默认 / 必填 | 含义 |
 | --- | --- | --- | --- |
 | `name` | string | 必填 | Agent 显示名 |
-| `description` | string / null | null | 可选说明 |
+| `description` | string / null | null | 成员能力说明；原文进入 Team/Fibre 成员上下文，与自身 instructions 分开 |
 | `instructions` | Instructions | 必填 | inline 或 path 二选一 |
 | `mode` | simple / fibre / team | simple | Agent 运行模式；声明 subagents 不会自动授权委派 |
 | `models` | 槽位 → App 模型 ID | `{}` | 本 Agent 模型绑定 |
@@ -158,6 +158,8 @@ agents:
 | `budgets` | AgentBudgets | 每项 null | 本 Agent 预算，与 Package 上限合并 |
 | `memory` | AgentMemoryBehavior | 见下表 | 记忆行为开关 |
 | `sandbox` | AgentSandboxConfig | network=none | 向宿主请求的网络范围，不是执行授权 |
+
+`description` 随加载版本固定并保存到运行快照，嵌套委派及重启恢复沿用该 Run 的描述。未填写或为空时，成员上下文显示对应语言的“无描述”。
 
 `preload_skills` 属于每个 Agent 的独立配置，例如：
 
