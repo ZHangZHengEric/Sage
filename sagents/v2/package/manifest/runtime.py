@@ -96,6 +96,13 @@ class SkillModulesConfig(StrictModel):
     usage: SkillUsageConfig = Field(default_factory=SkillUsageConfig)
 
 
+class DelegationConfig(StrictModel):
+    """Concurrent child Run limits shared by a composed Agent graph."""
+
+    max_concurrency: int = Field(default=8, strict=True, ge=1)
+    max_per_tenant: int = Field(default=2, strict=True, ge=1)
+
+
 class RuntimeConfig(StrictModel):
     # Host authority, independent of package Skills; empty denies attachments.
     runtime_skill_authorizations: tuple[RuntimeSkillAuthorization, ...] = ()
@@ -108,6 +115,7 @@ class RuntimeConfig(StrictModel):
     check_readiness: bool = False
     state_root: str | None = None
     capabilities: dict[Identifier, CapabilityBinding] = Field(default_factory=dict)
+    delegation: DelegationConfig = Field(default_factory=DelegationConfig)
     skills: SkillModulesConfig | None = None
     # Operational guarantees are requirements, not documentation.  The
     # builder fails closed when the selected provider cannot prove each value.
@@ -150,6 +158,7 @@ class RuntimeConfig(StrictModel):
             ("start_workers", True),
             ("check_readiness", False),
             ("state_root", None),
+            ("delegation", DelegationConfig()),
         ):
             if getattr(self, name) == default:
                 data.pop(name, None)

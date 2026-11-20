@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 import pytest
+from pydantic import ValidationError
 
 from sagents.v2.runtime.credentials.contracts import CredentialRef
 from sagents.v2.runtime.credentials import (
@@ -16,9 +17,32 @@ from sagents.v2.contracts.principals import (
 )
 from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.resolver import CompositionResolver
+from sagents.v2.package.manifest.runtime import RuntimeConfig
 
 
 from sagents.v2.model.catalog import model_catalog_input
+
+
+def test_delegation_limits_default_independently_and_preserve_runtime_serialization():
+    defaults = RuntimeConfig()
+    assert defaults.delegation.model_dump() == {"max_concurrency": 8, "max_per_tenant": 2}
+    assert "delegation" not in defaults.model_dump()
+    assert RuntimeConfig.model_validate({
+        "delegation": {"max_concurrency": 8, "max_per_tenant": 2},
+    }).model_dump() == defaults.model_dump()
+
+    for key in ("max_concurrency", "max_per_tenant"):
+        runtime = RuntimeConfig.model_validate({"delegation": {key: 6}})
+        assert runtime.model_dump()["delegation"] == {**defaults.delegation.model_dump(), key: 6}
+        assert RuntimeConfig.model_validate_json(runtime.model_dump_json()) == runtime
+
+
+@pytest.mark.parametrize("key", ["max_concurrency", "max_per_tenant"])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "6"])
+def test_delegation_limits_require_positive_integers(key, value):
+    with pytest.raises(ValidationError, match=rf"delegation\.{key}"):
+        RuntimeConfig.model_validate({"delegation": {key: value}})
+
 
 MODELS = """
 credentials:

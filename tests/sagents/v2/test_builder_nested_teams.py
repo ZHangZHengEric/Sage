@@ -16,11 +16,13 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 
 from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.multi_agent import DelegationConcurrencyLimiter
 from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.contracts.commands import (
     InputItem,
@@ -35,7 +37,7 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
     ModelToolCall,
 )
-from sagents.v2.package.manifest.runtime import CapabilitySelection
+from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.runtime.execution import LocalWorkspaceExecutionBindingProvider
 from sagents.v2.runtime.execution.sandbox import SandboxState
@@ -68,10 +70,11 @@ def package(role, children=(), *, version="original"):
 
 
 class Models:
-    def __init__(self, plans):
+    def __init__(self, plans, *, before_stream=None):
         self.plans = plans
         self.seen = []
         self.observe = lambda role, request: None
+        self.before_stream = before_stream
 
     def factory(self, context, dependencies):
         agent_id = context.agent_configuration["execution_agent_id"]
@@ -96,6 +99,8 @@ class Models:
             async def stream(self, request):
                 owner.observe(role, request)
                 owner.seen.append((role, request))
+                if owner.before_stream is not None:
+                    await owner.before_stream(role, request)
                 # Count only this scripted model's calls, including restored history.
                 stage = sum(
                     len(m.tool_calls) for m in request.messages if m.role == "assistant"
@@ -147,15 +152,18 @@ def environment(request):
     raise AssertionError("missing sandbox context")
 
 
-async def open_app(tmp_path, models, *, approval=False):
+async def open_app(tmp_path, models, *, approval=False, delegation=None, scheduler=None):
     bindings = LocalWorkspaceExecutionBindingProvider(
         tmp_path / "workspace", process_enabled=False
     )
     runtime = default_runtime(tmp_path / "sessions")
-    runtime = runtime.model_copy(
-        update={
+    runtime = RuntimeConfig.model_validate(
+        {
+            **runtime.model_dump(),
+            **({"delegation": delegation} if delegation is not None else {}),
             "capabilities": {
                 **runtime.capabilities,
+                **({"execution.scheduler": scheduler} if scheduler is not None else {}),
                 "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
                 "tool.selection-policy": CapabilitySelection(
                     plugin="sage.tool-selection.direct"
@@ -200,22 +208,113 @@ async def load_tree(app, *, version="original"):
     return root
 
 
-async def run(app, root, *, config=None):
-    stream = await app.entrypoint().run_stream(
+async def start_stream(app, root, *, config=None, idempotency_key="nested", context=CONTEXT):
+    return await app.entrypoint().run_stream(
         StartRun(
             agent_id=root.id,
             resolved_spec_hash=root.composition_hash,
-            idempotency_key="nested",
+            idempotency_key=idempotency_key,
             config=config or RunConfig(),
             input=(InputItem(role="user", content=(TextBlock(text="delegate"),)),),
         ),
-        CONTEXT,
+        context,
         agent=root,
     )
+
+
+async def run(app, root, *, config=None):
+    stream = await start_stream(app, root, config=config)
     async with asyncio.timeout(60):
         events = [event async for event in stream.events]
         result = await stream.wait()
     return result, events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_concurrency", "max_per_tenant", "tenant_count"), [(8, 6, 1), (6, 8, 2)]
+)
+async def test_public_builder_delegation_limits_across_parent_sessions(
+    tmp_path, monkeypatch, max_concurrency, max_per_tenant, tenant_count
+):
+    all_attempted = asyncio.Event()
+    attempts = 0
+    granted = 0
+    original_slot = DelegationConcurrencyLimiter.slot
+
+    @asynccontextmanager
+    async def observe_slot(limiter, tenant_id):
+        nonlocal attempts, granted
+        attempts += 1
+        if attempts == 7:
+            all_attempted.set()
+        async with original_slot(limiter, tenant_id):
+            granted += 1
+            yield
+
+    monkeypatch.setattr(DelegationConcurrencyLimiter, "slot", observe_slot)
+    starts = asyncio.Queue()
+    releases = [asyncio.Event() for _ in range(7)]
+    child_run_ids = []
+
+    async def hold_child(role, request):
+        if role == "maker":
+            release = releases[len(child_run_ids)]
+            child_run_ids.append(request.run_id)
+            starts.put_nowait(request.run_id)
+            await release.wait()
+
+    models = Models({"root": (delegate("maker"),)}, before_stream=hold_child)
+    contexts = [
+        CONTEXT.model_copy(update={
+            "actor": CONTEXT.actor.model_copy(update={"tenant_id": f"tenant_{index}"}),
+        })
+        for index in range(tenant_count)
+    ]
+    app, bindings, _ = await open_app(
+        tmp_path,
+        models,
+        delegation={"max_concurrency": max_concurrency, "max_per_tenant": max_per_tenant},
+        scheduler=CapabilitySelection(
+            plugin="sage.scheduler.ephemeral",
+            config={"max_concurrent_runs": 8, "max_concurrent_runs_per_tenant": 8},
+        ),
+    )
+    try:
+        maker = await app.load_agent(package("maker"))
+        root = await app.load_agent(package("root", ("maker",)), subagents={"maker": maker})
+        async with asyncio.timeout(20):
+            streams = [
+                await start_stream(
+                    app,
+                    root,
+                    idempotency_key=f"parent-{index}",
+                    context=contexts[index % tenant_count],
+                )
+                for index in range(7)
+            ]
+            assert len({stream.handle.session_id for stream in streams}) == 7
+            await all_attempted.wait()
+            first_six = {await starts.get() for _ in range(6)}
+            assert len(first_six) == granted == 6
+            assert starts.empty()
+
+            releases[0].set()
+            assert await starts.get() not in first_six
+            assert granted == 7
+            for release in releases:
+                release.set()
+            results = await asyncio.gather(*(stream.wait() for stream in streams))
+            assert all(result.state.value == "completed" for result in results)
+            assert len(set(child_run_ids)) == len(child_run_ids) == attempts == 7
+            for child_run_id in child_run_ids:
+                child = await app.runtime.get_run(child_run_id)
+                assert child.state.value == "completed"
+    finally:
+        for release in releases:
+            release.set()
+        await app.close()
+        await bindings.close()
 
 
 @pytest.mark.asyncio
@@ -308,7 +407,9 @@ async def test_public_builder_parallel_nested_teams_do_not_exhaust_parent_slots(
             ("file_write", {"file_path": name + ".txt", "content": name}),
         )
     models = Models(plans)
-    app, bindings, _ = await open_app(tmp_path, models)
+    app, bindings, _ = await open_app(
+        tmp_path, models, delegation={"max_concurrency": 1, "max_per_tenant": 1}
+    )
     try:
         maker = await app.load_agent(package("maker"))
         children = {
