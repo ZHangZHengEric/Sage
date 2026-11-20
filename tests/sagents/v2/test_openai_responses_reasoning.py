@@ -59,7 +59,7 @@ async def test_reasoning_dialects_preserve_display_text_and_continuation(
     wire_events = [{"type": "response.output_item.added", "item": reasoning_item}]
     if delta_type:
         wire_events.extend(
-            {"type": delta_type, "delta": part}
+            {"type": delta_type, "item_id": reasoning_item["id"], "delta": part}
             for part in (thinking[:6], thinking[6:])
         )
     wire_events.append({
@@ -95,6 +95,52 @@ async def test_reasoning_dialects_preserve_display_text_and_continuation(
     assert replay["input"][0] == saved
 
 
+@pytest.mark.parametrize(
+    ("field", "block_type"), [("summary", "summary_text"), ("content", "reasoning_text")]
+)
+async def test_final_reasoning_fills_only_items_without_streamed_deltas(field, block_type):
+    streamed = {
+        "type": "reasoning",
+        "id": "rs_streamed",
+        "summary": [{"type": "summary_text", "text": "First. "}],
+    }
+    final_only = {
+        "type": "reasoning",
+        "id": "rs_final",
+        "summary": [],
+        field: [{"type": block_type, "text": "Second."}],
+        "encrypted_content": "opaque-state",
+    }
+    stream = FakeAsyncStream([
+        {"type": "response.reasoning_summary_text.delta", "item_id": streamed["id"], "delta": "First. "},
+        {"type": "response.output_item.done", "item": final_only},
+        {"type": "response.completed", "response": {
+            "id": "response_1",
+            "status": "completed",
+            "output": [streamed, final_only, {
+                "type": "message", "content": [{"type": "output_text", "text": "Done."}],
+            }],
+        }},
+    ])
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="fixture", capabilities=CAPABILITIES),
+        client=SimpleNamespace(responses=FakeResponses(stream)),
+    )
+    events = [event async for event in provider.stream(request(messages=(), tools=()))]
+
+    assert [event.delta for event in events if event.kind == ModelEventKind.REASONING_DELTA] == [
+        "First. ", "Second.",
+    ]
+    response = events[-1].response
+    assert response is not None
+    assert response.reasoning == "First. Second."
+    assert response.text == "Done."
+    state = read_provider_state(response.provider_state, "openai_responses")
+    assert {item["id"]: item for item in state["reasoning_items"]} == {
+        streamed["id"]: streamed, final_only["id"]: final_only,
+    }
+
+
 async def test_unknown_message_content_is_still_rejected():
     stream = FakeAsyncStream([{
         "type": "response.completed",
@@ -116,23 +162,29 @@ async def test_unknown_message_content_is_still_rejected():
     assert stream.closed
 
 
-@pytest.mark.parametrize("streamed", [False, True])
-async def test_reasoning_reaches_agui_display_once(streamed):
+@pytest.mark.parametrize("source", ["final", "streamed", "delta_without_id", "item_without_id"])
+async def test_reasoning_reaches_agui_display_once(source):
     from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
     from sagents.v2.contracts.items import ReasoningItemData
     from tests.sagents.v2.test_agent_loop_matrix import CONTEXT, RunState, setup_loop
 
     thinking = "Check the workspace before answering."
+    streamed = source != "final"
     wire_events = []
     if streamed:
-        wire_events.append({"type": "response.reasoning_summary_text.delta", "delta": thinking})
+        wire_events.append({
+            "type": "response.reasoning_summary_text.delta",
+            "delta": thinking,
+            **({"item_id": "reasoning_1"} if source != "delta_without_id" else {}),
+        })
     wire_events.append({
         "type": "response.completed",
         "response": {
             "id": "response_1", "status": "completed",
             "output": [
                 {
-                    "type": "reasoning", "id": "reasoning_1",
+                    "type": "reasoning",
+                    **({"id": "reasoning_1"} if source != "item_without_id" else {}),
                     "summary": [{"type": "summary_text", "text": thinking}] if streamed else [],
                     "content": [{"type": "reasoning_text", "text": thinking}],
                 },

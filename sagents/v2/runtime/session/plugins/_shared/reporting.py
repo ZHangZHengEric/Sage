@@ -47,16 +47,8 @@ async def replay_sql(store, *, start, end, agent_id, max_runs, max_events, exclu
             candidates = candidates[:max_runs]
             for offset in range(0, len(candidates), 100):
                 batch = candidates[offset : offset + 100]
-                sessions = tuple(dict.fromkeys(sid for sid, _ in batch))
-                ids = tuple(rid for _, rid in batch)
-                marks = ",".join(["%s"] * len(sessions))
-                run_marks = ",".join(["%s"] * len(ids))
-                await cursor.execute(
-                    store._metadata_cte(store._table, marks) + f"SELECT session_id,run_id,created_at,state,agent_id FROM metadata WHERE run_id IN ({run_marks})",
-                    (*(sessions * 4), *ids),
-                )
                 selected = {}
-                for sid, rid, created_at, state, owner_agent in await cursor.fetchall():
+                for sid, rid, created_at, state, owner_agent in await store._report_metadata_rows(cursor, batch):
                     if agent_id and owner_agent != agent_id:
                         continue
                     metadata = RunMetadata(sid, rid, datetime.fromisoformat(created_at), RunState(state), owner_agent or "")

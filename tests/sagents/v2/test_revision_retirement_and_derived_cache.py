@@ -267,14 +267,19 @@ async def test_failed_mysql_derived_write_does_not_leave_a_process_copy():
 
 @pytest.mark.asyncio
 async def test_redis_derived_state_stays_authoritative_after_mysql_cache_change():
-    value = redis_store(fakeredis.aioredis.FakeRedis(decode_responses=True), Archive())
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = redis_store(redis, archive)
+    reader = redis_store(redis, archive)
     try:
         created = await value.create_run(session_command('redis-derived'), CONTEXT)
         sid = created.handle.session_id
         await value.put_derived_state(sid, 'summary', 'last', {'text':'in Redis'})
-        assert await value.get_derived_state(sid, 'summary', 'last') == {'text':'in Redis'}
+        assert await reader.get_derived_state(sid, 'summary', 'last') == {'text':'in Redis'}
+        assert sid not in reader._sessions
         assert not value._derived_state
         await value.delete_derived_state(sid, 'summary', 'last')
-        assert await value.get_derived_state(sid, 'summary', 'last') is None
+        assert await reader.get_derived_state(sid, 'summary', 'last') is None
     finally:
+        await reader.close()
         await value.close()

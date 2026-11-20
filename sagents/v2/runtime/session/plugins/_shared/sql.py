@@ -19,6 +19,20 @@ from .commit import SqlSessionCommit
 class SqlSessionPersistence(SqlSessionCommit):
     _decode_derived_value = staticmethod(_decode_json)
 
+    async def _canonical_report_metadata(self, cursor, batch):
+        sessions = tuple(dict.fromkeys(sid for sid, _ in batch))
+        ids = tuple(rid for _, rid in batch)
+        marks = ','.join(['%s'] * len(sessions))
+        run_marks = ','.join(['%s'] * len(ids))
+        await cursor.execute(
+            self._metadata_cte(self._table, marks) +
+            f"SELECT session_id,run_id,created_at,state,agent_id FROM metadata WHERE run_id IN ({run_marks})",
+            (*(sessions * 4), *ids),
+        )
+        return await cursor.fetchall()
+
+    _report_metadata_rows = _canonical_report_metadata
+
     async def report_business_events(
         self, *, start, end, agent_id="", max_runs=10000, max_events=100000, exclude_sessions=(),
     ):

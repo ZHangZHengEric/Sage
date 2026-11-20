@@ -61,6 +61,57 @@ def test_effective_file_capacity_inherits_explicit_disk_quota(disk_mb, filesyste
     assert restored.policy.filesystem.max_total_bytes == expected_mb * 1024**2
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS Seatbelt profile")
+@pytest.mark.asyncio
+async def test_local_binding_metal_is_host_enabled_and_frozen_at_admission(tmp_path):
+    from types import SimpleNamespace
+
+    from sagents.v2.runtime.execution.plugins.local_binding.registration import local_execution_binding_registration
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support.resources import LocalResourceBoundary
+
+    factory = local_execution_binding_registration().factory
+    config = {"workspace": str(tmp_path)}
+    disabled = factory(SimpleNamespace(config=config), {})
+    enabled = factory(SimpleNamespace(config={**config, "allow_metal": True}), {})
+    start = StartRun(agent_id="main", resolved_spec_hash="spec", idempotency_key="metal", input=())
+    old = (await disabled.accept_configuration(start, context=CONTEXT)).config.execution_snapshot
+    new = (await enabled.accept_configuration(start, context=CONTEXT)).config.execution_snapshot
+    assert old is not None and new is not None
+    assert "allow_metal" not in old.tool_environment
+    assert new.tool_environment["allow_metal"] is True
+    assert old.configuration_id != new.configuration_id
+    await enabled._restore_configuration(old)
+    with pytest.raises(SageV2Error, match="accepted Metal access is no longer enabled"):
+        await disabled._restore_configuration(new)
+    with pytest.raises(SageV2Error, match="unknown execution policy section: allow_metal"):
+        await disabled.accept_configuration(
+            start.model_copy(update={"config": RunConfig(execution_policy={"allow_metal": True})}),
+            context=CONTEXT,
+        )
+
+    def launch(spec, env):
+        boundary = LocalResourceBoundary(SimpleNamespace(root=tmp_path, spec=spec))
+        command, _, _ = boundary.command("/usr/bin/true", (), tmp_path, env)
+        index = command.index("-p") + 1
+        return command[index].splitlines(), command[index + 3:-1]
+
+    old_spec = enabled.sandbox_spec(tool_environment=old.tool_environment)
+    assert old_spec == disabled.sandbox_spec(tool_environment=old.tool_environment)
+    new_spec = enabled.sandbox_spec(tool_environment=new.tool_environment)
+    assert old_spec.policy_hash != new_spec.policy_hash
+    assert old_spec.spec_hash != new_spec.spec_hash
+    old_profile, old_env = launch(old_spec, {})
+    new_profile, new_env = launch(new_spec, {})
+    assert not any(value.startswith("USER=") for value in old_env)
+    assert "USER=agent" in new_env
+    assert "USER=custom" in launch(new_spec, {"USER": "custom"})[1]
+    added_rules = [rule for rule in new_profile if rule not in old_profile]
+    assert added_rules == [
+        '(allow iokit-open-user-client (iokit-user-client-class "AGXDeviceUserClient"))',
+    ]
+    assert [rule for rule in new_profile if rule not in added_rules] == old_profile
+
+
 def registration(plugin, capability, value, *, ownership="borrowed"):
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(

@@ -153,12 +153,6 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         head = mutation["upserts"]["sessions"][0]
         revision = int(head["revision"])
         expected = self._persisted_session_revisions.get(sid)
-        # A run body can be read from memory after its archived Redis cache expires.
-        # Reload the archived base before appending the next delta in that case.
-        if expected is not None and not await self._redis.exists(
-            self._session_key(sid)
-        ):
-            await self._fetch_session(sid)
         # Full snapshots are compacted by the archive worker, never by a Run commit.
         compact = expected is None
         if compact:
@@ -205,14 +199,20 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
 
         async def write():
             async with self._redis.pipeline() as pipe:
-                await cast("RedisSessionCoordination", self)._owned(pipe)
-                await pipe.watch(key)
+                await cast("RedisSessionCoordination", self)._owned(pipe, key)
                 # All these fields belong to the same watched Session revision.
                 fields = [self._event_head_field(rid) for rid in tails]
                 previous, indexed_revision, index_epoch, metadata_revision, snapshot_token, deleted, *old_heads = await pipe.hmget(
                     key, ("revision", "event_index_revision", "event_index_epoch",
                           "run_metadata_revision", "base_snapshot", "deleted", *fields),
                 )
+                if expected is not None and previous is None and deleted != "1":
+                    # An archived base may have expired since the last access.
+                    # Republish it outside WATCH and retry with fresh fences.
+                    await pipe.reset()
+                    if await self._fetch_session(sid) is not None:
+                        from redis.exceptions import WatchError
+                        raise WatchError("archived Session reloaded")
                 restoring = expected is None and sid in self._backup_restores.get()
                 if restoring and deleted == "1":
                     previous = None

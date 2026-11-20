@@ -40,6 +40,7 @@ class IdleSessionCache:
         self.eligible = eligible
         self.allow_suspended = allow_suspended
         self.entries = OrderedDict()
+        self._total_bytes = 0
         self.users = {}
         self.evicted_suspended = set()
         self._timer: asyncio.TimerHandle | None = None
@@ -91,10 +92,9 @@ class IdleSessionCache:
         if sid not in self.state._sessions:
             return
         _, previous = self.entries.pop(sid, (0, 0))
-        self.entries[sid] = (
-            time.monotonic(),
-            size if size is not None else previous + charge,
-        )
+        current = size if size is not None else previous + charge
+        self.entries[sid] = (time.monotonic(), current)
+        self._total_bytes += current - previous
         self._schedule_prune()
 
     def _schedule_prune(self):
@@ -127,7 +127,8 @@ class IdleSessionCache:
             await self._task
 
     def forget(self, sid):
-        self.entries.pop(sid, None)
+        _, size = self.entries.pop(sid, (0, 0))
+        self._total_bytes -= size
         if not self.entries and self._timer is not None:
             self._timer.cancel()
             self._timer = None
@@ -136,7 +137,14 @@ class IdleSessionCache:
         state = self.state
         async with state._lock:
             now = time.monotonic()
-            total = sum(size for _, size in self.entries.values())
+            if not self.entries:
+                return
+            # touch() maintains oldest-first order. A fresh oldest entry and
+            # sufficient capacity rule out eviction without traversing all Runs.
+            oldest, _ = next(iter(self.entries.values()))
+            if (len(self.entries) <= self.max_sessions and self._total_bytes <= self.max_bytes
+                    and now - oldest < self.idle_seconds):
+                return
             entries = tuple(self.entries.items())
             if self.eligible is not None and self.allow_suspended:
                 # The filesystem may allow explicit manual pauses, but only
@@ -146,14 +154,13 @@ class IdleSessionCache:
                     for run_id in state._session_run_ids_locked(entry[0])
                 ))
             allowed = TERMINAL_RUN_STATES | {RunState.SUSPENDED} if self.allow_suspended else TERMINAL_RUN_STATES
-            for sid, (used, size) in entries:
+            for sid, (used, _) in entries:
                 if sid not in state._sessions:
                     self.forget(sid)
-                    total -= size
                     continue
                 if (
                     len(self.entries) <= self.max_sessions
-                    and total <= self.max_bytes
+                    and self._total_bytes <= self.max_bytes
                     and now - used < self.idle_seconds
                 ):
                     continue
@@ -181,4 +188,3 @@ class IdleSessionCache:
                 if any(state._runs[rid].state == RunState.SUSPENDED for rid in run_ids):
                     self.evicted_suspended.add(sid)
                 state._evict_session_locked(sid)
-                total -= size

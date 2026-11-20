@@ -94,7 +94,7 @@ class SessionMemoryService:
         if pending:
             # Provider I/O stays outside the service lock so unrelated Runs can
             # index concurrently. A failed write does not advance this Run.
-            await self.provider.sync(pending)
+            await self.provider.sync(tuple(record for record, _ in pending))
         boundary = _RequestBoundary(
             session_id=session_id,
             historical=historical,
@@ -171,24 +171,24 @@ class SessionMemoryService:
 
     def _unindexed_locked(
         self, session_id: str | None, records: tuple[SessionMemoryRecord, ...]
-    ) -> tuple[SessionMemoryRecord, ...]:
+    ) -> tuple[tuple[SessionMemoryRecord, str], ...]:
         if session_id is None or not records:
             return ()
         known = self._indexed.get(session_id, {})
         return tuple(
-            record
+            (record, digest)
             for record in records
-            if known.get(record.record_id) != self._digest(record)
+            if known.get(record.record_id) != (digest := self._digest(record))
         )
 
     def _remember_locked(
-        self, session_id: str | None, records: tuple[SessionMemoryRecord, ...]
+        self, session_id: str | None, records: tuple[tuple[SessionMemoryRecord, str], ...]
     ) -> None:
         if session_id is None:
             return
         known = self._indexed.setdefault(session_id, OrderedDict())
-        for record in records:
-            known[record.record_id] = self._digest(record)
+        for record, digest in records:
+            known[record.record_id] = digest
             known.move_to_end(record.record_id)
             while len(known) > _MAX_INDEXED_RECORDS_PER_SESSION:
                 known.popitem(last=False)
@@ -206,9 +206,9 @@ class SessionMemoryService:
     ) -> tuple[SessionMemoryRecord, ...]:
         # ``messages`` is the newly appended suffix of the canonical Run ledger.
         return tuple(
-            cls._record(session_id, message, start_position + offset)
+            cls._record(session_id, message, start_position + offset, content)
             for offset, message in enumerate(messages)
-            if message.role not in {"system", "developer"} and cls._content(message)
+            if message.role not in {"system", "developer"} and (content := cls._content(message))
         )
 
     @staticmethod
@@ -224,13 +224,13 @@ class SessionMemoryService:
 
     @classmethod
     def _record(
-        cls, session_id: str, message: ModelMessage, position: int
+        cls, session_id: str, message: ModelMessage, position: int, content: str
     ) -> SessionMemoryRecord:
         return SessionMemoryRecord(
             record_id=cls.record_id(message),
             session_id=session_id,
             role=message.role,
-            content=cls._content(message),
+            content=content,
             position=position,
             source={
                 key: message.metadata[key]

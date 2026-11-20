@@ -110,6 +110,9 @@ class SqliteBm25SessionMemoryProvider:
 
     def _sync(self, records: tuple[SessionMemoryRecord, ...]) -> None:
         with closing(self._connect()) as connection, connection:
+            # The primary-key lookup also decides whether an FTS row exists.
+            # Serialize that decision with writers from other provider instances.
+            connection.execute("BEGIN IMMEDIATE")
             for record in records:
                 search_text = " ".join(self._tokenize(record.content))
                 payload = record.model_dump_json()
@@ -142,11 +145,13 @@ class SqliteBm25SessionMemoryProvider:
                         record.position,
                     ),
                 )
-                connection.execute(
-                    "DELETE FROM session_memory_fts "
-                    "WHERE session_id = ? AND record_id = ?",
-                    (record.session_id, record.record_id),
-                )
+                if current is not None:
+                    if current["search_text"] == search_text:
+                        continue
+                    connection.execute(
+                        "DELETE FROM session_memory_fts WHERE session_id = ? AND record_id = ?",
+                        (record.session_id, record.record_id),
+                    )
                 connection.execute(
                     "INSERT INTO session_memory_fts(session_id, record_id, search_text) "
                     "VALUES (?, ?, ?)",

@@ -806,6 +806,14 @@ class LocalResourceBoundary:
                 '(allow file-read* (literal "/Library/Preferences/com.apple.dt.Xcode.plist"))',
                 '(allow file-write* (literal "/dev/null"))',
             ]
+            if spec.metadata.get("allow_metal") is True:
+                # Blender's glog startup can dereference a missing account name
+                # when USER is unset and directory service lookup is denied.
+                env.setdefault("USER", "agent")
+                # Background Blender probes Metal during startup.
+                profile.append(
+                    '(allow iokit-open-user-client (iokit-user-client-class "AGXDeviceUserClient"))'
+                )
             if spec.network.mode == NetworkMode.UNRESTRICTED:
                 profile += [
                     '(allow network-outbound (remote ip "*:*"))',

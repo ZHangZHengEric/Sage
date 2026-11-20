@@ -167,6 +167,10 @@ capabilities:
           deny_private_networks: true
 ```
 
+On macOS, the host can set `allow_metal: true` in the binding config to allow the
+Apple GPU device queries used by Blender at background startup. It defaults to
+`false`.
+
 Use an actual configuration schema/inventory to check platform-specific resource
 fields. File total capacity inherits an explicitly selected disk quota when no
 smaller file-total ceiling is supplied. Read-only child workspaces restrict file

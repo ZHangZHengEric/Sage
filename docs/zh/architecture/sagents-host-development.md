@@ -121,6 +121,7 @@ configuration = await app.run_configuration(run_id, context)
 | `policy.resources` | CPU、内存、磁盘、进程数及是否要求硬限制 |
 | `policy.network` | 网络模式和私网访问策略 |
 | `command_path`、`read_paths` | Agent Shell 搜索路径与额外只读运行时目录 |
+| `allow_metal` | 仅 macOS，默认 `false`。宿主可设为 `true`，允许 Blender 后台启动所需的 Apple GPU 设备查询 |
 | `isolation_python` | 隔离辅助程序使用的可信真实 CPython |
 
 ```yaml

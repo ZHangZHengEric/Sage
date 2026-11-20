@@ -338,6 +338,8 @@ class OpenAIResponsesModelProvider:
         usage = UsageSummary(models=(self.config.model,))
         tool_fragments: dict[str, dict[str, str]] = {}
         reasoning_items: dict[str, dict[str, Any]] = {}
+        streamed_reasoning_ids: set[str] = set()
+        unattributed_reasoning = False
         terminal_event_received = False
         idle = StreamIdleTimeout(
             self.config.stream_idle_timeout_seconds, provider=self.config.provider_id
@@ -432,6 +434,11 @@ class OpenAIResponsesModelProvider:
                     delta = str(wire_value(event, "delta", "") or "")
                     if delta:
                         idle.progress()
+                        item_id = wire_value(event, "item_id")
+                        if item_id:
+                            streamed_reasoning_ids.add(str(item_id))
+                        else:
+                            unattributed_reasoning = True
                         reasoning += delta
                         yield ModelStreamEvent(
                             kind=ModelEventKind.REASONING_DELTA, delta=delta
@@ -558,22 +565,27 @@ class OpenAIResponsesModelProvider:
                 response_started=idle.response_started,
             ).info)
 
-        # Some Responses routes provide reasoning only in completed items.
-        # Keep the existing streamed text; summary and content may be duplicates.
-        if not reasoning:
+        # Routes without item IDs on their deltas cannot safely deduplicate
+        # streamed text against completed items.
+        if not unattributed_reasoning:
+            fallback_delta = ""
             for item in reasoning_items.values():
+                item_id = str(item.get("id") or "")
+                if item_id in streamed_reasoning_ids or (not item_id and streamed_reasoning_ids):
+                    continue
                 summary = "".join(
                     str(wire_value(block, "text", "") or "")
                     for block in wire_value(item, "summary", ()) or ()
                     if wire_value(block, "type") == "summary_text"
                 )
-                reasoning += summary or "".join(
+                fallback_delta += summary or "".join(
                     str(wire_value(block, "text", "") or "")
                     for block in wire_value(item, "content", ()) or ()
                     if wire_value(block, "type") == "reasoning_text"
                 )
-            if reasoning:
-                yield ModelStreamEvent(kind=ModelEventKind.REASONING_DELTA, delta=reasoning)
+            if fallback_delta:
+                reasoning += fallback_delta
+                yield ModelStreamEvent(kind=ModelEventKind.REASONING_DELTA, delta=fallback_delta)
 
         calls = tuple(
             parse_tool_arguments(

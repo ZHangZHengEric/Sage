@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
 
-def mysql_metadata_cte(table, marks):
+def _admissions_cte(table, marks):
     fields = """run_id VARCHAR(128) PATH '$.run_id', created_at VARCHAR(64) PATH '$.created_at',
        state VARCHAR(32) PATH '$.state', agent_id VARCHAR(191) PATH '$.start_command.agent_id',
        grant_agent_id VARCHAR(191) PATH '$.start_command.config.metadata.\"server_v2.execution\".agent_id',
@@ -22,7 +22,11 @@ def mysql_metadata_cte(table, marks):
         JSON_TABLE(m.mutation, '$.upserts.runs[*]' COLUMNS ({fields})) r WHERE m.session_id IN ({marks})
     ), admissions AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY session_id,run_id ORDER BY revision DESC) admission_position FROM sources
-    ), state_sources AS (
+    ) """
+
+
+def mysql_metadata_cte(table, marks):
+    return _admissions_cte(table, marks) + f""", state_sources AS (
       SELECT session_id,run_id,state,revision FROM sources
       UNION ALL
       SELECT m.session_id,r.run_id,r.state,m.revision FROM {table('session_mutations')} m,
@@ -61,6 +65,37 @@ def decode_metadata(row):
 
 class MysqlRunMetadataQueries:
     _metadata_cte = staticmethod(mysql_metadata_cte)
+
+    async def _report_metadata_rows(self, cursor, batch):
+        from .workspace_probe import NAMESPACE, _STATE_VALUES
+
+        sessions = tuple(dict.fromkeys(sid for sid, _ in batch))
+        ids = tuple(rid for _, rid in batch)
+        marks = ','.join(['%s'] * len(sessions))
+        run_marks = ','.join(['%s'] * len(ids))
+        table = self._table
+        # Admissions contain the original command. The smaller, revision-fenced
+        # lifecycle projection already has the latest state after journal patches.
+        await cursor.execute(_admissions_cte(table, marks) + f"""
+            SELECT a.session_id,a.run_id,a.created_at,
+              JSON_UNQUOTE(JSON_EXTRACT(d.value, CONCAT('$.states.', JSON_QUOTE(a.run_id)))),
+              CASE WHEN a.parent_run_id IS NULL THEN
+                COALESCE(NULLIF(a.grant_agent_id,''),NULLIF(a.composition_agent_id,''),a.agent_id)
+                ELSE a.agent_id END
+            FROM admissions a JOIN {table('sessions')} s ON s.session_id=a.session_id
+            JOIN {table('derived_state')} d ON d.session_id=s.session_id
+              AND d.namespace=%s AND d.`key`='runs'
+              AND JSON_EXTRACT(d.value,'$.revision')=s.revision
+            WHERE a.admission_position=1 AND a.run_id IN ({run_marks})
+        """, (*sessions, *sessions, NAMESPACE, *ids))
+        rows = [row for row in await cursor.fetchall() if row[3] in _STATE_VALUES]
+        matched = {(row[0], row[1]) for row in rows}
+        pending = [(sid, rid) for sid, rid in batch if (sid, rid) not in matched]
+        if pending:
+            # Old writers, missing projections and deleted Runs use canonical
+            # journal history, within the very same repeatable-read snapshot.
+            rows.extend(await self._canonical_report_metadata(cursor, pending))
+        return rows
 
     async def _run_metadata_batch(self, session_ids):
         store = cast("_MysqlSessionState", self)

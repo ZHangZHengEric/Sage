@@ -58,7 +58,11 @@ class LocalWorkspaceExecutionBindingProvider:
         read_paths: tuple[str, ...] = (),
         isolation_python: str | None = None,
         child_workspace_policy: str = "shared_parent",
+        allow_metal: bool = False,
     ) -> None:
+        if allow_metal and sys.platform != "darwin":
+            raise ValueError("allow_metal requires macOS")
+        self.allow_metal = allow_metal
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.workspace_root = self.workspace.as_posix()
@@ -157,6 +161,7 @@ class LocalWorkspaceExecutionBindingProvider:
                         "command_path": self.sandbox_provider.command_path,
                         "read_paths": list(self.sandbox_provider.read_paths),
                         "interpreter": interpreter,
+                        **({"allow_metal": True} if self.allow_metal else {}),
                     },
                 )
             values["configuration_id"] = ExecutionConfigurationSnapshot.identity(values)
@@ -183,6 +188,8 @@ class LocalWorkspaceExecutionBindingProvider:
             interpreter = snapshot.tool_environment["interpreter"]
             if snapshot.tool_environment.get("workspace_alias") != self.workspace_alias:
                 raise ValueError("accepted workspace mapping changed; start a new Run")
+            if snapshot.tool_environment.get("allow_metal") is True and not self.allow_metal:
+                raise ValueError("accepted Metal access is no longer enabled; start a new Run")
             actual = await asyncio.to_thread(
                 inspect_isolation_python, interpreter["executable"],
                 forbidden_roots=(self.workspace, self.private_workspace_root),
@@ -211,6 +218,12 @@ class LocalWorkspaceExecutionBindingProvider:
         resolved_workspace = (workspace or self.workspace).resolve()
         sandbox_workspace = self._sandbox_workspace(resolved_workspace)
         selected = policy or self.policy
+        allow_metal = (
+            self.allow_metal if tool_environment is None
+            else tool_environment.get("allow_metal") is True
+        )
+        if allow_metal and not self.allow_metal:
+            raise ValueError("Metal access must be enabled by the host")
         effective_read_only = self.read_only if read_only is None else read_only
         filesystem = selected.filesystem.model_copy(update={
             "allowed_operations": (
@@ -234,6 +247,7 @@ class LocalWorkspaceExecutionBindingProvider:
                 "process": process.model_dump(mode="json"),
                 "network": network.model_dump(mode="json"),
                 "resources": selected.resources.model_dump(mode="json"),
+                **({"allow_metal": True} if allow_metal else {}),
             },
             sort_keys=True,
         )
@@ -258,6 +272,7 @@ class LocalWorkspaceExecutionBindingProvider:
             resources=selected.resources,
             policy_hash=policy_hash,
             metadata={"host_workspace": str(resolved_workspace),
+                      **({"allow_metal": True} if allow_metal else {}),
                       **({"tool_environment": tool_environment} if tool_environment else {})},
         )
 

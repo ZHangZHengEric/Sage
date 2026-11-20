@@ -26,7 +26,6 @@ from sagents.v2.runtime.distributed.redis_coordination import (
     RedisGuard,
     active_worker_fence,
     coordination_error,
-    watch_fence,
 )
 from sagents.v2.runtime.observability.logs import get_logger
 
@@ -139,16 +138,20 @@ class RedisSessionCoordination:
             finally:
                 self._guards.reset(token)
 
-    async def _owned(self, pipe):
-        for guard in self._guards.get():
-            await watch_fence(pipe, guard)
-        fence = active_worker_fence.get()
-        if fence is not None:
-            if fence.redis_url != self.redis_url:
+    async def _owned(self, pipe, *write_keys):
+        fences = self._guards.get()
+        worker = active_worker_fence.get()
+        if worker is not None:
+            if worker.redis_url != self.redis_url:
                 raise coordination_error(
                     "Scheduler and SessionStore must share the same Redis URL"
                 )
-            await watch_fence(pipe, fence)
+            fences = (*fences, worker)
+        keys = tuple(fence.key for fence in fences)
+        if keys or write_keys:
+            await pipe.watch(*keys, *write_keys)
+        if keys and await pipe.mget(keys) != [fence.token for fence in fences]:
+            raise coordination_error("Distributed mutation ownership expired or was replaced")
 
     @asynccontextmanager
     async def _session_operation(self, *session_ids):
@@ -472,6 +475,17 @@ class RedisSessionCoordination:
             raise
 
     async def get_derived_state(self, sid, namespace, key):
+        await self._ensure_ready()
+        # Check the head and read its derived value in the same Redis snapshot.
+        # Only cold Sessions require the normal archive lookup and restoration.
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.hmget(self._session_key(sid), ("revision", "deleted"))
+            pipe.hget(self._key(f"derived:{sid}"), self._lookup_key((namespace, key)))
+            (revision, deleted), encoded = await pipe.execute()
+        if deleted == "1":
+            raise self._not_found("session.not_found", sid)
+        if revision is not None:
+            return json.loads(encoded) if encoded is not None else None
         await self.get_session(sid)
         return await super().get_derived_state(sid, namespace, key)
 

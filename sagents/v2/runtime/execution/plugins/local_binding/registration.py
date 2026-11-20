@@ -20,6 +20,7 @@ class LocalExecutionBindingConfig(StrictModel):
     policy: LocalExecutionPolicy = Field(default_factory=LocalExecutionPolicy)
     command_path: str | None = None
     read_paths: tuple[str, ...] = ()
+    allow_metal: bool = False
     isolation_python: str | None = None
     child_workspace_policy: Literal["shared_parent", "private_child", "read_only_parent"] = "shared_parent"
     linux_cgroup_root: str | None = None
@@ -55,6 +56,7 @@ def local_execution_binding_registration() -> ExtensionRegistration:
             private_workspace_root=config.private_workspace_root,
             policy=config.policy,
             child_workspace_policy=config.child_workspace_policy,
+            allow_metal=config.allow_metal,
         )
 
     return ExtensionRegistration(

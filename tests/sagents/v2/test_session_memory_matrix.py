@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
@@ -80,6 +82,25 @@ async def test_sqlite_session_memory_is_incremental_scoped_and_excludable(tmp_pa
         )
         == ()
     )
+
+
+@pytest.mark.asyncio
+async def test_sqlite_concurrent_writers_keep_single_search_row(tmp_path):
+    providers = [SqliteBm25SessionMemoryProvider(tmp_path) for _ in range(2)]
+    record = SessionMemoryRecord(
+        record_id="shared", session_id="session", role="tool", content="canary", position=0,
+    )
+    query = SessionMemoryQuery(session_id="session", run_id="run", text="canary")
+    await asyncio.gather(*(provider.sync((record,)) for provider in providers))
+    updated = record.model_copy(update={"position": 2})
+    await providers[0].sync((updated,))
+    assert [hit.record for hit in await providers[1].recall(query)] == [updated]
+
+    edited = updated.model_copy(update={"content": "stable"})
+    await asyncio.gather(*(provider.sync((edited,)) for provider in providers))
+    assert await providers[0].recall(query) == ()
+    hits = await providers[1].recall(query.model_copy(update={"text": "stable"}))
+    assert [hit.record for hit in hits] == [edited]
 
 
 class _RecordingProvider:
