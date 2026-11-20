@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from operator import itemgetter
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -367,7 +368,9 @@ class DurableAggregateCache:
         )
         payload["_mutation_count"] = len(mutation_rows)
         run_events: dict[str, list[dict[str, Any]]] = {}
-        for run_id, event in event_rows:
+        # MySQL filesort can exhaust sort_buffer_size on a single large JSON
+        # event. Order row references by the durable key in this decode worker.
+        for run_id, _, event in sorted(event_rows, key=itemgetter(0, 1)):
             run_events.setdefault(run_id, []).append(_decode_json(event))
         payload["run_events"] = run_events
         return payload

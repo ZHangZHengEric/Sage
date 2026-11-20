@@ -60,6 +60,7 @@ class _DispatchRequest:
     context: RequestContext
     resume: bool
     result: asyncio.Future[RunSnapshot]
+    idempotency_key: str
     recovered: bool = False
     claimed: bool = False
 
@@ -295,11 +296,16 @@ class LocalWorkerDispatcher:
         resume: bool = False,
     ) -> asyncio.Future[RunSnapshot]:
         while True:
+            work = self._work_item(handle, context, resume=resume)
             predecessor = None
             async with self._lifecycle:
                 await self._start_locked(recover=False)
                 current = self._requests.get(handle.run_id)
                 if current is not None:
+                    if resume and current.idempotency_key == work.idempotency_key:
+                        # Observers of this resume must not wait for their own
+                        # generation to finish before receiving its Future.
+                        return asyncio.shield(current.result)
                     if resume and current.claimed:
                         # A reply may be accepted while the previous suspended
                         # drive is still releasing resources and its lease.
@@ -312,7 +318,7 @@ class LocalWorkerDispatcher:
                     loop = asyncio.get_running_loop()
                     result: asyncio.Future[RunSnapshot] = loop.create_future()
                     request = _DispatchRequest(agent=agent, context=context,
-                        resume=resume, result=result)
+                        resume=resume, result=result, idempotency_key=work.idempotency_key)
                     self._requests[handle.run_id] = request
                     self._submissions_inflight += 1
                     break
@@ -328,12 +334,7 @@ class LocalWorkerDispatcher:
                 result.set_result(handle)
                 return result
         try:
-            revision = getattr(handle, "revision", None)
-            if revision is None:
-                revision = getattr(handle, "run_revision", 0)
-            await self.scheduler.submit(
-                self._work_item(handle, context, resume=resume, revision=revision)
-            )
+            await self.scheduler.submit(work)
         except BaseException:
             async with self._lifecycle:
                 self._discard_request(handle.run_id, request)
@@ -1075,6 +1076,7 @@ class LocalWorkerDispatcher:
             resume=bool(lease.work.payload.get("resume")),
             result=result,
             recovered=True,
+            idempotency_key=lease.work.idempotency_key,
         )
 
     def _mark_recovered(self, request: _DispatchRequest) -> None:

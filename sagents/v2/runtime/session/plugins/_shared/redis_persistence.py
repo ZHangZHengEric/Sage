@@ -207,11 +207,14 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
                 await pipe.watch(key)
-                previous, indexed_revision, index_epoch, metadata_revision = await pipe.hmget(
-                    key, ("revision", "event_index_revision", "event_index_epoch", "run_metadata_revision")
+                # All these fields belong to the same watched Session revision.
+                fields = [self._event_head_field(rid) for rid in tails]
+                previous, indexed_revision, index_epoch, metadata_revision, snapshot_token, deleted, *old_heads = await pipe.hmget(
+                    key, ("revision", "event_index_revision", "event_index_epoch",
+                          "run_metadata_revision", "base_snapshot", "deleted", *fields),
                 )
                 restoring = expected is None and sid in self._backup_restores.get()
-                if restoring and await pipe.hget(key, "deleted") == "1":
+                if restoring and deleted == "1":
                     previous = None
                 if previous != (str(expected) if expected is not None else None):
                     raise self._conflict(
@@ -219,7 +222,6 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                         f"Redis Session revision changed for {sid}",
                     )
                 old_fields = await pipe.hkeys(key) if compact else ()
-                snapshot_token = await pipe.hget(key, "base_snapshot")
                 parent = head.get("parent_session_id")
                 old_parent = await pipe.hget(self._key("parents"), sid) if parent else None
                 if staged_base:
@@ -235,8 +237,6 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 # first subsequent indexed commit.
                 if compact or previous != indexed_revision or not index_epoch:
                     index_epoch = commit_id
-                fields = [self._event_head_field(rid) for rid in tails]
-                old_heads = await pipe.hmget(key, fields) if fields else ()
                 rebuild_metadata = compact or metadata_revision != previous
                 owner, metadata = prepare_run_metadata(
                     self, sid, session_runs if rebuild_metadata else (

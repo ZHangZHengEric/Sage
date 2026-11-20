@@ -146,6 +146,10 @@ class OtlpTraceTransport:
                     self._warn("active_span_limit", count=1)
                     return
                 reserved = self._reserve_bytes(span.span_id, span.attributes)
+                if not reserved and span.name == "agent.run" and self._span_observer is not None:
+                    reserved = self._reserve_bytes(span.span_id, self._identity(span), timing=True)
+                    if reserved:
+                        self._warn("root_input_byte_limit")
                 if not reserved:
                     self._warn("active_byte_limit", count=1)
                     return
@@ -242,7 +246,19 @@ class OtlpTraceTransport:
                 )
                 if attributes is None:
                     self._mark_incomplete(otel_span, "completion_byte_limit")
-                else:
+                    if span.name == "agent.run" and "sage.performance.data" in span.attributes:
+                        # Preserve the queryable native root even if its raw input
+                        # or output cannot fit. Only allow timing and scope here.
+                        timing = {
+                            key: value for key, value in span.attributes.items()
+                            if key.startswith("sage.performance.")
+                            or key in {"agent_id", "root_session_id", "run_state"}
+                        }
+                        summary = span.model_copy(update={"attributes": timing})
+                        attributes = self._encode_values(
+                            span.span_id, timing, lambda: self._attributes(summary), timing=True,
+                        )
+                if attributes is not None:
                     otel_span.set_attributes(attributes)
                 if span.status is TraceStatus.ERROR:
                     error = (
@@ -288,20 +304,20 @@ class OtlpTraceTransport:
         span.set_attribute("sage.content.incomplete", True)
         self._warn(operation)
 
-    def _encode_values(self, span_id, source, encode):
+    def _encode_values(self, span_id, source, encode, *, timing=False):
         """Reserve source content before any copies or JSON encoding.
 
         Called with the transport lock held; an end/export transition cannot
         race the reservation. Adjust to projected size before storing it.
         """
-        reserved = self._reserve_bytes(span_id, source)
+        reserved = self._reserve_bytes(span_id, source, timing=timing)
         if not reserved:
             return None
         try:
             # Flatten nested attributes while the temporary reservation is
             # still held. All subsequent setters receive scalar OTLP values.
             values = _otel_attributes(encode())
-            available = self.max_retained_bytes - self._retained_bytes + reserved
+            available = self._available_bytes(timing) + reserved
             projected = retained_size(values, available // 2) * 2 + 512
             if projected > available:
                 self._refund_bytes(span_id, reserved)
@@ -352,11 +368,11 @@ class OtlpTraceTransport:
             body = raw_trace_value(body)
         else:
             body = {key: trace_content(self, value) for key, value in body.items()}
+        # Timing rows are control data. Skip ordinary content redaction and
+        # preserve the JSON across the SDK's per-attribute string length limit.
+        payload = values.pop("sage.performance.data", None) if span.name == "agent.run" else None
         projected = self._trace_value(values)
-        # Timing rows are control data. An OTLP string array preserves them
-        # across the SDK's per-attribute string length limit.
-        if span.name == "agent.run" and "sage.performance.data" in values:
-            payload = values["sage.performance.data"]
+        if payload is not None:
             projected["sage.performance.data"] = tuple(
                 payload[offset : offset + self.max_content_chars]
                 for offset in range(0, len(payload), self.max_content_chars)
@@ -521,9 +537,17 @@ class OtlpTraceTransport:
         provider.add_span_processor(processor)
         return provider, provider.get_tracer("sagents.v2")
 
-    def _reserve_bytes(self, span_id, values):
+    def _available_bytes(self, timing):
+        limit = self.max_retained_bytes
+        if not timing and self._span_observer is not None:
+            # Content, including duplicate span events, cannot exhaust the
+            # space needed to finish and enqueue a timing-only performance root.
+            limit -= min(limit // 8, 4 * 1024 * 1024)
+        return max(0, limit - self._retained_bytes)
+
+    def _reserve_bytes(self, span_id, values, *, timing=False):
         with self._lock:
-            available = self.max_retained_bytes - self._retained_bytes
+            available = self._available_bytes(timing)
             # Reserve both Python object and its encoded OTLP representation.
             # Holds through active, queued and in-flight phases until export.
             size = retained_size(values, available // 2) * 2 + 512

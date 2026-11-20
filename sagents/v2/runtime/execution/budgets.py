@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sagents.v2.runtime.session.contracts import SessionStore
+from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.run_state import RunSnapshot
 from sagents.v2.contracts.events import UsageEventData
 
@@ -108,7 +109,8 @@ async def stop_budget_descendants(runtime, run, context):
 
 
 async def evaluate_run_budget(
-    store: SessionStore, run: RunSnapshot, now: datetime, *, check_tokens: bool = True, usage_cache: dict[str, tuple[int, int]] | None = None
+    store: SessionStore, run: RunSnapshot, now: datetime, *, check_tokens: bool = True,
+    usage_cache: dict[str, tuple[int, int]] | None = None, run_command: StartRun | None = None,
 ) -> RunBudget:
     """Apply every ancestor's absolute deadline and shared subtree token cap."""
     deadline = None
@@ -117,7 +119,10 @@ async def evaluate_run_budget(
     seen = set()
     while current.run_id not in seen:
         seen.add(current.run_id)
-        command = await store.get_start_command(current.run_id)
+        if current is run and run_command is not None:
+            command = run_command
+        else:
+            command = await store.get_start_command(current.run_id)
         if command.config.deadline_seconds is not None:
             limit = current.created_at + timedelta(
                 seconds=command.config.deadline_seconds

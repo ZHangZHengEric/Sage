@@ -1560,7 +1560,10 @@ class AgentLoopEngine:
             if current.state != RunState.RUNNING:
                 raise SageV2Error(RuntimeErrorInfo(code="model.recovery_cancelled",
                     category=ErrorCategory.CANCELLED, message="Model call was cancelled"))
-            budget = await evaluate_run_budget(self.runtime.session_store, current, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, current, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 raise SageV2Error(budget.error)
         scope.check = check_call
@@ -1615,7 +1618,10 @@ class AgentLoopEngine:
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
         if run.state == RunState.SUSPEND_REQUESTED:
             return _DriveIteration(await self._suspend_at_safe_point(run, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
-        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+        budget = await evaluate_run_budget(
+            self.runtime.session_store, run, self.clock(),
+            usage_cache=self._budget_usage_cache, run_command=command,
+        )
         if budget.error is not None:
             return _DriveIteration(await self._fail(run, state, None, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
         if state.provider_retry_at is not None:
@@ -1637,7 +1643,10 @@ class AgentLoopEngine:
                 await self._release_run_resources(run.run_id)
                 return _DriveIteration(current, state, empty_response_retries, context_overflow_retries, stop=True)
             run = current
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, None, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             state = state.model_copy(update={
@@ -1777,7 +1786,10 @@ class AgentLoopEngine:
             except Exception as exc:
                 return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='loop.request_preparation_failed', category=ErrorCategory.PROVIDER_PERMANENT, message=exception_diagnostic_message(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
             request = prepared_step.request
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             if budget.remaining_tokens is not None:
@@ -1844,7 +1856,10 @@ class AgentLoopEngine:
         completed_tool_results: list[ToolExecutionResult] = []
         read_tools: set[str] = set()
         if response.tool_calls:
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             # Phase 4: proposal and policy decision are committed before any
@@ -2080,7 +2095,10 @@ class AgentLoopEngine:
             state, response, completed_tool_results, read_tools
         )
         repeated = repeated_cycles(state.response_fingerprints)
-        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+        budget = await evaluate_run_budget(
+            self.runtime.session_store, run, self.clock(),
+            usage_cache=self._budget_usage_cache, run_command=command,
+        )
         if budget.error is not None:
             return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
         signals = await self._continuation_signals(run.run_id, state)
@@ -2679,7 +2697,10 @@ class AgentLoopEngine:
             scope = current_recovery_scope()
             if scope is not None:
                 await stack.enter_async_context(scope.enforce_deadline())
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                check_tokens=False, run_command=command,
+            )
             iterator = stream.__aiter__()
             pending = None
             poll_seconds = 0.1
@@ -2712,7 +2733,10 @@ class AgentLoopEngine:
                         yield event, None
                         continue
                     if deadline_expired:
-                        expired = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+                        expired = await evaluate_run_budget(
+                            self.runtime.session_store, run, self.clock(),
+                            check_tokens=False, run_command=command,
+                        )
                         if expired.error is not None:
                             raise SageV2Error(expired.error)
                     current = await self.runtime.get_run(run.run_id)
@@ -4569,11 +4593,12 @@ class AgentLoopEngine:
                     }
                 )
 
-        command = await self.runtime.session_store.get_start_command(run.run_id)
-        if result.error is not None and command.config.autonomous_error_recovery:
-            from sagents.v2.agent.autonomous_recovery import with_recovery_feedback
+        if result.error is not None:
+            command = await self.runtime.session_store.get_start_command(run.run_id)
+            if command.config.autonomous_error_recovery:
+                from sagents.v2.agent.autonomous_recovery import with_recovery_feedback
 
-            result = with_recovery_feedback(result)
+                result = with_recovery_feedback(result)
 
         item_id = new_id("item")
         status = (

@@ -112,9 +112,10 @@ async def test_cold_descendant_hydration_batches_canonical_state_and_journal():
         elif "SELECT session_id, revision, mutation" in statement:
             cursor.fetchall.return_value = [(sid, payloads[sid]["sessions"][0]["revision"],
                 json.dumps(deltas[sid])) for sid in selected]
-        elif "SELECT session_id, run_id, event" in statement:
-            cursor.fetchall.return_value = [(sid, rid, json.dumps(event)) for sid in selected
-                for rid, events in payloads[sid]["run_events"].items() for event in events]
+        elif "SELECT session_id, run_id, run_sequence, event" in statement:
+            assert "ORDER BY" not in statement
+            cursor.fetchall.return_value = [(sid, rid, event["run_sequence"], json.dumps(event)) for sid in selected
+                for rid, events in payloads[sid]["run_events"].items() for event in reversed(events)]
     cursor.execute.side_effect = execute
     @asynccontextmanager
     async def reader():

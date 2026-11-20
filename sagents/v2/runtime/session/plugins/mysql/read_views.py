@@ -68,13 +68,16 @@ class MysqlSessionReadQueries:
             if legacy:
                 conditions.append('session_id IN (' + ','.join(['%s']*len(legacy)) + ") AND JSON_UNQUOTE(JSON_EXTRACT(event,'$.type')) = 'run.accepted'")
                 params.extend(legacy)
+            events = ()
             if conditions:
-                await cursor.execute(f"SELECT session_id,run_id,event FROM {store._table('run_events')} WHERE "
-                    + ' OR '.join('('+clause+')' for clause in conditions) + ' ORDER BY session_sequence,run_sequence',tuple(params))
-                for sid,rid,raw in await cursor.fetchall():
-                    if sid in states:
-                        states[sid]['run_events'].setdefault(rid,[]).append(_json(raw))
+                await cursor.execute(f"SELECT session_id,run_id,session_sequence,run_sequence,event FROM {store._table('run_events')} WHERE "
+                    + ' OR '.join('('+clause+')' for clause in conditions), tuple(params))
+                events = await cursor.fetchall()
         def decode():
+            # Match MySQL's ascending NULL-first order for legacy rows.
+            for sid, rid, _, _, raw in sorted(events, key=lambda row: (row[2] is not None, row[2], row[3])):
+                if sid in states:
+                    states[sid]['run_events'].setdefault(rid, []).append(_json(raw))
             result = {}
             for state in states.values():
                 result.update(views_from_payload(state,**options))
