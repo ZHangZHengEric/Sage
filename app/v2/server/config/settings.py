@@ -45,6 +45,7 @@ class ServerSettings:
     session_store_plugin: str | None = None
     session_store_key_prefix: str | None = None
     scheduler_plugin: str = "sage.scheduler.ephemeral"
+    release_id: str | None = None
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
@@ -138,6 +139,11 @@ class ServerSettings:
             not self.redis_session_store
         ):
             raise ValueError("Distributed scheduler requires Redis + SQL SessionStore")
+        if self.release_id is not None and (
+            self.scheduler_plugin != "sage.scheduler.redis-distributed"
+            or "execution.scheduler" in self.plugin_overrides
+        ):
+            raise ValueError("Release handoff requires the built-in distributed scheduler")
         if self.session_store_key_prefix is not None and (
             not self.session_store_key_prefix.strip() or not self.redis_session_store
         ):
@@ -284,6 +290,7 @@ class ServerSettings:
             session_store_plugin=_env("SAGE_SERVER_SESSION_STORE_PLUGIN") or None,
             session_store_key_prefix=_env("SAGE_SERVER_SESSION_STORE_KEY_PREFIX") or None,
             scheduler_plugin=_env("SAGE_SERVER_SCHEDULER_PLUGIN", "sage.scheduler.ephemeral"),
+            release_id=_env("SAGE_SCHEDULER_RELEASE_ID") or None,
             diagnostics_enabled=_env("SAGE_SERVER_DIAGNOSTICS_ENABLED", "true").lower() == "true",
             trace_backend=_env("SAGE_SERVER_TRACE_BACKEND") or None,
             trace_otlp_endpoint=_env("SAGE_SERVER_TRACE_OTLP_ENDPOINT"),

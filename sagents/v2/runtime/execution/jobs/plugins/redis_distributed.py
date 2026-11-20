@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 import asyncio
 import base64
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -21,7 +22,7 @@ from sagents.v2.contracts.jobs import (
     JobCursor, JobHandle, JobOutputChunk, JobPauseBehavior, JobSnapshot, JobState,
 )
 from sagents.v2.runtime.execution.jobs.plugins._shared.runtime import JobRuntimeState, TERMINAL_JOB_STATES
-from sagents.v2.runtime.distributed.redis_coordination import active_worker_fence, watch_fence
+from sagents.v2.runtime.distributed.redis_coordination import RedisGuard, active_worker_fence, watch_fence
 
 
 class RedisDistributedJobRuntime(JobRuntimeState):
@@ -40,6 +41,7 @@ class RedisDistributedJobRuntime(JobRuntimeState):
         self._redis_ready = False
         self._redis_init_lock = asyncio.Lock()
         self._admission_lock = asyncio.Lock()
+        self._registry_lock = asyncio.Lock()
         self._local_jobs = {}
         self._local_tokens = {}
         self._node = uuid.uuid4().hex
@@ -78,6 +80,28 @@ class RedisDistributedJobRuntime(JobRuntimeState):
     def _output_index_key(self, job_id):
         return self.key_prefix + ":output-offsets:" + job_id
 
+    def _inspect_key(self):
+        return self.key_prefix + ":inspect:v1"
+
+    @staticmethod
+    def _inspect_prefix(epoch):
+        return '{"inspect_epoch":"' + epoch + '",'
+
+    def _next_sweep(self, rows):
+        terminal = [row for row in rows.values() if row["state"] in TERMINAL_JOB_STATES]
+        over_quota = (len(terminal) > self._max_retained_terminal_jobs
+                      or sum(row["output_cursor"]["offset"] for row in terminal)
+                      > self._max_retained_output_bytes)
+        terminal_age = self._output_reconnect_window.total_seconds()
+        if not over_quota:
+            terminal_age = max(terminal_age, self._terminal_ttl.total_seconds())
+        return min(
+            min((datetime.fromisoformat(row["updated_at"]).timestamp() + terminal_age
+                 for row in terminal), default=float("inf")),
+            min((row["lease_until"] for row in rows.values() if row["state"] not in TERMINAL_JOB_STATES),
+                default=float("inf")),
+        )
+
     def _limits(self):
         return [self._max_concurrent, self._max_admitted, self._max_job_output_bytes,
             self._max_job_output_chunks, self._max_buffered_output_bytes,
@@ -85,14 +109,42 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             self._max_retained_terminal_jobs, self._max_retained_output_bytes,
             self._output_reconnect_window.total_seconds(), self.lease_seconds]
 
+    def _encode_rows(self, state, epoch):
+        # Fixed capacity leaves space for cursor, chunk count and timestamp
+        # growth without shifting the byte ranges of unrelated Jobs.
+        header = json.dumps({key: value for key, value in state.items() if key != "rows"},
+                            separators=(",", ":"), sort_keys=True)
+        parts = [self._inspect_prefix(epoch), header[1:-1], ',"rows":{']
+        position = sum(map(len, parts))
+        spans = {"@epoch": epoch}
+        for index, (job_id, row) in enumerate(state["rows"].items()):
+            key = ("," if index else "") + json.dumps(job_id) + ":"
+            value = json.dumps(row, separators=(",", ":"), sort_keys=True) + " " * 64
+            position += len(key)
+            spans[job_id] = json.dumps([position, position + len(value) - 1])
+            parts.extend((key, value))
+            position += len(value)
+        parts.append("}}")
+        return "".join(parts), spans
+
     async def _mutate(self, operation, *, admission=False):
         from redis.exceptions import ResponseError, WatchError
         redis = await self._client()
         key = self.key_prefix + ":state"
-        for _ in range(100):
-            async with redis.pipeline() as pipe:
+        writer_key = self.key_prefix + ":registry-writer"
+        for attempt in range(100):
+            # A heartbeat rewriting a large legacy registry must eventually
+            # finish even when another node is continuously publishing chunks.
+            guard = RedisGuard(redis, writer_key) if attempt else nullcontext()
+            async with self._registry_lock, guard as writer, redis.pipeline() as pipe:
                 try:
                     await pipe.watch(key)
+                    if writer is not None:
+                        await watch_fence(pipe, writer)
+                    else:
+                        await pipe.watch(writer_key)
+                        if await pipe.exists(writer_key):
+                            continue
                     if admission and (fence := active_worker_fence.get()) is not None:
                         if fence.redis_url != self.redis_url:
                             raise ValueError("Job and worker fencing must use the same Redis URL")
@@ -107,8 +159,11 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                     now = seconds + micros / 1e6
                     rows = state["rows"]
                     occupied = sum(row["state"] in {JobState.RUNNING, JobState.STOPPING} for row in rows.values())
-                    original_rows = {job_id: (row["owner"], row["state"], row["lease_until"])
-                                     for job_id, row in rows.items()}
+                    # The cursor is the only nested field changed in place.
+                    original_rows = {
+                        job_id: row | {"output_cursor": dict(row["output_cursor"])}
+                        for job_id, row in rows.items()
+                    }
                     removed = self._sweep(rows, now)
                     operation_error = None
                     try:
@@ -123,10 +178,30 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                         removed = self._sweep(rows, now)
                         result, output, operation_error = None, None, exc
                     removed.extend(set(original_rows).difference(rows).difference(removed))
-                    encoded = json.dumps(state, separators=(",", ":"), sort_keys=True)
-                    if encoded != raw or output or removed:
+                    epoch = state.pop("inspect_epoch", "")
+                    index = self._inspect_key()
+                    indexed = bool(raw and epoch and raw.startswith(self._inspect_prefix(epoch))
+                                   and await pipe.hget(index, "@epoch") == epoch)
+                    if not indexed or rows != original_rows or output or removed:
+                        epoch = uuid.uuid4().hex
+                        encoded, spans = self._encode_rows(state, epoch)
                         pipe.multi()
                         pipe.set(key, encoded)
+                        layout = self.key_prefix + ":output-layout"
+                        pipe.delete(layout)
+                        spans["@bytes"] = sum(row["output_cursor"]["offset"] for row in rows.values())
+                        spans["@chunks"] = sum(row["chunks"] for row in rows.values())
+                        pipe.hset(layout, mapping=spans)
+                        if not indexed:
+                            pipe.delete(index)
+                        elif removed:
+                            pipe.hdel(index, *("job:" + job_id for job_id in removed))
+                        projected = {"job:" + job_id: json.dumps(self._inspection_row(row), separators=(",", ":"))
+                                     for job_id, row in rows.items()
+                                     if not indexed or row != original_rows.get(job_id)}
+                        projected.update({"@epoch": epoch, "@sweep": self._next_sweep(rows),
+                                          "@limits": json.dumps(self._limits())})
+                        pipe.hset(index, mapping=projected)
                         updated_occupied = sum(row["state"] in {JobState.RUNNING, JobState.STOPPING}
                                                for row in rows.values())
                         if raw is None or updated_occupied != occupied:
@@ -135,7 +210,8 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                             pipe.delete(self._output_key(job_id), self._output_index_key(job_id))
                             pipe.delete(self.key_prefix + ":worker:" + job_id)
                         for job_id, row in rows.items():
-                            if original_rows.get(job_id) != (row["owner"], row["state"], row["lease_until"]):
+                            if job_id not in original_rows or any(original_rows[job_id][field] != row[field]
+                                                                 for field in ("owner", "state", "lease_until")):
                                 pipe.set(self.key_prefix + ":worker:" + job_id, json.dumps({
                                     "owner": row["owner"], "state": row["state"], "lease_until": row["lease_until"]}))
                         if output:
@@ -194,9 +270,12 @@ class RedisDistributedJobRuntime(JobRuntimeState):
         return rows[job_id]
 
     @staticmethod
-    def _snapshot_record(row):
-        return JobSnapshot.model_validate({key: value for key, value in row.items()
-            if key in JobSnapshot.model_fields})
+    def _inspection_row(row):
+        return {key: value for key, value in row.items() if key in JobSnapshot.model_fields}
+
+    @classmethod
+    def _snapshot_record(cls, row):
+        return JobSnapshot.model_validate(cls._inspection_row(row))
 
     async def submit(self, spec):
         async with self._admission_lock:
@@ -247,6 +326,57 @@ class RedisDistributedJobRuntime(JobRuntimeState):
         if row["owner"] != token or row["lease_until"] <= now or row["state"] in TERMINAL_JOB_STATES:
             raise self._error("job.fence_rejected", ErrorCategory.RESOURCE_LOST, "Job worker no longer owns publication")
         return row
+
+    async def _append_by_id(self, job_id, append):
+        from redis.exceptions import ResponseError, WatchError
+
+        redis = await self._client()
+        key = self.key_prefix + ":state"
+        layout = self.key_prefix + ":output-layout"
+        writer_key = self.key_prefix + ":registry-writer"
+        for _ in range(32):
+            async with self._registry_lock, redis.pipeline() as pipe:
+                try:
+                    await pipe.watch(key, writer_key)
+                    if await pipe.exists(writer_key):
+                        await asyncio.sleep(0.005)
+                        continue
+                    epoch, span, used, chunks = await pipe.hmget(layout, ("@epoch", job_id, "@bytes", "@chunks"))
+                    if not epoch or not span:
+                        return False
+                    prefix = self._inspect_prefix(epoch)
+                    if await pipe.getrange(key, 0, len(prefix) - 1) != prefix:
+                        return False
+                    start, end = json.loads(span)
+                    raw = await pipe.getrange(key, start, end)
+                    indexed, sweep = await pipe.hmget(self._inspect_key(), ("@epoch", "@sweep"))
+                    seconds, micros = await pipe.time()
+                    now = seconds + micros / 1e6
+                    if indexed != epoch or now >= float(sweep):
+                        return False
+                    row = json.loads(raw)
+                    before = row["output_cursor"]["offset"]
+                    _, output = append({job_id: row}, now, int(used), int(chunks))
+                    encoded = json.dumps(row, separators=(",", ":"), sort_keys=True)
+                    if len(encoded) > end - start + 1:
+                        return False
+                    pipe.multi()
+                    pipe.setrange(key, start, encoded.ljust(end - start + 1))
+                    pipe.hset(self._inspect_key(), "job:" + job_id, json.dumps(self._inspection_row(row), separators=(",", ":")))
+                    if output:
+                        _, chunk = output
+                        pipe.hincrby(layout, "@bytes", chunk["next_offset"] - before)
+                        pipe.hincrby(layout, "@chunks", 1)
+                        pipe.rpush(self._output_key(job_id), json.dumps(chunk, separators=(",", ":")))
+                        pipe.zadd(self._output_index_key(job_id), {str(row["chunks"] - 1): before})
+                    responses = await pipe.execute(raise_on_error=False)
+                    for response in responses[:-1] if output else responses:
+                        if isinstance(response, ResponseError):
+                            raise response
+                    return True
+                except WatchError:
+                    continue
+        return False
 
     async def _execute_shared(self, job_id, token, spec, runner):
         cancel_event = asyncio.Event()
@@ -310,15 +440,15 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             async def emit(stream, data):
                 if stream not in {"stdout", "stderr", "progress"} or not isinstance(data, bytes):
                     raise ValueError("Job output requires a supported stream and bytes")
-                def append(rows, now):
+                def append(rows, now, used_bytes, used_chunks):
                     row = self._owned(rows, job_id, token, now)
                     if row["state"] == JobState.STOPPING:
                         raise asyncio.CancelledError
                     size = row["output_cursor"]["offset"]
                     available = max(0, min(spec.max_output_bytes or self._max_job_output_bytes,
                         self._max_job_output_bytes) - size)
-                    available = min(available, max(0, self._max_buffered_output_bytes - sum(r["output_cursor"]["offset"] for r in rows.values())))
-                    if row["chunks"] >= self._max_job_output_chunks or sum(r["chunks"] for r in rows.values()) >= self._max_buffered_output_chunks:
+                    available = min(available, max(0, self._max_buffered_output_bytes - used_bytes))
+                    if row["chunks"] >= self._max_job_output_chunks or used_chunks >= self._max_buffered_output_chunks:
                         available = 0
                     accepted = data[:available]
                     row["output_truncated"] |= len(accepted) < len(data)
@@ -329,7 +459,10 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                     row["chunks"] += 1
                     return None, (job_id, dict(job_id=job_id, stream=stream, offset=size,
                         next_offset=size+len(accepted), data=base64.b64encode(accepted).decode(), occurred_at=self._date(now)))
-                await self._mutate(append)
+                if not await self._append_by_id(job_id, append):
+                    await self._mutate(lambda rows, now: append(
+                        rows, now, sum(r["output_cursor"]["offset"] for r in rows.values()),
+                        sum(r["chunks"] for r in rows.values())))
             runner_task = asyncio.ensure_future(runner(spec, emit, cancel_event))
             done, _ = await asyncio.wait({runner_task, monitor, stop_waiter}, return_when=asyncio.FIRST_COMPLETED)
             if monitor in done:
@@ -389,6 +522,22 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             return
 
     async def inspect(self, job_id):
+        redis = await self._client()
+        # The matching prefix rejects stale projections after a legacy writer
+        # reserializes the canonical registry with its original sorted keys.
+        prefix_len = len(self._inspect_prefix("0" * 32))
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.getrange(self.key_prefix + ":state", 0, prefix_len - 1)
+            pipe.hmget(self._inspect_key(), ("@epoch", "@sweep", "@limits", "job:" + job_id))
+            pipe.time()
+            prefix, (epoch, sweep, limits, row), (seconds, micros) = await pipe.execute()
+        if epoch and sweep is not None and limits and prefix == self._inspect_prefix(epoch):
+            if json.loads(limits) != self._limits():
+                raise ValueError("Distributed Job instances must use identical shared limits")
+            if seconds + micros / 1e6 < float(sweep):
+                if row is not None:
+                    return JobSnapshot.model_validate_json(row)
+                self._get({}, job_id)
         return await self._mutate(lambda rows, now: (self._snapshot_record(self._get(rows, job_id)), None))
 
     async def wait(self, job_id):

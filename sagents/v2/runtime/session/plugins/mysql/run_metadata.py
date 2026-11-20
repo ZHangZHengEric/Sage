@@ -60,6 +60,8 @@ def decode_metadata(row):
 
 
 class MysqlRunMetadataQueries:
+    _metadata_cte = staticmethod(mysql_metadata_cte)
+
     async def _run_metadata_batch(self, session_ids):
         store = cast("_MysqlSessionState", self)
         import json

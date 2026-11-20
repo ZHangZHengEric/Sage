@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.v2.server.database.upsert import upsert
 from .orm import dropped, logs, models, expiry, events, timings, maintenance_lock
 from .evidence_storage import EvidenceStorage
+from .retention import EvidenceInventory
 from .writer import ObservationWriter
 from sagents.v2.runtime.observability.evidence.capture import DiagnosticCapture
 from sagents.v2.runtime.observability.evidence.raw import retained_size
@@ -47,6 +48,8 @@ class DatabaseDiagnostics(DiagnosticCapture):
     def __init__(self, database, evidence_root: Path):
         self.database = database
         self.storage = EvidenceStorage(evidence_root)
+        self._inventory = EvidenceInventory(self.storage)
+        self._prune_lock = asyncio.Lock()
         self.available = True
         self._evidence_writer = ObservationWriter(
             self._write_evidence, batch_size=64, max_bytes=self.max_pending_evidence_bytes,
@@ -284,6 +287,10 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 )
 
     async def prune(self, *, now=None):
+        async with self._prune_lock:
+            return await self._prune(now)
+
+    async def _prune(self, now):
         now = time.time() if now is None else now
         removed = []
         async def write(db):
@@ -295,32 +302,45 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 maintenance_lock.c.id == "retention",
             ).with_for_update())
             removed.clear()
-            evidence = (await db.execute(select(models.c.payload, expiry.c.expires_at).join(
-                expiry, tuple_(*(models.c[n] for n in MODEL_KEY)) == tuple_(*(expiry.c[n] for n in MODEL_KEY)),
-            ))).all()
-            usage = await asyncio.to_thread(self._file_usage, [row.payload for row in evidence])
-            budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
             identity = tuple_(*(models.c[n] for n in MODEL_KEY))
             retention_identity = tuple_(*(expiry.c[n] for n in MODEL_KEY))
-            # Filter before the batch limit. Protected in-flight records must
-            # not occupy all 100 slots forever. Reuse the small SQL snapshot
-            # already read for accounting; no dialect-specific JSON queries or
-            # locks on the protected prefix are needed.
-            candidates = []
-            for payload, expires_at in evidence:
-                if expires_at <= 0:
-                    continue
-                record = json.loads(payload)
-                if expires_at <= now or (budget_excess > 0 and record.get("status") in {"completed", "failed"}):
-                    candidates.append((expires_at, *(record[n] for n in MODEL_KEY)))
-            candidates.sort()
-            keys = [candidate[1:] for candidate in candidates[:100]]
+            usage = {}
+            budget_excess = 0
+            if await asyncio.to_thread(self._inventory.inspect) > self.max_storage_bytes:
+                # Physical bytes include unreferenced files in the grace period.
+                # Count actual references in bounded pages under budget pressure.
+                query = select(models.c.payload).join(expiry, identity == retention_identity)
+                stream = await db.stream_scalars(query.execution_options(yield_per=100))
+                try:
+                    async for page in stream.partitions(100):
+                        usage.update(await asyncio.to_thread(self._file_usage, page))
+                finally:
+                    await stream.close()
+                budget_excess = max(0, sum(usage.values()) - self.max_storage_bytes)
+            candidates = select(*(expiry.c[n] for n in MODEL_KEY)).where(expiry.c.expires_at > 0)
+            if budget_excess:
+                # Skip protected active rows before the limit and before locking.
+                terminal = models.c.payload
+                dialect = db.get_bind().dialect.name
+                if dialect == "postgresql":
+                    from sqlalchemy.dialects.postgresql import JSONB
+                    status = cast(terminal, JSONB)["status"].astext
+                else:
+                    status = func.json_extract(terminal, "$.status")
+                    if dialect == "mysql":
+                        status = func.json_unquote(status)
+                candidates = candidates.join(models, identity == retention_identity).where(
+                    or_(expiry.c.expires_at <= now, status.in_(("completed", "failed"))))
+            else:
+                candidates = candidates.where(expiry.c.expires_at <= now)
+            keys = (await db.execute(candidates.order_by(
+                expiry.c.expires_at, *(expiry.c[n] for n in MODEL_KEY)).limit(100))).all()
             rows = (await db.execute(select(models, expiry.c.expires_at).join(
                 expiry, identity == retention_identity,
             ).where(identity.in_(keys), expiry.c.expires_at > 0,
                     or_(expiry.c.expires_at <= now, budget_excess > 0))
               .order_by(expiry.c.expires_at, *(models.c[n] for n in MODEL_KEY))
-              .with_for_update())).mappings().all()
+              .with_for_update())).mappings().all() if keys else ()
             for row in rows:
                 key = tuple(row[n] for n in MODEL_KEY)
                 record = json.loads(row["payload"])
@@ -361,11 +381,12 @@ class DatabaseDiagnostics(DiagnosticCapture):
                     await db.execute(delete(table).where(tuple_(*key_columns).in_(old)))
 
         await self.database.run_transaction(write)
-        async with self.database.session() as db:
-            payloads = list(await db.scalars(select(models.c.payload).join(
-                expiry, tuple_(*(models.c[n] for n in MODEL_KEY)) == tuple_(*(expiry.c[n] for n in MODEL_KEY)),
-            )))
-        await asyncio.to_thread(self._remove_expired_files, payloads)
+        candidates = await asyncio.to_thread(self._inventory.candidates)
+        if candidates:
+            async with self.database.session() as db:
+                payloads = await self._inventory.referenced_payloads(db, candidates, MODEL_KEY)
+            paths = (part for parts in candidates.values() for part in parts)
+            await asyncio.to_thread(self._remove_expired_files, payloads, paths)
         return len(removed)
 
     def _file_usage(self, payloads=None):
@@ -390,14 +411,14 @@ class DatabaseDiagnostics(DiagnosticCapture):
                 usage[str(path.parent)] += size
         return usage
 
-    def _remove_expired_files(self, payloads):
+    def _remove_expired_files(self, payloads, paths=None):
         referenced = set()
         for payload in payloads:
             row = json.loads(payload)
             key = tuple(row[n] for n in MODEL_KEY)
             referenced.update(self.storage.path(key, digest) for digest in row.get("_parts", {}).values())
         cutoff = time.time() - 3600
-        for path in self.storage.root.glob("*/*/*"):
+        for path in self.storage.root.glob("*/*/*") if paths is None else paths:
             # Grace protects parts staged by other processes before SQL commit,
             # as well as readers that opened an older SQL snapshot.
             if path not in referenced and path.is_file():

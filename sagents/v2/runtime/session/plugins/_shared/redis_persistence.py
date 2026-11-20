@@ -24,6 +24,7 @@ from sagents.v2.runtime.observability.logs import get_logger
 from .aggregate import _json, _principal_lookup_key
 from .redis_heads import RedisManagedSessionHeads
 from .redis_archive import RedisArchiveProtocol
+from .redis_metadata import metadata_index_keys, prepare_run_metadata, publish_run_metadata
 
 
 LOGGER = get_logger(__name__)
@@ -194,16 +195,26 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         key = self._session_key(sid)
         tails = self._event_tail_changes(mutation)
         deleted_runs = [row[0] for row in mutation["deletes"].get("runs", ())]
+        metadata_keys = metadata_index_keys(self, sid)
+        metadata_updated = {
+            row["run_id"] for row in (
+                *mutation["upserts"].get("runs", ()), *mutation["patches"].get("runs", ())
+            )
+            if "state" in row
+        }
 
         async def write():
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
                 await pipe.watch(key)
-                previous, indexed_revision, index_epoch = await pipe.hmget(
-                    key, ("revision", "event_index_revision", "event_index_epoch")
+                # All these fields belong to the same watched Session revision.
+                fields = [self._event_head_field(rid) for rid in tails]
+                previous, indexed_revision, index_epoch, metadata_revision, snapshot_token, deleted, *old_heads = await pipe.hmget(
+                    key, ("revision", "event_index_revision", "event_index_epoch",
+                          "run_metadata_revision", "base_snapshot", "deleted", *fields),
                 )
                 restoring = expected is None and sid in self._backup_restores.get()
-                if restoring and await pipe.hget(key, "deleted") == "1":
+                if restoring and deleted == "1":
                     previous = None
                 if previous != (str(expected) if expected is not None else None):
                     raise self._conflict(
@@ -211,7 +222,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                         f"Redis Session revision changed for {sid}",
                     )
                 old_fields = await pipe.hkeys(key) if compact else ()
-                snapshot_token = await pipe.hget(key, "base_snapshot")
+                parent = head.get("parent_session_id")
+                old_parent = await pipe.hget(self._key("parents"), sid) if parent else None
                 if staged_base:
                     token, parts = staged_base
                     staged_key = self._key(f"snapshot:{token}")
@@ -225,8 +237,17 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 # first subsequent indexed commit.
                 if compact or previous != indexed_revision or not index_epoch:
                     index_epoch = commit_id
-                fields = [self._event_head_field(rid) for rid in tails]
-                old_heads = await pipe.hmget(key, fields) if fields else ()
+                rebuild_metadata = compact or metadata_revision != previous
+                owner, metadata = prepare_run_metadata(
+                    self, sid, session_runs if rebuild_metadata else (
+                        self._runs[rid] for rid in metadata_updated
+                    )
+                )
+                metadata_ids = tuple(dict.fromkeys((*metadata, *deleted_runs)))
+                old_metadata = (
+                    dict(zip(metadata_ids, await pipe.hmget(metadata_keys[1], metadata_ids), strict=True))
+                    if not rebuild_metadata and metadata_ids else {}
+                )
                 pipe.multi()
                 if restoring:
                     pipe.hdel(
@@ -250,11 +271,36 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     "last_sequence": head["last_sequence"],
                     "commit_id": commit_id,
                     "quiescent": "1" if quiescent else "0",
+                    "activity_revision": revision,
+                    "activity_commit": commit_id,
+                    "has_nonterminal": int(not quiescent or suspended),
+                    "has_suspended": int(suspended),
                     "dispatch_revision": revision,
                     "dispatch_intents": _json(intents),
                     "event_index_revision": revision,
                     "event_index_epoch": index_epoch,
+                    "run_metadata_revision": revision,
+                    "run_metadata_owner": owner,
                 }
+                if quiescent and not suspended:
+                    from sagents.v2.runtime.artifact.video_storage import VIDEO_COPY_RECEIPT_PREFIX
+                    # Hosted copies require external cleanup before references
+                    # disappear. Only ordinary terminal trees can be tombstoned
+                    # using their reverse lookup fields alone.
+                    if not any(a.startswith(VIDEO_COPY_RECEIPT_PREFIX) for a in self._sessions[sid].attachments):
+                        values["cleanup_lookups"] = _json([
+                            [self._lookup_key((kind, identity)) for kind, identity, _ in rows],
+                            [self._lookup_key(row[:3]) for row in starts],
+                        ])
+                        values["cleanup_revision"] = revision
+                    else:
+                        values["cleanup_revision"] = ""
+                else:
+                    values["cleanup_revision"] = ""
+                publish_run_metadata(pipe, metadata_keys, rebuild=rebuild_metadata, members=metadata,
+                                     previous=old_metadata, deleted=deleted_runs)
+                for metadata_key in metadata_keys:
+                    pipe.persist(metadata_key)
                 for (rid, (event_head, members, replaced)), old_head in zip(tails.items(), old_heads, strict=True):
                     tail = self._durable_event_tail(rid)
                     if replaced or not old_head or old_head.partition(":")[0] != index_epoch:
@@ -275,6 +321,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     pipe.persist(self._key(f"snapshot:{token}"))
                 else:
                     values["base" if compact else f"d:{revision}"] = encoded
+                    if compact:
+                        values["base_revision"] = revision
                 pipe.hset(key, mapping=values)
                 pipe.persist(key)
                 if snapshot_token and not restoring:
@@ -306,8 +354,12 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     pipe.hset(self._key("starts"), self._lookup_key(row[:3]), sid)
                 for row in self._persisted_start_keys.get(sid, set()) - starts:
                     pipe.hdel(self._key("starts"), self._lookup_key(row[:3]))
-                if head.get("parent_session_id"):
-                    pipe.hset(self._key("parents"), sid, head["parent_session_id"])
+                if parent and parent != old_parent:
+                    order = self._key("child-edges:v2")
+                    if old_parent is not None:
+                        pipe.zrem(order, old_parent + "\0" + sid)
+                    pipe.hset(self._key("parents"), sid, parent)
+                    pipe.zadd(order, {parent + "\0" + sid: 0})
                 if attachments:
                     pipe.hset(self._key(f"attachments:{sid}"), mapping=attachments)
                 pipe.persist(self._key(f"attachments:{sid}"))
@@ -534,6 +586,11 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                             "revision": head["revision"],
                             "last_sequence": head["last_sequence"],
                             "archived_revision": head["revision"],
+                            "activity_revision": head["revision"],
+                            "activity_commit": token,
+                            "commit_id": token,
+                            "has_nonterminal": int(any(row["state"] not in TERMINAL_RUN_STATES for row in payload["runs"])),
+                            "has_suspended": int(any(row["state"] == RunState.SUSPENDED for row in payload["runs"])),
                             "quiescent": "1" if quiescent else "0",
                         },
                     )
@@ -606,18 +663,7 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         return sid
 
     async def _list_descendant_ids(self, sid):
-        parents = await self._redis.hgetall(self._key("parents"))
-        found = set(await self._archive._list_descendant_ids(sid))
-        frontier = {sid, *found}
-        while frontier:
-            children = {
-                child
-                for child, parent in parents.items()
-                if parent in frontier and child not in found
-            }
-            found.update(children)
-            frontier = children
-        return sorted(found)
+        return await self.list_workspace_descendant_ids([sid])
 
     async def read_session_views(self, session_ids, **options):
         from functools import partial
@@ -698,9 +744,10 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             report.runs = {key: report.runs[key] for key in newest}
         return report
 
-    async def _run_metadata_batch(self, session_ids):
+    async def _run_metadata_batch(self, session_ids, *, backfill_index=False):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload
         from sagents.v2.runtime.session.plugins._shared.redis_metadata import (
+            backfill_run_metadata,
             decode_redis_metadata,
             read_redis_metadata_batch,
         )
@@ -732,6 +779,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     )
                     result.extend(current)
                     owners.update(heads)
+                    if backfill_index:
+                        await backfill_run_metadata(self, sid, fields, current, heads[sid])
             else:
                 cold.append(sid)
         if cold:
@@ -740,96 +789,148 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             owners.update(heads)
         return tuple(result), owners
 
-    async def authorized_run_metadata_page(self, session_ids, context, **options):
+    async def authorized_run_metadata_page(self, session_ids, context, *, after=None, limit=101, agent_id='', states=()):
         from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
+        from .redis_metadata import _read_redis_fields_batched, read_authorized_indexed_page
 
-        return await RunMetadataQueries.authorized_run_metadata_page(
-            self, session_ids, context, **options
+        if not 1 <= limit <= 201 or len(session_ids) > 200:
+            raise ValueError('invalid Run metadata page')
+        await self._ensure_ready()
+        positions = {sid: position for position, sid in enumerate(session_ids)}
+        ids = tuple(sorted(positions, key=positions.__getitem__))
+        if after is not None:
+            ids = ids[ids.index(after[0]):]
+        fields = ("revision", "run_metadata_revision", "deleted")
+        headers = await _read_redis_fields_batched(
+            self, [("hmget", self._session_key(sid), fields) for sid in ids]
         )
+        absent = [sid for sid, (revision, _, deleted) in zip(ids, headers, strict=True)
+                  if revision is None and deleted != "1"]
+        cold = set()
+        if absent:
+            resident = await self._redis.smismember(self._key("resident"), absent)
+            cold = {sid for sid, hot in zip(absent, resident, strict=True) if not hot}
+        result = []
+        fallback = []
+
+        def cursor_for(sid):
+            return after if after is not None and sid == after[0] else None
+
+        async def flush():
+            if not fallback:
+                return
+            options = dict(after=cursor_for(fallback[0]), limit=limit - len(result), agent_id=agent_id, states=states)
+            if fallback[0] in cold:
+                page = await self._archive.authorized_run_metadata_page(fallback, context, **options)
+            else:
+                rows, owners = await self._run_metadata_batch(fallback, backfill_index=True)
+                page = RunMetadataQueries._authorized_metadata_page(self, fallback, context, rows, owners, **options)
+            result.extend(page)
+            fallback.clear()
+
+        for sid, (revision, indexed, deleted) in zip(ids, headers, strict=True):
+            if deleted == "1":
+                continue
+            if revision is None or revision != indexed:
+                if fallback and ((fallback[0] in cold) != (sid in cold)):
+                    await flush()
+                    if len(result) == limit:
+                        break
+                fallback.append(sid)
+                continue
+            await flush()
+            if len(result) == limit:
+                break
+            rows = await read_authorized_indexed_page(
+                self, sid, context, after=cursor_for(sid), limit=limit - len(result),
+                agent_id=agent_id, states=states,
+            )
+            if rows is None:
+                fallback.append(sid)
+            else:
+                result.extend(rows)
+            if len(result) == limit:
+                break
+        await flush()
+        return tuple(result)
+
+    async def _activity_batch(self, ids, *, suspended, resident_only):
+        from .redis_metadata import _decode_metadata, metadata_index_keys
+
+        field = "has_suspended" if suspended else "has_nonterminal"
+        def matches(state):
+            return state == RunState.SUSPENDED if suspended else state not in TERMINAL_RUN_STATES
+
+        # Read each revision together with its predicate. Older writers can
+        # leave these fields behind while advancing the canonical revision.
+        async with self._redis.pipeline(transaction=True) as pipe:
+            for sid in ids:
+                pipe.hmget(self._session_key(sid), ("revision", "activity_revision", field, "deleted", "commit_id", "activity_commit"))
+            pipe.smismember(self._key("resident"), ids)
+            pipe.smismember(self._key("suspended"), ids)
+            *heads, resident, waiting = await pipe.execute()
+        selected = set()
+        cold = []
+        missing = []
+        ambiguous = set()
+        for sid, (revision, projected, flag, deleted, commit, indexed_commit), hot, pending in zip(ids, heads, resident, waiting, strict=True):
+            if deleted == "1":
+                continue
+            if pending:
+                selected.add(sid)
+            elif not hot and (resident_only or revision is None):
+                cold.append(sid)
+            elif revision and revision == projected and commit and commit == indexed_commit and flag in {"0", "1"}:
+                if flag == "1":
+                    selected.add(sid)
+            else:
+                missing.append(sid)
+                if revision and revision == projected and commit != indexed_commit:
+                    ambiguous.add(sid)
+        if missing:
+            async with self._redis.pipeline(transaction=True) as pipe:
+                for sid in missing:
+                    pipe.hmget(self._session_key(sid), ("revision", "run_metadata_revision", "deleted"))
+                    pipe.hvals(metadata_index_keys(self, sid)[1])
+                results = await pipe.execute()
+            legacy = []
+            for sid, (revision, indexed, deleted), members in zip(missing, results[::2], results[1::2], strict=True):
+                if deleted == "1":
+                    continue
+                if revision and revision == indexed and members and sid not in ambiguous:
+                    if any(matches(_decode_metadata(member).state) for member in members):
+                        selected.add(sid)
+                else:
+                    legacy.append(sid)
+            if legacy:
+                rows, _ = await self._run_metadata_batch(legacy, backfill_index=True)
+                selected.update(row.session_id for row in rows if matches(row.state))
+        return selected, cold
+
+    async def _has_nonterminal_batchwise(self, ids, *, resident_only):
+        for start in range(0, len(ids), 128):
+            active, cold = await self._activity_batch(ids[start:start + 128], suspended=False, resident_only=resident_only)
+            if active or (cold and await self._archive.has_nonterminal_sessions(cold)):
+                return True
+        return False
 
     async def has_nonterminal_session_trees(self, session_ids):
-        """Redis owns hot state; an asynchronous SQL archive cannot overrule it."""
+        ids = sorted(await self._collect_session_tree(session_ids))
+        return await self._has_nonterminal_batchwise(ids, resident_only=True)
+
+    async def has_nonterminal_sessions(self, session_ids):
         await self._ensure_ready()
-        selected = set(session_ids)
-        children = {}
-        for child, parent in (await self._redis.hgetall(self._key("parents"))).items():
-            children.setdefault(parent, []).append(child)
-        frontier = set(selected)
-        while frontier:
-            archived = set(
-                await self._archive.list_workspace_descendant_ids(sorted(frontier))
-            )
-            traversal = list(frontier | (archived - selected))
-            selected.update(archived)
-            frontier = set()
-            while traversal:
-                for child in children.get(traversal.pop(), ()):
-                    if child not in selected:
-                        selected.add(child)
-                        frontier.add(child)
-                        traversal.append(child)
-        ids = sorted(selected)
-        cold = []
-        for offset in range(0, len(ids), 128):
-            batch = ids[offset : offset + 128]
-            # Acknowledged Redis deletion wins over both the resident queue and
-            # a stale SQL archive. Keep traversing its descendants, however.
-            async with self._redis.pipeline(transaction=False) as pipe:
-                for sid in batch:
-                    pipe.hget(self._session_key(sid), "deleted")
-                deleted = await pipe.execute()
-            batch = [sid for sid, marker in zip(batch, deleted) if marker != "1"]
-            if not batch:
-                continue
-            resident = await self._redis.smismember(self._key("resident"), batch)
-            suspended = await self._redis.smismember(self._key("suspended"), batch)
-            if any(suspended):
-                return True
-            hot_ids = [sid for sid, hot in zip(batch, resident) if hot]
-            if hot_ids:
-                rows, _ = await self._run_metadata_batch(hot_ids)
-                if any(row.state not in TERMINAL_RUN_STATES for row in rows):
-                    return True
-            cold.extend(sid for sid, hot in zip(batch, resident) if not hot)
-        # Topology was resolved above. A recursive archive query here would
-        # revisit resident descendants and let stale SQL state overrule Redis.
-        return await self._archive.has_nonterminal_sessions(cold) if cold else False
+        return await self._has_nonterminal_batchwise(tuple(dict.fromkeys(session_ids)), resident_only=False)
 
     async def filter_suspended_session_ids(self, session_ids):
         await self._ensure_ready()
         selected = set()
         ids = tuple(session_ids)
         for start in range(0, len(ids), 128):
-            batch = ids[start : start + 128]
-            async with self._redis.pipeline(transaction=False) as pipe:
-                for sid in batch:
-                    pipe.hget(self._session_key(sid), "deleted")
-                deleted = await pipe.execute()
-            batch = [sid for sid, marker in zip(batch, deleted) if marker != "1"]
-            if not batch:
-                continue
-            resident = await self._redis.smismember(self._key("resident"), list(batch))
-            waiting = await self._redis.smismember(self._key("suspended"), list(batch))
-            selected.update(sid for sid, pending in zip(batch, waiting) if pending)
-            cold = [
-                sid
-                for sid, hot, pending in zip(batch, resident, waiting)
-                if not hot and not pending
-            ]
+            hot, cold = await self._activity_batch(ids[start:start + 128], suspended=True, resident_only=True)
+            selected.update(hot)
             if cold:
                 selected.update(await self._archive.filter_suspended_session_ids(cold))
-            # Legacy resident data may predate the suspended index. Inspect its
-            # metadata in a batch without installing execution/event history.
-            hot_ids = [
-                sid
-                for sid, hot, pending in zip(batch, resident, waiting)
-                if hot and not pending
-            ]
-            if hot_ids:
-                rows, _ = await self._run_metadata_batch(hot_ids)
-                selected.update(
-                    row.session_id for row in rows if row.state == RunState.SUSPENDED
-                )
         return selected
 
     async def _read_attachment_bytes(self, sid, identity):
@@ -849,14 +950,24 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
         )
         return json.loads(value) if value is not None else None
 
-    async def _delete_storage_locked(self, sid, deleted_session_ids):
+    async def _delete_storage_locked(self, sid, deleted_session_ids, *, lookups=None):
         # Tombstones make deletion authoritative before SQL is reachable.
         delete_id = uuid.uuid4().hex
 
         async def write():
             async with self._redis.pipeline() as pipe:
                 await cast("RedisSessionCoordination", self)._owned(pipe)
+                root_key = self._session_key(sid)
+                await pipe.watch(root_key)
+                first_deletion = await pipe.hget(root_key, "deleted") != "1"
                 pipe.multi()
+                if first_deletion and sid in deleted_session_ids:
+                    # The root tombstone owns the manifest. Old workers may
+                    # overwrite or acknowledge it; readers verify delete_id.
+                    pipe.hset(root_key, mapping={
+                        "delete_manifest_id": delete_id,
+                        "delete_members": _json(list(deleted_session_ids)),
+                    })
                 for deleted in deleted_session_ids:
                     pipe.hset(
                         self._session_key(deleted),
@@ -866,12 +977,14 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                     pipe.sadd(self._key("pending"), deleted)
                     pipe.sadd(self._key("resident"), deleted)
                     pipe.srem(self._key("suspended"), deleted)
-                    for kind, identity, _ in self._persisted_locations.get(deleted, ()):
-                        pipe.hdel(
-                            self._key("locations"), self._lookup_key((kind, identity))
-                        )
-                    for row in self._persisted_start_keys.get(deleted, ()):
-                        pipe.hdel(self._key("starts"), self._lookup_key(row[:3]))
+                    locations, starts = lookups[deleted] if lookups is not None else (
+                        [self._lookup_key((kind, identity)) for kind, identity, _ in self._persisted_locations.get(deleted, ())],
+                        [self._lookup_key(row[:3]) for row in self._persisted_start_keys.get(deleted, ())],
+                    )
+                    if locations:
+                        pipe.hdel(self._key("locations"), *locations)
+                    if starts:
+                        pipe.hdel(self._key("starts"), *starts)
                 await pipe.execute()
 
         try:

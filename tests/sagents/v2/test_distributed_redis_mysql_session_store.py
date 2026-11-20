@@ -13,7 +13,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import fakeredis
 import fakeredis.aioredis
@@ -61,6 +61,7 @@ class Archive:
     def __init__(self):
         self.states = {}
         self._session_guards = {}
+        self.attachments = {}
 
     @asynccontextmanager
     async def session_guard(self, session_id):
@@ -94,6 +95,17 @@ class Archive:
                 owners.update(heads)
         return tuple(result), owners
 
+    async def authorized_run_metadata_page(self, session_ids, context, **options):
+        from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
+
+        return await RunMetadataQueries.authorized_run_metadata_page(self, session_ids, context, **options)
+
+    @staticmethod
+    def _authorize_session_owner(owner, context):
+        from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
+        return SessionStoreCoordinator._authorize_session_owner(owner, context)
+
     async def revision(self, session_id):
         state = self.states.get(session_id)
         return None if state is None else state["sessions"][0]["revision"]
@@ -107,6 +119,7 @@ class Archive:
         previous = self.states.get(sid)
         if previous is None or previous["sessions"][0]["revision"] < payload["sessions"][0]["revision"]:
             self.states[sid] = deepcopy(payload)
+            await self.archive_attachments(sid, attachments)
 
     async def archive_batch(self, sid, mutations):
         from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
@@ -120,7 +133,13 @@ class Archive:
                 self.states[sid], rows, rows[-1][0], sequence)
 
     async def archive_attachments(self, sid, attachments):
-        assert not attachments
+        self.attachments.update({(sid, identity): value for identity, value in attachments.items()})
+
+    async def archived_attachment_ids(self, sid, candidates):
+        return {identity for identity in candidates if (sid, identity) in self.attachments}
+
+    async def _read_attachment_bytes(self, sid, identity):
+        return self.attachments[(sid, identity)]
 
     async def _read_start_lookup(self, command, context):
         return None
@@ -131,6 +150,13 @@ class Archive:
 
     async def _list_descendant_ids(self, session_id):
         return []
+
+    async def list_direct_child_session_ids(self, session_id):
+        return [sid for sid, payload in self.states.items()
+                if payload["sessions"][0].get("parent_session_id") == session_id]
+
+    async def list_workspace_descendant_ids(self, session_ids):
+        return [child for sid in session_ids for child in await self._list_descendant_ids(sid)]
 
     async def delete_archived_sessions(self, session_ids):
         for sid in session_ids:
@@ -538,21 +564,100 @@ async def test_cached_read_views_and_metadata_refresh_after_remote_commit_and_de
 
 
 @pytest.mark.asyncio
+async def test_authorized_metadata_index_pages_without_loading_hot_ledger(stores):
+    first, second = stores
+    initial = (await first.create_run(command("metadata-first", text="large" * 30000), CONTEXT)).handle
+    sid = initial.session_id
+    await transition(first, initial.run_id, RunState.CANCELLED, "metadata-cancel")
+    following = (await first.create_run(command("metadata-second", session_id=sid), CONTEXT)).handle
+    key = first._session_key(sid)
+    await first._redis.hdel(key, "run_metadata_revision")
+    assert (await second.authorized_run_metadata_page([sid], CONTEXT, limit=1))[0].run_id == initial.run_id
+    assert await first._redis.hget(key, "run_metadata_revision") == await first._redis.hget(key, "revision")
+    outsider = CONTEXT.model_copy(update={"actor": CONTEXT.actor.model_copy(update={"principal_id": "other"})})
+    with patch.object(second, "_run_metadata_batch", side_effect=AssertionError("ledger read")):
+        page, = await second.authorized_run_metadata_page([sid], CONTEXT, limit=1)
+        cursor = (sid, page.created_at.isoformat(), page.run_id)
+        next_page, = await second.authorized_run_metadata_page([sid], CONTEXT, after=cursor, limit=1)
+        assert next_page.run_id == following.run_id
+        assert await second.authorized_run_metadata_page([sid], outsider) == ()
+        assert (await second.authorized_run_metadata_page([sid], CONTEXT, states=(RunState.QUEUED,))) == (next_page,)
+    await transition(first, following.run_id, RunState.CANCELLED, "metadata-finish")
+    await first.archive_pending()
+    await first._redis.delete(key)
+    with patch.object(second, "_run_metadata_batch", side_effect=AssertionError("unbounded SQL metadata batch")):
+        archived, = await second.authorized_run_metadata_page([sid], CONTEXT, after=cursor, limit=1)
+        assert archived.run_id == following.run_id and archived.state == RunState.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_topology_index_migrates_legacy_edges_and_cleans_up_tombstones(stores):
+    first, second = stores
+    parent = (await first.create_run(command("tree-root"), CONTEXT)).handle
+    child = (await first.create_run(command("tree-child").model_copy(update={"parent_run_id": parent.run_id}), CONTEXT)).handle
+    grandchild = (await first.create_run(command("tree-grandchild").model_copy(update={"parent_run_id": child.run_id}), CONTEXT)).handle
+    redis = first._redis
+    await redis.zrem(first._key("child-edges:v2"), parent.session_id + "\0" + child.session_id)
+    assert await second.list_direct_child_session_ids(parent.session_id) == [child.session_id]
+    assert await redis.hget(first._key("parents"), child.session_id) == parent.session_id
+    # A legacy writer reparents the child without changing either count.
+    await redis.hset(first._key("parents"), child.session_id, "other-parent")
+    assert await second.list_direct_child_session_ids(parent.session_id) == []
+    assert await second.list_direct_child_session_ids("other-parent") == [child.session_id]
+    await redis.hset(first._key("parents"), child.session_id, parent.session_id)
+    assert set(await second.list_workspace_descendant_ids([parent.session_id])) == {
+        child.session_id, grandchild.session_id}
+    for run in (parent, child, grandchild):
+        await transition(first, run.run_id, RunState.CANCELLED, f"cancel-{run.run_id}")
+    await first.delete_session(parent.session_id)
+    await first.archive_pending()
+    assert await second.list_workspace_descendant_ids([parent.session_id]) == []
+    assert await redis.zcard(first._key("child-edges:v2")) == 0
+
+
+@pytest.mark.asyncio
+async def test_incremental_archive_retries_without_refetching_committed_attachments(stores):
+    first, second = stores
+    run = (await first.create_run(command("archive-incremental"), CONTEXT)).handle
+    sid = run.session_id
+
+    async def content(value):
+        yield value
+
+    async def put(identity, value):
+        await first.put_attachment(sid, artifact_id=identity, media_type="application/octet-stream",
+                                   content=content(value), context=CONTEXT)
+        await first._redis.sadd(first._key("pending"), sid)
+
+    await put("baseline", b"old" * 262144)
+    await first._archive_session(sid)
+    await put("increment", b"new" * 262144)
+    with patch.object(first, "_read_archive_attachment", wraps=first._read_archive_attachment) as reads:
+        with patch.object(first._archive, "archive_batch", side_effect=OSError("interrupted revision append")):
+            with pytest.raises(OSError, match="interrupted revision"):
+                await first._archive_session(sid)
+        await first._archive_session(sid)
+        assert [call.args[1] for call in reads.call_args_list] == ["increment"]
+    assert await second._archive._read_attachment_bytes(sid, "increment") == b"new" * 262144
+    assert await first._archive.revision(sid) == int(await first._redis.hget(first._session_key(sid), "revision"))
+
+
+@pytest.mark.asyncio
 async def test_parent_delete_rechecks_child_created_after_its_descendant_snapshot(stores):
     first, second = stores
     parent = await first.create_run(command(), CONTEXT)
     sid, rid = parent.handle.session_id, parent.handle.run_id
     await transition(first, rid, RunState.CANCELLED, "cancel")
     snapshot_read, resume_delete = asyncio.Event(), asyncio.Event()
-    original = first._archive._list_descendant_ids
+    original = first._archive.list_workspace_descendant_ids
 
-    async def paused_snapshot(session_id):
-        result = await original(session_id)
+    async def paused_snapshot(session_ids):
+        result = await original(session_ids)
         snapshot_read.set()
         await resume_delete.wait()
         return result
 
-    first._archive._list_descendant_ids = paused_snapshot
+    first._archive.list_workspace_descendant_ids = paused_snapshot
     deleting = asyncio.create_task(first.delete_session(sid))
     creating = None
     try:
@@ -1002,17 +1107,30 @@ async def test_durable_event_tail_handles_revision_only_updates_and_reconnect(st
             assert (*first_page, *remaining) == added.events[-64:]
 
         await asyncio.gather(*(reconnect() for _ in range(16)))
+        joined = asyncio.Event()
+        proceed = asyncio.Event()
+        read_page = second.read_indexed_run_events
+        async def held_read(*args, **kwargs):
+            joined.set()
+            await proceed.wait()
+            return await read_page(*args, **kwargs)
+        shared = AsyncMock(side_effect=held_read)
+        patch.setattr(second, "read_indexed_run_events", shared)
         streams = [second.subscribe_durable_events(
             EventCursor(run_id=rid, run_sequence=added.events[-1].run_sequence), sid) for _ in range(16)]
         waiting = [asyncio.create_task(anext(stream)) for stream in streams]
         try:
-            await asyncio.sleep(.05)
+            await asyncio.wait_for(joined.wait(), 5)
+            waiting[0].cancel()
+            await asyncio.gather(waiting[0], return_exceptions=True)
+            assert shared.await_count == 1
+            proceed.set()
             current = await first.get_run(rid)
             live = await first.commit_run(run_id=rid, expected_revision=current.revision,
                 expected_states={RunState.RUNNING}, new_state=RunState.RUNNING, context=CONTEXT,
                 idempotency_key="live-event", drafts=(EventDraft(type="message.delta", item_id="durable-message",
                     data=ItemEventData(operation="delta", delta="after-reconnect")),))
-            assert await asyncio.wait_for(asyncio.gather(*waiting), 5) == [live.events[0]] * len(streams)
+            assert await asyncio.wait_for(asyncio.gather(*waiting[1:]), 5) == [live.events[0]] * (len(streams) - 1)
         finally:
             for task in waiting:
                 task.cancel()
@@ -1025,3 +1143,64 @@ async def test_durable_event_tail_handles_revision_only_updates_and_reconnect(st
     await first._redis.hset(session_key, "event_index_revision", "0")
     assert await second.read_indexed_run_events(
         rid, sid, after_sequence=added.events[-2].run_sequence, limit=1) == added.events[-1:]
+
+
+async def test_indexed_terminal_deletion_preserves_authorization_without_hydration(stores):
+    first, reader = stores
+    created = await first.create_run(command("terminal-index"), CONTEXT)
+    sid, rid = created.handle.session_id, created.handle.run_id
+    run = await first.get_run(rid)
+    await first.commit_run(run_id=rid, expected_revision=run.revision, expected_states={run.state},
+                           new_state=RunState.CANCELLED, drafts=(), context=CONTEXT, idempotency_key="cancel")
+    await first.archive_pending()
+    if hasattr(first._archive, "archived_cleanup_head"):
+        # A cold Redis miss after SQL ack must use the current archived head.
+        await first._redis.delete(first._session_key(sid))
+    with patch.object(reader, "_ensure_session_loaded", side_effect=AssertionError("loaded history")):
+        other = CONTEXT.model_copy(update={"actor": CONTEXT.actor.model_copy(update={"principal_id": "other"})})
+        with pytest.raises(SageV2Error) as denied:
+            await reader.authorize_session_actor(sid, other)
+        assert denied.value.info.code == "session.actor_not_authorized"
+        await reader.authorize_session_actor(sid, CONTEXT)
+        await reader.delete_session(sid)
+        with patch.object(reader._redis, "sscan", side_effect=AssertionError("scanned unrelated sessions")):
+            await reader.finish_session_deletions({sid})
+    assert await reader._archive.revision(sid) is None
+
+
+async def test_finish_retries_tree_deleted_during_last_scan_page(stores):
+    writer, reader = stores
+    root = (await writer.create_run(command("scan-root"), CONTEXT)).handle
+    handles = [root]
+    for i in range(16):
+        child = await writer.create_run(command(f"scan-child-{i}").model_copy(
+            update={"parent_run_id": root.run_id}), CONTEXT)
+        handles.append(child.handle)
+    for handle in reversed(handles):
+        run = await writer.get_run(handle.run_id)
+        await writer.commit_run(run_id=run.run_id, expected_revision=run.revision,
+                                expected_states={run.state}, new_state=RunState.CANCELLED,
+                                drafts=(), context=CONTEXT, idempotency_key="stop-" + run.run_id)
+    await writer.archive_pending()
+    pending = writer._key("pending")
+    unrelated = [f"unrelated-{i}" for i in range(1000)]
+    await writer._redis.sadd(pending, *unrelated)
+    scan = reader._redis.sscan
+    deleted = False
+
+    async def race(*args, **kwargs):
+        nonlocal deleted
+        page = await scan(*args, **kwargs)
+        if not page[0] and not deleted:
+            deleted = True
+            await writer.delete_session(root.session_id)
+        return page
+
+    with patch.object(reader._redis, "sscan", side_effect=race):
+        await reader.finish_session_deletions({root.session_id})
+    assert deleted
+    for handle in handles:
+        assert await reader._archive.revision(handle.session_id) is None
+        assert not await reader._redis.sismember(pending, handle.session_id)
+    assert await reader._redis.scard(pending) == len(unrelated)
+    await writer._redis.srem(pending, *unrelated)

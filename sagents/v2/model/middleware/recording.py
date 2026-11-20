@@ -8,7 +8,7 @@ from inspect import Parameter, signature
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.model.contracts import (
@@ -69,7 +69,9 @@ class RecordingModelProvider:
 
     @property
     def sink(self) -> DiagnosticSink:
-        return self._sink() if callable(self._sink) else self._sink
+        if callable(self._sink) and not callable(getattr(self._sink, "begin_model_request", None)):
+            return self._sink()
+        return cast(DiagnosticSink, self._sink)
 
     def _log(
         self,

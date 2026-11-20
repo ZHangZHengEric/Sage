@@ -3,7 +3,7 @@
 Workspace probe tests cover hot/cold descendants; these cases add acknowledged
 Redis deletion before archive completion and retain descendants of missing roots.
 """
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import fakeredis.aioredis
 import pytest
@@ -141,4 +141,32 @@ async def test_pending_tombstone_overrules_cached_run_and_stale_suspended_member
             assert 'deleted' not in state._sessions
             assert created.handle.run_id not in state._runs
     finally:
+        await state.close()
+
+
+async def test_deletion_filters_unrelated_pending_headers_in_bounded_pipelines(monkeypatch):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    state = store(redis, Archive())
+    pending = state._key("pending")
+    try:
+        await state._ensure_ready()
+        await redis.sadd(pending, "child", *(f"unrelated-{i}" for i in range(1000)))
+        await redis.hset(state._session_key("child"), mapping={"deleted": "1", "delete_root": "root"})
+
+        async def archive_child(sid):
+            await redis.srem(pending, sid)
+
+        acknowledge = AsyncMock(side_effect=archive_child)
+        monkeypatch.setattr(state, "_archive_session", acknowledge)
+        with monkeypatch.context() as patch:
+            scan = Mock(wraps=redis.sscan)
+            patch.setattr(redis, "sscan", scan)
+            patch.setattr(redis, "smembers", AsyncMock(side_effect=AssertionError("full pending set")))
+            await state.finish_session_deletions({"root"})
+            assert scan.call_count > 1
+            assert all(call.kwargs["count"] == 128 for call in scan.call_args_list)
+        acknowledge.assert_awaited_once_with("child")
+        assert await redis.scard(pending) == 1000
+    finally:
+        await redis.delete(pending)
         await state.close()

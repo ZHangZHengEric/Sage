@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import fakeredis
 import fakeredis.aioredis
@@ -90,6 +90,32 @@ async def test_remote_inspect_binary_output_cursor_and_wait(jobs_pair):
     assert completed.state == JobState.COMPLETED
     assert completed.exit_code == 7 and completed.error is None
     assert (await first.inspect(handle.job_id)).state == JobState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_inspect_by_id_observes_committed_output_and_recovers_legacy_writes(jobs_pair):
+    async def runner(spec, emit, cancelled):
+        await emit("stdout", b"test")
+        return JobCompletion(exit_code=7)
+
+    first, second = jobs_pair(runner)
+    handle = await first.submit(spec())
+    complete = await first.wait(handle.job_id)
+    assert complete.output_cursor.offset == 4
+    with patch.object(second, "_mutate", side_effect=AssertionError("registry payload read")):
+        assert await second.inspect(handle.job_id) == complete
+        assert await second.read_output(complete.output_cursor) == ()
+        with pytest.raises(SageV2Error) as missing:
+            await second.inspect("unknown")
+        assert missing.value.info.code == "job.not_found"
+
+    key = first.key_prefix + ":state"
+    legacy = json.loads(await first._redis.get(key))
+    legacy["rows"][handle.job_id]["exit_code"] = 8
+    await first._redis.set(key, json.dumps(legacy, sort_keys=True, separators=(",", ":")))
+    assert (await second.inspect(handle.job_id)).exit_code == 8
+    with patch.object(second, "_mutate", side_effect=AssertionError("index was not rebuilt")):
+        assert (await second.inspect(handle.job_id)).exit_code == 8
 
 
 @pytest.mark.asyncio
@@ -708,3 +734,22 @@ async def test_corrupted_output_index_cannot_fail_a_job_with_committed_output(jo
     finished = await asyncio.wait_for(second.wait(job), 5)
     assert finished.state == JobState.COMPLETED
     assert (await output(second, job, offset=5, max_bytes=3))[1] == b"eaf"
+
+
+@pytest.mark.asyncio
+async def test_incremental_output_can_be_read_from_v1_registry(jobs_pair):
+    async def runner(request, emit, cancel):
+        # All writes occur under the normal runner fence and byte quotas.
+        with patch.object(first, "_mutate", side_effect=AssertionError("full Job registry access")):
+            for data in (b"abc", b"def", b"ghi"):
+                await emit("stdout", data)
+        return JobCompletion()
+
+    first, second = jobs_pair(runner, lease_seconds=30, poll_interval_seconds=1)
+    handle = await first.submit(spec(max_output_bytes=8))
+    await first._local_jobs[handle.job_id]
+    state = json.loads(await first._redis.get(first.key_prefix + ":state"))
+    row = state["rows"][handle.job_id]
+    assert row["state"] == "completed" and row["output_truncated"]
+    assert row["output_cursor"]["offset"] == 8 and row["chunks"] == 3
+    assert (await output(second, handle.job_id, offset=2))[1] == b"cdefgh"

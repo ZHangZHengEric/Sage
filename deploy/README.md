@@ -78,22 +78,26 @@ Server 本地沙箱的预装前端测试环境、离线调用及隔离限制见
 
 复制 `deploy/release_v2.example.json` 为受限权限的发布清单，填写唯一 release ID、镜像、两个空闲的候选端口，以及每个入口当前的端口。`env_file` 和 `data_root` 必须指向该环境的实际配置与数据。新旧实例并行前，确认 Redis/数据库的分布式执行和调度配置支持并行实例；数据库迁移必须保持旧版本兼容，否则不要使用蓝绿发布。
 
+如果部署主机的 Docker 默认地址池已满，在发布清单中填写 `network_subnet`，指定与现有 Docker 网络和主机路由均不重叠的 IPv4 网段。
+
 在部署主机执行：
 
 ```bash
 python3 deploy/release_v2.py prepare /path/to/release.json
 python3 deploy/release_v2.py cutover /path/to/release.json
 python3 deploy/release_v2.py verify /path/to/release.json
-# 需要回滚时（必须仍保留旧实例）
+# 观察期内需要回滚时
 python3 deploy/release_v2.py rollback /path/to/release.json
 ```
 
-`prepare` 从现有 Compose 配置生成一整套候选前后端，不改公网入口；生成的配置包含环境变量，保存在权限受限的 release 目录中，不应提交 Git。前端同时检查首页和代理到后端的 `/readyz`。验收同时检查 API 和前端入口的 readiness JSON、health、登录接口空请求返回 422；不会尝试真实登录。业务级验收还应使用专用测试账号验证会话读取和 SSE。
+`prepare` 从现有 Compose 配置生成一整套候选前后端，向后端注入 `SAGE_SCHEDULER_RELEASE_ID`。候选版可以通过健康检查，等待 Redis 中的活动版本切换后才领取任务。生成的配置包含环境变量，保存在权限受限的 release 目录中，不应提交 Git。验收同时检查 API 和前端入口的 readiness JSON、health、登录接口空请求返回 422。业务级验收还应使用专用测试账号验证会话读取和 SSE。
 
-`cutover` 使用发布锁、检查旧端口唯一匹配、备份入口配置、校验 Caddy 后重载；两个域名均经过完整链路验收，默认观察 60 秒。切换或验收失败自动恢复入口，并验证恢复后的公网链路。若旧入口原本已损坏，恢复校验也会报错，需要人工处理。进程被 SIGKILL 或主机掉电时无法执行自动回滚，使用 release 目录的 `rollback.json` 和 rollback 命令恢复。回滚会拒绝覆盖后续发布或人工改动的入口配置。
+`cutover` 使用发布锁，检查旧端口唯一匹配并备份入口配置。Caddy 配置校验通过后，先将 Redis 活动版本从 `previous_release` 切换到 `release`，再重载 Caddy。旧 worker 只能继续处理已领任务。两个域名均经过完整链路验收，默认观察 60 秒。切换或验收失败会恢复 Redis 活动版本和入口，并验证恢复后的公网链路。进程被 SIGKILL 或主机掉电时，使用 release 目录的 `rollback.json` 和 rollback 命令恢复。回滚会拒绝覆盖后续发布或人工改动的入口配置。
 
-旧实例不会自动停止。观察期结束且运行中任务已排空后，才由运维清理旧 Compose 项目；保留回滚所需镜像和清单，不执行带 `-v` 的清理。不要用历史 release 脚本或单独 `docker run` 绕过此入口。
+同一环境的新副本使用相同的发布 ID、Redis 和数据库身份。它们共享队列、租户配额与会话，并通过任务租约及 fencing token 区分写入所有权。独立环境使用各自的数据库身份和 Redis 配置。首次启用交接时，`previous_release` 填 `null`。此前的旧镜像没有版本检查，须在维护窗口先暂停旧版流量，排空并停止旧 worker，再切换公网入口。如果要临时回滚到该旧版，需重新启动旧实例。
 
-持续监测可通过 systemd timer 每分钟运行当前 release 的 `verify` 命令，失败以非零退出码写入 journal，接入现有告警平台。Docker unhealthy 只提供状态，不代表会自动重启或发送告警。
+新版通过观察期后，安全排空旧 worker，再停止并移除上一版 Sage v2 的前后端容器，删除对应的旧版镜像。核对旧容器和镜像引用均已消失、共享 Redis 队列只由当前版本领取任务，并再次验证公网入口。完成这些检查后才算发布结束。清理范围为上一版容器和镜像，生产共享数据卷及发布记录继续保留。若清理后需要回滚，先重建或拉取对应版本的镜像，再依照发布记录恢复旧实例和入口。
+
+持续监测可通过 systemd timer 每分钟运行当前 release 的 `verify` 命令。巡检等待发布锁释放后读取最新清单，然后检查本机和公网入口。检查失败以非零退出码写入 journal，接入现有告警平台。Docker unhealthy 只提供状态，不代表会自动重启或发送告警。
 
 withling 已安装工具至 `/opt/sage-release/deploy/release_v2.py`，当前巡检清单为 `/opt/sage-release/current.json`，定时器为 `sage-v2-verify.timer`。示例中的 `monitor_manifest` 指向这份已存在的巡检清单；切流和回滚会一起更新它，使巡检跟随当前版本。其他主机未安装巡检时可删除该字段。查看最近结果：`journalctl -u sage-v2-verify.service -n 30`。当前巡检不发送外部通知。

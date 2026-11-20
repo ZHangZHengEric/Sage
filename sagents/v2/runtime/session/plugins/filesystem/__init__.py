@@ -652,11 +652,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             paths = dict(self._index_paths)
         parents = {sid: row.get("parent_session_id") for sid, row in summaries.items()}
         parents.update(live_parents)
-        selected, frontier = set(roots), set(roots)
-        while frontier:
-            children = {sid for sid, parent in parents.items() if parent in frontier and sid not in selected}
-            selected.update(children)
-            frontier = children
+        selected = roots | self._descendant_ids(roots, parents.items())
         async with self._lock:
             if any(row.session_id in selected and row.state not in TERMINAL_RUN_STATES for row in self._runs.values()):
                 return True
@@ -1361,22 +1357,23 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
     def _write_snapshot(self, path: Path, state: dict[str, Any]) -> None:
         current_revision = int(state["sessions"][0]["revision"])
-        typed_state = SessionAggregateSnapshotV2.model_validate(state)
-        # Hash and persist the same normalization, including the ordering of
-        # any collections serialized from sets.
-        normalized = SessionSnapshotEnvelope(
-            format=self.format_version,
-            write_id=new_id("session_write"),
-            current_session_revision=current_revision,
-            state=typed_state,
-            checksum="pending",
-        ).model_dump(mode="json", exclude={"checksum"})
-        payload = {
-            **normalized,
-            "checksum": self._checksum(normalized),
+        # The mutation path has already validated and normalized state. Use
+        # that same JSON representation for both the checksum and the file.
+        normalized = {
+            "format": self.format_version,
+            "write_id": new_id("session_write"),
+            "current_session_revision": current_revision,
+            "state": state,
         }
-        self._atomic_json_write(path, payload)
-        if typed_state.sessions[0].owner is not None:
+        encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256()
+        for part in encoder.iterencode(normalized):
+            digest.update(part.encode("utf-8"))
+        payload = {**normalized, "checksum": f"sha256:{digest.hexdigest()}"}
+        self._atomic_chunks_write(
+            path, (part.encode("utf-8") for part in encoder.iterencode(payload)),
+        )
+        if state["sessions"][0].get("owner") is not None:
             record_owner(path, self._atomic_json_write)
 
     @classmethod
@@ -2395,8 +2392,8 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             if source.exists():
                 source.replace(target)
                 self._fsync_directory(source.parent)
+            self._remove_start_lookups(deleted_session_ids)
             for deleted_session_id in deleted_session_ids:
-                self._remove_start_lookups(deleted_session_id)
                 self._location_path(deleted_session_id).unlink(missing_ok=True)
             self._forget_session_summaries(deleted_session_ids)
             if target.exists():
@@ -2459,8 +2456,8 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 for candidate in self.trash_root.glob(f"{session_dir.name}-*"):
                     if candidate.is_dir():
                         shutil.rmtree(candidate)
+                self._remove_start_lookups(session_ids)
                 for deleted_session_id in session_ids:
-                    self._remove_start_lookups(deleted_session_id)
                     self._location_path(deleted_session_id).unlink(missing_ok=True)
             else:
                 raise self._corrupt(
@@ -2469,13 +2466,14 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
                 )
             path.unlink(missing_ok=True)
 
-    def _remove_start_lookups(self, session_id: str) -> None:
+    def _remove_start_lookups(self, session_ids: set[str] | frozenset[str]) -> None:
         for path in self.idempotency_root.glob("*.json"):
             try:
                 value = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if value.get("session_id") == session_id:
+            owner = value.get("session_id")
+            if isinstance(owner, str) and owner in session_ids:
                 path.unlink(missing_ok=True)
 
     def _derived_path(self, session_id: str, namespace: str, key: str) -> Path:

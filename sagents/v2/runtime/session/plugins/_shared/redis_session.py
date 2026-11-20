@@ -62,6 +62,9 @@ class RedisSessionCoordination:
             )
         self.coordination_ttl_seconds = coordination_ttl_seconds
         self.coordination_wait_seconds = coordination_wait_seconds
+        self._durable_polls = {}
+        self._edge_watch = None
+        self._edge_lock = asyncio.Lock()
         self.event_poll_seconds = event_poll_seconds
         if min(max_preview_events, preview_retention_seconds) < 1:
             raise ValueError("Preview bounds must be positive")
@@ -218,9 +221,97 @@ class RedisSessionCoordination:
                     pass
             return await super().create_run(command, context)
 
+    async def authorize_session_actor(self, session_id, context):
+        from sagents.v2.contracts.principals import ActorRef
+
+        await self._ensure_ready()
+        revision, indexed, owner, deleted, commit, activity = await self._redis.hmget(
+            self._session_key(session_id), ("revision", "run_metadata_revision", "run_metadata_owner", "deleted", "commit_id", "activity_commit"))
+        if deleted == "1":
+            raise self._not_found("session.not_found", session_id)
+        if revision and indexed == revision and commit and commit == activity and owner is not None:
+            self._authorize_session_owner(None if owner == "null" else ActorRef.model_validate_json(owner), context)
+            return
+        if revision is None and callable(getattr(self._archive, "archived_cleanup_head", None)):
+            async with self._guard("session:" + session_id):
+                if not await self._redis.exists(self._session_key(session_id)) and not await self._redis.sismember(self._key("resident"), session_id):
+                    async with self._archive.session_guard(session_id):
+                        head = await self._archive.archived_cleanup_head(session_id)
+                    if head is not None and head[0] is not None:
+                        self._authorize_session_owner(ActorRef.model_validate(head[0]), context)
+                        return
+        await super().authorize_session_actor(session_id, context)
+
     async def delete_session(self, session_id):
         async with self._guard("topology"):
+            ids = sorted(await self._collect_session_tree((session_id,)))
+            if await self._delete_indexed_tree(session_id, ids):
+                return
             return await super().delete_session(session_id)
+
+    async def _delete_indexed_tree(self, root, ids):
+        from .redis_metadata import _read_redis_fields_batched
+
+        # Use the same Redis-then-local lock order as a Run commit. A
+        # restore or admission cannot invalidate these reads before the
+        # tombstone transaction. Legacy and externally hosted data continue
+        # through the coordinator's full cleanup protocol.
+        async with AsyncExitStack() as stack:
+            for sid in ids:
+                await stack.enter_async_context(self._guard("session:" + sid))
+            fields = ("revision", "cleanup_revision", "cleanup_lookups", "deleted", "commit_id", "activity_commit")
+            headers = await _read_redis_fields_batched(
+                self, [("hmget", self._session_key(sid), fields) for sid in ids])
+            lookups = {}
+            for sid, (revision, indexed, keys, deleted, commit, activity) in zip(ids, headers, strict=True):
+                if deleted == "1" and sid != root:
+                    continue
+                if revision is None and deleted is None and callable(getattr(self._archive, "archived_cleanup_head", None)):
+                    if await self._redis.sismember(self._key("resident"), sid):
+                        return False
+                    async with self._archive.session_guard(sid):
+                        if await self._archive.has_nonterminal_sessions([sid]):
+                            return False
+                        head = await self._archive.archived_cleanup_head(sid)
+                        if head is None or not head[1]:
+                            return False
+                        lookups[sid] = await self._archive.archived_cleanup_lookups(sid)
+                    continue
+                if not revision or deleted == "1" or revision != indexed or not keys or not commit or commit != activity:
+                    return False
+                lookups[sid] = json.loads(keys)
+            async with self._lock:
+                locks = [self._session_locks.setdefault(sid, asyncio.Lock()) for sid in ids]
+            for lock in locks:
+                await stack.enter_async_context(lock)
+            # Keep both fences until an ambiguous commit and cache invalidation
+            # have settled, even if the requesting HTTP connection goes away.
+            async def commit():
+                await self._delete_storage_locked(root, frozenset(lookups), lookups=lookups)
+                async with self._lock:
+                    for sid in lookups:
+                        if sid in self._sessions:
+                            for rid in self._session_run_ids_locked(sid):
+                                self._subscribers.pop(rid, None)
+                            self._evict_session_locked(sid)
+                        self._session_cache.evicted_suspended.discard(sid)
+                    self._topology_revision += 1
+
+            task = asyncio.create_task(commit())
+            cancelled = False
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    cancelled = True
+            task.result()
+        async with self._lock:
+            for sid, lock in zip(ids, locks, strict=True):
+                if self._session_locks.get(sid) is lock and not lock.locked() and not getattr(lock, "_waiters", None) and not self._session_cache.users.get(sid):
+                    self._session_locks.pop(sid, None)
+        if cancelled:
+            raise asyncio.CancelledError
+        return True
 
     async def restore_session_backup(self, backup, *, context):
         # Restoration is an explicit owner-authorized operation. Ordinary stale
@@ -641,14 +732,42 @@ class RedisSessionCoordination:
 
     async def subscribe_durable_events(self, cursor, session_id):
         sequence = cursor.run_sequence
-        while not self._closed:
-            events = await self.read_indexed_run_events(cursor.run_id, session_id,
-                after_sequence=sequence, limit=self._subscriber_queue_size)
-            for event in events:
-                sequence = event.run_sequence
-                yield event
-            if len(events) < self._subscriber_queue_size:
-                await asyncio.sleep(self.event_poll_seconds)
+        key = (session_id, cursor.run_id)
+        group = self._durable_polls.setdefault(key, {"users": 0, "reads": {}})
+        group["users"] += 1
+        reads = group["reads"]
+        try:
+            while not self._closed:
+                task = reads.get(sequence)
+                if task is None:
+                    task = asyncio.create_task(self.read_indexed_run_events(
+                        cursor.run_id, session_id, after_sequence=sequence, limit=self._subscriber_queue_size))
+                    reads[sequence] = task
+                    # Concurrent readers join the same page. Retain it for one
+                    # polling interval so staggered clients share idle reads.
+                    def expire(done, offset=sequence):
+                        def discard():
+                            if reads.get(offset) is done:
+                                reads.pop(offset)
+                        if done.cancelled() or done.exception() is not None or done.result():
+                            discard()
+                        else:
+                            asyncio.get_running_loop().call_later(self.event_poll_seconds, discard)
+                    task.add_done_callback(expire)
+                events = await asyncio.shield(task)
+                for event in events:
+                    sequence = event.run_sequence
+                    yield event
+                if len(events) < self._subscriber_queue_size:
+                    await asyncio.sleep(self.event_poll_seconds)
+        finally:
+            group["users"] -= 1
+            if not group["users"]:
+                self._durable_polls.pop(key, None)
+                for task in reads.values():
+                    if not task.done():
+                        task.cancel()
+                reads.clear()
 
     async def subscribe_events(self, cursor):
         # Canonical events are the replay authority. Polling is deliberately
@@ -710,6 +829,10 @@ class RedisSessionCoordination:
     async def close(self):
         if self._closed:
             return
+        async with self._edge_lock:
+            if self._edge_watch is not None:
+                await self._edge_watch.reset()
+                self._edge_watch = None
         await self._session_cache.close()
         if self._worker is not None:
             self._worker.cancel()

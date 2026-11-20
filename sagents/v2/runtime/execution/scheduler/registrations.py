@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 
 from sagents.v2.runtime.execution.dispatcher import DEFAULT_LEASE_SECONDS
 from sagents.v2.runtime.execution.scheduler import (
@@ -88,6 +89,8 @@ def register_scheduler_plugins(registry: ExtensionRegistry) -> None:
         RedisDistributedScheduler,
         "execution.scheduler",
         lambda context, dependencies: RedisDistributedScheduler(
+            # Release identity is process metadata; keep persisted run plans portable.
+            release_id=os.getenv("SAGE_SCHEDULER_RELEASE_ID", "").strip() or None,
             **{
                 key: value
                 for key, value in context.config.items()

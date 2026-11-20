@@ -845,7 +845,9 @@ class LocalResourceBoundary:
         return (
             [
                 str(self.host_python),
-                "-I",
+                # The pre-isolation launcher only needs the standard library.
+                # Skip site initialization and installed package startup hooks.
+                "-IS",
                 "-c",
                 _LAUNCH_CODE,
                 str(job) if job else "-",

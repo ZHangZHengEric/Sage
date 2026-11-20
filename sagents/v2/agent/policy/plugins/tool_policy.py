@@ -101,6 +101,10 @@ class DefaultToolPolicy:
         )
         self.policy_hash = self._configuration_hash()
 
+    @property
+    def batch_proposal_with_decision(self) -> bool:
+        return self.operation_assessor is None and self.approval_matcher is exact_arguments_matcher
+
     def _configuration_hash(self) -> str:
         encoded = json.dumps(
             {

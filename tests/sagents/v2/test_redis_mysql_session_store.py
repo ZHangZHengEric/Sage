@@ -64,6 +64,9 @@ class Archive:
     async def archive_attachments(self, sid, attachments):
         self.attachments.update({(sid, key): value for key, value in attachments.items()})
 
+    async def archived_attachment_ids(self, sid, candidates):
+        return {identity for identity in candidates if (sid, identity) in self.attachments}
+
     async def archive_session(self, payload, attachments):
         if self.fail:
             raise OSError("mysql unavailable")
@@ -83,6 +86,9 @@ class Archive:
 
     async def _list_descendant_ids(self, sid):
         return []
+
+    async def list_workspace_descendant_ids(self, session_ids):
+        return [child for sid in session_ids for child in await self._list_descendant_ids(sid)]
 
     async def delete_archived_sessions(self, ids):
         for sid in ids:
@@ -477,8 +483,10 @@ async def test_lost_delete_response_does_not_resurrect_deleted_memory():
         execute = pipe.execute
         async def lost(*a, **kw):
             nonlocal failed
+            tombstone = any(command[0] == "HSET" and "delete_id" in command
+                            for command, _ in pipe.command_stack)
             result = await execute(*a, **kw)
-            if not failed:
+            if tombstone and not failed:
                 failed = True
                 raise TimeoutError("lost delete response")
             return result
@@ -504,8 +512,10 @@ async def test_lost_delete_and_confirmation_response_force_resource_reload():
         execute = pipe.execute
         async def lost(*a, **kw):
             nonlocal failed
+            tombstone = any(command[0] == "HSET" and "delete_id" in command
+                            for command, _ in pipe.command_stack)
             result = await execute(*a, **kw)
-            if not failed:
+            if tombstone and not failed:
                 failed = True
                 raise TimeoutError("lost delete response")
             return result
@@ -914,3 +924,25 @@ async def test_delete_during_slow_archive_keeps_tombstone_and_pending_delete():
         release.set()
         await archiving
         await value.close()
+
+
+@pytest.mark.asyncio
+async def test_activity_projection_survives_old_writer_and_deletion(monkeypatch):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    created = await value.create_run(command(), CONTEXT)
+    sid = created.handle.session_id
+    key = value._session_key(sid)
+    await transition(value, created, RunState.RUNNING, "running")
+    with monkeypatch.context() as patch:
+        patch.setattr(value, "_run_metadata_batch", AsyncMock(side_effect=AssertionError("ledger read")))
+        assert await value.has_nonterminal_sessions([sid])
+        assert await value.has_nonterminal_session_trees([sid])
+        assert not await value.filter_suspended_session_ids([sid])
+        # Older writers maintain the Run index but leave stale activity fields.
+        await redis.hset(key, mapping={"activity_revision": "0", "has_nonterminal": "0", "has_suspended": "1"})
+        assert await value.has_nonterminal_sessions([sid])
+        assert not await value.filter_suspended_session_ids([sid])
+        await redis.hset(key, "deleted", "1")
+        assert not await value.has_nonterminal_sessions([sid])
+    await value.close()

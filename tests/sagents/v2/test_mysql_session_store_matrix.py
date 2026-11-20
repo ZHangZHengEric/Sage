@@ -606,7 +606,10 @@ async def test_mysql_export_reads_cold_durable_aggregate_without_loading_other_s
     head = payload["sessions"][0]
     cursor = AsyncMock()
     cursor.fetchone.return_value = (json.dumps(compact), head["revision"], head["last_sequence"])
-    cursor.fetchall.side_effect = [[], [(run_id, json.dumps(event)) for run_id, events in payload["run_events"].items() for event in events]]
+    cursor.fetchall.side_effect = [[], [
+        (run_id, event["run_sequence"], json.dumps(event))
+        for run_id, events in payload["run_events"].items() for event in reversed(events)
+    ]]
     connection = AsyncMock()
     connection.closed = False
     connection.cursor = MagicMock()

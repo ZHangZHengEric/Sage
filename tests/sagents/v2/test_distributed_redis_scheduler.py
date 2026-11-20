@@ -9,6 +9,8 @@ from typing import cast
 
 import asyncio
 from datetime import timedelta
+import json
+from unittest.mock import patch
 
 import fakeredis
 import fakeredis.aioredis
@@ -34,12 +36,12 @@ async def scheduler_pair():
     server = fakeredis.FakeServer()
     pairs = []
 
-    def create(*, queue_ids=("default", "default"), **options):
+    def create(*, queue_ids=("default", "default"), release_ids=None, **options):
         pair = []
-        for queue_id in queue_ids:
+        for queue_id, release_id in zip(queue_ids, release_ids or (None,) * len(queue_ids), strict=True):
             value = RedisDistributedScheduler(
                 redis_url="redis://unused/0", key_prefix=f"scheduler-test-{len(pairs)}",
-                queue_id=queue_id, **options)
+                queue_id=queue_id, release_id=release_id, **options)
             value._redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
             pair.append(value)
         pairs.append(pair)
@@ -68,6 +70,102 @@ async def test_submit_and_claim_are_shared_and_idempotent_between_instances(sche
     await second.assert_fence(lease)
     await second.release(lease, LeaseReleaseReason.COMPLETED)
     assert await claim(first) is None
+
+
+@pytest.mark.asyncio
+async def test_release_handoff_allows_active_replicas_and_preserves_inflight_lease(scheduler_pair):
+    old, first, second = scheduler_pair(queue_ids=("server",) * 3,
+                                        release_ids=("blue", "green", "green"))
+    key = old.active_release_key(old.key_prefix)
+    await old.submit(work("inflight"))
+    assert await claim(old) is None
+    await old._redis.set(key, "blue")
+    lease = await claim(old, "old")
+    await old.submit(work("queued"))
+    assert await claim(first) is None
+    await old._redis.set(key, "green")
+    assert await claim(old) is None
+    renewed = await old.renew(lease, lease_duration=timedelta(seconds=60))
+    assert renewed.expires_at > lease.expires_at
+    await old.release(renewed, LeaseReleaseReason.COMPLETED)
+
+    leases = await asyncio.gather(claim(first, "green-a"), claim(second, "green-b"))
+    assert [row.work.work_id for row in leases if row] == ["work-queued"]
+    await first.submit(work("another"))
+    idle_replica = second if leases[0] else first
+    assert (await claim(idle_replica)).work.work_id == "work-another"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fallback", (False, True))
+async def test_handoff_rejects_claim_that_was_already_in_progress(scheduler_pair, fallback):
+    old, new = scheduler_pair(queue_ids=("managed_agent",) * 2, release_ids=("old", "new"))
+    key = old.active_release_key(old.key_prefix)
+    await old._redis.set(key, "old")
+    item = work("racing")
+    await old.submit(item)
+    watch = old._watch_claim
+
+    async def switch_after_check(pipe, state_key):
+        eligible = await watch(pipe, state_key)
+        if eligible:
+            await new._redis.set(key, "new")
+        return eligible
+
+    with patch.object(old, "_watch_claim", side_effect=switch_after_check) as watched:
+        if fallback:
+            with patch.object(old, "_try_claim", return_value=NotImplemented):
+                assert await claim(old) is None
+        else:
+            assert await claim(old) is None
+    assert watched.await_count >= 1
+    assert (await claim(new)).work == item
+
+
+@pytest.mark.asyncio
+async def test_indexed_claim_reads_only_due_work_and_repairs_legacy_state(scheduler_pair):
+    first, second = scheduler_pair()
+    for i in range(12):
+        assert await first.submit(work(f"later-{i}", available_at=utc_now() + timedelta(hours=1)))
+    with patch.object(second, "_mutate", side_effect=AssertionError("full queue read during idle poll")):
+        assert await claim(second) is None
+
+    ready = work("ready")
+    assert await first.submit(ready)
+    state_key = first.key_prefix + ":state"
+    base = await first._redis.get(state_key)
+    with (
+        patch.object(second, "_reference", wraps=second._reference) as reference,
+        patch.object(second, "_mutate", side_effect=AssertionError("full snapshot used for ready claim")),
+    ):
+        lease = await claim(second)
+    assert lease is not None and lease.work == ready
+    snapshot = reference.call_args.args[1]
+    assert [item["work_id"] for item in snapshot["items"]] == [ready.work_id]
+    stored = json.loads(await first._redis.get(state_key))
+    assert stored["leases"][0]["lease_id"] == lease.lease_id
+    assert stored["items"] == json.loads(base)["items"]
+    assert len(await first.existing_work_ids()) == 13
+
+    # Reopen the previous journal format with its in-flight lease. After
+    # initialization even a plain JSON reader must observe the same fence.
+    await first._redis.set(state_key, base + "\x1e" + json.dumps({"lease": stored["leases"][0]}))
+    await first._mutate(lambda queue: queue.pending_count())
+    restored = json.loads(await first._redis.get(state_key))
+    assert restored["leases"] == stored["leases"]
+    await second.assert_fence(lease)
+    assert await claim(second) is None
+    await first.release(lease, LeaseReleaseReason.COMPLETED)
+    ready = work("legacy")
+    assert await first.submit(ready)
+    key = first.key_prefix + ":state"
+    legacy = json.loads(await first._redis.get(key))
+    legacy.pop("claim_epoch")
+    await first._redis.set(key, json.dumps(legacy))
+    await first._redis.delete(first._claim_due_key("default"))
+    lease = await claim(second)
+    assert lease is not None and lease.work == ready
+    assert await first._redis.zcard(first._claim_due_key("default")) == 12
 
 
 @pytest.mark.asyncio
@@ -253,3 +351,72 @@ async def test_restore_queued_reopens_retired_receipt_atomically_and_respects_le
     assert await first.submit(cancelled)
     assert await first.cancel(cancelled.work_id)
     assert not await second.restore_queued(cancelled)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retention", [0, 2])
+async def test_incremental_lease_updates_preserve_v1_arrays_and_receipts(scheduler_pair, retention):
+    owner, peer = scheduler_pair(max_retained_terminal_items=retention)
+    items = [work(str(i), tenant=str(i)) for i in range(5)]
+    for item in items:
+        await owner.submit(item)
+    leases = [await claim(owner) for _ in items]
+    with patch.object(peer, "_mutate", side_effect=AssertionError("full registry read")):
+        for index in (2, 0, 1, 4, 3):
+            lease = await peer.renew(leases[index], lease_duration=timedelta(seconds=60))
+            await peer.release(lease, LeaseReleaseReason.DEFERRED, requeue=True)
+            retry = await claim(peer)
+            assert retry.work.attempt == lease.work.attempt + 1
+            await peer.release(retry, LeaseReleaseReason.COMPLETED)
+            raw = json.loads(await owner._redis.get(owner.key_prefix + ":state"))
+            assert retry.work.work_id not in {row["work_id"] for row in raw["items"]}
+            assert len(raw["terminal_idempotency_keys"]) <= retention
+    assert set(raw["idempotency"]) == set(raw["terminal_idempotency_keys"])
+
+
+@pytest.mark.asyncio
+async def test_claim_fallback_uses_one_canonical_value_after_legacy_rewrite(scheduler_pair):
+    producer, reader = scheduler_pair()
+    item = work("legacy-rewrite")
+    await producer.submit(item)
+    key = producer.key_prefix + ":state"
+
+    async def legacy_write(_operation):
+        state = json.loads(await producer._redis.get(key))
+        state.pop("claim_epoch")
+        await producer._redis.set(key, json.dumps(state))
+        return NotImplemented
+
+    with (
+        patch.object(reader, "_try_claim", side_effect=legacy_write),
+        patch.object(reader, "_indexed_claim", side_effect=AssertionError("retried stale byte ranges")),
+    ):
+        lease = await claim(reader)
+    assert lease.work == item
+    await producer.assert_fence(lease)
+    assert await claim(producer) is None
+    await reader.release(lease, LeaseReleaseReason.COMPLETED)
+
+
+@pytest.mark.asyncio
+async def test_existing_ids_follow_cancellation_release_and_legacy_overwrite(scheduler_pair):
+    first, reader = scheduler_pair()
+    ready, cancelled = work("ready"), work("cancelled")
+    await first.submit(ready)
+    await first.submit(cancelled)
+    await first.cancel(cancelled.work_id)
+    key = first.key_prefix + ":state"
+    with patch.object(reader._redis, "get", side_effect=AssertionError("full queue read")):
+        assert await reader.existing_work_ids() == {ready.work_id, cancelled.work_id}
+        lease = await claim(first)
+        assert lease and lease.work == ready
+        assert await reader.existing_work_ids() == {ready.work_id, cancelled.work_id}
+        await first.release(lease, LeaseReleaseReason.COMPLETED)
+        assert await reader.existing_work_ids() == {cancelled.work_id}
+
+    # A pre-index writer replaces the document and leaves the old index behind.
+    legacy = json.loads(await first._redis.get(key))
+    legacy.pop("claim_epoch")
+    legacy["cancelled"] = ["legacy-id"]
+    await first._redis.set(key, json.dumps(legacy))
+    assert await reader.existing_work_ids() == {"legacy-id"}

@@ -118,11 +118,18 @@ class RunMetadataQueries:
 
     async def authorized_run_metadata_page(self, session_ids, context, *, after=None, limit=101, agent_id='', states=()):
         store = cast("SessionStoreCoordinator", self)
-        from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
-        from sagents.v2.contracts.principals import ActorRef
         if not 1 <= limit <= 201 or len(session_ids) > 200:
             raise ValueError('invalid Run metadata page')
         rows, owners = await store._run_metadata_batch(session_ids)
+        return RunMetadataQueries._authorized_metadata_page(
+            self, session_ids, context, rows, owners, after=after, limit=limit, agent_id=agent_id, states=states,
+        )
+
+    def _authorized_metadata_page(self, session_ids, context, rows, owners, *, after, limit, agent_id, states):
+        store = cast("SessionStoreCoordinator", self)
+        from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+        from sagents.v2.contracts.principals import ActorRef
+
         allowed = []
         for sid in session_ids:
             if sid not in owners:

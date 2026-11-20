@@ -134,12 +134,16 @@ async def test_mysql_cold_views_batch_all_sessions_and_only_selected_history():
     assert len(views) == 20
     assert len(cursor.queries) == 2
     assert all(not view.runs[0].events for view in views.values())
-    cursor.responses = [base_rows,[],[('s0',run_ids[0],event.model_dump(mode='json')) for event in memory._run_events[run_ids[0]]]]
+    cursor.responses = [base_rows, [], [
+        ('s0', run_ids[0], event.session_sequence, event.run_sequence, event.model_dump(mode='json'))
+        for event in reversed(memory._run_events[run_ids[0]])
+    ]]
     cursor.queries.clear()
     views = await store.read_session_views(list(payloads),include_events=True,run_ids=run_ids[:1])
     assert views['s0'].runs[0].events[0].type == 'run.accepted'
     assert all(not view.runs for sid,view in views.items() if sid != 's0')
     assert len(cursor.queries) == 3
+    assert 'ORDER BY' not in cursor.queries[-1][0]
     assert 'run_id IN (%s)' in cursor.queries[-1][0]
     assert cursor.queries[-1][1][-1] == run_ids[0]
 

@@ -95,3 +95,18 @@ async def test_sql_failure_rolls_back_entire_archive():
         await value.archive_session(await payload(), {})
     connection.commit.assert_not_awaited()
     connection.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_attachment_id_probe_limits_small_reads_and_large_query_size():
+    value, _, cursor = archive(offsets=[("present",)])
+    assert await value.archived_attachment_ids("session", set()) == set()
+    cursor.execute.assert_not_awaited()
+    assert await value.archived_attachment_ids("session", ["present", "missing"]) == {"present"}
+    statement, params = cursor.execute.await_args.args
+    assert "artifact_id IN (%s, %s)" in statement
+    assert params == ("session", "present", "missing")
+    await value.archived_attachment_ids("session", list(range(value.batch_rows + 1)))
+    statement, params = cursor.execute.await_args.args
+    assert " IN (" not in statement
+    assert params == ("session",)

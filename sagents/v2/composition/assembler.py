@@ -614,8 +614,8 @@ class ApplicationAssembler:
         )
 
         delegation_limiter = DelegationConcurrencyLimiter(
-            max_concurrency=8,
-            max_per_tenant=2,
+            max_concurrency=runtime_config.delegation.max_concurrency,
+            max_per_tenant=runtime_config.delegation.max_per_tenant,
         )
         runtime_composition_hash: str | None = None
 

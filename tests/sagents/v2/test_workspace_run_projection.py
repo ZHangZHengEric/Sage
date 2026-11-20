@@ -147,7 +147,7 @@ async def test_redis_probe_does_not_revisit_hot_terminal_child_in_stale_archive(
                 await cleanup.aclose()
 
 
-async def test_redis_workspace_page_reads_global_parent_metadata_once():
+async def test_redis_workspace_page_uses_warm_parent_index_without_global_reads():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
     setattr(archive, 'list_workspace_descendant_ids', AsyncMock(return_value=[]))
@@ -155,13 +155,23 @@ async def test_redis_workspace_page_reads_global_parent_metadata_once():
     state = redis_store(redis, archive)
     try:
         await state._ensure_ready()
-        original = redis.hgetall
-        async def parents(*args):
-            return await original(*args)
-        redis.hgetall = AsyncMock(side_effect=parents)
+        await redis.hset(state._key("parents"), mapping={
+            f"unrelated-{number}": f"other-{number}" for number in range(500)
+        })
+        await state._migrate_child_edges()
+        original = redis.pipeline
+        full_read = AsyncMock(side_effect=AssertionError("read the entire parent map"))
+
+        def pipeline(*args, **kwargs):
+            pipe = original(*args, **kwargs)
+            pipe.hgetall = full_read
+            return pipe
+
+        redis.hgetall = full_read
+        redis.pipeline = pipeline
         roots = [f"root-{number}" for number in range(200)]
         assert not await state.has_nonterminal_session_trees(roots)
-        redis.hgetall.assert_awaited_once_with(state._key("parents"))
+        full_read.assert_not_awaited()
         getattr(archive, 'list_workspace_descendant_ids').assert_awaited_once_with(sorted(roots))
     finally:
         await state.close()

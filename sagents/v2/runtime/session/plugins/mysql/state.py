@@ -428,51 +428,8 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
 
 
     async def filter_suspended_session_ids(self, session_ids):
-        """Project current Run states without installing any Session history."""
-        selected = set()
-        ids = tuple(session_ids)
-        for start in range(0, len(ids), 128):
-            batch = ids[start:start + 128]
-            marks = ",".join(["%s"] * len(batch))
-            # A compact base can be older than its journal. Rank only the tiny
-            # state projections, never fetch checkpoint/event JSON into Python.
-            statement = f"""
-                WITH states AS (
-                    SELECT s.session_id, r.run_id, r.state,
-                        CAST(JSON_UNQUOTE(JSON_EXTRACT(s.compact_state, '$.sessions[0].revision')) AS UNSIGNED) AS revision
-                    FROM {self._table('sessions')} s,
-                        JSON_TABLE(s.compact_state, '$.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
-                    WHERE s.session_id IN ({marks})
-                    UNION ALL
-                    SELECT m.session_id, r.run_id, r.state, m.revision
-                    FROM {self._table('session_mutations')} m,
-                        JSON_TABLE(m.mutation, '$.upserts.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
-                    WHERE m.session_id IN ({marks})
-                    UNION ALL
-                    SELECT m.session_id, r.run_id, r.state, m.revision
-                    FROM {self._table('session_mutations')} m,
-                        JSON_TABLE(m.mutation, '$.patches.runs[*]' COLUMNS (
-                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
-                    WHERE m.session_id IN ({marks}) AND r.state IS NOT NULL
-                ), latest AS (
-                    SELECT session_id, state,
-                        ROW_NUMBER() OVER (PARTITION BY session_id, run_id ORDER BY revision DESC) AS position
-                    FROM states
-                ) SELECT DISTINCT session_id FROM latest WHERE position = 1 AND state = 'suspended'
-            """
-            async with self._reader_connection() as connection:
-                async with connection.cursor() as cursor:
-                    await cursor.execute(statement, batch * 3)
-                    selected.update(str(row[0]) for row in await cursor.fetchall())
-        return selected
-
-
-
-
-
-
+        from .workspace_probe import suspended_sessions
+        return await suspended_sessions(self, session_ids)
 
     backend = "mysql"
     json_type = "JSON"

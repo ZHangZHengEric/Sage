@@ -346,8 +346,12 @@ class AuthorizedSessionAccess:
     async def delete_session(self, session_id: str, context: RequestContext, *,
                              require_derived_cleanup: bool = False) -> None:
         await self._authorize(session_id, context)
-        descendants = await self._session_store.list_descendant_sessions(session_id)
-        deleted_session_ids = (session_id, *(value.session_id for value in descendants))
+        descendant_ids = getattr(self._session_store, "list_workspace_descendant_ids", None)
+        if callable(descendant_ids):
+            deleted_session_ids = (session_id, *await descendant_ids((session_id,)))
+        else:
+            descendants = await self._session_store.list_descendant_sessions(session_id)
+            deleted_session_ids = (session_id, *(value.session_id for value in descendants))
         if require_derived_cleanup:
             # Keep the canonical tree discoverable until every external
             # cleaner succeeds so an interrupted purge can retry all children.

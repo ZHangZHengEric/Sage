@@ -223,9 +223,8 @@ class SqlSessionPersistence(SqlSessionCommit):
                 mutation_rows = await cursor.fetchall()
                 await cursor.execute(
                     f"""
-                    SELECT run_id, event FROM {self._table("run_events")}
+                    SELECT run_id, run_sequence, event FROM {self._table("run_events")}
                     WHERE session_id = %s
-                    ORDER BY run_id, run_sequence
                     """,
                     (session_id,),
                 )
@@ -259,8 +258,8 @@ class SqlSessionPersistence(SqlSessionCommit):
                     )
                     mutations = await cursor.fetchall()
                     await cursor.execute(
-                        f"SELECT session_id, run_id, event FROM {self._table('run_events')} "
-                        f"WHERE session_id IN ({marks}) ORDER BY session_id, run_id, run_sequence",
+                        f"SELECT session_id, run_id, run_sequence, event FROM {self._table('run_events')} "
+                        f"WHERE session_id IN ({marks})",
                         batch,
                     )
                     events = await cursor.fetchall()
@@ -271,8 +270,8 @@ class SqlSessionPersistence(SqlSessionCommit):
                             mutation_rows.setdefault(sid, []).append(
                                 (revision, mutation)
                             )
-                        for sid, rid, event in events:
-                            event_rows.setdefault(sid, []).append((rid, event))
+                        for sid, rid, sequence, event in events:
+                            event_rows.setdefault(sid, []).append((rid, sequence, event))
                         decoded = {}
                         for sid, *row in bases:
                             payload = self._decode_session_rows(

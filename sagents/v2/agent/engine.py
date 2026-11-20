@@ -176,6 +176,7 @@ class _DriveIteration:
     empty_response_retries: int
     context_overflow_retries: int
     stop: bool = False
+    ledger_digest: str | None = None
 
 
 class AgentLoopEngine:
@@ -654,21 +655,8 @@ class AgentLoopEngine:
             tool_calls=(model_call,),
         )
         state = state.model_copy(update={"messages": (*state.messages, assistant)})
-        run = await self._record_tool_proposal(
-            run, call, context, state.turn_id, step_id
-        )
-        policy = await self.tool_policy.decide(
-            ToolPolicyContext(
-                run_id=run.run_id,
-                actor=context.actor,
-                definition=definition,
-                call=call,
-                invocation_mode=command.invocation_mode,
-            )
-        )
-        policy = await self._consult_approval_memory(run, policy)
-        run = await self._record_policy(
-            run, call, policy, context, state.turn_id, step_id
+        run, policy, _ = await self._authorize_tool_call(
+            run, call, definition, context, state.turn_id, step_id, command.invocation_mode
         )
         if policy.action == ToolPolicyAction.ALLOW:
             run, result = await self._dispatch_tool(
@@ -1572,7 +1560,10 @@ class AgentLoopEngine:
             if current.state != RunState.RUNNING:
                 raise SageV2Error(RuntimeErrorInfo(code="model.recovery_cancelled",
                     category=ErrorCategory.CANCELLED, message="Model call was cancelled"))
-            budget = await evaluate_run_budget(self.runtime.session_store, current, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, current, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 raise SageV2Error(budget.error)
         scope.check = check_call
@@ -1599,6 +1590,7 @@ class AgentLoopEngine:
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
         context_overflow_retries = 0
+        ledger_digest = None
         from sagents.v2.model.recovery_scope import recovery_scope
         from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
         scope = await self._create_recovery_scope(run, state, command, context)
@@ -1609,8 +1601,9 @@ class AgentLoopEngine:
                 state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(
                     update={"run_requests": max(scope.run_requests, state.model_recovery.run_requests)})})
                 iteration = await self._drive_step(run, state, context, command, max_steps,
-                    empty_response_retries, context_overflow_retries)
+                    empty_response_retries, context_overflow_retries, ledger_digest)
                 run, state = iteration.run, iteration.state
+                ledger_digest = iteration.ledger_digest
                 empty_response_retries = iteration.empty_response_retries
                 context_overflow_retries = iteration.context_overflow_retries
                 if iteration.stop:
@@ -1620,12 +1613,15 @@ class AgentLoopEngine:
     async def _drive_step(
         self, run: RunSnapshot, state: AgentLoopCheckpointState,
         context: RequestContext, command: StartRun, max_steps: int,
-        empty_response_retries: int, context_overflow_retries: int,
+        empty_response_retries: int, context_overflow_retries: int, ledger_digest: str | None,
     ) -> _DriveIteration:
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
         if run.state == RunState.SUSPEND_REQUESTED:
             return _DriveIteration(await self._suspend_at_safe_point(run, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
-        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+        budget = await evaluate_run_budget(
+            self.runtime.session_store, run, self.clock(),
+            usage_cache=self._budget_usage_cache, run_command=command,
+        )
         if budget.error is not None:
             return _DriveIteration(await self._fail(run, state, None, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
         if state.provider_retry_at is not None:
@@ -1647,7 +1643,10 @@ class AgentLoopEngine:
                 await self._release_run_resources(run.run_id)
                 return _DriveIteration(current, state, empty_response_retries, context_overflow_retries, stop=True)
             run = current
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, None, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             state = state.model_copy(update={
@@ -1684,9 +1683,10 @@ class AgentLoopEngine:
                     "self_configuration_revision": self.self_configuration.revision
                 }
             )
-        state = state.model_copy(
-            update={"messages": order_tool_context(state.messages)}
-        )
+        ordered_messages = order_tool_context(state.messages)
+        if ordered_messages != state.messages:
+            ledger_digest = None
+            state = state.model_copy(update={"messages": ordered_messages})
         # Phase 1: observe control-plane state only at a safe boundary. A
         # pause never snapshots the middle of arbitrary Python mutation.
         current = await self.runtime.get_run(run.run_id)
@@ -1696,7 +1696,8 @@ class AgentLoopEngine:
             await self._release_run_resources(run.run_id)
             return _DriveIteration(current, state, empty_response_retries, context_overflow_retries, stop=True)
         run = current
-        if state.pending_response_step_id is not None:
+        replaying_response = state.pending_response_step_id is not None
+        if replaying_response:
             step_id = state.pending_response_step_id
             response = self._pending_response(state)
             system_requirements = state.pending_response_system_requirements
@@ -1716,6 +1717,7 @@ class AgentLoopEngine:
                 # order. It is not an Interaction reply and does not resume a
                 # suspended Run by itself.
                 run = claimed.run
+                ledger_digest = None
                 steering_messages = tuple(
                     ModelMessage(
                         role=item.role,
@@ -1748,6 +1750,7 @@ class AgentLoopEngine:
                     ),
                 ),
                 recovery_state=state,
+                ledger_digest=ledger_digest,
             )
             # Phase 2: ContextAssembler creates the provider-facing projection.
             # The raw ledger and canonical RuntimeEvents are left unchanged.
@@ -1783,7 +1786,10 @@ class AgentLoopEngine:
             except Exception as exc:
                 return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='loop.request_preparation_failed', category=ErrorCategory.PROVIDER_PERMANENT, message=exception_diagnostic_message(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
             request = prepared_step.request
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             if budget.remaining_tokens is not None:
@@ -1795,14 +1801,15 @@ class AgentLoopEngine:
             tools = prepared_step.tools
             system_requirements = self._system_requirements(request.messages)
             available_tools = tuple(tool.name for tool in tools)
+            request_size = None
             try:
                 # Phase 3: deltas are emitted as replay-buffered events, followed
                 # by completed Items that are authoritative for final content.
-                request_size = len(json.dumps([m.model_dump(mode="json") for m in request.messages]))
-                if (state.rejected_input_characters is not None
-                    and request_size >= state.rejected_input_characters):
-                    raise SageV2Error(RuntimeErrorInfo(code="model.context_irreducible",
-                        category=ErrorCategory.VALIDATION, message="Context recovery did not reduce the rejected input."))
+                if state.rejected_input_characters is not None:
+                    request_size = self._request_characters(request.messages)
+                    if request_size >= state.rejected_input_characters:
+                        raise SageV2Error(RuntimeErrorInfo(code="model.context_irreducible",
+                            category=ErrorCategory.VALIDATION, message="Context recovery did not reduce the rejected input."))
                 if state.model_recovery.pending_action is not None:
                     state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(update={"dispatch_started": True})})
                     run = await self._commit_running(run, context, (), recovery_state=state)
@@ -1817,6 +1824,8 @@ class AgentLoopEngine:
                     return _DriveIteration(await self._suspend_at_safe_point(run, state.model_copy(update={'retry_model_step': True}), context), state, empty_response_retries, context_overflow_retries, stop=True)
                 if run.state in TERMINAL_RUN_STATES:
                     return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+                if request_size is None:
+                    request_size = self._request_characters(request.messages)
                 run, state, recovered = await self._recover_model_failure(
                     run, state, step_id, exc.info.model_copy(update={"metadata": {
                         **exc.info.metadata, "request_characters": request_size}}), command, context
@@ -1847,7 +1856,10 @@ class AgentLoopEngine:
         completed_tool_results: list[ToolExecutionResult] = []
         read_tools: set[str] = set()
         if response.tool_calls:
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                usage_cache=self._budget_usage_cache, run_command=command,
+            )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             # Phase 4: proposal and policy decision are committed before any
@@ -1859,7 +1871,12 @@ class AgentLoopEngine:
             prepared_calls: list[ToolCall] = []
             prepared_definitions: dict[str, ToolDefinition] = {}
             approval_calls: list[tuple[ToolCall, ToolPolicyDecision]] = []
-            crossed = await self._crossed_tool_calls(run, step_id)
+            crossed = await self._crossed_tool_calls(run, step_id) if replaying_response else {}
+            authorization_drafts: tuple[EventDraft, ...] = ()
+            immediate_dispatch = (
+                len(response.tool_calls) == 1
+                and not replaying_response
+            )
             for model_call in response.tool_calls:
                 if model_call.tool_call_id in settled:
                     continue
@@ -1936,21 +1953,9 @@ class AgentLoopEngine:
                     owner_agent_id=command.agent_id,
                     owner_session_id=run.session_id,
                 )
-                run = await self._record_tool_proposal(
-                    run, tool_call, context, state.turn_id, step_id
-                )
-                policy = await self.tool_policy.decide(
-                    ToolPolicyContext(
-                        run_id=run.run_id,
-                        actor=context.actor,
-                        definition=definition,
-                        call=tool_call,
-                        invocation_mode=command.invocation_mode,
-                    )
-                )
-                policy = await self._consult_approval_memory(run, policy)
-                run = await self._record_policy(
-                    run, tool_call, policy, context, state.turn_id, step_id
+                run, policy, authorization_drafts = await self._authorize_tool_call(
+                    run, tool_call, definition, context, state.turn_id, step_id,
+                    command.invocation_mode, immediate_dispatch=immediate_dispatch,
                 )
                 if policy.action == ToolPolicyAction.DENY:
                     denied = localize_error(
@@ -2007,6 +2012,7 @@ class AgentLoopEngine:
                 run, result = await self._dispatch_tool(
                     run, tool_call, context, state.turn_id, step_id, state,
                     definition=prepared_definitions.get(tool_call.tool_call_id),
+                    authorization_drafts=authorization_drafts,
                 )
                 if result is None:
                     return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
@@ -2089,7 +2095,10 @@ class AgentLoopEngine:
             state, response, completed_tool_results, read_tools
         )
         repeated = repeated_cycles(state.response_fingerprints)
-        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+        budget = await evaluate_run_budget(
+            self.runtime.session_store, run, self.clock(),
+            usage_cache=self._budget_usage_cache, run_command=command,
+        )
         if budget.error is not None:
             return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
         signals = await self._continuation_signals(run.run_id, state)
@@ -2273,9 +2282,9 @@ class AgentLoopEngine:
                             "reason": "A tool operation may have applied but its outcome could not be verified. Recorded results are preserved; the operation was not repeated.",
                         }
                     )
-        run = await self._record_continuation(
-            run, decision, context, state.turn_id, step_id
-        )
+        decision_drafts = self._continuation_drafts(decision, state.turn_id, step_id)
+        if decision.action != ContinuationAction.CONTINUE_STEP:
+            run = await self._commit_running(run, context, decision_drafts)
         state = state.model_copy(
             update={
                 "pending_response_step_id": None,
@@ -2303,7 +2312,7 @@ class AgentLoopEngine:
                 ),
             })
             run = await self._commit_running(
-                run, context, (EventDraft(
+                run, context, (*decision_drafts, EventDraft(
                     type="step.completed", turn_id=state.turn_id, step_id=step_id,
                     data=StepEventData(state="completed", attempt=completed_step),
                 ), EventDraft(
@@ -2379,10 +2388,14 @@ class AgentLoopEngine:
                 "pending_continuation_reason": continuation_reason,
             }
         )
+        # The next step can reuse this digest if ordering and steering leave
+        # the ledger intact. Only the digest crosses the iteration boundary.
+        next_ledger_digest = self._ledger_digest(state.messages)
         run = await self._commit_running(
             run,
             context,
             (
+                *decision_drafts,
                 *continuation_drafts,
                 EventDraft(
                     type="step.completed",
@@ -2394,8 +2407,12 @@ class AgentLoopEngine:
                 ),
             ),
             recovery_state=state,
+            ledger_digest=next_ledger_digest,
         )
-        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+        return _DriveIteration(
+            run, state, empty_response_retries, context_overflow_retries,
+            ledger_digest=next_ledger_digest,
+        )
 
     def _state_after_model_response(
         self, state, response, step_id, requirements, tools
@@ -2680,7 +2697,10 @@ class AgentLoopEngine:
             scope = current_recovery_scope()
             if scope is not None:
                 await stack.enter_async_context(scope.enforce_deadline())
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+            budget = await evaluate_run_budget(
+                self.runtime.session_store, run, self.clock(),
+                check_tokens=False, run_command=command,
+            )
             iterator = stream.__aiter__()
             pending = None
             poll_seconds = 0.1
@@ -2713,7 +2733,10 @@ class AgentLoopEngine:
                         yield event, None
                         continue
                     if deadline_expired:
-                        expired = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+                        expired = await evaluate_run_budget(
+                            self.runtime.session_store, run, self.clock(),
+                            check_tokens=False, run_command=command,
+                        )
                         if expired.error is not None:
                             raise SageV2Error(expired.error)
                     current = await self.runtime.get_run(run.run_id)
@@ -3034,48 +3057,69 @@ class AgentLoopEngine:
         )
         return run, response, None
 
+    async def _authorize_tool_call(
+        self, run, call, definition, context, turn_id, step_id, invocation_mode,
+        *, immediate_dispatch=False,
+    ) -> tuple[RunSnapshot, ToolPolicyDecision, tuple[EventDraft, ...]]:
+        proposal = self._tool_proposal(call, turn_id, step_id)
+        # Opt in per implementation. Custom policies may observe the published
+        # proposal while deciding. Both paths persist the decision before dispatch.
+        batch = (
+            "batch_proposal_with_decision" in vars(type(self.tool_policy))
+            and self.tool_policy.batch_proposal_with_decision
+        )
+        if not batch:
+            run = await self._commit_running(run, context, (proposal,))
+        policy = await self.tool_policy.decide(ToolPolicyContext(
+            run_id=run.run_id, actor=context.actor, definition=definition, call=call,
+            invocation_mode=invocation_mode,
+        ))
+        policy = await self._consult_approval_memory(run, policy)
+        decision = self._tool_policy_draft(policy, turn_id, step_id)
+        drafts = (proposal, decision) if batch else (decision,)
+        if batch and immediate_dispatch and policy.action == ToolPolicyAction.ALLOW:
+            return run, policy, drafts
+        run = await self._commit_running(run, context, drafts)
+        return run, policy, ()
+
+    @staticmethod
+    def _tool_proposal(call, turn_id, step_id) -> EventDraft:
+        return EventDraft(
+            type="tool.call.proposed",
+            turn_id=turn_id,
+            step_id=step_id,
+            data=ToolEventData(
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool_name,
+                state="proposed",
+                operation_id=call.operation_id,
+                idempotency_key=call.idempotency_key,
+                arguments=call.arguments,
+            ),
+        )
+
     async def _record_tool_proposal(self, run, call, context, turn_id, step_id) -> RunSnapshot:
-        return await self._commit_running(
-            run,
-            context,
-            (
-                EventDraft(
-                    type="tool.call.proposed",
-                    turn_id=turn_id,
-                    step_id=step_id,
-                    data=ToolEventData(
-                        tool_call_id=call.tool_call_id,
-                        tool_name=call.tool_name,
-                        state="proposed",
-                        operation_id=call.operation_id,
-                        idempotency_key=call.idempotency_key,
-                        arguments=call.arguments,
-                    ),
-                ),
+        return await self._commit_running(run, context, (self._tool_proposal(call, turn_id, step_id),))
+
+    @staticmethod
+    def _tool_policy_draft(policy, turn_id, step_id) -> EventDraft:
+        payload = policy.interaction_payload
+        return EventDraft(
+            type="policy.decision.recorded",
+            turn_id=turn_id,
+            step_id=step_id,
+            data=PolicyEventData(
+                decision_id=policy.decision_id,
+                decision=policy.action.value,
+                policy_version=policy.policy_version,
+                reason=policy.reason,
+                remembered_by=payload.get("remembered_by"),
+                remembered_scope=payload.get("remembered_scope"),
             ),
         )
 
     async def _record_policy(self, run, call, policy, context, turn_id, step_id) -> RunSnapshot:
-        payload = policy.interaction_payload
-        return await self._commit_running(
-            run,
-            context,
-            (
-                EventDraft(
-                    type="policy.decision.recorded",
-                    turn_id=turn_id,
-                    step_id=step_id,
-                    data=PolicyEventData(
-                        decision_id=policy.decision_id,
-                        decision=policy.action.value,
-                        policy_version=policy.policy_version,
-                        reason=policy.reason,
-                        remembered_by=payload.get("remembered_by"),
-                        remembered_scope=payload.get("remembered_scope"),
-                    ),
-                ),
-            ),
-        )
+        return await self._commit_running(run, context, (self._tool_policy_draft(policy, turn_id, step_id),))
 
     async def _consult_approval_memory(self, run, policy) -> ToolPolicyDecision:
         """用会话内已记住的审批收敛决定；未命中则补上 approve_and_remember 选项。
@@ -3176,7 +3220,13 @@ class AgentLoopEngine:
     async def _dispatch_tool(
         self, run, call, context, turn_id, step_id=None, state=None, *,
         definition: ToolDefinition | None = None,
+        authorization_drafts: tuple[EventDraft, ...] = (),
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
+        if authorization_drafts:
+            return await self._dispatch_tool_call(
+                run, call, context, turn_id, step_id, state,
+                definition=definition, authorization_drafts=authorization_drafts,
+            )
         return await self.dispatch_tool_call(
             run, call, context, turn_id, step_id=step_id, state=state,
             definition=definition,
@@ -3190,15 +3240,16 @@ class AgentLoopEngine:
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
 
         budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
-        command = await self.runtime.session_store.get_start_command(run.run_id)
-        command = with_session_context(command, run.session_id)
         if call.tool_name == "search_memory" and state is not None and state.pending_response_step_id is not None:
             restore_history_search = getattr(self.context_assembler, "restore_history_search", None)
             if restore_history_search is not None:
+                command = await self.runtime.session_store.get_start_command(run.run_id)
+                command = with_session_context(command, run.session_id)
                 await restore_history_search(command, state.messages, run_id=run.run_id)
         if call.tool_name == "analyze_audio":
             from sagents.v2.tool.contracts import remote_audio_input
 
+            command = await self.runtime.session_store.get_start_command(run.run_id)
             capabilities = await media_capabilities(
                 self.model, command.config.model_bindings.get("primary", "primary")
             )
@@ -3371,6 +3422,8 @@ class AgentLoopEngine:
         Recovery consumes receipts or reconciles started operations, never
         repeats a side effect merely because a sibling needed user input.
         """
+        if len(calls) <= 1:
+            return run, state, {}
         command = await self.runtime.session_store.get_start_command(run.run_id)
         if command.config.autonomous_error_recovery:
             from sagents.v2.agent.autonomous_recovery import unresolved_effects
@@ -3382,8 +3435,6 @@ class AgentLoopEngine:
         turn_id = state.turn_id
         results = {}
         fresh = [call for call in calls if call.tool_call_id not in crossed]
-        if len(calls) <= 1:
-            return run, state, results
         for call in fresh:
             run = await self._start_tool_execution(run, call, context, turn_id, step_id)
 
@@ -3473,11 +3524,14 @@ class AgentLoopEngine:
                         )
         return await self.runtime.get_run(run.run_id), state, results
 
-    async def _start_tool_execution(self, run, call, context, turn_id, step_id) -> RunSnapshot:
+    async def _start_tool_execution(
+        self, run, call, context, turn_id, step_id, *, authorization_drafts=()
+    ) -> RunSnapshot:
         run = await self._commit_running(
             run,
             context,
             (
+                *authorization_drafts,
                 EventDraft(
                     type="tool.call.dispatching",
                     turn_id=turn_id,
@@ -3515,6 +3569,8 @@ class AgentLoopEngine:
         step_id: str | None,
         state: AgentLoopCheckpointState | None,
         definition: ToolDefinition,
+        *,
+        authorization_drafts: tuple[EventDraft, ...] = (),
     ) -> tuple[RunSnapshot, ToolExecutionResult | None] | None:
         command = await self.runtime.session_store.get_start_command(run.run_id)
         if not command.config.autonomous_error_recovery:
@@ -3528,6 +3584,8 @@ class AgentLoopEngine:
             return None
         if definition.side_effect_level in {SideEffectLevel.NONE, SideEffectLevel.READ}:
             return None
+        if authorization_drafts:
+            run = await self._commit_running(run, context, authorization_drafts)
         for proposal, unknown in pending:
             if (
                 proposal
@@ -3663,6 +3721,15 @@ class AgentLoopEngine:
         self, run, call, context, turn_id, step_id=None, state=None, *,
         definition: ToolDefinition | None = None,
     ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
+        return await self._dispatch_tool_call(
+            run, call, context, turn_id, step_id, state, definition=definition,
+        )
+
+    async def _dispatch_tool_call(
+        self, run, call, context, turn_id, step_id, state, *,
+        definition: ToolDefinition | None = None,
+        authorization_drafts: tuple[EventDraft, ...] = (),
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Cross the tool side-effect barrier and settle or reconcile its result.
 
         `dispatching` is committed before calling the provider. Once control
@@ -3671,7 +3738,9 @@ class AgentLoopEngine:
         retry.
         """
 
-        previous = await self._crossed_tool_calls(run, step_id)
+        # An uncommitted authorization is only passed for a single fresh call
+        # in a new step. The durable start still precedes the external tool.
+        previous = {} if authorization_drafts else await self._crossed_tool_calls(run, step_id)
         if call.tool_call_id in previous:
             # Reuse the original operation identity, including after process loss.
             call = previous[call.tool_call_id]
@@ -3706,11 +3775,14 @@ class AgentLoopEngine:
             if definition is None:
                 definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
             guarded = await self._guard_unresolved_effect(
-                run, call, context, turn_id, step_id, state, definition
+                run, call, context, turn_id, step_id, state, definition,
+                authorization_drafts=authorization_drafts,
             )
             if guarded is not None:
                 return guarded
-            run = await self._start_tool_execution(run, call, context, turn_id, step_id)
+            run = await self._start_tool_execution(
+                run, call, context, turn_id, step_id, authorization_drafts=authorization_drafts,
+            )
             try:
                 run, result = await self._capture_tool_execution(
                     run, call, context, turn_id, step_id, state=state,
@@ -4521,11 +4593,12 @@ class AgentLoopEngine:
                     }
                 )
 
-        command = await self.runtime.session_store.get_start_command(run.run_id)
-        if result.error is not None and command.config.autonomous_error_recovery:
-            from sagents.v2.agent.autonomous_recovery import with_recovery_feedback
+        if result.error is not None:
+            command = await self.runtime.session_store.get_start_command(run.run_id)
+            if command.config.autonomous_error_recovery:
+                from sagents.v2.agent.autonomous_recovery import with_recovery_feedback
 
-            result = with_recovery_feedback(result)
+                result = with_recovery_feedback(result)
 
         item_id = new_id("item")
         status = (
@@ -4842,7 +4915,8 @@ class AgentLoopEngine:
         )
         return checkpoint, suspension
 
-    async def _record_continuation(self, run, decision, context, turn_id, step_id) -> RunSnapshot:
+    @staticmethod
+    def _continuation_drafts(decision, turn_id, step_id) -> tuple[EventDraft, ...]:
         drafts = [
             EventDraft(
                 type="continuation.decided",
@@ -4871,11 +4945,7 @@ class AgentLoopEngine:
                     data=UsageEventData(usage=decision.usage),
                 )
             )
-        return await self._commit_running(
-            run,
-            context,
-            tuple(drafts),
-        )
+        return tuple(drafts)
 
     @staticmethod
     def _context_for_command(context: RequestContext, command) -> RequestContext:
@@ -4888,33 +4958,23 @@ class AgentLoopEngine:
         return context.model_copy(update={"language": language})
 
     @staticmethod
-    def _ledger_digest(messages) -> str:
-        """Hash provider-neutral ledger facts, excluding regenerated context."""
+    def _request_characters(messages) -> int:
+        # Match the legacy json.dumps(list) character count without building
+        # a second copy of the entire provider request.
+        return sum(len(json.dumps(message.model_dump(mode="json"))) + 2 for message in messages) or 2
 
-        payload = []
-        for message in messages:
-            value = message.model_dump(mode="json")
-            # These provenance keys are deterministically added by event
-            # projection but are intentionally absent from the live model
-            # response object. They do not change provider-visible semantics.
-            value["metadata"] = {
-                key: item
-                for key, item in value.get("metadata", {}).items()
-                if key
-                not in {
-                    "source_session_id",
-                    "source_run_id",
-                    "source_item_id",
-                }
-            }
-            payload.append(value)
-        encoded = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+    @staticmethod
+    def _ledger_digest(messages) -> str:
+        """Hash the existing canonical JSON format one message at a time."""
+        digest = hashlib.sha256(b"[")
+        encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        exclude = {"metadata": {"source_session_id", "source_run_id", "source_item_id"}}
+        for index, message in enumerate(messages):
+            if index:
+                digest.update(b",")
+            digest.update(encoder.encode(message.model_dump(mode="json", exclude=exclude)).encode("utf-8"))
+        digest.update(b"]")
+        return f"sha256:{digest.hexdigest()}"
 
     @staticmethod
     def _interaction_input_items(
@@ -5162,7 +5222,8 @@ class AgentLoopEngine:
                 continue
 
     async def _commit_running(
-        self, run, context, drafts, *, expected_states=None, recovery_state=None
+        self, run, context, drafts, *, expected_states=None, recovery_state=None,
+        ledger_digest: str | None = None,
     ) -> RunSnapshot:
         snapshot = None
         if self._checkpoint_skills and self.skill_loader is not None:
@@ -5191,7 +5252,7 @@ class AgentLoopEngine:
                 session_revision=run.accepted_session_revision,
                 state=AgentLoopCheckpointCodec.encode(
                     recovery_state.model_copy(update={"execution_checkpoint": True}),
-                    ledger_digest=self._ledger_digest(recovery_state.messages),
+                    ledger_digest=ledger_digest or self._ledger_digest(recovery_state.messages),
                 ),
                 resolved_spec_hash=run.resolved_spec_hash,
                 created_at=self.clock(),

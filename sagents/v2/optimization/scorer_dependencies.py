@@ -53,9 +53,19 @@ def _members(root):
 
 
 def _environment(*, bind_runtime=False):
-    versions = sorted({(d.metadata['Name'].lower().replace('_', '-'), d.version)
-        for d in importlib.metadata.distributions() if d.metadata.get('Name')})
-    result = {'python': sys.version, 'platform': sys.platform, 'distributions': [list(v) for v in versions]}
+    # Distribution.metadata parses the entire long description. Only the two
+    # identity headers participate in this binding, including legacy egg-info.
+    from email.parser import HeaderParser
+
+    versions = set()
+    parser = HeaderParser()
+    for distribution in importlib.metadata.distributions():
+        raw = distribution.read_text("METADATA") or distribution.read_text("PKG-INFO")
+        headers = parser.parsestr(raw.partition("\n\n")[0]) if raw else distribution.metadata
+        name = headers.get("Name")
+        if name:
+            versions.add((name.lower().replace("_", "-"), headers.get("Version")))
+    result = {'python': sys.version, 'platform': sys.platform, 'distributions': [list(v) for v in sorted(versions)]}
     if bind_runtime:
         result['executable'] = os.path.abspath(sys.executable)
     return result

@@ -129,3 +129,48 @@ async def test_redacted_performance_summary_keeps_timing_json_beyond_content_lim
     finally:
         await diagnostics.close()
         trace.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pressure", ["input", "output", "children"])
+async def test_phoenix_timing_survives_content_budget(pressure):
+    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
+    from sagents.v2.runtime.observability.traces import StructuredTracer
+    from tests.app.v2.server.test_external_observability import capture_sample
+
+    exporter = InMemorySpanExporter()
+    trace = PhoenixTraceSink(endpoint="http://localhost:6006/v1/traces", content_mode="raw",
+                             max_retained_bytes=512 * 1024, exporter=exporter)
+    diagnostics = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    diagnostics.bind_trace_sink(trace)
+    children = []
+    try:
+        if pressure == "children":
+            for index in range(100):
+                child = TraceSpan(trace_id="1" * 32, span_id=f"{index + 1:016x}",
+                                  name="model.request", attributes={"input": "x" * 2048})
+                trace.start_span(child)
+                children.append(child)
+            assert trace.statistics()["dropped_spans"] > 0
+
+        root = StructuredTracer(trace, "test").start_span(
+            "agent.run", session_id="s", run_id="r",
+            attributes={"input": "x" * 100_000} if pressure == "input" else {},
+        )
+        capture_sample(diagnostics)
+        root.end(attributes={"output": "x" * 100_000} if pressure == "output" else {})
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].name == "agent.run"
+        attrs = spans[0].attributes
+        assert attrs is not None
+        assert attrs["sage.performance.incomplete"] is False
+        assert attrs["sage.performance.framework_ms"] == 4000
+        assert len(json.loads("".join(cast("Iterable[str]", attrs["sage.performance.data"])))) == 8
+        assert trace.statistics()["retained_bytes"] <= trace.max_retained_bytes
+    finally:
+        for child in children:
+            trace.end_span(child)
+        await diagnostics.close()
+        trace.close()
+    assert trace.statistics()["retained_bytes"] == 0

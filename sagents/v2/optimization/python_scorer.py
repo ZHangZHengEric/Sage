@@ -68,7 +68,7 @@ class PythonExecutionScorer:
             raise ScorerExecutionError('frozen scorer source changed', code='scorer.source_changed')
         try:
             if self.dependency_manifest is not None:
-                verify_dependencies(self.dependency_manifest, check_environment=self.python_executable is None)
+                verify_dependencies(self.dependency_manifest, check_environment=False)
         except ScorerDependencyError as error:
             raise ScorerExecutionError(str(error), code='scorer.dependencies_changed') from error
         # Do not inherit model credentials from the Desktop process environment.
@@ -78,7 +78,9 @@ class PythonExecutionScorer:
         # Import self-tests receive no live API and cannot bill the chosen model.
         if not validate and model_api is not None:
             environment[MODEL_API_ENV] = model_api.worker_environment()
-        verify_in_worker = self.python_executable is not None and self.dependency_manifest is not None
+        # The isolated worker has its own import path even with the host's
+        # interpreter. Validate its installed distributions inside that worker.
+        verify_in_worker = self.dependency_manifest is not None
         if verify_in_worker:
             payload = json.dumps({'request': json.loads(payload) if payload else None,
                                   'dependencies': self.dependency_manifest}).encode()
@@ -126,9 +128,9 @@ class PythonExecutionScorer:
                         try:
                             if self.dependency_manifest is not None:
                                 verify_capture(self.dependency_manifest, observed)
-                                verify_dependencies(self.dependency_manifest, check_environment=self.python_executable is None)
+                                verify_dependencies(self.dependency_manifest, check_environment=False)
                             else:
-                                verify_dependencies(observed, check_environment=self.python_executable is None)
+                                verify_dependencies(observed, check_environment=False)
                         except ScorerDependencyError as error:
                             raise ScorerExecutionError(str(error), code='scorer.dependencies_changed') from error
                         self.dependency_manifest = self.dependency_manifest or observed

@@ -59,6 +59,8 @@ def decode_metadata(row):
 
 
 class PostgresRunMetadataQueries:
+    _metadata_cte = staticmethod(postgres_metadata_cte)
+
     async def _run_metadata_batch(self, session_ids):
         store = self
         ids = tuple(dict.fromkeys(session_ids))
