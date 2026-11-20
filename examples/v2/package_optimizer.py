@@ -59,7 +59,8 @@ async def demo(root: Path):
         "tuner",
         "Improve the supplied agent within the allowed scope. Return a JSON patch only.",
     )
-    proposals = iter(("Verify units", "Be brief", "Verify units and arithmetic"))
+    proposals = ("Verify units", "Be brief", "Verify units and arithmetic")
+    training_by_round = {}
     scores = {
         "original": 0.4,
         "Verify units": 0.6,
@@ -81,14 +82,7 @@ async def demo(root: Path):
 
     def factory(bundle, workspace, ctx):
         name = bundle.manifest.metadata.id
-        if name == "demo.tuner":
-            text = json.dumps(
-                {
-                    "rationale": "Try an alternative conversion strategy",
-                    "instruction_guidance": next(proposals),
-                }
-            )
-        elif name == "demo.target":
+        if name == "demo.target":
             instructions = (
                 bundle.resolved_manifest().agents["assistant"].instructions.inline
             )
@@ -141,9 +135,32 @@ async def demo(root: Path):
 
     class DemoRunner:
         async def run(self, bundle, agent_id, content, ctx):
-            if bundle.manifest.metadata.id == "demo.evaluator":
+            if bundle.manifest.metadata.id in {"demo.evaluator", "demo.tuner"}:
                 request = json.loads(content)
-                if request["task"].startswith("Design"):
+                if bundle.manifest.metadata.id == "demo.tuner":
+                    data = request["data"]
+                    round_number = data["round"]
+                    guidance = proposals[round_number - 1]
+                    if "measured_training_case_ids" in data:
+                        training_by_round[round_number] = data["measured_training_case_ids"]
+                    answer = json.dumps({
+                        "rationale": "Compare a scripted guidance alternative",
+                        "instruction_guidance": guidance,
+                        "experiment": {
+                            "parent_hash": data["retained_parent_hash"],
+                            "mechanism": f"Replace guidance with: {guidance}",
+                            "applicability": "Scripted unit-conversion fixtures only",
+                            "change_locations": ["manifest.agents.assistant.instructions"],
+                            "existing_rule_gap": f"Retained guidance does not select the scripted '{guidance}' response",
+                            "expected_observation": f"Scripted target emits '{guidance}', scored {scores[guidance]}",
+                            "support_condition": "Measured training score improves without case regressions",
+                            "falsification_condition": "A measured training case regresses",
+                            "inconclusive_condition": "Scores tie or no valid observation is available",
+                            "training_case_ids": training_by_round[round_number],
+                            "protected_behaviors": ["Keep unit-conversion instructions and empty tool permissions"],
+                        },
+                    })
+                elif request["task"].startswith("Design"):
                     offset = len(request["data"]["excluded_cases"])
                     answer = json.dumps(
                         {
@@ -185,7 +202,7 @@ async def demo(root: Path):
                         }
                     )
 
-                # Make the evaluator a real v2 Agent invocation too.
+                # Bind the scripted response per invocation for both tuner and evaluator.
                 def grader_factory(package, workspace, context):
                     provider = ScriptedModelProvider(
                         (
