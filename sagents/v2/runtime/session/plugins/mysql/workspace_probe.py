@@ -1,10 +1,11 @@
 """Read current Run states without expanding every historical JSON document."""
 import json
 
-from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
+from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 NAMESPACE = 'sage.workspace.lifecycle.v1'
+_STATE_VALUES = frozenset(state.value for state in RunState)
 
 
 async def write_projection(cursor, table, sid, revision, states):
@@ -24,9 +25,18 @@ def _rows(encoded):
 
 
 async def has_nonterminal_sessions(store, session_ids, *, include_descendants):
+    return bool(await _matching_sessions(store, session_ids, include_descendants, suspended_only=False))
+
+
+async def suspended_sessions(store, session_ids):
+    return await _matching_sessions(store, session_ids, False, suspended_only=True)
+
+
+async def _matching_sessions(store, session_ids, include_descendants, *, suspended_only):
     ids = tuple(dict.fromkeys(session_ids))
+    selected = set()
     if not ids:
-        return False
+        return selected
     repairs = []
     # locations and journal writes commit together. Keep the roster, reverse
     # journal pages and compact fallback in one snapshot, including compaction.
@@ -59,14 +69,21 @@ async def has_nonterminal_sessions(store, session_ids, *, include_descendants):
                 heads = {}
                 for sid, run_id, revision, encoded in await cursor.fetchall():
                     pending_by_session.setdefault(sid, set()).add(run_id)
-                    heads[sid] = (revision, json.loads(encoded) if isinstance(encoded, (str, bytes)) else encoded)
+                    if sid not in heads:
+                        heads[sid] = (revision, json.loads(encoded) if isinstance(encoded, (str, bytes)) else encoded)
                 for sid, pending in pending_by_session.items():
                     revision, projection = heads[sid]
                     if (isinstance(projection, dict) and projection.get('revision') == revision
                             and isinstance(projection.get('states'), dict)
-                            and set(projection['states']) == pending):
-                        if any(state not in TERMINAL_RUN_STATES for state in projection['states'].values()):
-                            return True
+                            and projection['states'].keys() == pending
+                            and all(isinstance(value, str) and value in _STATE_VALUES
+                                    for value in projection['states'].values())):
+                        states = projection['states'].values()
+                        if suspended_only:
+                            if 'suspended' in states:
+                                selected.add(sid)
+                        elif any(state not in TERMINAL_RUN_STATES for state in states):
+                            return {sid}
                         continue
                     resolved = {}
                     before = None
@@ -92,8 +109,8 @@ async def has_nonterminal_sessions(store, session_ids, *, include_descendants):
                                 for change in _rows(encoded):
                                     run_id, state = change.get('run_id'), change.get('state')
                                     if run_id in pending and state is not None:
-                                        if state not in TERMINAL_RUN_STATES:
-                                            return True
+                                        if not suspended_only and state not in TERMINAL_RUN_STATES:
+                                            return {sid}
                                         resolved[run_id] = state
                                         pending.remove(run_id)
                             if not pending:
@@ -104,14 +121,17 @@ async def has_nonterminal_sessions(store, session_ids, *, include_descendants):
                         page_size = min(page_size * 4, 32)
                     if pending:
                         await cursor.execute(f"""
-                            SELECT JSON_EXTRACT(compact_state, '$.runs')
-                            FROM {store._table('sessions')} WHERE session_id = %s
+                            SELECT JSON_ARRAYAGG(JSON_OBJECT('run_id', r.run_id, 'state', r.state))
+                            FROM {store._table('sessions')} s, JSON_TABLE(s.compact_state,
+                                '$.runs[*]' COLUMNS (run_id VARCHAR(128) PATH '$.run_id',
+                                                    state VARCHAR(32) PATH '$.state')) r
+                            WHERE s.session_id = %s
                         """, (sid,))
                         row = await cursor.fetchone()
                         for run in _rows(row[0] if row else None):
                             if run['run_id'] in pending:
-                                if run.get('state') not in TERMINAL_RUN_STATES:
-                                    return True
+                                if not suspended_only and run.get('state') not in TERMINAL_RUN_STATES:
+                                    return {sid}
                                 resolved[run['run_id']] = run['state']
                                 pending.remove(run['run_id'])
                         if pending:
@@ -122,6 +142,8 @@ async def has_nonterminal_sessions(store, session_ids, *, include_descendants):
                                 message='Workspace Run state is missing',
                                 safe_to_resume=False,
                             ))
+                    if suspended_only and 'suspended' in resolved.values():
+                        selected.add(sid)
                     repairs.append((sid, heads[sid][0], resolved))
     if repairs:
         async with store._writer_connection() as connection:
@@ -133,4 +155,4 @@ async def has_nonterminal_sessions(store, session_ids, *, include_descendants):
             except BaseException:
                 await connection.rollback()
                 raise
-    return False
+    return selected

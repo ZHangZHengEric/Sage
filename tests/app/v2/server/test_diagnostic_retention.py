@@ -191,12 +191,46 @@ async def test_locked_active_prefix_does_not_block_terminal_eviction(database, r
         # Model writers may hold these row locks. Maintenance must select and
         # reclaim the later terminal records while the locks are still held.
         async with database.transaction() as writer:
-            await writer.execute(select(models.c.request_id).where(
-                models.c.session_id == case.session,
-                models.c.request_id.like("active-%"),
-            ).with_for_update())
+            # Point locks model independent writers. InnoDB can lock terminal
+            # records too when a LIKE predicate scans the entire session range.
+            for index in range(100):
+                await writer.execute(select(models.c.request_id).where(
+                    models.c.session_id == case.session,
+                    models.c.run_id == case.run,
+                    models.c.request_id == f"active-{index:03}",
+                ).with_for_update())
             assert await asyncio.wait_for(other.prune(now=case.now), 5) == 2
         assert_active_preserved(await case.records(), 100)
     finally:
         await other.close()
         await other_database.stop()
+
+
+async def test_under_budget_prune_skips_payload_sweep_and_detects_other_writers(retention_case, monkeypatch):
+    case = retention_case
+    await case.seed(active=1, terminal=())
+    case.sink.max_storage_bytes = 1 << 30
+
+    def reject_full_read(*args):
+        raise AssertionError("within-budget cleanup scanned diagnostic payloads")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(case.sink, "_file_usage", reject_full_read)
+        assert await case.sink.prune(now=case.now) == 0
+    # Another process published a new immutable part under a new directory.
+    await case.seed(active=0, terminal=("failed",))
+    case.sink.max_storage_bytes = 0
+    assert await case.sink.prune(now=case.now) == 1
+    assert_active_preserved(await case.records(), 1)
+
+
+async def test_incremental_gc_collects_old_empty_staging_file(retention_case):
+    import os
+    case = retention_case
+    directory = case.sink.storage.directory(("abandoned", "run", "request"))
+    directory.mkdir(parents=True)
+    staged = directory / ".pending-empty"
+    staged.touch()
+    os.utime(staged, (case.now - 7200,) * 2)
+    await case.sink.prune(now=case.now)
+    assert not staged.exists()

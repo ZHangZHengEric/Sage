@@ -70,3 +70,22 @@ async def test_projection_repair_failure_rolls_back():
         await state.has_nonterminal_sessions(['s'])
     conn.rollback.assert_awaited_once()
     conn.commit.assert_not_awaited()
+
+
+async def test_suspended_filter_repairs_old_writer_revision_and_checks_every_run():
+    state, _, writer, conn = probe([
+        ('s', 'still-running', 11, {'revision': 10, 'states': {'still-running': 'running', 'paused': 'running'}}),
+        ('s', 'paused', 11, {'revision': 10, 'states': {'still-running': 'running', 'paused': 'running'}}),
+    ], [[(11, '[{"run_id":"paused","state":"suspended"}]', None)],
+        [(10, '[{"run_id":"still-running","state":"running"}]', None)]])
+    assert await state.filter_suspended_session_ids(['s']) == {'s'}
+    assert json.loads(writer.execute.await_args.args[1][1]) == {
+        'revision': 11, 'states': {'still-running': 'running', 'paused': 'suspended'}}
+    conn.commit.assert_awaited_once()
+
+
+async def test_unknown_state_in_current_projection_falls_back_to_canonical_approval():
+    state, _, writer, _ = probe([('s', 'r', 3, {'revision': 3, 'states': {'r': None}})],
+                                [[(3, '[{"run_id":"r","state":"suspended"}]', None)]])
+    assert await state.filter_suspended_session_ids(['s']) == {'s'}
+    writer.execute.assert_awaited_once()
