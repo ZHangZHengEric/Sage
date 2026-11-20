@@ -60,13 +60,36 @@ def trace_content(sink: Any, value: Any) -> Any:
     if sink is None or getattr(sink, "content_mode", "redacted") == "metadata":
         return None
     if getattr(sink, "content_mode", "redacted") == "raw":
-        return json.loads(json.dumps(value, ensure_ascii=False, default=_raw_json))
+        return _raw_snapshot(value, set())
     limit = getattr(sink, "max_content_chars", 16384)
     safe = safe_trace_value(value, limit=limit)
     encoded = json.dumps(safe, ensure_ascii=False, default=str)
     if len(encoded) > limit:
         return {"truncated": True, "preview": encoded[: max(0, limit - 64)]}
     return safe
+
+
+def _raw_snapshot(value: Any, ancestors: set[int]) -> Any:
+    # Raw spans own their containers. Immutable text (including inline media)
+    # can be shared without encoding and decoding every byte at each trace hop.
+    kind = type(value)
+    if value is None or kind in (str, bool, float) or (kind is int and value.bit_length() <= 64):
+        return value
+    if id(value) in ancestors:
+        raise ValueError("Circular reference detected")
+    ancestors.add(id(value))
+    try:
+        if kind is dict and all(type(key) is str for key in value):
+            return {key: _raw_snapshot(item, ancestors) for key, item in value.items()}
+        if kind in (tuple, list):
+            return [_raw_snapshot(item, ancestors) for item in value]
+        if hasattr(value, "model_dump") and not isinstance(value, (dict, list, tuple, int, float, str)):
+            return _raw_snapshot(value.model_dump(mode="json"), ancestors)
+        # Retain the JSON encoder's coercion rules for extension objects and
+        # non-string keys, including collisions between normalized keys.
+        return json.loads(json.dumps(value, ensure_ascii=False, default=_raw_json))
+    finally:
+        ancestors.remove(id(value))
 
 
 def _raw_json(value: Any) -> Any:

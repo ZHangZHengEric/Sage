@@ -274,3 +274,25 @@ def test_many_pydantic_extras_are_preflighted_without_merging(monkeypatch):
     finally:
         if tracemalloc.is_tracing():
             tracemalloc.stop()
+
+
+def test_raw_trace_content_snapshots_containers_and_preserves_wire_values():
+    from types import SimpleNamespace
+    import json
+    from pydantic import BaseModel, field_serializer
+    from sagents.v2.runtime.observability.content import trace_content
+
+    class WireModel(BaseModel):
+        value: int
+
+        @field_serializer("value")
+        def serialize_value(self, value):
+            return str(value)
+
+    text = "图像" * 32768
+    source = {"messages": [WireModel(value=42), {"media": text}], "extra": ({1: True},)}
+    snapshot = trace_content(SimpleNamespace(content_mode="raw"), source)
+    expected = json.loads(json.dumps(source, default=lambda obj: obj.model_dump(mode="json")))
+    source["messages"][1]["media"] = ""
+    assert snapshot == expected
+    assert snapshot["messages"][1]["media"] is text

@@ -97,6 +97,24 @@ async def test_business_report_replays_committed_events_after_reopen(backend, tm
 
 
 
+async def test_mysql_report_ignores_stale_or_incomplete_lifecycle_projection():
+    from sagents.v2.runtime.session.plugins.mysql.workspace_probe import NAMESPACE
+
+    async with sql_store_factory("mysql") as open_store:
+        store = open_store()
+        handle = (await store.create_run(command(), CONTEXT)).handle
+        now = utc_now().timestamp()
+        revision = (await store.get_session(handle.session_id)).revision
+        for projection in (
+            {"revision": revision - 1, "states": {handle.run_id: "completed"}},
+            {"revision": revision, "states": {}},
+            {"revision": revision, "states": {handle.run_id: "invalid"}},
+        ):
+            await store.put_derived_state(handle.session_id, NAMESPACE, "runs", projection)
+            replay = await store.report_business_events(start=now - 60, end=now + 60)
+            assert replay.runs[handle.session_id, handle.run_id].metadata.state == RunState.QUEUED
+
+
 async def test_remote_timing_failure_still_returns_business_summary(monkeypatch):
     import httpx
 
