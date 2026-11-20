@@ -52,7 +52,15 @@ The script defines these responses and grades in advance. This table explains th
 
 The useful part is round 2: a new proposal does not automatically replace the retained best candidate. Its scripted score is below round 1's, so the comparison should reject it and retain the better version.
 
-Here is an excerpt from a completed scripted run:
+### Current result contract
+
+With the corrected example, inspect `baseline_score: 0.4`, `selected_score: 0.8`, `goal_verified: false`, and round acceptance `true`, `false`, `true`. Round 2 is rejected with `Insufficient validation improvement`. An improved retained candidate is not the same as convergence: the default target is 0.95 with stable passes, which this scripted run does not meet.
+
+The fixture now declares an experiment using the retained parent hash and measured training evidence supplied in each tuner request. Repairs reuse the same round's proposal and training evidence; production experiment validation remains enabled.
+
+### Historical output (not the current schema)
+
+The following captured output belongs to the 2026-10-12 revision, not the current command:
 
 ```json
 {
@@ -84,15 +92,19 @@ In your printed JSON, inspect:
 - `baseline_score` and `selected_score`: the scripted validation values, expected to be `0.4` and `0.8`.
 - `rounds`: three entries with `accepted` values expected to be `true`, `false`, and `true`; read each `reason`.
 - `original_hash` and `candidate_hash`: identifiers for the original and selected package. They should differ because candidate guidance changed.
-- `final_passed`: expected to be `true` under the scripted final check. This is not evidence of performance on real unseen tasks.
+- `goal_verified`: expected to be `false`. The candidate improves, but the convergence target remains unmet. `final_passed` appears only in the historical output above. Neither result measures real-model performance.
 
 The unit-conversion questions provide the workflow's fixtures; the scripted target returns a guidance label, not a calculated conversion answer. Suite-audit and semantic-review approvals are scripted too.
 
 **You have completed the walkthrough when you can find the rejected round and identify the selected candidate.** Nothing has been applied to your normal Agent configuration.
 
-### What was verified
+### Historical verification
 
 The excerpt was captured on 2026-10-12 from [commit `296cc3d`](https://github.com/ZHangZHengEric/Sage/blob/296cc3dec8f7ea11fa58a079df9b18709305fa89/examples/sagents_v2_package_optimizer.py), using Python 3.12.14 on Linux. The unmodified example exited successfully in a prepared Python environment with no API credentials. A Python-level test guard reported no attempted network or subprocess operations. This check covers the example, not a fresh full installation, Windows/macOS execution, or real-model quality.
+
+### Current fixture verification
+
+On 2026-11-19, the corrected fixture was tested in an isolated macOS snapshot based on `1d3d1dd65857a4903ceaedf3ccaea81f1c3666f9`, using Python 3.12.13 and existing dependencies. The documented module command exited 0 without API credentials under a network/subprocess guard and produced the current result contract above. This is verification of the fixture change on that base, not a claim that the unmodified base works, nor a fresh-install or Windows test. The offline regression test also exercises a forced same-round repair.
 
 ## If it does not run
 
