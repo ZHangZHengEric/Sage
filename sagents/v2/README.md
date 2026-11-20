@@ -338,3 +338,10 @@ belong to their configured provider, not this standard catalog. Hosts do not
 import private method owners or reflect on implementation classes.
 
 Runnable JSON example: `python -m examples.v2.tool_catalog --agent-mode all`.
+
+OpenAI Responses keeps reasoning separate from answer text. Streamed reasoning
+uses the existing reasoning events. Routes that provide reasoning only in final
+output items use `summary.summary_text`, or `content.reasoning_text` when no
+summary is present, to emit the same reasoning events. Duplicate final content
+does not repeat streamed reasoning. The original reasoning items, including
+encrypted continuation state, remain available for subsequent model requests.

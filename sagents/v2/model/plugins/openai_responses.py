@@ -490,10 +490,15 @@ class OpenAIResponsesModelProvider:
                     usage = self._usage(raw_usage)
                     final_text = []
                     for output_item in wire_value(response, "output", ()) or ():
-                        if wire_value(output_item, "type") not in {"message", "function_call", "reasoning"}:
+                        item_type = wire_value(output_item, "type")
+                        if item_type not in {"message", "function_call", "reasoning"}:
                             raise SageV2Error(RuntimeErrorInfo(code="model.response_unsupported",
                                 category=ErrorCategory.PROVIDER_PERMANENT,
                                 message="Unsupported Responses output item", safe_to_resume=True))
+                        # Reasoning content belongs to its own output item, not
+                        # the answer. Preserve it through _record_reasoning_item.
+                        if item_type != "message":
+                            continue
                         for block in wire_value(output_item, "content", ()) or ():
                             block_type = wire_value(block, "type")
                             if block_type == "refusal":
@@ -552,6 +557,23 @@ class OpenAIResponsesModelProvider:
                 provider=self.config.provider_id,
                 response_started=idle.response_started,
             ).info)
+
+        # Some Responses routes provide reasoning only in completed items.
+        # Keep the existing streamed text; summary and content may be duplicates.
+        if not reasoning:
+            for item in reasoning_items.values():
+                summary = "".join(
+                    str(wire_value(block, "text", "") or "")
+                    for block in wire_value(item, "summary", ()) or ()
+                    if wire_value(block, "type") == "summary_text"
+                )
+                reasoning += summary or "".join(
+                    str(wire_value(block, "text", "") or "")
+                    for block in wire_value(item, "content", ()) or ()
+                    if wire_value(block, "type") == "reasoning_text"
+                )
+            if reasoning:
+                yield ModelStreamEvent(kind=ModelEventKind.REASONING_DELTA, delta=reasoning)
 
         calls = tuple(
             parse_tool_arguments(
