@@ -14,6 +14,7 @@ from pydantic import Field
 from sagents.v2.prompt_i18n import prompt_language
 from sagents.v2.contracts.common import StrictModel, new_id, utc_now
 from sagents.v2.context.contracts import ContextReductionScope
+from sagents.v2.context.message_time import historical_time_context
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.contracts.items import (
     AudioBlock,
@@ -80,6 +81,12 @@ def summary_safe_block_text(block: Any) -> str:
         name = f", name={block.name[:200]}" if block.name else ""
         return f"[resource attached: mime={block.mime_type or 'unknown'}{name}]"
     return f"[{getattr(block, 'kind', 'attachment')} attached]"
+
+
+def summary_message_text(message: ModelMessage) -> str:
+    text = "\n".join(summary_safe_block_text(block) for block in message.content)
+    time = historical_time_context(message) if message.role == "user" else None
+    return f"{time}\n{text}" if time else text
 
 
 class ConversationSummary(StrictModel):

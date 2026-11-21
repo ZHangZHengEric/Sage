@@ -13,8 +13,10 @@ from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.context.summary import (
     SummarizationRequest,
     summary_safe_block_text,
+    summary_message_text,
     _redact_data_urls,
 )
+from sagents.v2.context.message_time import historical_time_context
 
 FIELDS = (
     "summary",
@@ -109,8 +111,8 @@ def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) 
     )
     todo = previous.get("todo_state_at_compaction_boundary")
     for message in request.messages:
-        text = "\n".join(summary_safe_block_text(b) for b in message.content)
-        if is_user_request(message) and narrative is None:
+        text = summary_message_text(message)
+        if is_user_request(message) and (narrative is None or historical_time_context(message)):
             result["user_requirements"].append(text[:1000])
         for block in message.content:
             if getattr(block, "kind", "text") in (

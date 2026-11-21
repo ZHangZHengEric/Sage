@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from ag_ui.core import RunAgentInput
@@ -10,6 +11,7 @@ from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.common import Identifier, new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import ImageBlock, TextBlock
+from sagents.v2.context.message_time import FROZEN_TIME_KEY, frozen_time_context
 
 _ID = TypeAdapter(Identifier)
 
@@ -116,7 +118,7 @@ def _content_blocks(content: Any) -> tuple[TextBlock | ImageBlock, ...]:
     return tuple(blocks)
 
 
-def latest_user_input(request: RunAgentInput) -> InputItem:
+def latest_user_input(request: RunAgentInput, *, time_context: str | None = None) -> InputItem:
     users = [
         message
         for message in request.messages
@@ -131,7 +133,8 @@ def latest_user_input(request: RunAgentInput) -> InputItem:
             )
         )
     return InputItem(
-        role="user", content=_content_blocks(getattr(users[-1], "content", ""))
+        role="user", content=_content_blocks(getattr(users[-1], "content", "")),
+        metadata={FROZEN_TIME_KEY: time_context} if time_context else {},
     )
 
 
@@ -143,6 +146,7 @@ def to_start_run(
     enabled_skills: tuple[str, ...] | None = None,
     max_steps: int | None = None,
     metadata: dict[str, object] | None = None,
+    accepted_at: datetime | None = None,
 ) -> tuple[str, str, str, StartRun]:
     thread_id = validate_agui_id(request.thread_id, field="threadId")
     run_id = validate_agui_id(request.run_id, field="runId")
@@ -151,7 +155,10 @@ def to_start_run(
     command = StartRun(
         session_id=thread_id,
         agent_id=agent_id,
-        input=(latest_user_input(request),),
+        input=(latest_user_input(request, time_context=(
+            frozen_time_context(metadata or {}, accepted_at=accepted_at)
+            if accepted_at is not None else None
+        )),),
         config=RunConfig(
             max_steps=max_steps,
             enabled_skills=enabled_skills,

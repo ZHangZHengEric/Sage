@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from sagents.v2.context.contracts import RunHistoryWindow
+from sagents.v2.context.message_time import FROZEN_TIME_KEY, frozen_time_context, historical_time_context
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.events import ContinuationEventData, ItemEventData, RuntimeEvent
-from sagents.v2.contracts.errors import error_diagnostic_message
+from sagents.v2.contracts.errors import SageV2Error, error_diagnostic_message
 from sagents.v2.contracts.items import (
     ItemStatus,
     MessageItemData,
@@ -36,6 +37,7 @@ class SessionHistoryReader(Protocol):
     """Read-only repository surface required for model-context reconstruction."""
 
     async def get_run(self, run_id: str) -> RunSnapshot: ...
+    async def get_start_command(self, run_id: str) -> StartRun: ...
     async def get_session(self, session_id: str) -> SessionSnapshot: ...
 
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]: ...
@@ -304,6 +306,51 @@ class SessionHistoryLedgerBuilder:
         self.projector = projector or SessionEventModelProjector()
         self.history_window = history_window
         self._window_starts: OrderedDict[str, int] = OrderedDict()
+        self._message_times: OrderedDict[str, str | None] = OrderedDict()
+
+    async def with_message_times(
+        self, messages: tuple[ModelMessage, ...], *, run_id: str
+    ) -> tuple[ModelMessage, ...]:
+        """Enrich the inference view while preserving checkpoint ledger hashes."""
+        prepared = []
+        for message in messages:
+            source_run = message.metadata.get("source_run_id")
+            if message.role != "user" or historical_time_context(message) or not source_run:
+                prepared.append(message)
+                continue
+            if source_run not in self._message_times:
+                try:
+                    command = await self.reader.get_start_command(source_run)
+                    frozen = frozen_time_context(command.config.metadata)
+                    if frozen is None and "server_v2.external.run_id" in command.config.metadata:
+                        original = await self.reader.get_run(source_run)
+                        frozen = frozen_time_context(
+                            command.config.metadata, accepted_at=original.created_at,
+                        )
+                except SageV2Error as exc:
+                    if not exc.info.code.endswith("not_found"):
+                        raise
+                    # A fork preserves immutable Items even if its source Run
+                    # has been deleted. Their creation time is still durable.
+                    events = await self.reader.read_fork_base_events(run_id)
+                    source = next((
+                        event.data.item for event in events
+                        if isinstance(event.data, ItemEventData)
+                        and event.data.item is not None
+                        and event.data.item.item_id == message.metadata.get("source_item_id")
+                    ), None)
+                    frozen = frozen_time_context({}, accepted_at=source.created_at) if source else None
+                self._message_times[source_run] = frozen
+                if len(self._message_times) > 128:
+                    self._message_times.popitem(last=False)
+            self._message_times.move_to_end(source_run)
+            frozen = self._message_times[source_run]
+            if frozen:
+                message = message.model_copy(update={"metadata": {
+                    **message.metadata, FROZEN_TIME_KEY: frozen,
+                }})
+            prepared.append(message)
+        return tuple(prepared)
 
     async def build(
         self, command: StartRun, *, run_id: str

@@ -323,7 +323,15 @@ def test_external_cleanup_routes_are_independent_and_idempotent(tmp_path):
         base = f"/api/agents/{agent_id}"
         client.put(base + "/workspace/files", headers=_headers(),
                    json={"directory": "assets/site", "files": {"index.html": "YQ=="}})
-        assert _run(client, agent_id).status_code == 200
+        response = _run(client, agent_id)
+        assert response.status_code == 200 and "RUN_FINISHED" in response.text, response.text
+        # Terminal SSE can precede completion callbacks. Deletion intentionally
+        # remains busy until the entire workspace execution lifetime settles.
+        async def wait_for_workspace_release():
+            import asyncio
+            await asyncio.gather(*tuple(host.execution._drives.values()))
+
+        cast("BlockingPortal", client.portal).call(wait_for_workspace_release)
         # Session cleanup must preserve files, and reject a different tenant.
         assert client.delete(base + "/sessions/thread-a", headers=_headers("tenant-b")).status_code == 404
         for _ in range(2):

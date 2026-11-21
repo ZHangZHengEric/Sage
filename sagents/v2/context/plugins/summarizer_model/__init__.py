@@ -12,7 +12,7 @@ import json
 import httpx
 
 from sagents.v2.context.plugins._shared.progress_summary import extract_snapshot, task_snapshot
-from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
+from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text, summary_message_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import JsonBlock, TextBlock
@@ -508,7 +508,7 @@ class ModelConversationSummarizer:
 
     @staticmethod
     def _message_text(message: ModelMessage) -> str:
-        return "\n".join(summary_safe_block_text(block) for block in message.content)
+        return summary_message_text(message)
 
     @classmethod
     def _parse_payload(cls, value: str) -> dict[str, object]:

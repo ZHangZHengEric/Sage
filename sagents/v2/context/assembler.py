@@ -41,6 +41,7 @@ from sagents.v2.context.session_history import (
     SessionHistoryLedgerBuilder,
     SessionHistoryReader,
 )
+from sagents.v2.context.message_time import historical_time_context
 from sagents.v2.contracts.run_state import RunSnapshot, SessionConcurrencyMode
 from sagents.v2.skill.tags import strip_skill_tags
 from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
@@ -278,6 +279,8 @@ class DefaultContextAssembler:
         media_capabilities: ModelCapabilities | None = None,
         run_snapshot: RunSnapshot | None = None,
     ) -> ContextProjection:
+        if self.history is not None and run_id is not None:
+            ledger = await self.history.with_message_times(ledger, run_id=run_id)
         source_ledger = ledger
         start = await self._history_start(command, run_id)
         ledger, omitted = self._split_history_window(ledger, start)
@@ -596,8 +599,7 @@ class DefaultContextAssembler:
         )
         payload = cls._sanitize_tool_pairs(cls._strip_historical_search_memory(payload))
         payload = tuple(strip_skill_tags(message) for message in payload)
-        if volatile:
-            payload = cls._inject_latest_user(payload, volatile)
+        payload = cls._inject_latest_user(payload, volatile)
         return (*systems, *payload)
 
     @staticmethod
@@ -615,7 +617,7 @@ class DefaultContextAssembler:
         runtime_text = "\n".join(
             segment.content for segment in segments if segment.content
         )
-        if index is None or not runtime_text:
+        if index is None:
             return messages
         prepared = list(messages)
         for prior_index in range(index):
@@ -634,6 +636,12 @@ class DefaultContextAssembler:
                 else clean
             )
         original = prepared[index]
+        if not re.search(r"<current_time\b", runtime_text, flags=re.IGNORECASE):
+            frozen = historical_time_context(original)
+            if frozen:
+                runtime_text = f"{frozen}\n{runtime_text}"
+        if not runtime_text:
+            return tuple(prepared)
         prepared[index] = DefaultContextAssembler._wrap_user_context(
             original, runtime_text
         )
@@ -674,40 +682,7 @@ class DefaultContextAssembler:
 
     @staticmethod
     def _historical_current_time(message: ModelMessage) -> str | None:
-        frozen = message.metadata.get("frozen_current_time_context")
-        if isinstance(frozen, str):
-            match = re.search(
-                r"<current_time\b[^>]*>.*?</current_time>",
-                frozen,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
-            if match is not None:
-                return match.group(0).strip()
-        for block in message.content:
-            if not isinstance(block, TextBlock):
-                continue
-            runtime = re.search(
-                r"<runtime_context\b[^>]*>(.*?)</runtime_context>",
-                block.text,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
-            if runtime is None:
-                continue
-            runtime_body = runtime.group(1)
-            system = re.search(
-                r"<system_context\b[^>]*>(.*?)</system_context>",
-                runtime_body,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
-            trusted_body = system.group(1) if system is not None else runtime_body
-            match = re.search(
-                r"<current_time\b[^>]*>.*?</current_time>",
-                trusted_body,
-                flags=re.IGNORECASE | re.DOTALL,
-            )
-            if match is not None:
-                return match.group(0).strip()
-        return None
+        return historical_time_context(message)
 
     @staticmethod
     def _unwrap_user_context(message: ModelMessage) -> ModelMessage:

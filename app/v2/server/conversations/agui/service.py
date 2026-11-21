@@ -7,6 +7,7 @@ import json
 import asyncio
 from time import perf_counter
 from sagents.v2.contracts.common import utc_now
+from sagents.v2.context.message_time import FROZEN_TIME_KEY
 
 from app.v2.server.conversations.agui.mapping import to_start_run, validate_agui_id
 from app.v2.server.conversations.agui.sse import (
@@ -378,6 +379,7 @@ class ConversationService:
                 enabled_skills=enabled,
                 max_steps=admitted.max_steps,
                 metadata=metadata,
+                accepted_at=performance_started_at if stream_run_id is not None else None,
             )
         if stream_run_id is not None:
             command = command.model_copy(update={"config": command.config.model_copy(update={
@@ -387,24 +389,32 @@ class ConversationService:
             agent_id = admitted.agent_id
         if notification_connection_id is not None:
             command = await self.runs.host.im.notifications.bind(command, user_id, notification_connection_id)
-        if stream_run_id is not None:
-            # Freeze retries to their original admitted command. Upgrades must
-            # not change its idempotency digest or silently accept new input.
-            previous = await self._find_client_run(thread_id, stream_run_id,
-                self.context_for(user_id), external=True)
-            if previous is not None:
-                _, stored = previous
-                old_context = dict(stored.config.metadata.get("system_context") or {})
-                new_context = dict(command.config.metadata.get("system_context") or {})
-                old_context.pop("session_id", None)
-                new_context.pop("session_id", None)
-                if (stored.input != command.input or stored.agent_id != command.agent_id
-                        or stored.config.metadata.get("server_v2.im_notify") != command.config.metadata.get("server_v2.im_notify")
-                        or stored.config.metadata.get("server_v2.external.workspace_path") != workspace_directory
-                        or old_context != new_context):
-                    raise _error("idempotency_conflict", "runId is already bound to a different request", ErrorCategory.CONFLICT)
-                command = stored
         async with self.runs.workspace_guard(workspace_user_id, admitted.agent_id):
+            if stream_run_id is not None:
+                # Freeze retries to their original admitted command. Upgrades must
+                # not change its idempotency digest or silently accept new input.
+                previous = await self._find_client_run(thread_id, stream_run_id,
+                    self.context_for(user_id), external=True)
+                if previous is not None:
+                    _, stored = previous
+                    old_context = dict(stored.config.metadata.get("system_context") or {})
+                    new_context = dict(command.config.metadata.get("system_context") or {})
+                    old_context.pop("session_id", None)
+                    new_context.pop("session_id", None)
+                    # The time anchor is derived at acceptance. Compare the caller's
+                    # original payload, then replay the exact persisted command,
+                    # including commands admitted before anchors were introduced.
+                    def retry_input(items):
+                        return tuple(item.model_copy(update={"metadata": {
+                            key: value for key, value in item.metadata.items() if key != FROZEN_TIME_KEY
+                        }}) for item in items)
+
+                    if (retry_input(stored.input) != retry_input(command.input) or stored.agent_id != command.agent_id
+                            or stored.config.metadata.get("server_v2.im_notify") != command.config.metadata.get("server_v2.im_notify")
+                            or stored.config.metadata.get("server_v2.external.workspace_path") != workspace_directory
+                            or old_context != new_context):
+                        raise _error("idempotency_conflict", "runId is already bound to a different request", ErrorCategory.CONFLICT)
+                    command = stored
             # Validate and claim ownership before Run creation or workspace writes.
             with log_duration(logger, "server.admission.phase", "会话归属绑定结束",
                               session_id=thread_id, attributes={"phase": "thread_bind"}):
