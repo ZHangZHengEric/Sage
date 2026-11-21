@@ -858,7 +858,7 @@ class StudioContextProvider:
                     f"You are member {self.binding['member_id']} in Studio {group['name']}.\n"
                     f"Members: {json.dumps(roster, ensure_ascii=False)}\n"
                     f"Group owner (primary responsible member): {group['coordinator_id']}.\n"
-                    f"This message is addressed to member IDs: {json.dumps(recipients)}. You are {self.binding['member_id']}.\n"
+                    f"Explicit @ member IDs for this message: {json.dumps(recipients)} (empty means no explicit @; the group owner handles it by default). You are {self.binding['member_id']}.\n"
                     "Mentioned members execute in parallel. Read the full original message, including where each @mention occurs, and handle the parts addressed to you. Other members handle their own addressed work; do not duplicate their tasks. Use shared history for context. "
                     "For an Agent-originated message, publish only when you have something to share: your final completion is internal unless you call studio_send_message. You need not reply to every mention. Public replies do not require an @ back; only explicit mentions/recipient IDs wake another Agent. "
                     "Use studio_read_messages to verify earlier discussions or decisions missing from the provided context. "
