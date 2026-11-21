@@ -14,6 +14,7 @@ import json
 from datetime import timedelta, datetime, timezone
 from dataclasses import dataclass
 from collections.abc import Callable, AsyncGenerator, Awaitable
+from contextvars import ContextVar
 from typing import cast
 
 from sagents.v2.runtime.execution.ownership import (
@@ -179,6 +180,58 @@ class _DriveIteration:
     ledger_digest: str | None = None
 
 
+class _LedgerDigest:
+    """Extend the canonical checkpoint hash as the active ledger grows."""
+
+    def __init__(self) -> None:
+        self.messages: tuple[ModelMessage, ...] = ()
+        self.prefix = hashlib.sha256(b"[")
+        self.previous_prefix = self.prefix.copy()
+        self.previous_count = 0
+
+    def calculate(self, messages: tuple[ModelMessage, ...]) -> str:
+        offset = len(self.messages)
+        prefix = self.prefix
+        if messages is not self.messages:
+            common = next(
+                (index for index, (previous, current) in enumerate(zip(self.messages, messages))
+                 if previous is not current),
+                min(offset, len(messages)),
+            )
+            if common < offset:
+                # Model completion may rebuild the assistant message before
+                # appending tool results. The prior committed prefix still fits.
+                if common >= self.previous_count:
+                    prefix = self.previous_prefix
+                    offset = self.previous_count
+                else:
+                    prefix = hashlib.sha256(b"[")
+                    offset = 0
+        if offset < len(messages):
+            # Keep the persisted JSON and hash format byte-for-byte compatible.
+            extended = prefix.copy()
+            encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            exclude = {"metadata": {"source_session_id", "source_run_id", "source_item_id"}}
+            for index in range(offset, len(messages)):
+                if index:
+                    extended.update(b",")
+                extended.update(encoder.encode(messages[index].model_dump(mode="json", exclude=exclude)).encode())
+            self.previous_prefix = prefix
+            self.previous_count = offset
+            prefix = extended
+        elif offset < self.previous_count:
+            self.previous_prefix = prefix
+            self.previous_count = offset
+        self.prefix = prefix
+        self.messages = messages
+        digest = prefix.copy()
+        digest.update(b"]")
+        return f"sha256:{digest.hexdigest()}"
+
+
+_ACTIVE_LEDGER_DIGEST: ContextVar[_LedgerDigest | None] = ContextVar("agent_ledger_digest", default=None)
+
+
 class AgentLoopEngine:
     # Retry only the uncommitted model request, before Tool dispatch. Partial
     # Items are cancelled and never enter canonical model history.
@@ -294,6 +347,7 @@ class AgentLoopEngine:
         self.context_assembler = context_assembler or DefaultContextAssembler(
             history_reader=runtime.session_store
         )
+        self._builtin_step_request_builder = step_request_builder is None
         self.step_request_builder = (
             step_request_builder
             or DefaultAgentStepRequestBuilder(
@@ -1594,20 +1648,26 @@ class AgentLoopEngine:
         from sagents.v2.model.recovery_scope import recovery_scope
         from sagents.v2.runtime.artifact.workspace_images import bind_image_workspace
         scope = await self._create_recovery_scope(run, state, command, context)
-        with recovery_scope(scope), bind_image_workspace(self.tool_result_runtime):
-            while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
-                scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
-                scope.primary_recovery = bool(state.model_recovery.logical_call_id)
-                state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(
-                    update={"run_requests": max(scope.run_requests, state.model_recovery.run_requests)})})
-                iteration = await self._drive_step(run, state, context, command, max_steps,
-                    empty_response_retries, context_overflow_retries, ledger_digest)
-                run, state = iteration.run, iteration.state
-                ledger_digest = iteration.ledger_digest
-                empty_response_retries = iteration.empty_response_retries
-                context_overflow_retries = iteration.context_overflow_retries
-                if iteration.stop:
-                    return run
+        ledger = _LedgerDigest()
+        token = _ACTIVE_LEDGER_DIGEST.set(ledger)
+        try:
+            with recovery_scope(scope), bind_image_workspace(self.tool_result_runtime):
+                while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                    scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
+                    scope.primary_recovery = bool(state.model_recovery.logical_call_id)
+                    state = state.model_copy(update={"model_recovery": state.model_recovery.model_copy(
+                        update={"run_requests": max(scope.run_requests, state.model_recovery.run_requests)})})
+                    iteration = await self._drive_step(run, state, context, command, max_steps,
+                        empty_response_retries, context_overflow_retries, ledger_digest)
+                    run, state = iteration.run, iteration.state
+                    ledger_digest = iteration.ledger_digest
+                    empty_response_retries = iteration.empty_response_retries
+                    context_overflow_retries = iteration.context_overflow_retries
+                    if iteration.stop:
+                        return run
+        finally:
+            ledger.messages = ()
+            _ACTIVE_LEDGER_DIGEST.reset(token)
         return run
 
     async def _drive_step(
@@ -1772,6 +1832,7 @@ class AgentLoopEngine:
                     messages=state.messages,
                     pending_continuation_reason=state.pending_continuation_reason,
                     language=context.language,
+                    **({"run_snapshot": run} if self._builtin_step_request_builder else {}),
                 )
             except SageV2Error as exc:
                 run = await self.runtime.get_run(run.run_id)
@@ -2779,10 +2840,20 @@ class AgentLoopEngine:
             )
 
         batcher = StreamEventBatcher(run, commit_delta_batch)
+        monotonic = asyncio.get_running_loop().time
+        next_control_read = 0.0
         try:
             async for model_event, observed_run in controlled_events:
-                current = observed_run or await self.runtime.get_run(run.run_id)
-                await batcher.observe_run(current)
+                current = run
+                # Delta batches validate their revision and execution fence.
+                # Refresh control while streaming and before the final response,
+                # instead of doing a distributed read for every token.
+                if observed_run is not None or monotonic() >= next_control_read or (
+                    model_event is not None and model_event.kind == ModelEventKind.COMPLETED
+                ):
+                    current = observed_run or await self.runtime.get_run(run.run_id)
+                    await batcher.observe_run(current)
+                    next_control_read = monotonic() + 0.1
                 if current.state == RunState.SUSPEND_REQUESTED:
                     run = await batcher.flush()
                     current = await self.runtime.get_run(run.run_id)
@@ -4966,15 +5037,7 @@ class AgentLoopEngine:
     @staticmethod
     def _ledger_digest(messages) -> str:
         """Hash the existing canonical JSON format one message at a time."""
-        digest = hashlib.sha256(b"[")
-        encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        exclude = {"metadata": {"source_session_id", "source_run_id", "source_item_id"}}
-        for index, message in enumerate(messages):
-            if index:
-                digest.update(b",")
-            digest.update(encoder.encode(message.model_dump(mode="json", exclude=exclude)).encode("utf-8"))
-        digest.update(b"]")
-        return f"sha256:{digest.hexdigest()}"
+        return (_ACTIVE_LEDGER_DIGEST.get() or _LedgerDigest()).calculate(tuple(messages))
 
     @staticmethod
     def _interaction_input_items(

@@ -45,13 +45,21 @@ FIXED_EXTERNAL_SECONDS = 664.069
 
 
 class MeasuredStore(SessionStoreCoordinator):
-    def __init__(self, io_ms):
+    def __init__(self, io_ms, read_ms):
         super().__init__()
         self.io_seconds = io_ms / 1000
+        self.read_seconds = read_ms / 1000
+        self.run_reads = 0
         self.transactions = 0
         self.payload_bytes = 0
         self.storage_seconds = 0.0
         self.serialization_seconds = 0.0
+
+    async def get_run(self, run_id):
+        self.run_reads += 1
+        if self.read_seconds:
+            await asyncio.sleep(self.read_seconds)
+        return await super().get_run(run_id)
 
     async def _commit_storage_locked(self, sid):
         started = perf_counter()
@@ -67,10 +75,15 @@ class MeasuredStore(SessionStoreCoordinator):
 class MeasuredFilesystemStore(_FilesystemSessionState):
     def __init__(self, root):
         super().__init__(root)
+        self.run_reads = 0
         self.transactions = 0
         self.storage_seconds = 0.0
         self.aggregate_seconds = 0.0
         self.snapshot_seconds = 0.0
+
+    async def get_run(self, run_id):
+        self.run_reads += 1
+        return await super().get_run(run_id)
 
     async def _commit_storage_locked(self, session_id):
         started = perf_counter()
@@ -127,8 +140,18 @@ class MeasuredDriver(ObservedRunDriver):
 class ReplayModel:
     plugin_id = "benchmark.replay"
 
-    def __init__(self):
+    def __init__(self, model_calls, tool_calls, stream_chunks):
         self.calls = 0
+        self.model_calls = model_calls
+        self.tool_calls = tool_calls
+        self.stream_chunks = stream_chunks
+        self.non_tool_steps = set(
+            range(7, model_calls, 7)
+            if (model_calls, tool_calls) == (64, 55)
+            else range(tool_calls + 1, model_calls)
+        )
+        if (model_calls, tool_calls) == (64, 55):
+            self.non_tool_steps.discard(63)
 
     async def capabilities(self, model_binding):
         return ModelCapabilities(supports_streaming=True, supports_tools=True)
@@ -136,11 +159,13 @@ class ReplayModel:
     async def stream(self, request):
         self.calls += 1
         index = self.calls
-        final = index == 64
-        partial = not final and index % 7 == 0 and index != 63
+        final = index == self.model_calls
+        partial = index in self.non_tool_steps
         calls = () if final or partial else (
             ModelToolCall(tool_call_id=f"call_{index}", name=TOOL.name, arguments={}),
         )
+        for _ in range(self.stream_chunks):
+            yield ModelStreamEvent(kind=ModelEventKind.REASONING_DELTA, delta="Reasoning fragment. ")
         yield ModelStreamEvent(
             kind=ModelEventKind.COMPLETED,
             response=ModelResponse(
@@ -166,9 +191,9 @@ class StageTotals:
             self.counts[name] += 1
 
 
-async def benchmark(store, payload_bytes, io_ms):
+async def benchmark(store, args):
     runtime = HarnessRuntime(store)
-    model = ReplayModel()
+    model = ReplayModel(args.model_calls, args.tool_calls, args.stream_chunks)
     totals = StageTotals()
     tool_calls = 0
 
@@ -178,7 +203,7 @@ async def benchmark(store, payload_bytes, io_ms):
         return ToolExecutionResult(
             tool_call_id=call.tool_call_id,
             operation_id=call.operation_id,
-            content=(TextBlock(text=str(tool_calls) + "x" * payload_bytes),),
+            content=(TextBlock(text=str(tool_calls) + "x" * args.tool_payload_bytes),),
         )
 
     loop = MeasuredDriver(
@@ -193,13 +218,13 @@ async def benchmark(store, payload_bytes, io_ms):
     handle = await runtime.start_run(StartRun(
         agent_id="benchmark",
         input=(InputItem(role="user", content=(TextBlock(text="Inspect the records and report."),)),),
-        config=RunConfig(max_steps=70, model_bindings={"primary": "replay"}),
+        config=RunConfig(max_steps=args.model_calls + 6, model_bindings={"primary": "replay"}),
         idempotency_key="benchmark",
         resolved_spec_hash="benchmark",
     ), context)
     result = await loop.execute(handle.run_id, context)
     elapsed = perf_counter() - started
-    assert (result.state, model.calls, tool_calls) == (RunState.COMPLETED, 64, 55), (
+    assert (result.state, model.calls, tool_calls) == (RunState.COMPLETED, args.model_calls, args.tool_calls), (
         result.state, model.calls, tool_calls,
     )
     state_commit = totals.ms["agent.state.commit"] / 1000
@@ -207,9 +232,13 @@ async def benchmark(store, payload_bytes, io_ms):
     remainder = elapsed - state_commit - model_request
     return {
         "model_calls": model.calls, "tool_calls": tool_calls,
-        "tool_payload_bytes": payload_bytes, "simulated_storage_io_ms": io_ms,
+        "tool_payload_bytes": args.tool_payload_bytes,
+        "stream_chunks_per_model": args.stream_chunks,
+        "simulated_storage_io_ms": 0 if args.filesystem else args.storage_io_ms,
+        "simulated_run_read_ms": args.run_read_ms,
         "local_framework_seconds": round(elapsed, 4),
-        "projected_framework_share_percent": round(100 * elapsed / (FIXED_EXTERNAL_SECONDS + elapsed), 4),
+        "projected_framework_share_percent": round(100 * elapsed / (args.external_seconds + elapsed), 4),
+        "run_reads": store.run_reads,
         "storage_transactions": store.transactions,
         "checkpoint_digest_count": loop.digest_count,
         "peak_process_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024),
@@ -229,8 +258,8 @@ async def benchmark(store, payload_bytes, io_ms):
 
 async def main(args):
     if not args.filesystem:
-        store = MeasuredStore(args.storage_io_ms)
-        metrics = await benchmark(store, args.tool_payload_bytes, args.storage_io_ms)
+        store = MeasuredStore(args.storage_io_ms, args.run_read_ms)
+        metrics = await benchmark(store, args)
         metrics["serialized_delta_bytes"] = store.payload_bytes
         metrics["stage_seconds"]["delta_serialization_inside_storage"] = round(store.serialization_seconds, 4)
         return metrics
@@ -250,7 +279,7 @@ async def main(args):
 
         try:
             os.fsync = measured_fsync
-            metrics = await benchmark(store, args.tool_payload_bytes, 0)
+            metrics = await benchmark(store, args)
         finally:
             os.fsync = fsync
             await store.close()
@@ -266,13 +295,22 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tool-payload-bytes", type=int, default=8192)
+    parser.add_argument("--model-calls", type=int, default=64)
+    parser.add_argument("--tool-calls", type=int, default=55)
+    parser.add_argument("--stream-chunks", type=int, default=0)
+    parser.add_argument("--run-read-ms", type=float, default=0)
+    parser.add_argument("--external-seconds", type=float, default=FIXED_EXTERNAL_SECONDS)
     parser.add_argument("--trace-allocations", action="store_true", help="Measure Python heap separately from RSS")
     storage = parser.add_mutually_exclusive_group()
     storage.add_argument("--storage-io-ms", type=float, default=2)
     storage.add_argument("--filesystem", action="store_true")
     args = parser.parse_args()
-    if args.tool_payload_bytes < 0 or args.storage_io_ms < 0:
-        parser.error("payload size and I/O delay must be non-negative")
+    if min(args.tool_payload_bytes, args.storage_io_ms, args.run_read_ms, args.stream_chunks) < 0:
+        parser.error("payload size, chunk count and I/O delays must be non-negative")
+    if not 0 <= args.tool_calls < args.model_calls or args.external_seconds <= 0:
+        parser.error("model calls must exceed tool calls and external time must be positive")
+    if args.filesystem and args.run_read_ms:
+        parser.error("run-read-ms is available only for simulated storage")
     if args.trace_allocations:
         import tracemalloc
 

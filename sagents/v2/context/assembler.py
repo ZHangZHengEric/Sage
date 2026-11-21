@@ -41,7 +41,7 @@ from sagents.v2.context.session_history import (
     SessionHistoryLedgerBuilder,
     SessionHistoryReader,
 )
-from sagents.v2.contracts.run_state import SessionConcurrencyMode
+from sagents.v2.contracts.run_state import RunSnapshot, SessionConcurrencyMode
 from sagents.v2.skill.tags import strip_skill_tags
 from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.runtime.observability.logs import get_logger
@@ -233,6 +233,7 @@ class DefaultContextAssembler:
         run_id: str | None = None,
         reservation: ContextRequestReservation | None = None,
         media_capabilities: ModelCapabilities | None = None,
+        run_snapshot: RunSnapshot | None = None,
     ) -> tuple[ModelMessage, ...]:
         return (
             await self.prepare_projection(
@@ -241,6 +242,7 @@ class DefaultContextAssembler:
                 run_id=run_id,
                 reservation=reservation,
                 media_capabilities=media_capabilities,
+                **({"run_snapshot": run_snapshot} if run_snapshot is not None else {}),
             )
         ).messages
 
@@ -252,6 +254,7 @@ class DefaultContextAssembler:
         run_id: str | None = None,
         reservation: ContextRequestReservation | None = None,
         media_capabilities: ModelCapabilities | None = None,
+        run_snapshot: RunSnapshot | None = None,
     ) -> ContextProjection:
         """Create a fresh request view with deterministic context ordering.
 
@@ -261,7 +264,8 @@ class DefaultContextAssembler:
         latest user message while preserving the original multimodal block order.
         """
         return await self._project_context(
-            command, ledger, run_id=run_id, media_capabilities=media_capabilities
+            command, ledger, run_id=run_id, media_capabilities=media_capabilities,
+            **({"run_snapshot": run_snapshot} if run_snapshot is not None else {}),
         )
 
     async def _project_context(
@@ -272,6 +276,7 @@ class DefaultContextAssembler:
         run_id: str | None,
         history_only: bool = False,
         media_capabilities: ModelCapabilities | None = None,
+        run_snapshot: RunSnapshot | None = None,
     ) -> ContextProjection:
         source_ledger = ledger
         start = await self._history_start(command, run_id)
@@ -367,21 +372,26 @@ class DefaultContextAssembler:
         clean = self._strip_historical_search_memory(
             canonical, source_positions=source_positions
         )
-        positions = defaultdict(deque)
-        for index, message in zip(source_positions, clean, strict=True):
-            positions[id(message)].append(index)
         payload = self._sanitize_tool_pairs(clean)
-        canonical_indices = tuple(
-            positions[id(message)].popleft() for message in payload
-        )
+        if len(payload) == len(clean) and all(
+            before is after for before, after in zip(clean, payload, strict=True)
+        ):
+            canonical_indices = tuple(source_positions)
+        else:
+            positions = defaultdict(deque)
+            for index, message in zip(source_positions, clean, strict=True):
+                positions[id(message)].append(index)
+            canonical_indices = tuple(positions[id(message)].popleft() for message in payload)
         payload = tuple(strip_skill_tags(message) for message in payload)
         messages = (*system, *payload)
-        # Resolved once and shared: the reduction scope and the projection
-        # observer both need the owning Run, and neither should pay for a
-        # second store read.
+        # These scope fields are fixed at admission. The default driver can
+        # reuse its commit result without a second distributed read.
         run = None
         if run_id is not None and self.history is not None and self.reducer is not None:
-            run = await self.history.reader.get_run(run_id)
+            run = (
+                run_snapshot if run_snapshot is not None and run_snapshot.run_id == run_id
+                else await self.history.reader.get_run(run_id)
+            )
         scope = ContextReductionScope(
             context_key=self._summary_context_key(
                 run.session_id if run is not None else run_id or command.agent_id,

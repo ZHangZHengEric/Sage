@@ -324,6 +324,7 @@ async def setup_loop(
 def test_incremental_checkpoint_hash_and_request_size_match_legacy_serialization():
     import hashlib
     import json
+    from sagents.v2.agent.engine import _LedgerDigest
 
     messages = (
         ModelMessage(role="user", content=(TextBlock(text="检查 🧪\n"),),
@@ -338,6 +339,28 @@ def test_incremental_checkpoint_hash_and_request_size_match_legacy_serialization
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     assert AgentLoopEngine._ledger_digest(messages) == f"sha256:{hashlib.sha256(encoded).hexdigest()}"
     assert AgentLoopEngine._ledger_digest(()) == f"sha256:{hashlib.sha256(b'[]').hexdigest()}"
+    incremental = _LedgerDigest()
+    for ledger in (messages[:1], messages, messages[::-1], messages[:1], (), messages):
+        assert incremental.calculate(ledger) == AgentLoopEngine._ledger_digest(ledger)
+
+
+@pytest.mark.asyncio
+async def test_burst_model_stream_coalesces_durable_control_reads(monkeypatch):
+    chunks = (ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="x"),) * 200
+    model = ScriptedModelProvider((ScriptedModelStep(events=(*chunks, completed("x" * 200))),))
+    runtime, handle, loop, _ = await setup_loop(model)
+    get_run = runtime.get_run
+    reads = 0
+
+    async def counted_get_run(run_id):
+        nonlocal reads
+        reads += 1
+        return await get_run(run_id)
+
+    monkeypatch.setattr(runtime, "get_run", counted_get_run)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert reads < len(chunks) // 4
 
 
 @pytest.mark.asyncio

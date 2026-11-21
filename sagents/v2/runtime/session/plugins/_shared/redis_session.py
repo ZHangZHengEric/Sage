@@ -32,6 +32,7 @@ from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 
 from .aggregate import _json
+from .cache import cached_session_operation
 from .loading import DurableSessionLoading
 
 
@@ -572,9 +573,13 @@ class RedisSessionCoordination:
     def _preview_epoch_for_run(self, run_id):
         return self._publication_epoch.get() or self._preview_epoch
 
+    @cached_session_operation
     async def publish_stream_preview(self, *, run_id, **options):
-        run = await self.get_run(run_id)
-        async with self._guard("session:" + run.session_id):
+        # Only the immutable Session identity is needed to take the guard.
+        # The publication below reloads and authorizes the Run under that guard.
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        session_id = self._runs[run_id].session_id
+        async with self._guard("session:" + session_id):
             key = self._key("previews:" + run_id)
             index = self._key("preview-events:" + run_id)
             epoch, stored, indexed = await self._redis.hmget(key, _PREVIEW_HEADER)

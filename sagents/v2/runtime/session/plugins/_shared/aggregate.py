@@ -268,18 +268,14 @@ class DurableAggregateCache:
         }
 
     def _location_rows_after_mutation(self, session_id, mutation):
-        current = {
-            (kind, identity): (kind, identity, session_id)
-            for kind, identity, _ in self._persisted_locations.get(session_id, set())
-        }
+        current = self._persisted_locations.get(session_id, set()).copy()
         for collection, key in _LOCATION_KINDS:
             for identity in mutation["deletes"].get(collection, ()):
-                current.pop((key, str(identity[0])), None)
+                current.discard((key, str(identity[0]), session_id))
             for row in mutation["upserts"].get(collection, ()):
                 if row.get(key):
-                    identity = str(row[key])
-                    current[(key, identity)] = (key, identity, session_id)
-        return set(current.values())
+                    current.add((key, str(row[key]), session_id))
+        return current
 
     @staticmethod
     def _start_key_rows(session_id, compact) -> set[tuple[str, ...]]:

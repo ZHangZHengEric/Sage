@@ -69,14 +69,14 @@ class SessionMemoryService:
         async with self._lock:
             previous = self._boundaries.get(run_id)
             append_from = 0
-            calls: dict[str, list[str]] = {}
+            calls: dict[str, tuple[str, ...]] = {}
             if (
                 previous is not None
                 and previous.session_id == session_id
                 and previous.source_count <= len(source_messages)
             ):
                 append_from = previous.source_count
-                calls = {key: list(value) for key, value in previous.calls.items()}
+                calls = previous.calls.copy()
             appended = source_messages[append_from:]
             records = (
                 self._records(
@@ -87,9 +87,12 @@ class SessionMemoryService:
                 if session_id is not None and appended
                 else ()
             )
+            added_calls: dict[str, list[str]] = {}
             for record in records:
                 for tool_call_id in record.source.get("tool_call_ids", ()):
-                    calls.setdefault(tool_call_id, []).append(record.record_id)
+                    added_calls.setdefault(tool_call_id, []).append(record.record_id)
+            for tool_call_id, record_ids in added_calls.items():
+                calls[tool_call_id] = (*calls.get(tool_call_id, ()), *record_ids)
             pending = self._unindexed_locked(session_id, records)
         if pending:
             # Provider I/O stays outside the service lock so unrelated Runs can
@@ -99,7 +102,7 @@ class SessionMemoryService:
             session_id=session_id,
             historical=historical,
             source_count=len(source_messages),
-            calls={key: tuple(value) for key, value in calls.items()},
+            calls=calls,
         )
         async with self._lock:
             self._remember_locked(session_id, pending)

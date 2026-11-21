@@ -9,12 +9,13 @@ from __future__ import annotations
 from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from sagents.v2.context import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.contracts import ContextBudget
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.run_state import RunSnapshot
 from sagents.v2.i18n import tr
 from sagents.v2.model.contracts import (
     ModelCapabilities,
@@ -68,6 +69,7 @@ class DefaultAgentStepRequestBuilder:
         model: ModelProvider | None = None,
     ) -> None:
         self.context_assembler = context_assembler
+        self._reuse_run_snapshot = type(context_assembler) is DefaultContextAssembler
         self.tool_catalog = tool_catalog
         self.tool_selection_policy = tool_selection_policy
         self.context_budget = context_budget
@@ -83,6 +85,7 @@ class DefaultAgentStepRequestBuilder:
         messages: tuple[ModelMessage, ...],
         pending_continuation_reason: str | None,
         language: str | None,
+        run_snapshot: RunSnapshot | None = None,
     ) -> PreparedAgentStep:
         catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
         catalog_tools = tools_for_invocation_mode(
@@ -129,14 +132,12 @@ class DefaultAgentStepRequestBuilder:
             else ()
         )
         suffix_messages = (*hidden_index_messages, *continuation_messages)
+        options: dict[str, Any] = {"run_id": run_id}
+        if self._reuse_run_snapshot and run_snapshot is not None:
+            options["run_snapshot"] = run_snapshot
         if isinstance(self.context_assembler, DefaultContextAssembler):
-            prepared_messages = await self.context_assembler.prepare_messages(
-                command, messages, run_id=run_id, media_capabilities=capabilities
-            )
-        else:
-            prepared_messages = await self.context_assembler.prepare_messages(
-                command, messages, run_id=run_id
-            )
+            options["media_capabilities"] = capabilities
+        prepared_messages = await self.context_assembler.prepare_messages(command, messages, **options)
         prepared_messages = (*prepared_messages, *suffix_messages)
         request = ModelRequest(
             request_id=new_id("model_request"),

@@ -138,8 +138,17 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             events = replacements.get(rid, appends.get(rid, ()))
             members = {}
             for event in events[-_EVENT_TAIL_ROWS:]:
+                data = event["data"]
+                item = data.get("item") if data.get("kind") == "item" else None
+                if item and any(
+                    isinstance(text := block.get("text"), str) and len(text) > _EVENT_TAIL_ROW_BYTES
+                    for block in item["data"].get("content", ())
+                ):
+                    # The durable delta already carries this Item. A single
+                    # oversized text block cannot fit in the Redis read index.
+                    continue
                 raw = _json(event)
-                if len(raw.encode("utf-8")) <= _EVENT_TAIL_ROW_BYTES:
+                if len(raw) <= _EVENT_TAIL_ROW_BYTES and len(raw.encode("utf-8")) <= _EVENT_TAIL_ROW_BYTES:
                     members[raw] = event["run_sequence"]
             tails[rid] = (head, members, rid in replacements)
         return tails
@@ -159,9 +168,12 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             encoded = _json(self._dump_session_state_locked(sid))
         else:
             head["revision_sequences"] = {str(revision): head["last_sequence"]}
-            encoded = _json(mutation)
+            # Redis accepts the wire bytes directly. Reuse their size for
+            # cache accounting and logs instead of repeatedly encoding a delta.
+            encoded = _json(mutation).encode("utf-8")
+        payload_bytes = len(encoded.encode("utf-8")) if isinstance(encoded, str) else len(encoded)
         staged_base = None
-        if compact and len(encoded.encode("utf-8")) > self.archive_batch_bytes:
+        if compact and payload_bytes > self.archive_batch_bytes:
             staged_base = await self._stage_snapshot(encoded)
         rows = self._location_rows_after_mutation(sid, mutation)
         starts = self._start_rows_after_mutation(sid, mutation)
@@ -386,7 +398,7 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             starts,
             0 if compact else self._persisted_mutation_counts.get(sid, 0) + 1,
         )
-        self._session_cache.touch(sid, charge=4 * len(encoded.encode()))
+        self._session_cache.touch(sid, charge=4 * payload_bytes)
         self._forget_attachment_bytes(sid)
         if stopped or quiescent or revision % self.archive_batch_rows == 0:
             self._wake.set()
@@ -395,7 +407,7 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             "Redis Session commit completed",
             session_id=sid,
             revision=revision,
-            payload_bytes=len(encoded.encode()),
+            payload_bytes=payload_bytes,
             snapshot=compact,
             duration_ms=round((time.perf_counter() - started) * 1000, 3),
         )

@@ -810,10 +810,9 @@ async def test_concurrent_previews_for_different_runs_keep_each_runs_original_ep
         if session_id not in reads:
             return
         reads[session_id] += 1
-        if reads[session_id] == 2:
-            # The first read finds the Run; the second enters the coordinator
-            # after the distributed publisher selected this Run's epoch. Hold
-            # both there so a shared mutable epoch would contaminate a writer.
+        if reads[session_id] == 1:
+            # The publisher selects its epoch before entering the coordinator.
+            # Hold both calls there so shared mutable epoch state would race.
             waiting.add(session_id)
             if waiting == session_ids:
                 both_publications_ready.set()
@@ -830,6 +829,7 @@ async def test_concurrent_previews_for_different_runs_keep_each_runs_original_ep
             ) for rid in expected
         )), 3)
         assert waiting == session_ids
+        assert all(count == 1 for count in reads.values())
     finally:
         first._prepare_session_access = original_access
     for rid, epoch in expected.items():
