@@ -78,7 +78,7 @@ def translation_errors(pages: dict[str, str]) -> list[str]:
 
 def load_pages(root: Path) -> dict[str, str]:
     return {
-        p.relative_to(root).as_posix(): p.read_text()
+        p.relative_to(root).as_posix(): p.read_text(encoding="utf-8")
         for lang in ("en", "zh")
         for p in (root / lang).rglob("*.md")
     }

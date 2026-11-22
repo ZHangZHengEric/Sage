@@ -21,12 +21,12 @@ REPO_URL = "https://github.com/ZHangZHengEric/Sage/blob/main/"
 def main() -> None:
     errors: list[str] = translation_errors(load_pages(DOCS))
     for lang in ("en", "zh"):
-        api = (DOCS / lang / "api/HTTP_API_REFERENCE.md").read_text()
+        api = (DOCS / lang / "api/HTTP_API_REFERENCE.md").read_text(encoding="utf-8")
         if route_table() not in api:
             errors.append(
                 f"{lang}: HTTP route inventory differs from registered router source"
             )
-        env = (DOCS / lang / "ENV_VARS.md").read_text()
+        env = (DOCS / lang / "ENV_VARS.md").read_text(encoding="utf-8")
         documented = set(re.findall(r"^\| `(SAGE_SERVER_[A-Z_]+)`", env, re.M))
         expected = set(server_environment())
         if documented != expected:
@@ -37,7 +37,7 @@ def main() -> None:
     metadata = {}
     refs = set()
     for path in pages:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         if not text.startswith("---\n"):
             errors.append(f"{path}: missing front matter")
             continue
@@ -69,7 +69,7 @@ def main() -> None:
     knowledge_pages = sorted((ROOT / "knowledge").rglob("*.md"))
     link_pages = pages + quickstart_pages + [ROOT / "CONTRIBUTING.md"] + knowledge_pages
     for path in link_pages:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         for link in re.findall(r'\]\(([^)\s]+)\)|src="([^"]+)"', text):
             target = unquote(link[0] or link[1]).split("#", 1)[0]
             if not target or target.startswith(("{{", "mailto:")):
@@ -91,14 +91,14 @@ def main() -> None:
                 and not target.startswith(REPO_URL)
             ):
                 errors.append(f"{path}: local link into unpublished archive: {target}")
-    source = (ROOT / "examples/v2/quickstart.py").read_text()
+    source = (ROOT / "examples/v2/quickstart.py").read_text(encoding="utf-8")
     ast.parse(source)
     for path in quickstart_pages + [
         DOCS / lang / "applications/GETTING_STARTED.md" for lang in ("en", "zh")
     ]:
-        if "```python\n" + source + "```" not in path.read_text():
+        if "```python\n" + source + "```" not in path.read_text(encoding="utf-8"):
             errors.append(f"{path}: quick-start copy differs from executable example")
-    config = yaml.safe_load((DOCS / "_config.yml").read_text())
+    config = yaml.safe_load((DOCS / "_config.yml").read_text(encoding="utf-8"))
     if "archive/" not in config.get("exclude", []):
         errors.append("archive must remain excluded from publication")
     logo = config.get("logo", "").lstrip("/")

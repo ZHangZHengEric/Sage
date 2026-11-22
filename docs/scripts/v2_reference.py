@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def server_environment() -> dict[str, str]:
-    tree = ast.parse((ROOT / "app/v2/server/config/settings.py").read_text())
+    tree = ast.parse((ROOT / "app/v2/server/config/settings.py").read_text(encoding="utf-8"))
     values = {}
     for node in ast.walk(tree):
         if (
@@ -29,7 +29,7 @@ def server_environment() -> dict[str, str]:
 
 
 def server_routes() -> list[tuple[str, str, str]]:
-    card = ast.parse((ROOT / "app/v2/server/conversations/a2a/card.py").read_text())
+    card = ast.parse((ROOT / "app/v2/server/conversations/a2a/card.py").read_text(encoding="utf-8"))
     constants = {
         n.targets[0].id: n.value.value
         for n in card.body
@@ -52,7 +52,7 @@ def server_routes() -> list[tuple[str, str, str]]:
 
     routes = []
     for path in sorted((ROOT / "app/v2/server/routers").glob("*.py")):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         prefixes = {}
         for n in tree.body:
             if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
