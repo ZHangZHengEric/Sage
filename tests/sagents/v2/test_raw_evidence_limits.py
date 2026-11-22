@@ -255,6 +255,15 @@ def test_raw_pydantic_extensions_survive_without_custom_serializers():
     assert raw_trace_value(event) == expected
 
 
+@pytest.mark.parametrize("text", ["first\nsecond\r\t", "".join(map(chr, range(32))), '中文"\\\n'])
+def test_raw_json_working_size_preserves_escape_budget(text):
+    from sagents.v2.runtime.observability.evidence.raw import json_working_size
+
+    encoded = json.dumps(text, ensure_ascii=False)
+    expected = len(encoded) if text.isascii() else 4 * (len(encoded) - 2) + 2
+    assert json_working_size(text, 4096) == expected
+
+
 def test_many_pydantic_extras_are_preflighted_without_merging(monkeypatch):
     import tracemalloc
     from pydantic import BaseModel, ConfigDict

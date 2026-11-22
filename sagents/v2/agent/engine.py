@@ -22,6 +22,7 @@ from sagents.v2.runtime.execution.ownership import (
     is_lease_loss,
     require_execution_ownership,
 )
+from sagents.v2.runtime.observability.timing import measure_framework_phase
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.agent.progress import inspection_progress, repeated_cycles
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
@@ -240,6 +241,8 @@ class _DriveReads:
     store: object
     command: StartRun | None
     resolved_effects_through: int = 0
+    # One already-built response, handed back to the same step after commit.
+    response_checkpoint: tuple[ModelResponse, AgentLoopCheckpointState] | None = None
 
 
 _ACTIVE_DRIVE_READS: ContextVar[_DriveReads | None] = ContextVar("agent_drive_reads", default=None)
@@ -1702,6 +1705,7 @@ class AgentLoopEngine:
             ledger.messages = ()
             reads.store = None
             reads.command = None
+            reads.response_checkpoint = None
             _ACTIVE_LEDGER_DIGEST.reset(token)
             _ACTIVE_DRIVE_READS.reset(reads_token)
         return run
@@ -1893,10 +1897,11 @@ class AgentLoopEngine:
             except Exception as exc:
                 return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='loop.request_preparation_failed', category=ErrorCategory.PROVIDER_PERMANENT, message=exception_diagnostic_message(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
             request = prepared_step.request
-            budget = await evaluate_run_budget(
-                self.runtime.session_store, run, self.clock(),
-                usage_cache=self._budget_usage_cache, run_command=command,
-            )
+            with measure_framework_phase("model_budget_check"):
+                budget = await evaluate_run_budget(
+                    self.runtime.session_store, run, self.clock(),
+                    usage_cache=self._budget_usage_cache, run_command=command,
+                )
             if budget.error is not None:
                 return _DriveIteration(await self._fail(run, state, step_id, budget.error, context), state, empty_response_retries, context_overflow_retries, stop=True)
             if budget.remaining_tokens is not None:
@@ -1904,11 +1909,14 @@ class AgentLoopEngine:
                     request.max_output_tokens or budget.remaining_tokens,
                     budget.remaining_tokens,
                 )})
-            run = await self.runtime.get_run(run.run_id)
+            with measure_framework_phase("model_dispatch_control_read"):
+                run = await self.runtime.get_run(run.run_id)
             tools = prepared_step.tools
             system_requirements = self._system_requirements(request.messages)
             available_tools = tuple(tool.name for tool in tools)
             request_size = None
+            reads = _ACTIVE_DRIVE_READS.get()
+            response_checkpoint = None
             try:
                 # Phase 3: deltas are emitted as replay-buffered events, followed
                 # by completed Items that are authoritative for final content.
@@ -1941,6 +1949,10 @@ class AgentLoopEngine:
                     stop=not recovered or can_defer_run(run.run_id))
             except Exception as exc:
                 return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='model.provider_error', category=ErrorCategory.PROVIDER_PERMANENT, message=str(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
+            finally:
+                if reads is not None and reads.store is store and reads.run_id == run.run_id:
+                    response_checkpoint = reads.response_checkpoint
+                    reads.response_checkpoint = None
             if partial_suspension is not None:
                 return _DriveIteration(partial_suspension, state, empty_response_retries, context_overflow_retries, stop=True)
             assert response is not None
@@ -1951,13 +1963,27 @@ class AgentLoopEngine:
                 observe_response(request, response)
             empty_response_retries = 0
             context_overflow_retries = 0
-            state = state.model_copy(update={
+            next_call = {
                 "model_recovery": state.model_recovery.next_call(),
-                "provider_retry_attempts": 0, "rejected_input_characters": None,
-            })
-            state = self._state_after_model_response(
-                state, response, step_id, system_requirements, available_tools
-            )
+                "provider_retry_attempts": 0,
+                "rejected_input_characters": None,
+            }
+            if (
+                response_checkpoint is not None
+                and response_checkpoint[0] is response
+                and response_checkpoint[1].pending_response_step_id == step_id
+            ):
+                state = response_checkpoint[1].model_copy(update={
+                    **next_call,
+                    "pending_response_system_requirements": system_requirements,
+                    "pending_response_tool_names": available_tools,
+                })
+            else:
+                state = self._state_after_model_response(
+                    state.model_copy(update=next_call), response, step_id,
+                    system_requirements, available_tools,
+                )
+            response_checkpoint = None
 
         questionnaire_completed = state.pending_questionnaire_completed
         completed_tool_results: list[ToolExecutionResult] = []
@@ -2060,10 +2086,11 @@ class AgentLoopEngine:
                     owner_agent_id=command.agent_id,
                     owner_session_id=run.session_id,
                 )
-                run, policy, authorization_drafts = await self._authorize_tool_call(
-                    run, tool_call, definition, context, state.turn_id, step_id,
-                    command.invocation_mode, immediate_dispatch=immediate_dispatch,
-                )
+                with measure_framework_phase("tool_policy_wall"):
+                    run, policy, authorization_drafts = await self._authorize_tool_call(
+                        run, tool_call, definition, context, state.turn_id, step_id,
+                        command.invocation_mode, immediate_dispatch=immediate_dispatch,
+                    )
                 if policy.action == ToolPolicyAction.DENY:
                     denied = localize_error(
                         RuntimeErrorInfo(
@@ -3074,19 +3101,21 @@ class AgentLoopEngine:
             raise
         finally:
             try:
-                run = await batcher.flush()
+                with measure_framework_phase("model_stream_final_flush"):
+                    run = await batcher.flush()
             finally:
-                try:
-                    # Stop the pending `anext` task before asking its source
-                    # stream to close; Python async generators reject aclose
-                    # while an iteration task is still running.
-                    await controlled_events.aclose()
-                finally:
-                    # Provider streams may own sockets/tasks. A persistence
-                    # error while flushing must not bypass their cleanup.
-                    closer = getattr(stream, "aclose", None)
-                    if closer is not None:
-                        await closer()
+                with measure_framework_phase("model_stream_close"):
+                    try:
+                        # Stop the pending `anext` task before asking its source
+                        # stream to close; Python async generators reject aclose
+                        # while an iteration task is still running.
+                        await controlled_events.aclose()
+                    finally:
+                        # Provider streams may own sockets/tasks. A persistence
+                        # error while flushing must not bypass their cleanup.
+                        closer = getattr(stream, "aclose", None)
+                        if closer is not None:
+                            await closer()
         assert response is not None
         # Some providers leave the final text empty and deliver it only as
         # deltas. The response checkpoint must describe the exact committed Item.
@@ -3163,13 +3192,22 @@ class AgentLoopEngine:
                 data=UsageEventData(usage=response.usage),
             )
         )
-        recovery_state = self._state_after_model_response(
-            state, response, step_id, self._system_requirements(request.messages),
-            tuple(tool.name for tool in request.tools),
-        )
-        run = await self._commit_running(
-            run, context, tuple(drafts), recovery_state=recovery_state
-        )
+        with measure_framework_phase("model_response_checkpoint_wall"):
+            recovery_state = self._state_after_model_response(
+                state, response, step_id, self._system_requirements(request.messages),
+                tuple(tool.name for tool in request.tools),
+            )
+            run = await self._commit_running(
+                run, context, tuple(drafts), recovery_state=recovery_state
+            )
+        reads = _ACTIVE_DRIVE_READS.get()
+        if (
+            self._builtin_step_request_builder
+            and reads is not None
+            and reads.store is self.runtime.session_store
+            and reads.run_id == run.run_id
+        ):
+            reads.response_checkpoint = response, recovery_state
         return run, response, None
 
     async def _authorize_tool_call(
@@ -3876,7 +3914,10 @@ class AgentLoopEngine:
 
         # An uncommitted authorization is only passed for a single fresh call
         # in a new step. The durable start still precedes the external tool.
-        previous = {} if authorization_drafts else await self._crossed_tool_calls(run, step_id)
+        previous = {}
+        if not authorization_drafts:
+            with measure_framework_phase("tool_dispatch_replay_lookup"):
+                previous = await self._crossed_tool_calls(run, step_id)
         if call.tool_call_id in previous:
             # Reuse the original operation identity, including after process loss.
             call = previous[call.tool_call_id]
@@ -3908,17 +3949,19 @@ class AgentLoopEngine:
                 )
             result = receipt
         else:
-            if definition is None:
-                definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
-            guarded = await self._guard_unresolved_effect(
-                run, call, context, turn_id, step_id, state, definition,
-                authorization_drafts=authorization_drafts,
-            )
+            with measure_framework_phase("tool_dispatch_preflight_wall"):
+                if definition is None:
+                    definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
+                guarded = await self._guard_unresolved_effect(
+                    run, call, context, turn_id, step_id, state, definition,
+                    authorization_drafts=authorization_drafts,
+                )
             if guarded is not None:
                 return guarded
-            run = await self._start_tool_execution(
-                run, call, context, turn_id, step_id, authorization_drafts=authorization_drafts,
-            )
+            with measure_framework_phase("tool_dispatch_commit_wall"):
+                run = await self._start_tool_execution(
+                    run, call, context, turn_id, step_id, authorization_drafts=authorization_drafts,
+                )
             try:
                 run, result = await self._capture_tool_execution(
                     run, call, context, turn_id, step_id, state=state,
@@ -5370,6 +5413,11 @@ class AgentLoopEngine:
                 recovery_state = recovery_state.model_copy(
                     update={"skill_state": snapshot}
                 )
+            with measure_framework_phase("agent_checkpoint_encode"):
+                encoded = AgentLoopCheckpointCodec.encode(
+                    recovery_state.model_copy(update={"execution_checkpoint": True}),
+                    ledger_digest=ledger_digest or self._ledger_digest(recovery_state.messages),
+                )
             checkpoint = Checkpoint(
                 checkpoint_id=new_id("checkpoint"),
                 checkpoint_codec_version=AgentLoopCheckpointCodec.version,
@@ -5377,10 +5425,7 @@ class AgentLoopEngine:
                 run_id=run.run_id,
                 run_sequence=run.last_run_sequence + len(drafts) + 1,
                 session_revision=run.accepted_session_revision,
-                state=AgentLoopCheckpointCodec.encode(
-                    recovery_state.model_copy(update={"execution_checkpoint": True}),
-                    ledger_digest=ledger_digest or self._ledger_digest(recovery_state.messages),
-                ),
+                state=encoded,
                 resolved_spec_hash=run.resolved_spec_hash,
                 created_at=self.clock(),
             )

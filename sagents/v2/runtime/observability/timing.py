@@ -41,6 +41,19 @@ def framework_phase_attributes(totals: dict[str, tuple[int, float]]) -> dict[str
 
 
 @contextmanager
+def measure_framework_phase(name: str):
+    """Measure a phase in the Run summary without emitting a per-call log."""
+    if _framework_phases.get() is None:
+        yield
+        return
+    started = perf_counter()
+    try:
+        yield
+    finally:
+        record_framework_phase(name, perf_counter() - started)
+
+
+@contextmanager
 def log_duration(logger, event: str, message: str, *, attributes=None, aggregate_phase=None, **context):
     """Measure a boundary without capturing inputs or changing its outcome."""
     started = perf_counter()

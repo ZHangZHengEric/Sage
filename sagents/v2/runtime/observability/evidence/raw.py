@@ -6,6 +6,7 @@ from itertools import chain
 from collections.abc import Mapping
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal
@@ -17,6 +18,11 @@ from pydantic_core import to_jsonable_python
 
 
 _JSON_SCALARS = (datetime, date, time, timedelta, Decimal, UUID)
+_UNICODE_ESCAPED_CONTROLS = re.compile(r"[\x00-\x07\x0b\x0e-\x1f]")
+_SHORT_ESCAPED_CONTROLS = ("\b", "\t", "\n", "\f", "\r")
+_LONG_ESCAPED_CONTROLS = tuple(
+    chr(code) for code in range(32) if chr(code) not in _SHORT_ESCAPED_CONTROLS
+)
 
 
 def retained_size(value, limit, seen=None):
@@ -58,10 +64,11 @@ def json_working_size(value, limit, ancestors=None):
     if isinstance(value, str):
         chars = len(value) + value.count('"') + value.count("\\")
         if not value.isprintable():
-            for code in range(32):
-                chars += value.count(chr(code)) * (
-                    1 if code in {8, 9, 10, 12, 13} else 5
-                )
+            chars += sum(value.count(char) for char in _SHORT_ESCAPED_CONTROLS)
+            # Ordinary multiline text has only short escapes. Avoid walking
+            # the entire string once per other control character.
+            if _UNICODE_ESCAPED_CONTROLS.search(value):
+                chars += 5 * sum(value.count(char) for char in _LONG_ESCAPED_CONTROLS)
         return chars * (1 if value.isascii() else 4) + 2
     if value is None or isinstance(value, (bool, int, float)):
         return sys.getsizeof(value) * 3
@@ -111,6 +118,16 @@ def _model_fields(value):
 
 def raw_trace_value(value):
     """Normalize JSON values without a whole-payload dumps/loads round trip."""
+    kind = type(value)
+    if value is None or kind in (str, bool, int, float):
+        return value
+    if kind is dict:
+        return {
+            key if type(key) is str else _json_key(key): raw_trace_value(item)
+            for key, item in value.items()
+        }
+    if kind in (list, tuple):
+        return [raw_trace_value(item) for item in value]
     if isinstance(value, BaseModel):
         value = _model_fields(value)
     if isinstance(value, Mapping):

@@ -252,7 +252,7 @@ class OtlpTraceTransport:
                         timing = {
                             key: value for key, value in span.attributes.items()
                             if key.startswith("sage.performance.")
-                            or key in {"agent_id", "root_session_id", "run_state"}
+                            or key in {"agent_id", "root_session_id", "run_state", "framework_phases"}
                         }
                         summary = span.model_copy(update={"attributes": timing})
                         attributes = self._encode_values(

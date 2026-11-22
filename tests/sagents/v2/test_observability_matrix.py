@@ -666,6 +666,7 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("delta", "final_text"), [("done", "done"), (None, "done"), (" \n", " \n")])
 async def test_recording_provider_emits_model_request_logs(tmp_path, delta, final_text):
+    from sagents.v2.model.middleware.recording import bind_model_trace_session
     from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
 
     sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
@@ -703,7 +704,9 @@ async def test_recording_provider_emits_model_request_logs(tmp_path, delta, fina
         model_binding="primary",
         messages=(ModelMessage(role="user", content=(TextBlock(text="hello"),)),),
     )
-    [event async for event in recording.stream(request)]
+    with bind_model_trace_session("other_run", "other_session"):
+        [event async for event in recording.stream(request)]
+    assert all(record.session_id == "session_1" for record in logs.records)
     events = [record.event for record in logs.records]
     if not final_text.strip():
         assert events == ["model.request.started", "model.request.completed"]
@@ -798,7 +801,7 @@ async def test_otlp_trace_sink_maps_spans_when_sdk_is_installed():
 
 
 @pytest.mark.asyncio
-async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
+async def test_loop_emits_execution_scoped_run_model_and_tool_spans(monkeypatch):
 
     from tests.sagents.v2.test_agent_loop_matrix import (
         CONTEXT,
@@ -808,10 +811,10 @@ async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
     )
 
     traces = _CapturingTraceSink()
-    runtime_holder = {}
+    logs = _CapturingLogSink()
 
     async def resolve_session(run_id: str) -> str:
-        return (await runtime_holder["runtime"].get_run(run_id)).session_id
+        pytest.fail("model trace must reuse the current Run's session identity")
 
     inner = ScriptedModelProvider(
         (
@@ -825,11 +828,20 @@ async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
         trace_sink=traces,
         session_id_resolver=resolve_session,
     )
-    runtime, handle, loop, executor = await setup_loop(model, trace_sink=traces)
-    runtime_holder["runtime"] = runtime
+    _, handle, loop, executor = await setup_loop(model, trace_sink=traces, log_sink=logs)
+    response_state_calls = 0
+    state_after_response = loop._state_after_model_response
+
+    def count_response_state(*args, **kwargs):
+        nonlocal response_state_calls
+        response_state_calls += 1
+        return state_after_response(*args, **kwargs)
+
+    monkeypatch.setattr(loop, "_state_after_model_response", count_response_state)
     result = await loop.execute(handle.run_id, CONTEXT)
 
     assert result.state.value == "completed"
+    assert response_state_calls == 2
     assert len(executor.calls) == 1
     names = [span.name for span in traces.started]
     assert names.count("agent.run") == 1
@@ -846,11 +858,21 @@ async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
     assert run_span.trace_id == expected_trace
     assert {span.trace_id for span in traces.started} == {expected_trace}
     assert all(span.parent_span_id == run_span.span_id for span in model_spans)
+    assert all(span.session_id == run_span.session_id for span in model_spans)
     assert tool_span.parent_span_id == run_span.span_id
     assert run_span.attributes["user_input"] == "do task"
     assert tool_span.attributes["tool_name"] == "read_value"
     ended_run = next(span for span in traces.ended if span.name == "agent.run")
     assert ended_run.attributes["run_state"] == "completed"
+    phases = ended_run.attributes["framework_phases"]
+    assert phases == next(
+        record.attributes["framework_phases"] for record in logs.records
+        if record.event == "agent.run.completed"
+    )
+    for phase in ("model_request_prepare_wall", "model_response_checkpoint_wall", "model_observation_finalize"):
+        assert phases[phase]["count"] == 2
+        assert phases[phase]["duration_ms"] >= 0
+    assert phases["tool_result_settlement_wall"]["count"] == 1
 
 
 @pytest.mark.asyncio

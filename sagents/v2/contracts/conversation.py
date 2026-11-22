@@ -30,6 +30,8 @@ def order_tool_context(messages: Sequence["ModelMessage"]) -> tuple["ModelMessag
     Never cross a real user/assistant boundary or move an unrelated tool result.
     Incomplete pairs remain incomplete for the assembler to handle normally.
     """
+    if not any(is_tool_context(message) for message in messages):
+        return tuple(messages)
     output = []
     index = 0
     while index < len(messages):

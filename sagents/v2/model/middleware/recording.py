@@ -7,6 +7,8 @@ from dataclasses import replace
 from inspect import Parameter, signature
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, cast
 
@@ -30,13 +32,34 @@ from sagents.v2.runtime.observability.contracts import (
 )
 from sagents.v2.runtime.observability.logs import StructuredLogger
 from sagents.v2.runtime.observability.performance.recording import ModelTiming, PerformanceRecorder
-from sagents.v2.runtime.observability.timing import elapsed_ms
+from sagents.v2.runtime.observability.timing import elapsed_ms, measure_framework_phase
 from sagents.v2.runtime.observability.traces import (
     SpanHandle,
     StructuredTracer,
     current_trace_context,
     new_trace_id,
 )
+
+
+_run_session: ContextVar[tuple[str, str] | None] = ContextVar("model_trace_run_session", default=None)
+
+
+def _model_span_content(sink: TraceSink | None, value: Any) -> Any:
+    # StructuredTracer and SpanHandle synchronously snapshot raw attributes.
+    # Redacted and metadata-only sinks still apply their collection policy here.
+    if getattr(sink, "content_mode", None) == "raw":
+        return value
+    return trace_content(sink, value)
+
+
+@contextmanager
+def bind_model_trace_session(run_id: str, session_id: str):
+    """Reuse the session identity from an already loaded Run snapshot."""
+    token = _run_session.set((run_id, session_id))
+    try:
+        yield
+    finally:
+        _run_session.reset(token)
 
 
 class RecordingModelProvider:
@@ -127,7 +150,12 @@ class RecordingModelProvider:
         return self._stream(request)
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
-        session_id = await self.session_id_resolver(request.run_id)
+        scope = _run_session.get()
+        if scope is not None and scope[0] == request.run_id:
+            session_id = scope[1]
+        else:
+            with measure_framework_phase("model_trace_session_lookup"):
+                session_id = await self.session_id_resolver(request.run_id)
         started_at = utc_now()
         purpose = (
             request.metadata.get("purpose")
@@ -170,7 +198,7 @@ class RecordingModelProvider:
             attributes={
                 "model_binding": request.model_binding,
                 "purpose": purpose,
-                "input": trace_content(
+                "input": _model_span_content(
                     self.trace_sink,
                     {"messages": request.messages, "tools": request.tools},
                 ),
@@ -289,36 +317,38 @@ class RecordingModelProvider:
                                         "first_text_ms": elapsed_ms(started_at, first_text_at)},
                         )
                 if completed:
-                    assert event.response is not None and observed_at is not None
-                    await persist_first_output()
-                    await self._diagnose(
-                        "complete_model_request",
-                        session_id=session_id,
-                        request=request,
-                        response=event.response,
-                        observed_at=observed_at,
-                    )
-                    _end_model_span(
-                        span, started_at, first_token_at, finished=observed_at, response=event.response
-                    )
-                    self._log(
-                        "model.request.completed",
-                        "model request completed",
-                        session_id=session_id,
-                        request=request,
-                        attributes={
-                            "model_binding": request.model_binding,
-                            "purpose": purpose,
-                            "agent_id": self.provider_metadata.get("agent_id"),
-                            "finish_reason": event.response.finish_reason,
-                            "duration_ms": elapsed_ms(started_at, observed_at),
-                            "ttfb_ms": elapsed_ms(started_at, first_token_at),
-                            "first_text_at": first_text_at.isoformat() if first_text_at is not None else None,
-                            "first_text_ms": elapsed_ms(started_at, first_text_at),
-                        },
-                    )
-                    finish_timing(observed_at)
-                    finalized = True
+                    with measure_framework_phase("model_observation_finalize"):
+                        assert event.response is not None and observed_at is not None
+                        await persist_first_output()
+                        await self._diagnose(
+                            "complete_model_request",
+                            session_id=session_id,
+                            request=request,
+                            response=event.response,
+                            observed_at=observed_at,
+                        )
+                        with measure_framework_phase("model_trace_completion_wall"):
+                            _end_model_span(
+                                span, started_at, first_token_at, finished=observed_at, response=event.response
+                            )
+                        self._log(
+                            "model.request.completed",
+                            "model request completed",
+                            session_id=session_id,
+                            request=request,
+                            attributes={
+                                "model_binding": request.model_binding,
+                                "purpose": purpose,
+                                "agent_id": self.provider_metadata.get("agent_id"),
+                                "finish_reason": event.response.finish_reason,
+                                "duration_ms": elapsed_ms(started_at, observed_at),
+                                "ttfb_ms": elapsed_ms(started_at, first_token_at),
+                                "first_text_at": first_text_at.isoformat() if first_text_at is not None else None,
+                                "first_text_ms": elapsed_ms(started_at, first_text_at),
+                            },
+                        )
+                        finish_timing(observed_at)
+                        finalized = True
                 yield event
         except BaseException as exc:
             # A consumer may close immediately after COMPLETED (summaries do
@@ -411,7 +441,7 @@ def _end_model_span(
     if response is not None:
         attributes.update(
             {
-                "output": trace_content(
+                "output": _model_span_content(
                     span.sink,
                     {"text": response.text, "tool_calls": response.tool_calls},
                 ),

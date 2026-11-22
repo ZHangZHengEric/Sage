@@ -8,12 +8,14 @@ from sagents.v2.contracts.common import utc_now
 
 from sagents.v2.agent.engine import AgentLoopEngine
 from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
+from sagents.v2.model.middleware.recording import bind_model_trace_session
 from sagents.v2.runtime.observability.performance.recording import PerformanceRecorder, RunTimingStage
 from sagents.v2.runtime.observability.run_output import capture_run_trace_output
 from sagents.v2.runtime.observability.timing import (
     collect_framework_phases,
     framework_phase_attributes,
     log_duration,
+    measure_framework_phase,
 )
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.contracts.items import TextBlock
@@ -72,11 +74,13 @@ class _ObservedContextAssembler:
 
     async def initial_ledger(self, command, *, run_id=None):
         with log_duration(self.logger, "agent.preparation.completed", "会话历史加载结束",
+                          aggregate_phase="history_load_wall",
                           run_id=run_id, attributes={"phase": "history"}):
             return await self.assembler.initial_ledger(command, run_id=run_id)
 
     async def prepare_messages(self, command, ledger, **kwargs):
         with log_duration(self.logger, "agent.preparation.completed", "模型上下文构建结束",
+                          aggregate_phase="context_projection_wall",
                           run_id=kwargs.get("run_id"), attributes={"phase": "context_projection"}):
             return await self.assembler.prepare_messages(command, ledger, **kwargs)
 
@@ -90,6 +94,7 @@ class _ObservedStepRequestBuilder:
 
     async def prepare(self, **kwargs):
         with log_duration(self.logger, "agent.preparation.completed", "模型请求准备结束",
+                          aggregate_phase="model_request_prepare_wall",
                           run_id=kwargs["run_id"], turn_id=kwargs["turn_id"], step_id=kwargs["step_id"],
                           attributes={"phase": "model_request"}):
             return await self.builder.prepare(**kwargs)
@@ -150,6 +155,7 @@ class ObservedRunDriver(AgentLoopEngine):
         if run_id in self._prepared_tool_selection_runs:
             return
         with log_duration(self._structured_logger(), "agent.preparation.completed", "工具目录与选择策略准备结束",
+                          aggregate_phase="tool_selection_prepare_wall",
                           run_id=run_id, attributes={"phase": "tool_selection"}):
             return await super()._prepare_tool_selection(
                 command=command, run_id=run_id, messages=messages, language=language
@@ -161,6 +167,10 @@ class ObservedRunDriver(AgentLoopEngine):
                           aggregate_phase="agent_state_commit",
                           attributes={"event_types": [draft.type for draft in drafts], "revision": run.revision}):
             return await super()._commit_running(run, context, drafts, **kwargs)
+
+    async def _commit_tool_result(self, *args, **kwargs):
+        with measure_framework_phase("tool_result_settlement_wall"):
+            return await super()._commit_tool_result(*args, **kwargs)
 
     async def _root_session_id(self, session_id: str) -> str:
         return await resolve_root_session_id(
@@ -265,7 +275,10 @@ class ObservedRunDriver(AgentLoopEngine):
             with (
                 structured_log_context(**correlation, run_id=run.run_id, session_id=run.session_id),
                 capture_run_trace_output(run_id, enabled=capture_output) as output,
-                collect_framework_phases(enabled=logger is not None) as phases,
+                collect_framework_phases(
+                    enabled=logger is not None or self._observed_trace_sink is not None
+                ) as phases,
+                bind_model_trace_session(run.run_id, run.session_id),
             ):
                 snapshot = await body(
                     run_id,
@@ -295,7 +308,8 @@ class ObservedRunDriver(AgentLoopEngine):
             raise
         status, event, message, log_method = _run_outcome_observation(snapshot.state)
         self._record_stage(run, event, segment, state=snapshot.state.value)
-        final_attributes = {"run_state": snapshot.state.value}
+        summary_attributes = {"run_state": snapshot.state.value, **framework_phase_attributes(phases)}
+        final_attributes = dict(summary_attributes)
         try:
             if output is not None and snapshot.state in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}:
                 if output.items:
@@ -317,7 +331,7 @@ class ObservedRunDriver(AgentLoopEngine):
                 session_id=run.session_id,
                 run_id=run.run_id,
                 **correlation,
-                attributes={"run_state": snapshot.state.value, **framework_phase_attributes(phases)},
+                attributes=summary_attributes,
             )
         return snapshot
 
