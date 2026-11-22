@@ -50,6 +50,7 @@ from app.v2.server.storage.external_workspaces import (
     delete_workspace_path,
     import_workspace_file,
     import_workspace_files,
+    replace_workspace_files,
     workspace_parts,
 )
 from app.v2.server.storage.user_preferences import MAX_USER_PREFERENCES_BYTES, user_preferences
@@ -440,6 +441,8 @@ WorkspaceCallerDep = Annotated[Caller, Depends(workspace_file_caller)]
 class WorkspaceImport(BaseModel):
     directory: str = Field(min_length=1, max_length=4096)
     files: dict[str, str] = Field(default_factory=dict)
+    overwrite: bool = False
+    validate_paths: list[str] | None = Field(default=None, min_length=1, max_length=MAX_STAT_PATHS)
 
 
 class WorkspaceFileInfo(BaseModel):
@@ -526,6 +529,20 @@ async def put_user_preferences(body: UserPreferencesBody, caller: CallerDep, hos
 async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep, service: ConversationDep):
     try:
         async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
+            paths = body.validate_paths
+            validate_only = paths is not None
+            if validate_only and (not body.overwrite or body.files):
+                raise ValueError("validation requires paths without file contents")
+            if body.overwrite:
+                if host.workspace_storage is not None:
+                    raise ValueError("workspace replacement is unavailable for this provider")
+                count = await finish_file_operation(
+                    replace_workspace_files, host.paths, caller.tenant_id, caller.agent_id,
+                    body.directory, dict.fromkeys(paths, "") if paths is not None else body.files,
+                    validate_only=validate_only,
+                )
+                return success({"directory": body.directory, "file_count": count,
+                                "overwrite": True, "validated": validate_only})
             if host.workspace_storage is not None:
                 count = await finish_file_operation(host.workspace_storage.import_files,
                     caller.tenant_id, caller.agent_id, body.directory, body.files)

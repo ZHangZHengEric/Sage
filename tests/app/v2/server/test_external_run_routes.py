@@ -137,6 +137,51 @@ def test_external_run_routes_are_scoped_to_agent_tenant_and_request(tmp_path):
         _exercise_run_routes(client, base, agent_id)
 
 
+@pytest.mark.timeout(15)
+def test_external_workspace_replaces_a_validated_batch(tmp_path):
+    host = make_host(tmp_path)
+    with TestClient(create_app(host)) as client:
+        setup_agent(client)
+        agent = client.headers["SAGE-AGENT-ID"]
+        base = f"/api/agents/{agent}"
+        headers = _headers()
+        directory = "projects/site"
+        names = ("assets/mix.mp3", "assets/mix.mp3.arrangement.json")
+        files = {name: base64.b64encode(f"old-{name}".encode()).decode() for name in names}
+        assert client.put(base + "/workspace/files", headers=headers,
+                          json={"directory": directory, "files": files}).status_code == 200
+        preflight = {"directory": directory, "overwrite": True, "validate_paths": [*names, "assets/unused"]}
+        checked = client.put(base + "/workspace/files", headers=headers, json=preflight)
+        assert checked.json()["data"] == {
+            "directory": directory, "file_count": 3, "overwrite": True, "validated": True,
+        }
+
+        def read(name):
+            return client.get(base + "/workspace/file", headers=headers,
+                              params={"path": directory + "/" + name})
+
+        assert read("assets/unused").status_code == 404
+        assert read(names[0]).content == f"old-{names[0]}".encode()
+        updated = {name: base64.b64encode(f"new-{name}".encode()).decode() for name in names}
+        assert client.put(base + "/workspace/files", headers=headers,
+                          json={"directory": directory, "files": updated}).status_code == 409
+        assert client.put(base + "/workspace/files", headers=headers,
+                          json={**preflight, "validate_paths": ["assets", "index.html"]}).status_code == 422
+
+        batch = {"directory": directory, "overwrite": True, "files": updated}
+        rejected = client.put(base + "/workspace/files", headers=headers,
+                              json={**batch, "files": {**updated, "assets/../escape": ""}})
+        assert rejected.status_code == 422
+        assert read(names[0]).content == f"old-{names[0]}".encode()
+        for _ in range(2):
+            saved = client.put(base + "/workspace/files", headers=headers, json=batch)
+            assert saved.json()["data"] == {
+                "directory": directory, "file_count": 2, "overwrite": True, "validated": False,
+            }
+        for name in names:
+            assert read(name).content == f"new-{name}".encode()
+
+
 def _exercise_run_routes(client, base, agent_id):
     seed = {"index.html": base64.b64encode(b"<html></html>").decode()}
     imported = client.put(base + "/workspace/files", headers=_headers(),

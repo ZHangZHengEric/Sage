@@ -7,7 +7,7 @@ import binascii
 import hashlib
 import os
 import shutil
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import PurePosixPath
 import stat
 from uuid import uuid4
@@ -209,6 +209,86 @@ def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
     finally:
         os.close(fd)
     return len(decoded)
+
+
+def replace_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
+                            directory: str, encoded_files: dict[str, str],
+                            *, validate_only: bool = False) -> int:
+    """Preflight or replace a batch of regular files sharing one parent."""
+    root_parts, decoded = decode_workspace_files(directory, encoded_files)
+    if len(root_parts) != 2 or root_parts[0] != "projects":
+        raise ValueError("workspace replacement requires one project directory")
+    parents = {root_parts + parts[:-1] for parts in decoded}
+    if len(parents) != 1:
+        raise ValueError("workspace replacement files must share one parent")
+    parent_parts = parents.pop()
+    names = {parts[-1]: data for parts, data in decoded.items()}
+    if any(len(os.fsencode(part)) > 255 for part in (*parent_parts, *names)):
+        raise ValueError("workspace replacement name exceeds the component limit")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root = os.open(paths.workspace_dir(tenant_id, agent_id), flags)
+    with ExitStack() as opened:
+        opened.callback(os.close, root)
+        if validate_only:
+            parent = root
+            for part in parent_parts:
+                try:
+                    parent = os.open(part, flags, dir_fd=parent)
+                except FileNotFoundError:
+                    return len(names)
+                opened.callback(os.close, parent)
+        else:
+            parent = _directory(root, parent_parts, paths)
+            opened.callback(os.close, parent)
+        existing = set()
+        for name in names:
+            try:
+                info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("workspace replacement target is not a regular file")
+            existing.add(name)
+        if validate_only:
+            return len(names)
+        _commit_workspace_replacement(paths, parent, names, existing)
+    return len(names)
+
+
+def _commit_workspace_replacement(paths: ServerPaths, parent: int,
+                                  names: dict[str, bytes], existing: set[str]) -> None:
+    staged: dict[str, str] = {}
+    backups: dict[str, str] = {}
+    published: list[str] = []
+    try:
+        for name, data in names.items():
+            temporary = ".import-" + uuid4().hex
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o644, dir_fd=parent)
+            staged[name] = temporary
+            with os.fdopen(fd, "wb") as stream:
+                if paths.linux_execution_uid is not None and os.geteuid() == 0:
+                    os.fchown(stream.fileno(), paths.linux_execution_uid, paths.linux_execution_gid)
+                stream.write(data)
+            if name in existing:
+                backup = ".import-" + uuid4().hex
+                os.link(name, backup, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+                backups[name] = backup
+        for name, temporary in staged.items():
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+            published.append(name)
+    except OSError:
+        for name in reversed(published):
+            backup = backups.pop(name, None)
+            if backup is None:
+                os.unlink(name, dir_fd=parent)
+            else:
+                os.replace(backup, name, src_dir_fd=parent, dst_dir_fd=parent)
+        raise
+    finally:
+        for temporary in (*staged.values(), *backups.values()):
+            with suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=parent)
 
 
 def delete_workspace_path(paths: ServerPaths, tenant_id: str, agent_id: str,
