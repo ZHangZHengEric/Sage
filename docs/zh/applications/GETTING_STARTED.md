@@ -32,6 +32,13 @@ py -3.12 -m venv .venv
 
 如果使用更新的受支持 Python 版本，请修改第一条命令中的版本选择器，例如 `py -3.13`。直接调用虚拟环境中的 `python.exe` 既不需要激活环境，也不需要修改执行策略；本指南中运行 `python` 的地方都可以改用 `.\.venv\Scripts\python.exe`。安装依赖需要联网。
 
+如果没有 `py -3.12`（`py -0` 会列出启动器识别的版本），请改用已安装的 Python 3.12+ 解释器的完整路径创建虚拟环境，之后的安装和示例同样使用 `.\.venv\Scripts\python.exe` 运行：
+
+```powershell
+& 'C:\path\to\python.exe' -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
 ## 一个 Python 文件即可运行
 
 **不需要创建 `sage.yaml` 文件。** `SageManifestLoader.loads()` 将 YAML 字符串解析为 manifest，再直接传给 `SAgentBuilder.build()`。

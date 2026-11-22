@@ -32,6 +32,13 @@ py -3.12 -m venv .venv
 
 With a newer supported Python, change the selector in the first command, for example `py -3.13`. Calling the venv's `python.exe` directly needs neither activation nor an execution-policy change; use `.\.venv\Scripts\python.exe` wherever this guide runs `python`. Installing the dependencies needs network access.
 
+If `py -3.12` isn't available (`py -0` lists the versions the launcher knows), create the venv with the full path to an installed Python 3.12+ interpreter instead, then run the install and examples with the same `.\.venv\Scripts\python.exe`:
+
+```powershell
+& 'C:\path\to\python.exe' -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
 ## Run from one Python file
 
 **No `sage.yaml` file is required.** `SageManifestLoader.loads()` parses a YAML string into a manifest, which `SAgentBuilder.build()` accepts directly.
