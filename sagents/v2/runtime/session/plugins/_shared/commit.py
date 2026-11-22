@@ -10,7 +10,9 @@ class SqlSessionCommit:
     async def _commit_storage_locked(self, session_id: str) -> None:
         started_at = time.perf_counter()
         await self._ensure_ready()
-        mutation = self._session_mutation_locked(session_id).model_dump(
+        mutation = self._session_mutation_locked(
+            session_id, latest_revision_only=True
+        ).model_dump(
             mode="json", exclude={"kind"}
         )
         location_rows = self._location_rows_after_mutation(session_id, mutation)
@@ -39,10 +41,6 @@ class SqlSessionCommit:
         )
         session_row = mutation["upserts"]["sessions"][0]
         new_revision = int(session_row["revision"])
-        if not should_snapshot:
-            session_row["revision_sequences"] = {
-                str(new_revision): int(session_row["last_sequence"])
-            }
         encoded_compact = _json(compact) if should_snapshot else None
         encoded_mutation = _json(mutation) if not should_snapshot else None
         next_run_sequences: dict[str, int] = {}

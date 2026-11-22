@@ -48,6 +48,75 @@ def test_workspace_memory_is_bounded_but_core_instructions_are_not_silently_cut(
         provider._identity_document("AGENT", "instruction " * 5000, "en")
 
 
+@pytest.mark.asyncio
+async def test_summary_budget_counts_text_without_inline_image_bytes():
+    from sagents.v2.context import ModelConversationSummarizer
+    from sagents.v2.context.plugins._shared.persistent_summary import _summary_characters
+    from sagents.v2.context.summary import SummarizationRequest
+    from sagents.v2.contracts.items import ImageBlock
+
+    class NoProviderCalls:
+        async def capabilities(self, _binding):
+            pytest.fail("An over-budget summary must fall back before model I/O")
+
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, NoProviderCalls()), max_source_bytes=160)
+    image = ImageBlock(uri="data:image/png;base64," + "YWFh" * 350_000, mime_type="image/png")
+    user = ModelMessage(role="user", content=(TextBlock(text="检查原图"), image))
+    request = SummarizationRequest(scope=scope(), messages=(user,), target_tokens=64)
+
+    (size,) = _summary_characters("en", (user,))
+    assert size < 100
+    source = summarizer._source(request, max_bytes=160)
+    assert source is not None and "检查原图" in source and "image attached" in source
+    assert image.uri not in source
+    large_text = request.model_copy(update={"messages": (message("界" * 75, "user"),)})
+    assert summarizer._source(large_text, max_bytes=160) is None
+    assert "界" in await summarizer.summarize(large_text)
+
+
+@pytest.mark.asyncio
+async def test_inline_image_budget_reuses_only_the_same_image_and_bounds(monkeypatch):
+    from types import SimpleNamespace
+
+    from sagents.v2.context.assembler import _projection_digest
+    from sagents.v2.contracts.items import ImageBlock
+    from sagents.v2.model.inline_images import reuse_inline_image_checks
+    from sagents.v2.model.plugins._shared import image_limits
+
+    calls = []
+
+    def probe(source, **bounds):
+        calls.append((source["data"][-4:], bounds["max_edge"]))
+        return None, False
+
+    monkeypatch.setattr(image_limits, "_compress_source", probe)
+    first = ImageBlock(uri="data:image/png;base64," + "YWFh" * 20_000, mime_type="image/png")
+    second = first.model_copy(update={"uri": first.uri[:-4] + "YmJi"})
+    config = SimpleNamespace(
+        max_inline_images=20, max_inline_image_bytes=1_000_000,
+        max_inline_image_edge=2048, max_request_bytes=1_000_000,
+    )
+
+    async def measure(image):
+        payload = {
+            "input": [{"content": [{"type": "input_image", "image_url": image.uri}]}],
+        }
+        size = await image_limits.limit_openai_images(payload, config, responses=True)
+        assert size == image_limits.json_bytes(payload)
+
+    with reuse_inline_image_checks():
+        digest = _projection_digest((ModelMessage(role="user", content=(first,)),))
+        assert digest != _projection_digest((ModelMessage(role="user", content=(second,)),))
+        await measure(first)
+        await measure(first)
+        await measure(second)
+        config.max_inline_image_edge = 1024
+        await measure(first)
+        assert calls == [("YWFh", 2048), ("YmJi", 2048), ("YWFh", 1024)]
+    await measure(first)
+    assert len(calls) == 4
+
+
 def test_retired_estimated_budgets_load_but_are_never_enforced_or_reported():
     from sagents.v2.context import ContextBudget
     from sagents.v2.package.presets.factory import BuiltinPackageFactory

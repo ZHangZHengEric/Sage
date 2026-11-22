@@ -40,6 +40,28 @@ def record(index, content="deployment canary release"):
     )
 
 
+def test_framework_phase_totals_aggregate_and_isolate_nested_runs():
+    from sagents.v2.runtime.observability.timing import (
+        collect_framework_phases,
+        framework_phase_attributes,
+        record_framework_phase,
+    )
+
+    with collect_framework_phases(enabled=True) as parent:
+        record_framework_phase("redis_commit_transaction", 0.01)
+        with collect_framework_phases(enabled=True) as child:
+            record_framework_phase("redis_commit_transaction", 0.30)
+        with collect_framework_phases(enabled=False) as disabled:
+            record_framework_phase("redis_commit_transaction", 10)
+        record_framework_phase("redis_commit_transaction", 0.02)
+    record_framework_phase("redis_commit_transaction", 20)
+    assert framework_phase_attributes(parent) == {
+        "framework_phases": {"redis_commit_transaction": {"count": 2, "duration_ms": 30.0}}
+    }
+    assert child == {"redis_commit_transaction": (1, 0.30)}
+    assert disabled == {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("event_type", ["message", "reasoning"])
 async def test_stream_start_without_delta_preserves_following_text(event_type):
@@ -313,6 +335,48 @@ async def test_index_digest_cache_is_bounded_and_eviction_does_not_break_recall(
     assert len(service._indexed["session"]) == 3
     await service.recall(run_id="run", session_id="session", text="history", limit=5)
     assert len(queries[0].included_record_ids) == 10
+
+
+@pytest.mark.asyncio
+async def test_effect_scan_reuses_safe_prefix_but_finds_an_old_proposal():
+    from sagents.v2.agent.engine import AgentLoopEngine, _ACTIVE_DRIVE_READS, _DriveReads
+    from sagents.v2.contracts.commands import StartRun
+    from sagents.v2.contracts.events import ToolEventData
+
+    events, reads = [], []
+
+    class Store:
+        async def read_events(self, run_id, *, after_sequence=0):
+            assert run_id == "run"
+            reads.append(after_sequence)
+            return tuple(event for event in events if event.run_sequence > after_sequence)
+
+    def append(state):
+        data = ToolEventData(
+            tool_call_id="call", tool_name="write", state=state,
+            operation_id="operation", arguments={"value": 1} if state == "proposed" else None,
+        )
+        events.append(SimpleNamespace(type=f"tool.call.{state}", run_sequence=len(events) + 1, data=data))
+        run.last_run_sequence = len(events)
+        return data
+
+    store = Store()
+    engine = cast("AgentLoopEngine", SimpleNamespace(runtime=SimpleNamespace(session_store=store)))
+    run = SimpleNamespace(run_id="run", last_run_sequence=0)
+    command = StartRun(agent_id="agent", input=(), resolved_spec_hash="spec", idempotency_key="start")
+    token = _ACTIVE_DRIVE_READS.set(_DriveReads("run", store, command))
+    try:
+        proposal = append("proposed")
+        assert await AgentLoopEngine._unresolved_tool_effects(engine, run) == []
+        unknown = append("unknown")
+        assert await AgentLoopEngine._unresolved_tool_effects(engine, run) == [(proposal, unknown)]
+        append("reconciled")
+        assert await AgentLoopEngine._unresolved_tool_effects(engine, run) == []
+        append("succeeded")
+        assert await AgentLoopEngine._unresolved_tool_effects(engine, run) == []
+        assert reads == [0, 1, 0, 1, 0, 3]
+    finally:
+        _ACTIVE_DRIVE_READS.reset(token)
 
 
 @pytest.mark.asyncio

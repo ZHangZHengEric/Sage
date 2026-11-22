@@ -31,6 +31,7 @@ from sagents.v2.context.plugins.summary_ephemeral import (
     InMemoryConversationSummaryStore,
 )
 from sagents.v2.model import ModelCapabilities, ModelMessage
+from sagents.v2.model.inline_images import image_uri_digest, is_large_inline_image
 from sagents.v2.runtime.artifact.contracts import ArtifactStore
 from sagents.v2.runtime.artifact.images import hydrate_image_blocks, hydrate_wishseen_history
 from sagents.v2.runtime.artifact.media import hydrate_media_blocks
@@ -49,6 +50,23 @@ from sagents.v2.runtime.observability.logs import get_logger
 
 
 LOGGER = get_logger(__name__)
+
+
+def _projection_digest(messages: tuple[ModelMessage, ...]) -> str:
+    signature = hashlib.sha256()
+    for message in messages:
+        exclude = {}
+        for index, block in enumerate(message.content):
+            if isinstance(block, ImageBlock) and is_large_inline_image(block):
+                signature.update(f"image:{index}:".encode())
+                signature.update(image_uri_digest(block))
+                exclude[index] = {"uri"}
+        serialized = (
+            message.model_dump_json(exclude={"content": exclude})
+            if exclude else message.model_dump_json()
+        )
+        signature.update(serialized.encode())
+    return signature.hexdigest()
 
 
 class ContextAssembler(Protocol):
@@ -477,10 +495,7 @@ class DefaultContextAssembler:
                 }
             )
         if run_id is not None:
-            signature = hashlib.sha256()
-            for message in projection.messages:
-                signature.update(message.model_dump_json().encode())
-            digest = signature.hexdigest()
+            digest = _projection_digest(projection.messages)
             if (
                 required
                 and digest == self._projection_signatures.get(run_id, (None, None))[0]
@@ -568,7 +583,11 @@ class DefaultContextAssembler:
             if isinstance(submission_id, str) and submission_id:
                 digest = hashlib.sha256()
                 for block in message.content:
-                    digest.update(block.model_dump_json().encode())
+                    if isinstance(block, ImageBlock) and is_large_inline_image(block):
+                        digest.update(image_uri_digest(block))
+                        digest.update(block.model_dump_json(exclude={"uri"}).encode())
+                    else:
+                        digest.update(block.model_dump_json().encode())
                     digest.update(b"\0")
                 key = (submission_id, digest.hexdigest())
                 duplicate = key in seen_submissions

@@ -10,14 +10,16 @@ from sagents.v2.context.partition import conversation_units, current_turn_bounda
 from sagents.v2.context.plugins._shared.references import compact_units_to_references
 from sagents.v2.context.plugins._shared.progress_summary import extract_snapshot
 from sagents.v2.context.summary import (
+    active_summary_validation,
     create_summary,
     message_digests_async,
     ConversationSummary,
     SummarizationRequest,
+    summary_message_fragments,
 )
 from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import AudioBlock, FileBlock, ImageBlock, TextBlock
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.model.recovery import model_call_budget
 from sagents.v2.runtime.observability.logs import get_logger
@@ -26,8 +28,27 @@ from sagents.v2.runtime.observability.logs import get_logger
 LOGGER = get_logger(__name__)
 
 
-def _serialized_characters(*groups):
-    return tuple(sum(len(message.model_dump_json()) for message in group) for group in groups)
+def _summary_characters(language, *groups):
+    return tuple(
+        sum(len(part) for message in group for part in summary_message_fragments(message, language))
+        for group in groups
+    )
+
+
+def _inline_media_characters(messages):
+    return sum(
+        len(block.uri)
+        for message in messages
+        for block in message.content
+        if isinstance(block, (AudioBlock, FileBlock, ImageBlock)) and block.uri.startswith("data:")
+    )
+
+
+def _projection_characters(language, *groups):
+    return tuple(
+        rendered + _inline_media_characters(group)
+        for rendered, group in zip(_summary_characters(language, *groups), groups, strict=True)
+    )
 
 
 class _ExtractiveConversationSummarizer:
@@ -89,7 +110,7 @@ class PersistentSummaryReducerBase:
                 "context.invalid_source_mapping", "invalid canonical history mapping"
             )
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
-        previous, _ = await self._validated_previous(stored, canonical)
+        previous, _ = await self._validated_previous(stored, canonical, run_id=scope.run_id)
         canonical_covered = len(previous.covered_message_digests) if previous else 0
         covered = sum(i < canonical_covered for i in indices)
         if any(i >= canonical_covered for i in indices[:covered]) or any(
@@ -227,8 +248,9 @@ class PersistentSummaryReducerBase:
                 else ()
             )
             selected_characters, retained_characters = await bounded_to_thread(
-                "context-cpu", partial(_serialized_characters, selected, retained)
+                "context-cpu", partial(_summary_characters, scope.response_language, selected, retained)
             )
+            selected_media_characters = _inline_media_characters(selected)
             LOGGER.bind(session_id=scope.session_id, run_id=scope.run_id).info(
                 "context.summary.selection",
                 "Selected a complete history prefix for compression",
@@ -237,9 +259,11 @@ class PersistentSummaryReducerBase:
                     "previous_revision": previous.revision if previous else 0,
                     "covered_message_count": canonical_covered,
                     "selected_message_count": len(selected),
-                    "selected_characters": selected_characters,
+                    "selected_summary_characters": selected_characters,
+                    "selected_inline_media_characters": selected_media_characters,
                     "retained_message_count": len(retained),
-                    "retained_characters": retained_characters,
+                    "retained_summary_characters": retained_characters,
+                    "retained_inline_media_characters": _inline_media_characters(retained),
                 },
             )
             with model_call_budget() as quota:
@@ -256,7 +280,10 @@ class PersistentSummaryReducerBase:
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-            source_characters = selected_characters + (
+            # The summary receives text only. Actual model-context progress can
+            # also come from removing media, except for media kept in the anchor.
+            selected_projection_characters = selected_characters + selected_media_characters
+            source_characters = selected_projection_characters + (
                 len(previous.text) if previous else 0
             )
             if len(text.strip()) >= source_characters:
@@ -284,12 +311,13 @@ class PersistentSummaryReducerBase:
                 # Compare only the portions that differ.
                 new_chars, old_chars = await bounded_to_thread(
                     "context-cpu", partial(
-                        _serialized_characters,
+                        _projection_characters,
+                        scope.response_language,
                         (self._summary_message(summary), *anchor),
                         (*prefix, *previous_anchor),
                     )
                 )
-                if new_chars >= old_chars + selected_characters:
+                if new_chars >= old_chars + selected_projection_characters:
                     raise self._error(
                         "context.summary_no_progress",
                         "Summarizer did not reduce the complete request view",
@@ -308,7 +336,7 @@ class PersistentSummaryReducerBase:
                     stored.revision if stored else None
                 ):
                     raise
-                valid, _ = await self._validated_previous(winner, canonical)
+                valid, _ = await self._validated_previous(winner, canonical, run_id=scope.run_id)
                 if valid is None or len(valid.covered_message_digests) < canonical_end:
                     raise self._error(
                         "context.summary_revision_conflict",
@@ -323,6 +351,14 @@ class PersistentSummaryReducerBase:
                     else ()
                 )
                 saved = valid
+            else:
+                validation = active_summary_validation.get()
+                if (
+                    validation is not None
+                    and validation.run_id == scope.run_id
+                    and saved.covered_message_digests == summary.covered_message_digests
+                ):
+                    validation.remember(saved.covered_message_digests, canonical[:canonical_end])
             return ContextProjection(
                 messages=(*systems, self._summary_message(saved), *anchor, *retained),
                 historical_messages=canonical[:canonical_end],
@@ -358,30 +394,38 @@ class PersistentSummaryReducerBase:
     async def _validated_previous(
         summary: ConversationSummary | None,
         payload: tuple[ModelMessage, ...],
+        *,
+        run_id: str | None = None,
     ) -> tuple[ConversationSummary | None, tuple[ModelMessage, ...]]:
         if summary is None:
             return None, payload
         count = len(summary.covered_message_digests)
         if count > len(payload):
             return None, payload
-        actual = await message_digests_async(payload[:count])
+        prefix = payload[:count]
+        validation = active_summary_validation.get()
+        if validation is not None and (run_id is None or validation.run_id != run_id):
+            validation = None
+        if validation is not None and validation.matches(summary.covered_message_digests, prefix):
+            return summary, payload[count:]
+        actual = await message_digests_async(prefix)
         if actual != summary.covered_message_digests:
             # Existing checkpoints used full message metadata. Accept their
             # exact legacy hash or the provenance-free hash for each message;
             # an active Run can contain both reconstructed and new messages.
             legacy = await message_digests_async(
-                payload[:count], include_source_metadata=True
+                prefix, include_source_metadata=True
             )
-            if all(
+            if not all(
                 saved in {current, old}
                 for saved, current, old in zip(
                     summary.covered_message_digests, actual, legacy, strict=True
                 )
             ):
-                return summary, payload[count:]
-            # Never apply a summary to a rewritten or fork-incompatible prefix.
-            # The caller keeps the checkpoint so a later turn can replace it.
-            return None, payload
+                # Never apply a summary to a rewritten or fork-incompatible prefix.
+                return None, payload
+        if validation is not None:
+            validation.remember(summary.covered_message_digests, prefix)
         return summary, payload[count:]
 
     @staticmethod

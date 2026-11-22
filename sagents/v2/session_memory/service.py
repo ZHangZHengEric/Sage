@@ -7,10 +7,13 @@ import hashlib
 import json
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from time import perf_counter
 
 from sagents.v2.context import ContextProjection
+from sagents.v2.context.summary import verified_summary_prefix_token
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model import ModelMessage
+from sagents.v2.runtime.observability.timing import record_framework_phase
 from sagents.v2.session_memory.contracts import (
     SessionMemoryHit,
     SessionMemoryProvider,
@@ -33,6 +36,7 @@ class _RequestBoundary:
     # tool_call_id -> record ids produced by that call, so a search_memory call
     # cannot retrieve its own request.
     calls: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    summary_prefix_token: object | None = None
 
 
 class SessionMemoryService:
@@ -61,11 +65,23 @@ class SessionMemoryService:
         session_id: str | None = None,
         source_messages: tuple[ModelMessage, ...] = (),
     ) -> None:
-        historical = frozenset(
-            self.record_id(message)
-            for message in projection.historical_messages
-            if message.role not in {"system", "developer"}
-        )
+        prefix_token = verified_summary_prefix_token(run_id, projection.historical_messages)
+        previous = self._boundaries.get(run_id)
+        if (
+            prefix_token is not None
+            and previous is not None
+            and previous.session_id == session_id
+            and previous.summary_prefix_token is prefix_token
+        ):
+            # Record IDs can depend on provenance that summary hashes exclude.
+            # The token identifies the precise verified message objects.
+            historical = previous.historical
+        else:
+            historical = frozenset(
+                self.record_id(message)
+                for message in projection.historical_messages
+                if message.role not in {"system", "developer"}
+            )
         async with self._lock:
             previous = self._boundaries.get(run_id)
             append_from = 0
@@ -97,12 +113,17 @@ class SessionMemoryService:
         if pending:
             # Provider I/O stays outside the service lock so unrelated Runs can
             # index concurrently. A failed write does not advance this Run.
-            await self.provider.sync(tuple(record for record, _ in pending))
+            started = perf_counter()
+            try:
+                await self.provider.sync(tuple(record for record, _ in pending))
+            finally:
+                record_framework_phase("session_memory_sync", perf_counter() - started)
         boundary = _RequestBoundary(
             session_id=session_id,
             historical=historical,
             source_count=len(source_messages),
             calls=calls,
+            summary_prefix_token=prefix_token,
         )
         async with self._lock:
             self._remember_locked(session_id, pending)

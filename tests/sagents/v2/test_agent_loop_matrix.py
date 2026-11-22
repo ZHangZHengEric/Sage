@@ -4570,7 +4570,7 @@ async def _wait_for_tool_event(runtime, run_id, event_type, call_id):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", ["read_value", "write_value"])
 async def test_parallel_tools_overlap_and_publish_fast_result_before_slow_siblings(
-    tool_name,
+    tool_name, monkeypatch,
 ):
     entered = set()
     all_entered = asyncio.Event()
@@ -4598,10 +4598,25 @@ async def test_parallel_tools_overlap_and_publish_fast_result_before_slow_siblin
         handlers={"read_value": handler, "write_value": handler},
         tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
     )
+    commit = runtime.session_store.commit_run
+    start_batches = []
+
+    async def record_starts(**kwargs):
+        result = await commit(**kwargs)
+        starts = tuple(
+            event.data.tool_call_id for event in result.events
+            if event.type == "tool.call.started" and isinstance(event.data, ToolEventData)
+        )
+        if starts:
+            start_batches.append(starts)
+        return result
+
+    monkeypatch.setattr(runtime.session_store, "commit_run", record_starts)
     task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
     try:
         # A sequential executor cannot reach this barrier: no handler may finish yet.
         await asyncio.wait_for(all_entered.wait(), 2)
+        assert start_batches == [tuple(release)]
         assert len(model.requests) == 1
         release["call_1"].set()
         events = await _wait_for_tool_event(

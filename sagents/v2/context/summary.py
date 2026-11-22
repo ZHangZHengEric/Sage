@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -33,7 +36,7 @@ _DATA_URL_PATTERN = re.compile(
 
 
 def _redact_data_urls(value: str) -> str:
-    if "data:" not in value.lower():
+    if "data:" not in value:
         return value
 
     def replacement(match: re.Match[str]) -> str:
@@ -89,6 +92,30 @@ def summary_message_text(message: ModelMessage) -> str:
     return f"{time}\n{text}" if time else text
 
 
+def summary_message_fragments(message: ModelMessage, language: str) -> Iterator[str]:
+    """Render only the evidence that the text summarizer can consume."""
+    from sagents.v2.prompt_i18n import prompt_text
+
+    yield f"<{message.role}>\n"
+    time = historical_time_context(message) if message.role == "user" else None
+    if time:
+        yield time
+        yield "\n"
+    for index, block in enumerate(message.content):
+        if index:
+            yield "\n"
+        yield summary_safe_block_text(block)
+    if message.tool_calls:
+        yield f"\n{prompt_text('summary_tools', language)} "
+        for index, call in enumerate(message.tool_calls):
+            if index:
+                yield ", "
+            yield f"{call.name}("
+            yield summary_safe_block_text(JsonBlock(value=call.arguments))
+            yield ")"
+    yield f"\n</{message.role}>"
+
+
 class ConversationSummary(StrictModel):
     """Derived state; canonical conversation Items remain untouched."""
 
@@ -104,6 +131,58 @@ class ConversationSummary(StrictModel):
     source_sequence: int = Field(default=0, ge=0)
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass
+class SummaryValidation:
+    """One verified prefix of the immutable ledger during a Run drive."""
+
+    run_id: str | None
+    digests: tuple[str, ...] = ()
+    messages: tuple[ModelMessage, ...] = ()
+    token: object = field(default_factory=object)
+
+    def matches(
+        self, digests: tuple[str, ...], messages: tuple[ModelMessage, ...]
+    ) -> bool:
+        return self.digests == digests and self.matches_messages(messages)
+
+    def matches_messages(self, messages: tuple[ModelMessage, ...]) -> bool:
+        return (
+            len(self.messages) == len(messages)
+            and all(previous is current for previous, current in zip(self.messages, messages))
+        )
+
+    def remember(self, digests: tuple[str, ...], messages: tuple[ModelMessage, ...]) -> None:
+        self.messages = messages
+        self.digests = digests
+        self.token = object()
+
+
+active_summary_validation: ContextVar[SummaryValidation | None] = ContextVar(
+    "active_summary_validation", default=None
+)
+
+
+@contextmanager
+def reuse_summary_validation(run_id: str):
+    validation = SummaryValidation(run_id)
+    token = active_summary_validation.set(validation)
+    try:
+        yield
+    finally:
+        validation.run_id = None
+        validation.messages = ()
+        validation.digests = ()
+        active_summary_validation.reset(token)
+
+
+def verified_summary_prefix_token(run_id: str, messages: tuple[ModelMessage, ...]) -> object | None:
+    validation = active_summary_validation.get()
+    if messages and validation is not None and validation.run_id == run_id:
+        if validation.matches_messages(messages):
+            return validation.token
+    return None
 
 
 class ConversationSummaryStore(Protocol):

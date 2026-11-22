@@ -392,7 +392,7 @@ class SessionStore(Protocol):
         self,
         *,
         run_id: str,
-        expected_revision: int,
+        expected_revision: int | None,
         turn_id: str,
         context: RequestContext,
     ) -> SteerClaimResult: ...

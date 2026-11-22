@@ -10,7 +10,11 @@ from sagents.v2.agent.engine import AgentLoopEngine
 from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
 from sagents.v2.runtime.observability.performance.recording import PerformanceRecorder, RunTimingStage
 from sagents.v2.runtime.observability.run_output import capture_run_trace_output
-from sagents.v2.runtime.observability.timing import log_duration
+from sagents.v2.runtime.observability.timing import (
+    collect_framework_phases,
+    framework_phase_attributes,
+    log_duration,
+)
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.commands import StartRun
@@ -154,6 +158,7 @@ class ObservedRunDriver(AgentLoopEngine):
     async def _commit_running(self, run, context, drafts, **kwargs):
         with log_duration(self._structured_logger(), "agent.state.commit", "Agent 状态提交结束",
                           run_id=run.run_id, session_id=run.session_id,
+                          aggregate_phase="agent_state_commit",
                           attributes={"event_types": [draft.type for draft in drafts], "revision": run.revision}):
             return await super()._commit_running(run, context, drafts, **kwargs)
 
@@ -260,6 +265,7 @@ class ObservedRunDriver(AgentLoopEngine):
             with (
                 structured_log_context(**correlation, run_id=run.run_id, session_id=run.session_id),
                 capture_run_trace_output(run_id, enabled=capture_output) as output,
+                collect_framework_phases(enabled=logger is not None) as phases,
             ):
                 snapshot = await body(
                     run_id,
@@ -311,7 +317,7 @@ class ObservedRunDriver(AgentLoopEngine):
                 session_id=run.session_id,
                 run_id=run.run_id,
                 **correlation,
-                attributes={"run_state": snapshot.state.value},
+                attributes={"run_state": snapshot.state.value, **framework_phase_attributes(phases)},
             )
         return snapshot
 

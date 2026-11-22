@@ -11,6 +11,11 @@ from PIL import Image, ImageOps
 from sagents.v2.concurrency import bounded_to_thread
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.model.inline_images import (
+    inline_image_fits,
+    inline_image_json_characters,
+    remember_inline_image_fit,
+)
 from sagents.v2.runtime.artifact.workspace_images import (
     materialize_image_source,
     minimum_workspace_image_path,
@@ -104,12 +109,18 @@ def _compress_source(source, *, max_bytes, max_edge, max_patches):
     return None, True
 
 
-async def compress_wire_images(images, *, source_for, update, max_bytes, max_edge, max_patches=None):
+async def compress_wire_images(
+    images, *, source_for, update, max_bytes, max_edge, max_patches=None, inline_uri=None,
+):
     """Normalize only oversized inline images and retain original fallback bytes."""
     originals = {}
     unresolved = set()
     cache = {}
+    bounds = (max_bytes, max_edge, max_patches)
     for image in images:
+        uri = inline_uri(image) if inline_uri is not None else None
+        if uri is not None and inline_image_fits(uri, bounds):
+            continue
         source = source_for(image)
         if source.get("type") != "base64":
             continue
@@ -127,6 +138,8 @@ async def compress_wire_images(images, *, source_for, update, max_bytes, max_edg
             update(image, compressed)
         elif exceeds:
             unresolved.add(id(image))
+        elif uri is not None:
+            remember_inline_image_fit(uri, bounds)
     return originals, unresolved
 
 
@@ -165,6 +178,7 @@ async def limit_wire_images(images, *, size, max_bytes, max_images, exceeds, sou
         remaining -= 1
     if remaining > max_images and unavailable is not None:
         raise unavailable
+    return size
 
 
 async def _replace(image, source_for, text_type, paths):
@@ -219,12 +233,14 @@ async def limit_openai_images(
             return {"type": "base64", "media_type": header[5:-7], "data": data}
         return {"type": "url", "url": address}
 
-    def update(image, source):
-        address = f"data:{source['media_type']};base64,{source['data']}"
+    def set_url(image, address):
         if responses:
             image["image_url"] = address
         else:
             image["image_url"]["url"] = address
+
+    def update(image, source):
+        set_url(image, f"data:{source['media_type']};base64,{source['data']}")
 
     if images:
         originals = original_sources if original_sources is not None else {}
@@ -234,15 +250,34 @@ async def limit_openai_images(
                 images, source_for=source_for, update=update,
                 max_bytes=config.max_inline_image_bytes, max_edge=config.max_inline_image_edge,
                 max_patches=OPENAI_MAX_IMAGE_PATCHES,
+                inline_uri=url,
             )
             originals.update(compressed)
-        await limit_wire_images(
-            images, size=json_bytes(body), max_bytes=limit, max_images=config.max_inline_images,
+        # Size the real request without allocating another full JSON body for
+        # already-checked Base64. Restore the exact input before any await.
+        uses_payload_images = body.get(field) is payload[field]
+        literals = []
+        if uses_payload_images:
+            for image in images:
+                address = url(image)
+                if inline_image_json_characters(address):
+                    literals.append((image, address))
+        try:
+            for image, _ in literals:
+                set_url(image, "")
+            size = json_bytes(body) + sum(len(address) for _, address in literals)
+        finally:
+            for image, address in literals:
+                set_url(image, address)
+        limited_size = await limit_wire_images(
+            images, size=size, max_bytes=limit, max_images=config.max_inline_images,
             exceeds=lambda image: id(image) in unresolved,
             source_for=lambda image: originals.get(id(image)) or source_for(image),
             text_type=text_type,
         )
-    size = json_bytes(body)
+        size = limited_size if uses_payload_images else json_bytes(body)
+    else:
+        size = json_bytes(body)
     if retry_below is None and size > limit:
         raise request_too_large(size, limit)
     return size

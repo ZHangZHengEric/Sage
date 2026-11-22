@@ -50,6 +50,7 @@ from sagents.v2.agent.step_request import (
 )
 from sagents.v2.context import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.system_context import with_session_context
+from sagents.v2.context.summary import reuse_summary_validation
 from sagents.v2.context.session_history import (
     RunLedgerRebuilder,
     SessionHistoryLedgerBuilder,
@@ -59,6 +60,7 @@ from sagents.v2.memory import (
     MemoryRecallQueryGenerator,
 )
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.inline_images import reuse_inline_image_checks
 from sagents.v2.agent.policy.plugins.continuation import CompositeContinuationPolicy
 from sagents.v2.agent.policy.continuation import (
     ContinuationAction,
@@ -230,6 +232,29 @@ class _LedgerDigest:
 
 
 _ACTIVE_LEDGER_DIGEST: ContextVar[_LedgerDigest | None] = ContextVar("agent_ledger_digest", default=None)
+
+
+@dataclass
+class _DriveReads:
+    run_id: str
+    store: object
+    command: StartRun | None
+    resolved_effects_through: int = 0
+
+
+_ACTIVE_DRIVE_READS: ContextVar[_DriveReads | None] = ContextVar("agent_drive_reads", default=None)
+
+
+async def _driving_command(store, run_id: str) -> StartRun:
+    reads = _ACTIVE_DRIVE_READS.get()
+    if (
+        reads is not None
+        and reads.store is store
+        and reads.run_id == run_id
+        and reads.command is not None
+    ):
+        return reads.command
+    return await store.get_start_command(run_id)
 
 
 class AgentLoopEngine:
@@ -1638,8 +1663,9 @@ class AgentLoopEngine:
         """
 
 
-        command = await self.runtime.session_store.get_start_command(run.run_id)
-        command = with_session_context(command, run.session_id)
+        store = self.runtime.session_store
+        start_command = await store.get_start_command(run.run_id)
+        command = with_session_context(start_command, run.session_id)
         context = self._context_for_command(context, command)
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
@@ -1650,8 +1676,15 @@ class AgentLoopEngine:
         scope = await self._create_recovery_scope(run, state, command, context)
         ledger = _LedgerDigest()
         token = _ACTIVE_LEDGER_DIGEST.set(ledger)
+        reads = _DriveReads(run.run_id, store, start_command)
+        reads_token = _ACTIVE_DRIVE_READS.set(reads)
         try:
-            with recovery_scope(scope), bind_image_workspace(self.tool_result_runtime):
+            with (
+                recovery_scope(scope),
+                bind_image_workspace(self.tool_result_runtime),
+                reuse_summary_validation(run.run_id),
+                reuse_inline_image_checks(),
+            ):
                 while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
                     scope.step_key = state.model_recovery.logical_call_id or f"{run.run_id}:{state.stage_number}:{state.step_number}"
                     scope.primary_recovery = bool(state.model_recovery.logical_call_id)
@@ -1667,7 +1700,10 @@ class AgentLoopEngine:
                         return run
         finally:
             ledger.messages = ()
+            reads.store = None
+            reads.command = None
             _ACTIVE_LEDGER_DIGEST.reset(token)
+            _ACTIVE_DRIVE_READS.reset(reads_token)
         return run
 
     async def _drive_step(
@@ -1749,14 +1785,23 @@ class AgentLoopEngine:
             state = state.model_copy(update={"messages": ordered_messages})
         # Phase 1: observe control-plane state only at a safe boundary. A
         # pause never snapshots the middle of arbitrary Python mutation.
-        current = await self.runtime.get_run(run.run_id)
+        replaying_response = state.pending_response_step_id is not None
+        store = self.runtime.session_store
+        claimed = None
+        if not replaying_response and getattr(store, "supports_steer_revision_snapshot", False) is True:
+            claimed = await store.claim_steers(
+                run_id=run.run_id,
+                expected_revision=None,
+                turn_id=state.turn_id,
+                context=context,
+            )
+        current = claimed.run if claimed is not None else await self.runtime.get_run(run.run_id)
         if current.state == RunState.SUSPEND_REQUESTED:
             return _DriveIteration(await self._suspend_at_safe_point(current, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
         if current.state in TERMINAL_RUN_STATES:
             await self._release_run_resources(run.run_id)
             return _DriveIteration(current, state, empty_response_retries, context_overflow_retries, stop=True)
         run = current
-        replaying_response = state.pending_response_step_id is not None
         if replaying_response:
             step_id = state.pending_response_step_id
             response = self._pending_response(state)
@@ -1766,12 +1811,13 @@ class AgentLoopEngine:
                 for tool in await self.tool_catalog.list_tools(run_id=run.run_id)
             )
         else:
-            claimed = await self.runtime.session_store.claim_steers(
-                run_id=run.run_id,
-                expected_revision=run.revision,
-                turn_id=state.turn_id,
-                context=context,
-            )
+            if claimed is None:
+                claimed = await store.claim_steers(
+                    run_id=run.run_id,
+                    expected_revision=run.revision,
+                    turn_id=state.turn_id,
+                    context=context,
+                )
             if claimed.entries:
                 # Steering is appended to the model ledger in durable inbox
                 # order. It is not an Interaction reply and does not resume a
@@ -2207,7 +2253,9 @@ class AgentLoopEngine:
         ):
             await scope.finish_episode()
             scope.primary_recovery = False
-            run = await self.runtime.get_run(run.run_id)
+            if questionnaire_completed:
+                # The policy path refreshes the Run after the decision.
+                run = await self.runtime.get_run(run.run_id)
         if invalid_tool_results:
             decision = ContinuationDecision(action=ContinuationAction.CONTINUE_STEP,
                 reason_code="tool.validation_retry", reason="Correct the failed calls using the available tool schemas and recorded validation feedback. Reuse successful sibling results; do not repeat completed operations.")
@@ -2331,11 +2379,7 @@ class AgentLoopEngine:
                 ContinuationAction.COMPLETE_TURN,
                 ContinuationAction.HANDOFF,
             }:
-                from sagents.v2.agent.autonomous_recovery import unresolved_effects
-
-                if unresolved_effects(
-                    await self.runtime.session_store.read_events(run.run_id)
-                ):
+                if await self._unresolved_tool_effects(run):
                     decision = decision.model_copy(
                         update={
                             "action": ContinuationAction.FAIL,
@@ -2827,7 +2871,7 @@ class AgentLoopEngine:
         response = None
         from sagents.v2.model.stream_errors import normalized_model_stream
         stream = normalized_model_stream(self.model, request)
-        command = await self.runtime.session_store.get_start_command(run.run_id)
+        command = await _driving_command(self.runtime.session_store, run.run_id)
         command = with_session_context(command, run.session_id)
         controlled_events = self._control_aware_model_events(stream, run, command, state.model_recovery.deadline)
 
@@ -3310,17 +3354,20 @@ class AgentLoopEngine:
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
 
-        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+        store = self.runtime.session_store
+        command = await _driving_command(store, run.run_id)
+        budget = await evaluate_run_budget(
+            store, run, self.clock(), check_tokens=False, run_command=command
+        )
         if call.tool_name == "search_memory" and state is not None and state.pending_response_step_id is not None:
             restore_history_search = getattr(self.context_assembler, "restore_history_search", None)
             if restore_history_search is not None:
-                command = await self.runtime.session_store.get_start_command(run.run_id)
-                command = with_session_context(command, run.session_id)
-                await restore_history_search(command, state.messages, run_id=run.run_id)
+                await restore_history_search(
+                    with_session_context(command, run.session_id), state.messages, run_id=run.run_id
+                )
         if call.tool_name == "analyze_audio":
             from sagents.v2.tool.contracts import remote_audio_input
 
-            command = await self.runtime.session_store.get_start_command(run.run_id)
             capabilities = await media_capabilities(
                 self.model, command.config.model_bindings.get("primary", "primary")
             )
@@ -3345,7 +3392,8 @@ class AgentLoopEngine:
                     return run, await execution
                 done, _ = await asyncio.wait({execution}, timeout=0.1)
                 if done:
-                    return await self.runtime.get_run(run.run_id), execution.result()
+                    # The owner refreshes once before settling the result.
+                    return run, execution.result()
                 current = await self.runtime.get_run(run.run_id)
                 deadline_expired = (
                     budget.deadline is not None and self.clock() >= budget.deadline
@@ -3495,19 +3543,25 @@ class AgentLoopEngine:
         """
         if len(calls) <= 1:
             return run, state, {}
-        command = await self.runtime.session_store.get_start_command(run.run_id)
+        command = await _driving_command(self.runtime.session_store, run.run_id)
         if command.config.autonomous_error_recovery:
-            from sagents.v2.agent.autonomous_recovery import unresolved_effects
-
-            if unresolved_effects(
-                await self.runtime.session_store.read_events(run.run_id)
-            ):
+            if await self._unresolved_tool_effects(run):
                 return run, state, {}
         turn_id = state.turn_id
         results = {}
         fresh = [call for call in calls if call.tool_call_id not in crossed]
-        for call in fresh:
-            run = await self._start_tool_execution(run, call, context, turn_id, step_id)
+        if fresh:
+            # No sibling can start until the entire batch has crossed the
+            # durable barrier, so one commit can publish every start in order.
+            run = await self._commit_running(
+                run,
+                context,
+                tuple(
+                    draft
+                    for call in fresh
+                    for draft in self._tool_execution_start_drafts(call, turn_id, step_id)
+                ),
+            )
 
         async def execute(call):
             _, result = await self._capture_tool_execution(
@@ -3593,43 +3647,58 @@ class AgentLoopEngine:
                         run = await self._record_cancelled_execution(
                             run, call, context, turn_id, step_id
                         )
-        return await self.runtime.get_run(run.run_id), state, results
+        return run, state, results
 
     async def _start_tool_execution(
         self, run, call, context, turn_id, step_id, *, authorization_drafts=()
     ) -> RunSnapshot:
-        run = await self._commit_running(
+        return await self._commit_running(
             run,
             context,
-            (
-                *authorization_drafts,
-                EventDraft(
-                    type="tool.call.dispatching",
-                    turn_id=turn_id,
-                    step_id=step_id,
-                    data=ToolEventData(
-                        tool_call_id=call.tool_call_id,
-                        tool_name=call.tool_name,
-                        state="dispatching",
-                        operation_id=call.operation_id,
-                        idempotency_key=call.idempotency_key,
-                    ),
-                ),
-                EventDraft(
-                    type="tool.call.started",
-                    turn_id=turn_id,
-                    step_id=step_id,
-                    data=ToolEventData(
-                        tool_call_id=call.tool_call_id,
-                        tool_name=call.tool_name,
-                        state="running",
-                        operation_id=call.operation_id,
-                        idempotency_key=call.idempotency_key,
-                    ),
-                ),
-            ),
+            (*authorization_drafts, *self._tool_execution_start_drafts(call, turn_id, step_id)),
         )
-        return run
+
+    @staticmethod
+    def _tool_execution_start_drafts(call, turn_id, step_id) -> tuple[EventDraft, ...]:
+        return tuple(
+            EventDraft(
+                type=event_type,
+                turn_id=turn_id,
+                step_id=step_id,
+                data=ToolEventData(
+                    tool_call_id=call.tool_call_id,
+                    tool_name=call.tool_name,
+                    state=state,
+                    operation_id=call.operation_id,
+                    idempotency_key=call.idempotency_key,
+                ),
+            )
+            for event_type, state in (
+                ("tool.call.dispatching", "dispatching"),
+                ("tool.call.started", "running"),
+            )
+        )
+
+    async def _unresolved_tool_effects(self, run):
+        from sagents.v2.agent.autonomous_recovery import unresolved_effects
+
+        store = self.runtime.session_store
+        reads = _ACTIVE_DRIVE_READS.get()
+        if reads is None or reads.store is not store or reads.run_id != run.run_id:
+            return unresolved_effects(await store.read_events(run.run_id))
+        after = reads.resolved_effects_through
+        if after > run.last_run_sequence:
+            # A recovered snapshot can predate an earlier read.
+            reads.resolved_effects_through = 0
+            after = 0
+        events = await store.read_events(run.run_id, after_sequence=after)
+        if after and any(event.type == "tool.call.unknown" for event in events):
+            # A new unknown outcome can refer to a proposal from an older step.
+            events = await store.read_events(run.run_id)
+        pending = unresolved_effects(events)
+        if not pending and events:
+            reads.resolved_effects_through = max(after, events[-1].run_sequence)
+        return pending
 
     async def _guard_unresolved_effect(
         self,
@@ -3643,17 +3712,13 @@ class AgentLoopEngine:
         *,
         authorization_drafts: tuple[EventDraft, ...] = (),
     ) -> tuple[RunSnapshot, ToolExecutionResult | None] | None:
-        command = await self.runtime.session_store.get_start_command(run.run_id)
+        if definition.side_effect_level in {SideEffectLevel.NONE, SideEffectLevel.READ}:
+            return None
+        command = await _driving_command(self.runtime.session_store, run.run_id)
         if not command.config.autonomous_error_recovery:
             return None
-        from sagents.v2.agent.autonomous_recovery import unresolved_effects
-
-        pending = unresolved_effects(
-            await self.runtime.session_store.read_events(run.run_id)
-        )
+        pending = await self._unresolved_tool_effects(run)
         if not pending:
-            return None
-        if definition.side_effect_level in {SideEffectLevel.NONE, SideEffectLevel.READ}:
             return None
         if authorization_drafts:
             run = await self._commit_running(run, context, authorization_drafts)
@@ -3873,6 +3938,10 @@ class AgentLoopEngine:
             if result is None:
                 await self._release_run_resources(run.run_id)
                 return run, None
+        run = await self.runtime.get_run(run.run_id)
+        if run.state in TERMINAL_RUN_STATES:
+            await self._release_run_resources(run.run_id)
+            return run, None
         if result.error is not None:
             localized = localize_error(result.error, context.language)
             if await self._tool_failure_is_uncertain(run, call, localized, definition):
@@ -3930,11 +3999,6 @@ class AgentLoopEngine:
                 ),
                 None,
             )
-        current = await self.runtime.get_run(run.run_id)
-        if current.state in TERMINAL_RUN_STATES:
-            await self._release_run_resources(run.run_id)
-            return current, None
-        run = current
         if run.state == RunState.SUSPEND_REQUESTED:
             run, result = await self._commit_tool_result(
                 run,

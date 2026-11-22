@@ -32,6 +32,41 @@ class RecordingSummary:
         return "Completed file inspections; continue comparing the latest files."
 
 
+@pytest.mark.asyncio
+async def test_summary_validation_reuses_only_the_verified_run_prefix(monkeypatch):
+    from sagents.v2.context.contracts import ContextReductionScope
+    from sagents.v2.context.plugins._shared import persistent_summary
+    from sagents.v2.context.summary import create_summary, message_digest, reuse_summary_validation
+
+    first = ModelMessage(role="user", content=(TextBlock(text="original"),))
+    second = ModelMessage(role="assistant", content=(TextBlock(text="answer"),))
+    edited = first.model_copy(update={"content": (TextBlock(text="edited"),)})
+    scope = ContextReductionScope(context_key="context", session_id="session", run_id="run")
+    stored = create_summary(
+        scope=scope, previous=None, covered_messages=(first,),
+        covered_digests=(message_digest(first),), text="summary",
+    )
+    real_digests = persistent_summary.message_digests_async
+    hashes = []
+
+    async def count_digests(messages, **kwargs):
+        hashes.extend(messages)
+        return await real_digests(messages, **kwargs)
+
+    monkeypatch.setattr(persistent_summary, "message_digests_async", count_digests)
+    validate = SummaryOnlyContextReducer._validated_previous
+    with reuse_summary_validation("run"):
+        assert await validate(stored, (first,), run_id="run") == (stored, ())
+        assert await validate(stored, (first, second), run_id="run") == (stored, (second,))
+        assert hashes == [first]
+        assert await validate(stored, (first,), run_id="another_run") == (stored, ())
+        assert hashes == [first, first]
+        assert await validate(stored, (edited, second), run_id="run") == (None, (edited, second))
+        assert hashes == [first, first, edited, edited]
+    assert await validate(stored, (first,), run_id="run") == (stored, ())
+    assert hashes[-1] is first
+
+
 def batch(index, results):
     calls = tuple(
         ModelToolCall(

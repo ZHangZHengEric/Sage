@@ -97,7 +97,8 @@ async def test_command_idempotency_replays_identical_request_but_rejects_key_reu
 
 
 @pytest.mark.asyncio
-async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically():
+@pytest.mark.parametrize("use_current_revision", [False, True])
+async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically(use_current_revision):
     runtime = ephemeral_runtime()
     handle = await runtime.start_run(start(), CONTEXT)
     running = await runtime.start_execution(
@@ -135,7 +136,7 @@ async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically():
     )
     claimed = await runtime.session_store.claim_steers(
         run_id=handle.run_id,
-        expected_revision=cast('int', second.current_revision),
+        expected_revision=None if use_current_revision else cast('int', second.current_revision),
         turn_id="turn_1",
         context=CONTEXT,
     )

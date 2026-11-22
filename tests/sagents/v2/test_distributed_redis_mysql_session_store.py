@@ -1051,6 +1051,33 @@ async def test_recovery_isolates_bad_session_and_rebuilds_only_derived_index(sto
         await first._redis.hset(wrong_type_key, mapping=original_hash)
 
 
+def test_oversized_inline_image_skips_redis_event_index_encoding(monkeypatch):
+    from sagents.v2.runtime.session.plugins._shared import redis_persistence
+
+    oversized = {
+        "run_sequence": 1,
+        "data": {"kind": "item", "item": {"data": {"content": [
+            {"kind": "image", "uri": "data:image/png;base64," + "A" * 20_000},
+        ]}}},
+    }
+    small = {"run_sequence": 2, "data": {"kind": "step"}}
+    mutation = {
+        "upserts": {"runs": ({"run_id": "run", "last_run_sequence": 2},)},
+        "patches": {},
+        "appends": {"run_events": {"run": (oversized, small)}},
+        "replacements": {},
+    }
+    encode = redis_persistence._json
+
+    def encode_small(event):
+        assert event is small
+        return encode(event)
+
+    monkeypatch.setattr(redis_persistence, "_json", encode_small)
+    tails = redis_persistence.RedisSessionPersistence._event_tail_changes(object(), mutation)
+    assert tails == {"run": (2, {encode(small): 2}, False)}
+
+
 @pytest.mark.asyncio
 async def test_durable_event_tail_handles_revision_only_updates_and_reconnect(stores, monkeypatch):
     first, second = stores

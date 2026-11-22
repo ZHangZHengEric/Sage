@@ -214,6 +214,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
     """
 
     api_version = "2"
+    supports_steer_revision_snapshot = True
 
     @staticmethod
     def _backup_probe():
@@ -698,13 +699,18 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             if key in self._session_commit_command_results
         }
 
-    def _session_mutation_locked(self, session_id: str) -> SessionStateDeltaMutation:
+    def _session_mutation_locked(
+        self, session_id: str, *, latest_revision_only: bool = False
+    ) -> SessionStateDeltaMutation:
         """Serialize only rows and events changed since the operation watermark."""
 
         operation = self._operation.get()
         undo = (operation.undos or {}).get(session_id) if operation else None
         if undo is None:
             payload = self._dump_session_state_locked(session_id)
+            if latest_revision_only:
+                head = payload["sessions"][0]
+                head["revision_sequences"] = {str(head["revision"]): head["last_sequence"]}
             return SessionStateDeltaMutation(
                 upserts={
                     key: list(payload.get(key, ()))
@@ -752,7 +758,9 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         map_deletes: dict[str, list[str]] = {}
         session = self._sessions[session_id]
         if not undo.existed or undo.session is None or undo.session != session:
-            upserts["sessions"] = [self._session_row_payload(session)]
+            upserts["sessions"] = [
+                self._session_row_payload(session, latest_revision_only=latest_revision_only)
+            ]
         for run_id in sorted(current_run_ids):
             row = self._runs[run_id]
             previous = undo.runs.get(run_id)
@@ -772,16 +780,25 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             deletes["runs"] = [[run_id] for run_id in removed_runs]
         event_appends: dict[str, list[dict[str, Any]]] = {}
         event_replacements: dict[str, list[dict[str, Any]]] = {}
+        event_payloads: dict[int, dict[str, Any]] = {}
+
+        def event_payload(event: RuntimeEvent) -> dict[str, Any]:
+            # The commit receipt and ledger append share the same event.
+            key = id(event)
+            if key not in event_payloads:
+                event_payloads[key] = event.model_dump(mode="json")
+            return event_payloads[key]
+
         for run_id in current_run_ids:
             events = self._run_events.get(run_id, [])
             previous_len = undo.run_event_lens.get(run_id, 0)
             if len(events) < previous_len:
                 event_replacements[run_id] = [
-                    event.model_dump(mode="json") for event in events
+                    event_payload(event) for event in events
                 ]
             elif len(events) > previous_len:
                 event_appends[run_id] = [
-                    event.model_dump(mode="json") for event in events[previous_len:]
+                    event_payload(event) for event in events[previous_len:]
                 ]
         if event_appends:
             appends["run_events"] = event_appends
@@ -853,7 +870,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 "result": {
                     "run": value.run.model_dump(mode="json"),
                     "session": value.session.model_dump(mode="json"),
-                    "events": [event.model_dump(mode="json") for event in value.events],
+                    "events": [event_payload(event) for event in value.events],
                 },
             }
             for key, value in current_commands.items()
@@ -1041,7 +1058,9 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             map_deletes=map_deletes,
         )
 
-    def _session_row_payload(self, session: _SessionRow) -> dict[str, Any]:
+    def _session_row_payload(
+        self, session: _SessionRow, *, latest_revision_only: bool = False
+    ) -> dict[str, Any]:
         return {
             "session_id": session.session_id,
             "revision": session.revision,
@@ -1059,7 +1078,8 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                 if session.owner is not None
                 else None
             ),
-            "revision_sequences": {
+            "revision_sequences": {str(session.revision): session.last_sequence}
+            if latest_revision_only else {
                 str(revision): sequence
                 for revision, sequence in session.revision_sequences.items()
             },
@@ -2998,11 +3018,11 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         self,
         *,
         run_id: str,
-        expected_revision: int,
+        expected_revision: int | None,
         turn_id: str,
         context: RequestContext,
     ) -> SteerClaimResult:
-        """Atomically mark pending steering as applied at a model safe point."""
+        """Claim steering using an explicit revision or the latest running snapshot."""
 
         # Most steps have no steering. Check under the normal read lock before
         # allocating a rollback snapshot for the Session. Recheck under the
@@ -3010,6 +3030,10 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
         async with self._run_session_read(run_id):
             row = self._runs[run_id]
             self._authorize_session_actor_locked(row.session_id, context)
+            if expected_revision is None:
+                if row.state != RunState.RUNNING:
+                    return SteerClaimResult(run=self._run_snapshot(row), entries=(), events=())
+                expected_revision = row.revision
             if not any(
                 entry.status == SteerInboxStatus.PENDING and entry.expected_turn_id == turn_id
                 for entry in self._steer_inbox.get(run_id, ())

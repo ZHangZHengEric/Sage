@@ -21,6 +21,7 @@ from sagents.v2.runtime.session.run_metadata import RunMetadata
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 from sagents.v2.runtime.observability.logs import get_logger
+from sagents.v2.runtime.observability.timing import record_framework_phase
 from .aggregate import _json, _principal_lookup_key
 from .redis_heads import RedisManagedSessionHeads
 from .redis_archive import RedisArchiveProtocol
@@ -141,11 +142,12 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 data = event["data"]
                 item = data.get("item") if data.get("kind") == "item" else None
                 if item and any(
-                    isinstance(text := block.get("text"), str) and len(text) > _EVENT_TAIL_ROW_BYTES
+                    isinstance(value, str) and len(value) > _EVENT_TAIL_ROW_BYTES
                     for block in item["data"].get("content", ())
+                    for value in (block.get("text"), block.get("uri"))
                 ):
                     # The durable delta already carries this Item. A single
-                    # oversized text block cannot fit in the Redis read index.
+                    # oversized text or inline URI cannot fit in the read index.
                     continue
                 raw = _json(event)
                 if len(raw) <= _EVENT_TAIL_ROW_BYTES and len(raw.encode("utf-8")) <= _EVENT_TAIL_ROW_BYTES:
@@ -156,18 +158,19 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
     async def _commit_storage_locked(self, sid):
         await self._ensure_ready()
         started = time.perf_counter()
-        mutation = self._session_mutation_locked(sid).model_dump(
+        expected = self._persisted_session_revisions.get(sid)
+        mutation = self._session_mutation_locked(
+            sid, latest_revision_only=expected is not None
+        ).model_dump(
             mode="json", exclude={"kind"}
         )
         head = mutation["upserts"]["sessions"][0]
         revision = int(head["revision"])
-        expected = self._persisted_session_revisions.get(sid)
         # Full snapshots are compacted by the archive worker, never by a Run commit.
         compact = expected is None
         if compact:
             encoded = _json(self._dump_session_state_locked(sid))
         else:
-            head["revision_sequences"] = {str(revision): head["last_sequence"]}
             # Redis accepts the wire bytes directly. Reuse their size for
             # cache accounting and logs instead of repeatedly encoding a delta.
             encoded = _json(mutation).encode("utf-8")
@@ -378,6 +381,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
                 pipe.persist(self._key(f"derived:{sid}"))
                 await pipe.execute()
 
+        transaction_started = time.perf_counter()
+        record_framework_phase("redis_commit_preparation", transaction_started - started)
         try:
             await self._retry_transaction(write)
         except Exception:
@@ -386,6 +391,8 @@ class RedisSessionPersistence(RedisArchiveProtocol, RedisManagedSessionHeads):
             self._recovery_required.add(sid)
             if await self._redis.hget(key, "commit_id") != commit_id:
                 raise
+        finally:
+            record_framework_phase("redis_commit_transaction", time.perf_counter() - transaction_started)
         self._recovery_required.discard(sid)
         self._remember_persisted_session(
             sid,

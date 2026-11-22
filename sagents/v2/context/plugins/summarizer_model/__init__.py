@@ -4,6 +4,7 @@ from __future__ import annotations
 from sagents.v2.model.recovery_scope import scoped_recovery
 
 import asyncio
+from contextvars import ContextVar
 from functools import partial
 from sagents.v2.prompt_i18n import prompt_text
 from sagents.v2.concurrency import auxiliary_capacity, bounded_to_thread
@@ -12,10 +13,10 @@ import json
 import httpx
 
 from sagents.v2.context.plugins._shared.progress_summary import extract_snapshot, task_snapshot
-from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text, summary_message_text
+from sagents.v2.context.summary import SummarizationRequest, summary_message_fragments
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import JsonBlock, TextBlock
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelMessage, ModelRequest
 from sagents.v2.model.plugins._shared.wire import stream_incomplete_error
 from sagents.v2.model.recovery import (
@@ -32,7 +33,11 @@ from sagents.v2.model.provider import (
 from sagents.v2.runtime.observability.logs import get_logger
 
 DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS = 300.0
+DEFAULT_SUMMARY_SOURCE_BYTES = 512 * 1024
 LOGGER = get_logger(__name__)
+_rendered_summary_source: ContextVar[tuple[SummarizationRequest, str] | None] = ContextVar(
+    "rendered_summary_source", default=None
+)
 
 
 class ModelConversationSummarizer:
@@ -77,6 +82,7 @@ class ModelConversationSummarizer:
         *,
         model_binding: str = "primary",
         max_source_tokens: int = 24_000,
+        max_source_bytes: int = DEFAULT_SUMMARY_SOURCE_BYTES,
         timeout_seconds: float = DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
         idle_timeout_seconds: float = DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
     ) -> None:
@@ -86,11 +92,14 @@ class ModelConversationSummarizer:
             raise ValueError("idle_timeout_seconds must be greater than zero")
         if max_source_tokens <= 0:
             raise ValueError("max_source_tokens must be greater than zero")
+        if max_source_bytes < 4:
+            raise ValueError("max_source_bytes must be at least four bytes")
         if model_binding != "primary":
             raise ValueError("history summarization must use the Agent primary model")
         self.model = model
         self.model_binding = model_binding
         self.max_source_tokens = max_source_tokens
+        self.max_source_bytes = max_source_bytes
         self.timeout_seconds = float(timeout_seconds)
         self.idle_timeout_seconds = float(idle_timeout_seconds)
 
@@ -98,7 +107,15 @@ class ModelConversationSummarizer:
     async def summarize(self, request: SummarizationRequest) -> str:
         from sagents.v2.model.recovery_scope import current_recovery_scope, reserve_additional_request
 
-        source = await bounded_to_thread("context-cpu", partial(self._source, request))
+        source = await bounded_to_thread(
+            "context-cpu", partial(self._source, request, max_bytes=self.max_source_bytes)
+        )
+        if source is None:
+            LOGGER.bind(run_id=request.scope.run_id, session_id=request.scope.session_id).info(
+                "context.summary.preflight_extractive", "Summary text exceeds the source byte budget",
+                max_source_bytes=self.max_source_bytes,
+            )
+            return await extract_snapshot(request)
         capabilities = getattr(self.model, "capabilities", None)
         limits = None
         if callable(capabilities):
@@ -148,6 +165,7 @@ class ModelConversationSummarizer:
             if not initial:
                 await reserve_additional_request("context", purpose="summary_fragment")
             fragment_request = request
+            rendered = source
             if fragment is not source:
                 fragment_request = request.model_copy(
                     update={
@@ -155,7 +173,12 @@ class ModelConversationSummarizer:
                         "messages": (ModelMessage(role="user", content=(TextBlock(text=fragment),)),),
                     }
                 )
-            return await self._attempt_with_retries(fragment_request, account_initial=initial)
+                rendered = f"<history>\n<user>\n{fragment}\n</user>\n</history>"
+            token = _rendered_summary_source.set((fragment_request, rendered))
+            try:
+                return await self._attempt_with_retries(fragment_request, account_initial=initial)
+            finally:
+                _rendered_summary_source.reset(token)
 
         with model_call_budget() as budget:
             if len(parts) > budget.remaining:
@@ -338,32 +361,41 @@ class ModelConversationSummarizer:
             )
         )
 
-    def _source(self, request: SummarizationRequest) -> str:
+    def _source(self, request: SummarizationRequest, *, max_bytes: int | None = None) -> str | None:
+        def fragments():
+            if request.previous_summary:
+                yield "<previous_summary>\n"
+                yield request.previous_summary
+                yield "\n</previous_summary>\n"
+            yield "<history>"
+            for message in request.messages:
+                yield "\n"
+                yield from summary_message_fragments(message, request.response_language)
+            yield "\n</history>"
+
+        remaining = max_bytes
         parts = []
-        if request.previous_summary:
-            parts.append(
-                f"<previous_summary>\n{request.previous_summary}\n</previous_summary>"
-            )
-        parts.append("<history>")
-        for message in request.messages:
-            value = self._message_text(message)
-            if message.tool_calls:
-                value += (
-                    "\n"
-                    + prompt_text("summary_tools", request.response_language)
-                    + " "
-                    + ", ".join(
-                        f"{call.name}({summary_safe_block_text(JsonBlock(value=call.arguments))})"
-                        for call in message.tool_calls
-                    )
-                )
-            parts.append(f"<{message.role}>\n{value}\n</{message.role}>")
-        parts.append("</history>")
-        return "\n".join(parts)
+        for part in fragments():
+            if remaining is not None:
+                if len(part) > remaining:
+                    return None
+                remaining -= len(part) if part.isascii() else len(part.encode("utf-8"))
+                if remaining < 0:
+                    return None
+            parts.append(part)
+        return "".join(parts)
 
     async def _summarize(self, request: SummarizationRequest, progress) -> str:
         capabilities = await self.model.capabilities(self.model_binding)
-        source = await bounded_to_thread("context-cpu", partial(self._source, request))
+        cached = _rendered_summary_source.get()
+        if cached is not None and cached[0] is request:
+            source = cached[1]
+        else:
+            source = await bounded_to_thread(
+                "context-cpu", partial(self._source, request, max_bytes=self.max_source_bytes)
+            )
+            if source is None:
+                return await extract_snapshot(request)
         last_error = ""
         for attempt in range(2):
             progress["attempt"] = attempt + 1
@@ -505,10 +537,6 @@ class ModelConversationSummarizer:
             else:
                 merged[key] = value
         return json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
-
-    @staticmethod
-    def _message_text(message: ModelMessage) -> str:
-        return summary_message_text(message)
 
     @classmethod
     def _parse_payload(cls, value: str) -> dict[str, object]:

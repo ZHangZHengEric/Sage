@@ -269,8 +269,7 @@ class AnthropicMessagesModelProvider:
             maximum = _CLAUDE_MAX_REQUEST_BYTES if direct else _COMPATIBLE_MAX_REQUEST_BYTES
         payload = self.diagnostic_request(request)
         replacements = {}
-        payload = await self._limit_images(request, payload, maximum, replacements)
-        size = self._request_bytes(payload)
+        payload, size = await self._limit_images(request, payload, maximum, replacements)
         if size > maximum:
             raise request_too_large(size, maximum)
         return payload, size, replacements
@@ -278,7 +277,7 @@ class AnthropicMessagesModelProvider:
     async def _limit_images(self, request, payload, maximum, replacements):
         images = tuple(self._wire_images(payload["messages"]))
         if not images:
-            return payload
+            return payload, self._request_bytes(payload)
         reference_count = sum(image["type"] == "text" for image in replacements.values())
         inline_indices = [
             index for index in range(len(images) + reference_count)
@@ -303,7 +302,7 @@ class AnthropicMessagesModelProvider:
             return original_wire[indices_by_id[id(image)]]["source"]
 
         indices_by_id = {id(image): index for index, image in zip(inline_indices, images, strict=True)}
-        await limit_wire_images(
+        size = await limit_wire_images(
             images, size=json_bytes(payload), max_bytes=maximum,
             max_images=self.config.max_inline_images,
             exceeds=lambda image: id(image) in unresolved,
@@ -315,8 +314,9 @@ class AnthropicMessagesModelProvider:
         }
         if changed:
             replacements.update(changed)
-            return self._build_payload(request, image_references=replacements)
-        return payload
+            payload = self._build_payload(request, image_references=replacements)
+            size = self._request_bytes(payload)
+        return payload, size
 
     def _build_payload(self, request: ModelRequest, *, image_references=None) -> dict[str, Any]:
         bindings: list[tuple[int, int, str]] = []
@@ -565,10 +565,9 @@ class AnthropicMessagesModelProvider:
                     and any(self._wire_images(payload["messages"]))
                 ):
                     await streams.aclose()
-                    smaller = await self._limit_images(
+                    smaller, smaller_bytes = await self._limit_images(
                         request, payload, request_bytes // 2, replacements,
                     )
-                    smaller_bytes = self._request_bytes(smaller)
                     if smaller_bytes < request_bytes:
                         await reserve_additional_request(
                             "compatibility", purpose="anthropic_image_references",

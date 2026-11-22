@@ -13,6 +13,7 @@ from sagents.v2.context import (
 )
 from sagents.v2.context.plugins.summarizer_model import (
     DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
+    DEFAULT_SUMMARY_SOURCE_BYTES,
 )
 from sagents.v2.context.plugins.run_history_window import RecentRunHistoryWindow
 from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
@@ -122,6 +123,7 @@ def register_context_plugins(registry: ExtensionRegistry) -> None:
             dependencies.require_unique("model.provider"),
             model_binding=str(context.config.get("model_binding", "primary")),
             max_source_tokens=int(context.config.get("max_source_tokens", 24000)),
+            max_source_bytes=int(context.config.get("max_source_bytes", DEFAULT_SUMMARY_SOURCE_BYTES)),
             timeout_seconds=float(
                 context.config.get(
                     "timeout_seconds", DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS
@@ -148,6 +150,11 @@ def register_context_plugins(registry: ExtensionRegistry) -> None:
                     "type": "integer",
                     "minimum": 1,
                     "default": 24_000,
+                },
+                "max_source_bytes": {
+                    "type": "integer",
+                    "minimum": 4,
+                    "default": DEFAULT_SUMMARY_SOURCE_BYTES,
                 },
                 "timeout_seconds": {
                     "type": "number",

@@ -31,6 +31,47 @@ from sagents.v2.tool.official.memory import MemoryTools
 
 
 @pytest.mark.asyncio
+async def test_verified_summary_reuses_history_ids_without_losing_provenance(monkeypatch):
+    from sagents.v2.context.summary import active_summary_validation, message_digest, reuse_summary_validation
+
+    service = SessionMemoryService(NoopSessionMemoryProvider())
+    original = ModelMessage(
+        role="user", content=(TextBlock(text="historical text"),),
+        metadata={"source_item_id": "original"},
+    )
+    reconstructed = original.model_copy(update={"metadata": {"source_item_id": "reconstructed"}})
+    record_id = service.record_id
+    hashed = []
+
+    def track(message):
+        hashed.append(message)
+        return record_id(message)
+
+    monkeypatch.setattr(service, "record_id", track)
+
+    async def observe(message):
+        await service.observe_projection(
+            "run",
+            ContextProjection(messages=(), historical_messages=(message,), source_message_count=1),
+            session_id="session",
+        )
+
+    with reuse_summary_validation("run"):
+        validation = active_summary_validation.get()
+        assert validation is not None
+        validation.remember((message_digest(original),), (original,))
+        await observe(original)
+        await observe(original)
+        assert hashed == [original]
+        assert service._boundaries["run"].historical == {"original"}
+
+        assert message_digest(original) == message_digest(reconstructed)
+        await observe(reconstructed)
+        assert hashed == [original, reconstructed]
+        assert service._boundaries["run"].historical == {"reconstructed"}
+
+
+@pytest.mark.asyncio
 async def test_sqlite_session_memory_is_incremental_scoped_and_excludable(tmp_path):
     provider = SqliteBm25SessionMemoryProvider(tmp_path / "session-memory")
     old = SessionMemoryRecord(
