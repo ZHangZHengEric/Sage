@@ -23,7 +23,14 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-On Windows use `py -3.12 -m venv .venv`, then `.venv\Scripts\Activate.ps1` in PowerShell.
+On Windows, run this in PowerShell from the cloned repository root (after the `git clone` and `cd Sage` above):
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+With a newer supported Python, change the selector in the first command, for example `py -3.13`. Calling the venv's `python.exe` directly needs neither activation nor an execution-policy change; use `.\.venv\Scripts\python.exe` wherever this guide runs `python`. Installing the dependencies needs network access.
 
 ## Run from one Python file
 

@@ -23,7 +23,14 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Windows 使用 `py -3.12 -m venv .venv` 创建环境，在 PowerShell 中执行 `.venv\Scripts\Activate.ps1` 激活。
+Windows 下，在 PowerShell 中从克隆后的仓库根目录（即执行上面的 `git clone` 和 `cd Sage` 之后）运行：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+如果使用更新的受支持 Python 版本，请修改第一条命令中的版本选择器，例如 `py -3.13`。直接调用虚拟环境中的 `python.exe` 既不需要激活环境，也不需要修改执行策略；本指南中运行 `python` 的地方都可以改用 `.\.venv\Scripts\python.exe`。安装依赖需要联网。
 
 ## 一个 Python 文件即可运行
 
