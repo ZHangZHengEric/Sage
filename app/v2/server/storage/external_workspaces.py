@@ -16,6 +16,7 @@ from app.v2.server.storage.paths import ServerPaths, identity_segment
 
 MAX_FILES = 256
 MAX_FILE_BYTES = 4 << 20
+MAX_AUDIO_FILE_BYTES = 12 << 20
 MAX_TOTAL_BYTES = 16 << 20
 MAX_BINARY_BYTES = 64 << 20
 
@@ -146,23 +147,28 @@ def import_workspace_file(paths: ServerPaths, tenant_id: str, agent_id: str,
         os.close(root)
 
 
-def decode_workspace_files(directory: str, encoded_files: dict[str, str]):
+def decode_workspace_files(directory: str, encoded_files: dict[str, str], *, replace_project: bool = False):
     """Validate an import completely before either storage backend writes files."""
     root_parts = workspace_parts(directory)
+    if replace_project and (len(root_parts) != 2 or root_parts[0] != "projects"):
+        raise ValueError("workspace replacement requires one project directory")
     if len(encoded_files) > MAX_FILES:
         raise ValueError("too many workspace files")
     decoded: dict[tuple[str, ...], bytes] = {}
     total = 0
     for name, encoded in encoded_files.items():
         parts = workspace_parts(name)
-        if not isinstance(encoded, str) or len(encoded) > (MAX_FILE_BYTES * 4 // 3 + 8):
+        limit = MAX_FILE_BYTES
+        if replace_project and len(parts) > 1 and parts[0] == "assets" and parts[-1].lower().endswith((".mp3", ".ogg")):
+            limit = MAX_AUDIO_FILE_BYTES
+        if not isinstance(encoded, str) or len(encoded) > (limit * 4 // 3 + 8):
             raise ValueError("invalid workspace file")
         try:
             data = base64.b64decode(encoded, validate=True)
         except (ValueError, binascii.Error) as exc:
             raise ValueError("invalid workspace file encoding") from exc
         total += len(data)
-        if len(data) > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
+        if len(data) > limit or total > MAX_TOTAL_BYTES:
             raise ValueError("workspace file quota exceeded")
         decoded[parts] = data
     return root_parts, decoded
@@ -215,9 +221,7 @@ def replace_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
                             directory: str, encoded_files: dict[str, str],
                             *, validate_only: bool = False) -> int:
     """Preflight or replace a batch of regular files sharing one parent."""
-    root_parts, decoded = decode_workspace_files(directory, encoded_files)
-    if len(root_parts) != 2 or root_parts[0] != "projects":
-        raise ValueError("workspace replacement requires one project directory")
+    root_parts, decoded = decode_workspace_files(directory, encoded_files, replace_project=True)
     parents = {root_parts + parts[:-1] for parts in decoded}
     if len(parents) != 1:
         raise ValueError("workspace replacement files must share one parent")

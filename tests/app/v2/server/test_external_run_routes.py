@@ -154,6 +154,7 @@ def test_external_workspace_replaces_a_validated_batch(tmp_path):
         checked = client.put(base + "/workspace/files", headers=headers, json=preflight)
         assert checked.json()["data"] == {
             "directory": directory, "file_count": 3, "overwrite": True, "validated": True,
+            "audio_file_limit": 12 << 20,
         }
 
         def read(name):
@@ -177,9 +178,20 @@ def test_external_workspace_replaces_a_validated_batch(tmp_path):
             saved = client.put(base + "/workspace/files", headers=headers, json=batch)
             assert saved.json()["data"] == {
                 "directory": directory, "file_count": 2, "overwrite": True, "validated": False,
+                "audio_file_limit": 12 << 20,
             }
         for name in names:
             assert read(name).content == f"new-{name}".encode()
+
+        larger_mix = b"m" * (5 << 20)
+        encoded = base64.b64encode(larger_mix).decode()
+        saved = client.put(base + "/workspace/files", headers=headers,
+                           json={**batch, "files": {**updated, names[0]: encoded}})
+        assert saved.status_code == 200
+        assert read(names[0]).content == larger_mix
+        rejected = client.put(base + "/workspace/files", headers=headers,
+                              json={**batch, "files": {"assets/oversized.json": encoded}})
+        assert rejected.status_code == 422
 
 
 def _exercise_run_routes(client, base, agent_id):

@@ -46,6 +46,7 @@ from app.v2.server.routers.schemas.conversations import (
 )
 from app.v2.server.storage.downloads import SnapshotChangedError, prepare_download, prepare_session_export, workspace_version
 from app.v2.server.storage.external_workspaces import (
+    MAX_AUDIO_FILE_BYTES,
     MAX_BINARY_BYTES,
     delete_workspace_path,
     import_workspace_file,
@@ -542,7 +543,8 @@ async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: Ho
                     validate_only=validate_only,
                 )
                 return success({"directory": body.directory, "file_count": count,
-                                "overwrite": True, "validated": validate_only})
+                                "overwrite": True, "validated": validate_only,
+                                "audio_file_limit": MAX_AUDIO_FILE_BYTES})
             if host.workspace_storage is not None:
                 count = await finish_file_operation(host.workspace_storage.import_files,
                     caller.tenant_id, caller.agent_id, body.directory, body.files)
