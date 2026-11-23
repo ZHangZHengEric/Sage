@@ -115,10 +115,8 @@ class McpPluginCache:
     def invalidate(self, user_id: str) -> None:
         """Forget this user's plugins so the next Run rediscovers their Tools.
 
-        A discovery result is cached for the lifetime of the entry, and the
-        fingerprint covers only the transport — so a server that was down when
-        it was first listed, or that has since gained Tools, would otherwise
-        stay stale forever with no way for the tenant to recover.
+        Explicit invalidation lets the next Run bypass catalog expiry and
+        discovery failure backoff.
         """
 
         for key in [item for item in self._plugins if item[0] == user_id]:

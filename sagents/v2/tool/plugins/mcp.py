@@ -46,6 +46,13 @@ from sagents.v2.tool.plugins._shared.mcp_session import sdk_session as _sdk_sess
 from sagents.v2.runtime.observability.logs import get_logger
 
 LOGGER = get_logger(__name__)
+_CATALOG_TTL_SECONDS = 300
+
+
+def _is_unknown_property(error: ValidationError) -> bool:
+    return error.validator in {"additionalProperties", "unevaluatedProperties"} or any(
+        _is_unknown_property(child) for child in error.context
+    )
 
 
 class McpServerConfig(StrictModel):
@@ -140,6 +147,7 @@ class McpToolPlugin:
         self._server_catalogs: dict[str, tuple[
             dict[str, ToolDefinition], dict[str, tuple[McpServerConfig, str]],
         ]] = {}
+        self._catalog_expires_at: dict[str, float] = {}
         self._discovery_retry: dict[str, tuple[int, float]] = {}
         self._discovery_task: asyncio.Task[None] | None = None
         self._discovery_generation = 0
@@ -174,6 +182,7 @@ class McpToolPlugin:
     def invalidate_discovery(self) -> None:
         self._discovery_generation += 1
         self._server_catalogs.clear()
+        self._catalog_expires_at.clear()
         self._discovery_retry.clear()
         self._definitions = {}
         self._routes = {}
@@ -183,30 +192,40 @@ class McpToolPlugin:
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         del run_id
+        await self._refresh_discovery()
+        return self._catalog_result()
+
+    async def _refresh_discovery(
+        self, rejected: ToolDefinition | None = None
+    ) -> None:
         while True:
             fingerprint = self.servers_fingerprint(self.servers)
             async with self._lock:
                 if self._discovery_fingerprint != fingerprint:
                     self.invalidate_discovery()
-                generation = self._discovery_generation
+                if rejected is not None:
+                    # Another observer may already have refreshed this definition.
+                    if self._definitions.get(rejected.name) is not rejected:
+                        return
                 if self._discovery_task is None:
-                    now = monotonic()
-                    pending = tuple(
-                        server for server in self.servers
-                        if server.name not in self._server_catalogs
-                        and self._discovery_retry.get(server.name, (0, 0.0))[1] <= now
-                    )
+                    if rejected is None:
+                        now = monotonic()
+                        pending = tuple(
+                            server for server in self.servers
+                            if self._catalog_expires_at.get(server.name, 0.0) <= now
+                            and self._discovery_retry.get(server.name, (0, 0.0))[1] <= now
+                        )
+                    else:
+                        pending = (self._routes[rejected.name][0],)
                     if not pending:
-                        return self._catalog_result()
+                        return
                     self._discovery_task = asyncio.create_task(
-                        self._discover_tools(pending, generation, fingerprint)
+                        self._discover_tools(pending, self._discovery_generation, fingerprint)
                     )
                     self._discovery_task.add_done_callback(self._discovery_finished)
                 task = self._discovery_task
             # Observers do not own this shared read-only discovery task.
             await asyncio.shield(task)
-            if generation == self._discovery_generation and fingerprint == self.servers_fingerprint(self.servers):
-                return self._catalog_result()
 
     def _catalog_result(self) -> tuple[ToolDefinition, ...]:
         for server in self.servers:
@@ -222,6 +241,7 @@ class McpToolPlugin:
 
     def _record_discovery_error(self, name: str, error: RuntimeErrorInfo) -> None:
         self._server_catalogs.pop(name, None)
+        self._catalog_expires_at.pop(name, None)
         self._discovery_errors[name] = error
         attempts = min(self._discovery_retry.get(name, (0, 0.0))[0] + 1, 6)
         self._discovery_retry[name] = (attempts, monotonic() + min(30, 2 ** (attempts - 1)))
@@ -244,6 +264,7 @@ class McpToolPlugin:
                 except SageV2Error as exc:
                     self._record_discovery_error(name, exc.info)
                 else:
+                    self._catalog_expires_at[name] = monotonic() + _CATALOG_TTL_SECONDS
                     self._discovery_errors.pop(name, None)
                     self._discovery_retry.pop(name, None)
 
@@ -353,7 +374,8 @@ class McpToolPlugin:
         )
 
     async def get_tool(self, name: str, *, run_id: str) -> ToolDefinition:
-        if name not in self._definitions:
+        route = self._routes.get(name)
+        if route is None or self._catalog_expires_at[route[0].name] <= monotonic():
             await self.list_tools(run_id=run_id)
         try:
             return self._definitions[name]
@@ -367,49 +389,78 @@ class McpToolPlugin:
     ) -> ToolExecutionResult:
         del context
         fingerprint = call_fingerprint(call)
-        async with self._lock:
-            bound = self._call_fingerprints.get(call.idempotency_key)
-            if bound is not None and bound != fingerprint:
-                raise self._error(
-                    "tool.idempotency_conflict",
-                    "idempotency key was already bound to a different Tool call",
-                    ErrorCategory.CONFLICT,
-                    metadata={"side_effect_state": "not_applied"},
-                )
-            previous = self._results.get(call.idempotency_key)
-            failure = self._failures.get(call.idempotency_key)
-            route = self._routes.get(call.tool_name)
-            definition = self._definitions.get(call.tool_name)
-            if previous is not None:
-                return previous
-            if failure is not None:
-                raise SageV2Error(failure)
-            if route is None or definition is None:
-                raise self._error(
-                    "tool.not_found", f"MCP tool {call.tool_name!r} is not registered"
-                )
+        rejected_route: tuple[McpServerConfig, str] | None = None
+        while True:
+            async with self._lock:
+                bound = self._call_fingerprints.get(call.idempotency_key)
+                if bound is not None and bound != fingerprint:
+                    raise self._error(
+                        "tool.idempotency_conflict",
+                        "idempotency key was already bound to a different Tool call",
+                        ErrorCategory.CONFLICT,
+                        metadata={"side_effect_state": "not_applied"},
+                    )
+                previous = self._results.get(call.idempotency_key)
+                failure = self._failures.get(call.idempotency_key)
+                if previous is not None:
+                    return previous
+                if failure is not None:
+                    raise SageV2Error(failure)
+                future = self._inflight.get(call.idempotency_key)
+                owner = future is None
+                if future is not None:
+                    break
+
+                route = self._routes.get(call.tool_name)
+                definition = self._definitions.get(call.tool_name)
+                if rejected_route is not None and route != rejected_route:
+                    raise self._error(
+                        "mcp.tool_changed",
+                        f"MCP tool {call.tool_name!r} changed during catalog refresh",
+                        metadata={"side_effect_state": "not_applied"},
+                    )
+                if route is None or definition is None:
+                    raise self._error(
+                        "tool.not_found", f"MCP tool {call.tool_name!r} is not registered",
+                        metadata={"side_effect_state": "not_applied"},
+                    )
+                server, remote_name = route
+                if rejected_route is not None or self._catalog_expires_at[server.name] > monotonic():
+                    try:
+                        Draft202012Validator(definition.input_schema).validate(call.arguments)
+                    except ValidationError as exc:
+                        if rejected_route is not None or not _is_unknown_property(exc):
+                            raise self._error(
+                                "tool.arguments_invalid",
+                                exc.message,
+                                ErrorCategory.VALIDATION,
+                                metadata={"side_effect_state": "not_applied"},
+                            ) from exc
+                        rejected_route = route
+                    else:
+                        future = asyncio.get_running_loop().create_future()
+                        self._inflight[call.idempotency_key] = future
+                        self._operation_keys[call.operation_id] = call.idempotency_key
+                        self._call_fingerprints[call.idempotency_key] = fingerprint
+                        self._call_run_ids[call.idempotency_key] = call.owner_run_id
+                        break
+
             try:
-                Draft202012Validator(definition.input_schema).validate(call.arguments)
-            except ValidationError as exc:
-                raise self._error(
-                    "tool.arguments_invalid",
-                    exc.message,
-                    ErrorCategory.VALIDATION,
-                    metadata={"side_effect_state": "not_applied"},
+                if rejected_route is None:
+                    await self.list_tools(run_id=call.owner_run_id)
+                else:
+                    await self._refresh_discovery(definition)
+                    if (error := self._discovery_errors.get(server.name)) is not None:
+                        raise SageV2Error(error)
+                    self._catalog_result()
+            except SageV2Error as exc:
+                raise SageV2Error(
+                    exc.info.model_copy(update={
+                        "metadata": {**exc.info.metadata, "side_effect_state": "not_applied"},
+                    })
                 ) from exc
-            future = self._inflight.get(call.idempotency_key)
-            if future is None:
-                future = asyncio.get_running_loop().create_future()
-                self._inflight[call.idempotency_key] = future
-                self._operation_keys[call.operation_id] = call.idempotency_key
-                self._call_fingerprints[call.idempotency_key] = fingerprint
-                self._call_run_ids[call.idempotency_key] = call.owner_run_id
-                owner = True
-            else:
-                owner = False
         if not owner:
             return await asyncio.shield(future)
-        server, remote_name = route
         try:
             response, cleanup_error = await self._request(server, remote_name, call)
         except asyncio.CancelledError as exc:

@@ -436,6 +436,94 @@ async def test_mcp_bridge_validates_arguments_before_remote_dispatch():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("accepts_times_ms", [True, False])
+async def test_unknown_mcp_argument_refreshes_only_its_server_once(accepts_times_ms):
+    listings = {"wishseen": 0, "healthy": 0}
+
+    class WishSeenSession(FakeSession):
+        async def list_tools(self):
+            listings["wishseen"] += 1
+            properties = {}
+            if listings["wishseen"] > 1 and accepts_times_ms:
+                properties["times_ms"] = {"type": "array", "items": {"type": "integer"}}
+            return {"tools": [{"name": "screenshot_draft", "inputSchema": {
+                "type": "object", "properties": properties, "additionalProperties": False,
+            }}]}
+
+    class HealthySession(FakeSession):
+        async def list_tools(self):
+            listings["healthy"] += 1
+            return await super().list_tools()
+
+    session = WishSeenSession()
+
+    @asynccontextmanager
+    async def factory(config):
+        yield session if config.name == "wishseen" else HealthySession()
+
+    bridge = McpToolPlugin(
+        tuple(McpServerConfig(name=name, protocol="stdio", command="fake") for name in listings),
+        session_factory=factory,
+    )
+    tool_name = "mcp_wishseen_screenshot_draft"
+    old_tool = await bridge.get_tool(tool_name, run_id="first")
+    assert "times_ms" not in old_tool.input_schema["properties"]
+    call = ToolCall(
+        tool_call_id="call_1", tool_name=tool_name, arguments={"times_ms": [1000]},
+        operation_id="operation_1", idempotency_key="refresh", owner_run_id="second",
+    )
+
+    outcomes = await asyncio.gather(
+        bridge.execute(call, CONTEXT), bridge.execute(call, CONTEXT), return_exceptions=True,
+    )
+
+    assert listings == {"wishseen": 2, "healthy": 1}
+    if accepts_times_ms:
+        assert outcomes[0] == outcomes[1]
+        assert session.calls == [("screenshot_draft", {"times_ms": [1000]})]
+        refreshed = await bridge.get_tool(tool_name, run_id="third")
+        assert "times_ms" in refreshed.input_schema["properties"]
+    else:
+        for outcome in outcomes:
+            assert isinstance(outcome, SageV2Error)
+            assert outcome.info.code == "tool.arguments_invalid"
+            assert outcome.info.metadata["side_effect_state"] == "not_applied"
+        assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_catalog_expires_across_runs(monkeypatch):
+    from sagents.v2.tool.plugins import mcp
+
+    now = 0.0
+    description = "old"
+    monkeypatch.setattr(mcp, "monotonic", lambda: now)
+
+    class ChangingSession(FakeSession):
+        async def list_tools(self):
+            response = await super().list_tools()
+            response["tools"][0]["description"] = description
+            return response
+
+    @asynccontextmanager
+    async def factory(config):
+        yield ChangingSession()
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="fake"),),
+        session_factory=factory,
+    )
+    (old_tool,) = await bridge.list_tools(run_id="first")
+    description = "new"
+    now = mcp._CATALOG_TTL_SECONDS - 1
+    assert await bridge.list_tools(run_id="second") == (old_tool,)
+    now += 1
+    refreshed = await bridge.get_tool(old_tool.name, run_id="third")
+    assert refreshed.description == "new"
+    assert await bridge.list_tools(run_id="fourth") == (refreshed,)
+
+
+@pytest.mark.asyncio
 async def test_mcp_bridge_exposes_discovery_failure_instead_of_hiding_server():
     @asynccontextmanager
     async def failing_factory(config):
