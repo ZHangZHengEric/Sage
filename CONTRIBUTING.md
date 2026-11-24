@@ -54,8 +54,11 @@ For backend changes, also run the affected Python tests under `tests/app/v2/desk
 ```bash
 cd app/v2/server/web
 npm ci
+npm test
 npm run build
 ```
+
+`npm test` runs the frontend unit tests with Node's built-in test runner and needs no Sage backend or API keys.
 
 ## Open your PR
 
