@@ -117,3 +117,9 @@ Keep the exact error and checkout revision when asking for help. Do not add an A
 ## Next: use your own Agent and evaluation
 
 For a real model, follow the [RSI workflow guide](RSI.md) and [optimizer API reference](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/README.md). Those explain host bindings, authorized editable scope, test suites, candidate evidence, and failure handling. Real-model runs may incur provider charges; this demonstration's scripted grades are not a benchmark for them.
+
+## Optional: make a first Sage PR
+
+If you want to contribute without a model API key, documentation improvements or offline tests are welcome. Browse the [open good first issues](https://github.com/ZHangZHengEric/Sage/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read the [contribution guide](https://github.com/ZHangZHengEric/Sage/blob/main/CONTRIBUTING.md) before making changes.
+
+Before starting work on an issue, check its comments and linked pull requests—an unassigned issue may already have an active PR. Leave a comment or open a draft PR if you want early feedback.

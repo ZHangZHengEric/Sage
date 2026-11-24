@@ -118,3 +118,9 @@ Windows 用户按照快速开始创建环境后，运行：
 ## 下一步：使用自己的 Agent 和评测
 
 如需使用真实模型，请阅读 [RSI 工作流指南](RSI.md)和[优化器 API 参考](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/README.md)。这些文档介绍宿主绑定、授权的可编辑范围、测试集、候选证据和失败处理。真实模型运行可能产生服务费用；本演示的预设评分不能作为它们的基准。
+
+## 可选：提交你的第一个 Sage PR
+
+如果你想在没有模型 API 密钥的情况下参与贡献，完善文档或补充离线测试都是非常有价值的贡献。你可以先浏览[开放的 good first issues](https://github.com/ZHangZHengEric/Sage/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)，并在动手前阅读[贡献指南](https://github.com/ZHangZHengEric/Sage/blob/main/CONTRIBUTING.md)。
+
+认领 issue 前，请先查看该 issue 下的评论和关联的 Pull Request——未指派负责人的 issue 也可能已经有活跃的 PR 在推进。如果你希望尽早获得反馈，欢迎在 issue 中留言或提交草稿 PR（draft PR）。
