@@ -55,7 +55,8 @@ permanently free. See also Keenable's [privacy policy](https://keenable.ai/priva
 
 ## Tests
 
-Mocked coverage (no network; `httpx.MockTransport` behind the real MCP SDK client):
+Mocked coverage (no network; `httpx.MockTransport` behind the real MCP SDK client).
+Install the test dependencies from the repository root (`python -m pip install -e '.[test]'`), then run:
 
 ```bash
 python -m pytest -q tests/sagents/v2/test_keenable_search_example.py
