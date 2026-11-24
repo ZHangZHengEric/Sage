@@ -89,6 +89,14 @@ by regression tests, rather than a separate executable example.
 
 ## Verification
 
+Install the test dependencies from the repository root first:
+
+```bash
+python -m pip install -e '.[test]'
+```
+
+Then run the offline example checks:
+
 ```bash
 python -m pytest -q tests/sagents/v2/test_quickstart_example.py \
   tests/sagents/v2/test_host_starter_example.py \
