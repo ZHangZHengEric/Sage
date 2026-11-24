@@ -28,7 +28,7 @@ def main() -> int:
     docs = Path(__file__).resolve().parents[1]
     site = docs / "_site"
     base = (
-        yaml.safe_load((docs / "_config.yml").read_text())
+        yaml.safe_load((docs / "_config.yml").read_text(encoding="utf-8"))
         .get("baseurl", "")
         .rstrip("/")
     )
@@ -73,7 +73,7 @@ def main() -> int:
             nav_by_language[lang] = normalized
             counterpart = other + relative[len(lang) :]
             switch = re.search(
-                r'<div class="sage-lang-switcher">(.*?)</div>', path.read_text(), re.S
+                r'<div class="sage-lang-switcher">(.*?)</div>', path.read_text(encoding="utf-8"), re.S
             )
             switches = re.findall(r'href="([^"]+)"', switch.group(1)) if switch else []
             if set(switches) != {url, targets[counterpart][1]}:

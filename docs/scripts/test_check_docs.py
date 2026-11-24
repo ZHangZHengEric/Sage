@@ -143,5 +143,19 @@ class GroupedConversationRoutes(unittest.TestCase):
         self.assertTrue(expected <= routes, expected - routes)
 
 
+class DefaultEncoding(unittest.TestCase):
+    def test_checks_read_utf8_whatever_the_locale_default(self):
+        # Simulate a cp1252 locale (Windows) for any read that omits the encoding.
+        read_text = Path.read_text
+
+        def cp1252_default(path, encoding=None, *args, **kwargs):
+            return read_text(path, encoding or "cp1252", *args, **kwargs)
+
+        out = io.StringIO()
+        with patch.object(Path, "read_text", cp1252_default), redirect_stdout(out):
+            check_docs.main()
+        self.assertIn("Validated", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
