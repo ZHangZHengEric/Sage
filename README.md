@@ -88,26 +88,26 @@ For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). 
 <details>
 <summary>🌐 Run Server from source</summary>
 
-Requires **Python 3.12+**, **MySQL**, and **Node.js 22.12+**. From the checkout root, with the Python environment active:
+Requires **Python 3.12+**, **Node.js 22.12+**, and one supported database (**MySQL** or **PostgreSQL**). From the checkout root, with the Python environment active:
 
 ```bash
 python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-Set the MySQL connection, JWT secret, and initial administrator credentials in `.env`, then run:
+Configure one database URL in `.env` (the template starts with a MySQL example; for PostgreSQL, install the `postgres` extra alongside `server` with `python -m pip install -e '.[server,postgres]'`, disable the MySQL URL, and set `SAGE_SERVER_POSTGRES_URL` instead), along with the JWT secret and initial administrator credentials. Do not configure both database URLs. Then run:
 
 ```bash
 cd app/v2/server/web
 npm install
 npm run build
-cd ../../..
+cd ../../../..
 python -m app.v2.server
 ```
 
 Open **[localhost:8090](http://localhost:8090)**. Add a model and an Agent to start chatting, or open **`/studio`** to manage Agent packages.
 
-See the [Server guide](app/v2/server/README.md) for configuration. Server currently supports **one worker**; MySQL persistence does not enable horizontal scaling.
+See the [Server guide](app/v2/server/README.md) for configuration. Server currently supports **one worker**; database persistence does not enable horizontal scaling.
 
 </details>
 

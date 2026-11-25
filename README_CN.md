@@ -88,26 +88,26 @@ Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.2 发�
 <details>
 <summary>🌐 从源码启动 Server</summary>
 
-需要 **Python 3.12+**、**MySQL** 和 **Node.js 22.12+**。在仓库根目录、已激活 Python 环境的终端中执行：
+需要 **Python 3.12+**、**Node.js 22.12+**，以及一种受支持的数据库（**MySQL** 或 **PostgreSQL**）。在仓库根目录、已激活 Python 环境的终端中执行：
 
 ```bash
 python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-在 `.env` 中配置 MySQL 连接、JWT 密钥和初始管理员账号，然后运行：
+在 `.env` 中配置一个数据库连接 URL（模板以 MySQL 为例；如使用 PostgreSQL，请用 `python -m pip install -e '.[server,postgres]'` 在 `server` 之外安装 `postgres` 附加依赖，停用 MySQL 的 URL，改为设置 `SAGE_SERVER_POSTGRES_URL`），以及 JWT 密钥和初始管理员账号。不要同时配置两个数据库的 URL。然后运行：
 
 ```bash
 cd app/v2/server/web
 npm install
 npm run build
-cd ../../..
+cd ../../../..
 python -m app.v2.server
 ```
 
 打开 **[localhost:8090](http://localhost:8090)**，添加模型和 Agent 后开始对话；进入 **`/studio`** 管理 Agent 包。
 
-详细配置见 [服务端指南](app/v2/server/README.md)。Server 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
+详细配置见 [服务端指南](app/v2/server/README.md)。Server 当前支持**单 worker**，数据库持久化不代表已支持横向扩容。
 
 </details>
 
