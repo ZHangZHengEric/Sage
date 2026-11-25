@@ -58,6 +58,36 @@ With the corrected example, inspect `baseline_score: 0.4`, `selected_score: 0.8`
 
 The fixture now declares an experiment using the retained parent hash and measured training evidence supplied in each tuner request. Repairs reuse the same round's proposal and training evidence; production experiment validation remains enabled.
 
+An excerpt of the current command's output, captured on 2026-11-25 from [commit `26fc3a3`](https://github.com/ZHangZHengEric/Sage/blob/26fc3a39190ec947baabcc051c335955d5ef80d5/examples/v2/package_optimizer.py) with Python 3.12.3 on Linux (`original_hash` and `candidate_hash` omitted):
+
+```json
+{
+  "baseline_score": 0.4,
+  "selected_score": 0.8,
+  "goal_verified": false,
+  "training_questions": 1,
+  "rounds": [
+    {
+      "round": 1,
+      "accepted": true,
+      "reason": "Validation quality improved 0.4000 -> 0.6000; on 1 validation cases; 0 new training cases not backtested; 0 case regressions retained for follow-up"
+    },
+    {
+      "round": 2,
+      "accepted": false,
+      "reason": "Insufficient validation improvement"
+    },
+    {
+      "round": 3,
+      "accepted": true,
+      "reason": "Validation quality improved 0.6000 -> 0.8000; on 1 validation cases; 0 new training cases not backtested; 0 case regressions retained for follow-up"
+    }
+  ]
+}
+```
+
+The retained candidate improves from 0.4 to 0.8, but 0.8 is below the convergence target, so `goal_verified` stays `false`. Compare your own output with this excerpt, not with the historical one below.
+
 ### Historical output (not the current schema)
 
 The following captured output belongs to the 2026-10-12 revision, not the current command:
