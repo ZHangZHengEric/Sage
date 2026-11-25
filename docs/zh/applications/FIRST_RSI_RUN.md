@@ -59,6 +59,36 @@ Windows 用户按照快速开始创建环境后，运行：
 
 示例从每次调优请求读取保留版本的哈希及已测训练证据来声明实验；修复重试复用同轮提案与训练证据，不关闭生产实验校验。
 
+以下是当前命令输出的节选，于 2026-11-25 采集自[提交 `26fc3a3`](https://github.com/ZHangZHengEric/Sage/blob/26fc3a39190ec947baabcc051c335955d5ef80d5/examples/v2/package_optimizer.py)，使用 Linux 上的 Python 3.12.3（省略 `original_hash` 和 `candidate_hash`）：
+
+```json
+{
+  "baseline_score": 0.4,
+  "selected_score": 0.8,
+  "goal_verified": false,
+  "training_questions": 1,
+  "rounds": [
+    {
+      "round": 1,
+      "accepted": true,
+      "reason": "Validation quality improved 0.4000 -> 0.6000; on 1 validation cases; 0 new training cases not backtested; 0 case regressions retained for follow-up"
+    },
+    {
+      "round": 2,
+      "accepted": false,
+      "reason": "Insufficient validation improvement"
+    },
+    {
+      "round": 3,
+      "accepted": true,
+      "reason": "Validation quality improved 0.6000 -> 0.8000; on 1 validation cases; 0 new training cases not backtested; 0 case regressions retained for follow-up"
+    }
+  ]
+}
+```
+
+保留的候选从 0.4 提升到 0.8，但 0.8 低于收敛目标，因此 `goal_verified` 仍为 `false`。请用这段节选而不是下面的历史输出来对照你的结果。
+
 ### 历史输出（不是当前字段合同）
 
 以下保留的输出来自 2026-10-12 版本，不是当前命令输出：
