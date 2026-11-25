@@ -64,7 +64,7 @@ Sage、Desktop、Server 和 SAgents 默认指当前 v2 实现。旧版单独见 
 <details>
 <summary>💻 从源码启动 Desktop</summary>
 
-需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **[Flutter](https://flutter.dev/)**。macOS 下运行：
+需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **[Flutter](https://flutter.dev/)**。从源码运行 Desktop 时，[Desktop OpenUI](app/v2/desktop/README.md#openui) 流式解析器还需要 **Node.js 22+**。macOS 下运行：
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git

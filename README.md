@@ -64,7 +64,7 @@ Sage, Desktop, Server, and SAgents refer to the current v2 implementation by def
 <details>
 <summary>💻 Run Desktop from source</summary>
 
-Requires **Python 3.12+** and **[Flutter](https://flutter.dev/)** with Dart `^3.12.2` and desktop support. On macOS:
+Requires **Python 3.12+** and **[Flutter](https://flutter.dev/)** with Dart `^3.12.2` and desktop support. The [Desktop OpenUI](app/v2/desktop/README.md#openui) streaming parser also needs **Node.js 22+** when running Desktop from source. On macOS:
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
