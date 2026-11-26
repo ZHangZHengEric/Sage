@@ -171,6 +171,46 @@ The opt-in [domain benchmark](https://github.com/ZHangZHengEric/Sage/blob/main/e
 
 On 2026-10-12, Skill-only and tool-selection experiments each reached 3/3 final cases. Joint scope also reached 3/3 but changed only a Skill, so simultaneous instruction/Skill modification was not demonstrated. All used four proposal rounds with no new changes after the first accepted version. Skill/tool tests reused old final cases and measure regression; the clarified joint run used newly sealed cases. Preserve failures and review rejections; small samples do not establish general reliability.
 
+### Offline reproducibility
+
+To audit the saved [τ-bench retail dataset](../../assets/benchmarks/tau-retail-rsi.json) from the [historical τ-bench retail report](TAU_BENCH.md) without model calls, API keys, fees, or live logs, run the Python standard-library check below from the repository root. It reads only the raw `measurements` rows, pairs `test-baseline` and `test-candidate` by `(task, trial, seed)`, and flags duplicates, missing counterparts, unexpected rewards, or incomplete per-task repeats instead of silently dropping rows:
+
+```python
+python3 - <<'PY'
+import json
+from collections import Counter, defaultdict
+
+rows = json.load(open("docs/assets/benchmarks/tau-retail-rsi.json", encoding="utf-8"))["measurements"]
+arms = ("test-baseline", "test-candidate")
+cells, problems = defaultdict(dict), []
+for r in rows:
+    key = (str(r["task"]), r["trial"], r["seed"])
+    if r["phase"] not in arms or r["reward"] not in (0, 1):
+        problems.append(f"unexpected row {key}: {r['phase']} reward={r['reward']}")
+    elif r["phase"] in cells[key]:
+        problems.append(f"duplicate {r['phase']} row {key}")
+    else:
+        cells[key][r["phase"]] = r["reward"] == 1
+problems += [f"missing {a} row {k}" for k, c in cells.items() for a in arms if a not in c]
+problems += [f"task {t}: {n} paired trials, expected 4" for t, n in Counter(k[0] for k in cells).items() if n != 4]
+print("problems:", problems or "none")
+
+paired = {k: c for k, c in cells.items() if len(c) == 2}
+for a in arms:
+    ok = sum(c[a] for c in paired.values())
+    tasks = defaultdict(list)
+    for (t, _, _), c in paired.items():
+        tasks[t].append(c[a])
+    every = sum(all(v) for v in tasks.values())
+    print(f"{a}: pass^1 {ok}/{len(paired)} ({ok / len(paired):.3%}), passed every repeat {every}/{len(tasks)}")
+label = {(True, True): "both passed", (False, True): "candidate win",
+         (True, False): "candidate loss", (False, False): "both failed"}
+print("paired trials:", dict(Counter(label[c[arms[0]], c[arms[1]]] for c in paired.values())))
+PY
+```
+
+On the checked-in file, it prints `problems: none`, `test-baseline: pass^1 120/160 (75.000%), passed every repeat 23/40`, `test-candidate: pass^1 133/160 (83.125%), passed every repeat 26/40`, and `{'candidate win': 28, 'candidate loss': 15, 'both passed': 105, 'both failed': 12}`. Note that the separate `Default gpt-6.1-sol` reference row in the historical report is not stored in `tau-retail-rsi.json` and comes from the original experiment artifacts rather than this file. This check audits a saved historical evaluation only: it does not rerun τ-bench, establish an equal-budget comparison, or prove general RSI effectiveness.
+
 ### Responsibilities of prompts, Skills, and tools
 
 Skill names should name the reusable capability actually implemented, in concise lowercase hyphenated form showing the action and its object or domain; avoid optimization-process containers such as `rsi-guidance`. New Skill YAML headers contain `name` and `description`, describing what the Skill does and when to load it; the body defines preconditions, inputs, steps, result checks, and failure handling. Directory name, `name`, manifest bindings, and `load_skill` references must agree; renaming updates them together and removes old resources. Desktop no longer presets generic candidate names; the tuner chooses capability names within its authorized scope. Whether a name fits the actual procedure is a tuner writing requirement, not an extra model judgment; the framework checks consistency of declared metadata names, descriptions, and bindings and still accepts legacy Skills without YAML headers. Frozen historical versions stay unchanged.
