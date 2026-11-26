@@ -13,7 +13,7 @@ parent: Applications
 
 ## Requirements
 
-Python 3.12+, MySQL, and Node.js 22.12+. Complete the [source setup](GETTING_STARTED.md) first. **Redis is not a Server startup dependency.**
+Python 3.12+, MySQL or PostgreSQL, and Node.js 22.12+. Complete the [source setup](GETTING_STARTED.md) first. **Redis is not a Server startup dependency.**
 
 ## Start
 
@@ -24,13 +24,15 @@ python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`. There is no default administrator password. For local HTTP development set `SAGE_SERVER_COOKIE_SECURE=false`; keep the default `true` for HTTPS deployments. The server defaults to local SQLite memory. To use [remote libSQL](../../../app/v2/server/README.md#长期记忆与会话检索索引), configure and provision it before startup.
+Configure one database, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`. There is no default administrator password. For local HTTP development set `SAGE_SERVER_COOKIE_SECURE=false`; keep the default `true` for HTTPS deployments.
+
+The default path is MySQL: set `SAGE_SERVER_MYSQL_URL` in `app/v2/server/.env`. To use PostgreSQL instead, install the extra with `python -m pip install -e '.[server,postgres]'`, remove or comment out `SAGE_SERVER_MYSQL_URL` in the copied template, and set `SAGE_SERVER_POSTGRES_URL` instead. Do not set both database URLs. The server defaults to local SQLite memory for agent memory. To use [remote libSQL](../../../app/v2/server/README.md#长期记忆与会话检索索引), configure and provision it before startup.
 
 ```bash
 cd app/v2/server/web
 npm install
 npm run build
-cd ../../..
+cd ../../../..
 python -m app.v2.server
 ```
 
@@ -44,7 +46,7 @@ Startup automatically upgrades legacy users, preserving user IDs, roles, and exe
 
 ## Storage and deployment boundary
 
-- MySQL stores users, catalogs, thread indexes, Agent package inventory, and runtime Sessions.
+- MySQL or PostgreSQL stores users, catalogs, thread indexes, Agent package inventory, and runtime Sessions.
 - AG-UI replay reads canonical RuntimeEvents from Sage Sessions, not a separate Redis event log.
 - Workspace files live under the configured data root's tenant directories.
 - Run **one worker**. The built-in SessionStore rejects a second writer; the Scheduler and JobRuntime do not supply multi-host durability.
