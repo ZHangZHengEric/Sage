@@ -293,8 +293,10 @@ The default weight is 0.2; references are 1 cost unit (the provider's reported c
 unit), 60 seconds or 10,000 input-plus-output tokens. References are fixed across
 versions and included in recovery fingerprints. Zero quality cannot be rescued by
 cheap execution. These opt-in modes permit quality/resource trade-offs; they do
-not impose an additional no-quality-regression guarantee. Selection equally weights
-training and validation objective means on the same common cases. Repeated trials
+not impose an additional no-quality-regression guarantee. After checking execution
+and audit gates, selection compares the incumbent and candidate objective scores
+on the fixed validation cases; the training objective does not enter that
+comparison. Repeated trials
 aggregate their objective scores with the requested mean/minimum policy; resource
 metrics are averages per execution, not totals across repeats. Dialogue costs and
 tokens include all target turns. Optimizer/evaluator overhead is separate.
