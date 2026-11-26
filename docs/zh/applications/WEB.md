@@ -13,7 +13,7 @@ parent: 应用入口
 
 ## 环境要求
 
-Python 3.12+、MySQL 和 Node.js 22.12+。先完成[源码环境安装](GETTING_STARTED.md)。**Redis 已不是 Server 的启动依赖。**
+Python 3.12+、MySQL 或 PostgreSQL 以及 Node.js 22.12+。先完成[源码环境安装](GETTING_STARTED.md)。**Redis 已不是 Server 的启动依赖。**
 
 ## 启动
 
@@ -24,13 +24,15 @@ python -m pip install -e '.[server]'
 cp .env.example app/v2/server/.env
 ```
 
-在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号和密码（无默认密码）。本地 HTTP 开发还需设置 `SAGE_SERVER_COOKIE_SECURE=false`；HTTPS 部署保持默认 `true`。记忆默认使用本地 SQLite。启用远端 libSQL 时，按[记忆存储说明](../../../app/v2/server/README.md#长期记忆与会话检索索引)配置并初始化。
+在 `app/v2/server/.env` 中配置一种数据库、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号和密码（无默认密码）。本地 HTTP 开发还需设置 `SAGE_SERVER_COOKIE_SECURE=false`；HTTPS 部署保持默认 `true`。
+
+默认使用 MySQL，在 `app/v2/server/.env` 中设置 `SAGE_SERVER_MYSQL_URL`。如需改用 PostgreSQL，先执行 `python -m pip install -e '.[server,postgres]'` 安装额外依赖，在复制出的模板中删除或注释 `SAGE_SERVER_MYSQL_URL`，改为设置 `SAGE_SERVER_POSTGRES_URL`。请勿同时配置两个数据库地址。记忆默认使用本地 SQLite。启用远端 libSQL 时，按[记忆存储说明](../../../app/v2/server/README.md#长期记忆与会话检索索引)配置并初始化。
 
 ```bash
 cd app/v2/server/web
 npm install
 npm run build
-cd ../../..
+cd ../../../..
 python -m app.v2.server
 ```
 
@@ -44,7 +46,7 @@ python -m app.v2.server
 
 ## 存储与部署边界
 
-- MySQL 保存用户、catalog、thread 索引、Agent 包库存和运行时 Session。
+- MySQL 或 PostgreSQL 保存用户、catalog、thread 索引、Agent 包库存和运行时 Session。
 - AG-UI 回放直接读取 Sage Session 的权威 RuntimeEvent，不依赖另一份 Redis 事件日志。
 - 工作区文件保存在配置的数据根目录下，按租户分隔。
 - 使用**单 worker**。内置 SessionStore 拒绝第二个 writer；Scheduler 和 JobRuntime 不提供多宿主持久运行保证。
