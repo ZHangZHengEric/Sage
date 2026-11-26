@@ -13,7 +13,19 @@ parent: 应用入口
 
 ## 从源码启动
 
-先完成 [Python 环境安装](GETTING_STARTED.md)，再安装 Dart 满足 `^3.12.2` 的 Flutter 和目标平台的桌面工具链：
+先完成 [Python 环境安装](GETTING_STARTED.md)。然后在仓库根目录、使用同一个虚拟环境安装 `desktop` 附加依赖，其中包含托管 Python sidecar 所需的 Uvicorn 等依赖：
+
+```bash
+python -m pip install -e '.[desktop]'
+```
+
+Windows PowerShell 下如果按 Python 环境安装中的方式未激活虚拟环境，请直接调用虚拟环境中的解释器：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e '.[desktop]'
+```
+
+再安装 Dart 满足 `^3.12.2` 的 Flutter 和目标平台的桌面工具链：
 
 ```bash
 cd app/v2/desktop
