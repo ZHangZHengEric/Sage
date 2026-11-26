@@ -13,7 +13,19 @@ parent: Applications
 
 ## Start from source
 
-Complete the [Python setup](GETTING_STARTED.md). Install Node.js 22+ for the official streaming UI parser, then install Flutter with Dart `^3.12.2` and your platform's desktop toolchain:
+Complete the [Python setup](GETTING_STARTED.md). Then, from the checkout root and in the same virtual environment, install the `desktop` extra, which adds the managed Python sidecar's dependencies such as Uvicorn:
+
+```bash
+python -m pip install -e '.[desktop]'
+```
+
+In Windows PowerShell, with the unactivated environment from the Python setup, run the venv's interpreter directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e '.[desktop]'
+```
+
+Install Node.js 22+ for the official streaming UI parser, then install Flutter with Dart `^3.12.2` and your platform's desktop toolchain:
 
 ```bash
 cd app/v2/desktop
