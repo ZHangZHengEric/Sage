@@ -171,39 +171,50 @@ Desktop 当前支持 simple Agent、原生工具、临时工作区和宿主沙�
 
 ### 离线复现
 
-如需在不调用模型、无需 API Key、无费用且不依赖实时日志的情况下核验[历史 τ-bench retail 报告](TAU_BENCH.md)对应的[已归档数据集](../../assets/benchmarks/tau-retail-rsi.json)，可在仓库根目录运行下方仅依赖 Python 标准库的脚本。该脚本只读取原始 `measurements` 记录，按 `(task, trial, seed)` 配对 `test-baseline` 与 `test-candidate`，并显式报告重复行、缺失配对、异常 reward 或任务重复次数不完整的情况，而不会静默丢弃或直接计为失败：
+如需在不调用模型、无需 API Key、无费用且不依赖实时日志的情况下核验[历史 τ-bench retail 报告](TAU_BENCH.md)对应的[已归档数据集](../../assets/benchmarks/tau-retail-rsi.json)，可在仓库根目录运行下方仅依赖 Python 标准库的脚本。它会根据固定的 40 个[上游 retail test 任务列表](https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/split_tasks.json)（以及归档中 `trial 0–3` 对应的 `seeds 20261021–20261024`）校验所有原始 `measurements` 记录；若发现任何重复、缺失、格式异常或预期之外的条目，会在输出汇总前报错并以非零状态码退出：
 
-```python
+```bash
 python3 - <<'PY'
 import json
 from collections import Counter, defaultdict
 
+# Pinned upstream retail test split (40 IDs):
+# https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/split_tasks.json
+TEST_TASKS = (
+    "5", "9", "12", "17", "18", "26", "27", "32", "33", "36",
+    "38", "39", "40", "42", "45", "49", "51", "53", "55", "56",
+    "60", "61", "62", "64", "65", "68", "70", "71", "74", "77",
+    "79", "86", "90", "94", "97", "100", "101", "102", "108", "111",
+)
+TRIAL_SEEDS = {0: 20261021, 1: 20261022, 2: 20261023, 3: 20261024}
+EXPECTED = {(t, tr, s) for t in TEST_TASKS for tr, s in TRIAL_SEEDS.items()}
+ARMS = ("test-baseline", "test-candidate")
+
 rows = json.load(open("docs/assets/benchmarks/tau-retail-rsi.json", encoding="utf-8"))["measurements"]
-arms = ("test-baseline", "test-candidate")
 cells, problems = defaultdict(dict), []
 for r in rows:
     key = (str(r["task"]), r["trial"], r["seed"])
-    if r["phase"] not in arms or r["reward"] not in (0, 1):
-        problems.append(f"unexpected row {key}: {r['phase']} reward={r['reward']}")
+    reward = r.get("reward")
+    valid_reward = isinstance(reward, (int, float)) and not isinstance(reward, bool) and reward in (0, 1)
+    if key not in EXPECTED or r.get("phase") not in ARMS or not valid_reward:
+        problems.append(f"unexpected row {key}: {r.get('phase')} reward={reward!r}")
     elif r["phase"] in cells[key]:
         problems.append(f"duplicate {r['phase']} row {key}")
     else:
-        cells[key][r["phase"]] = r["reward"] == 1
-problems += [f"missing {a} row {k}" for k, c in cells.items() for a in arms if a not in c]
-problems += [f"task {t}: {n} paired trials, expected 4" for t, n in Counter(k[0] for k in cells).items() if n != 4]
-print("problems:", problems or "none")
+        cells[key][r["phase"]] = reward == 1
+problems += [f"missing {a} row {k}" for k in sorted(EXPECTED) for a in ARMS if a not in cells[k]]
+if problems:
+    print("problems:", problems)
+    raise SystemExit(1)
 
-paired = {k: c for k, c in cells.items() if len(c) == 2}
-for a in arms:
-    ok = sum(c[a] for c in paired.values())
-    tasks = defaultdict(list)
-    for (t, _, _), c in paired.items():
-        tasks[t].append(c[a])
-    every = sum(all(v) for v in tasks.values())
-    print(f"{a}: pass^1 {ok}/{len(paired)} ({ok / len(paired):.3%}), passed every repeat {every}/{len(tasks)}")
+print("problems: none")
+for a in ARMS:
+    ok = sum(cells[k][a] for k in EXPECTED)
+    every = sum(all(cells[(t, tr, s)][a] for tr, s in TRIAL_SEEDS.items()) for t in TEST_TASKS)
+    print(f"{a}: pass^1 {ok}/{len(EXPECTED)} ({ok / len(EXPECTED):.3%}), passed every repeat {every}/{len(TEST_TASKS)}")
 label = {(True, True): "both passed", (False, True): "candidate win",
          (True, False): "candidate loss", (False, False): "both failed"}
-print("paired trials:", dict(Counter(label[c[arms[0]], c[arms[1]]] for c in paired.values())))
+print("paired trials:", dict(Counter(label[cells[k][ARMS[0]], cells[k][ARMS[1]]] for k in EXPECTED)))
 PY
 ```
 
