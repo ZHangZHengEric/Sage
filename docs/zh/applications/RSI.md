@@ -169,6 +169,46 @@ Desktop 当前支持 simple Agent、原生工具、临时工作区和宿主沙�
 
 2026-10-12 的只优化 Skill 与工具选择实验分别达到最终测试 3/3。联合范围也达到 3/3，但只修改了 Skill，尚未验证指令与 Skill 同时修改。三组均执行四轮提案，第一轮接受后，后续轮次没有新修改。Skill/工具组复用了以前实验的最终题目，只能作为回归验证；明确精度约定后的联合组使用新封存题目。评估结果时应保留失败记录和审查拒绝，不能将这些小样本结果作为 RSI 普遍可靠性的证明。
 
+### 离线复现
+
+如需在不调用模型、无需 API Key、无费用且不依赖实时日志的情况下核验[历史 τ-bench retail 报告](TAU_BENCH.md)对应的[已归档数据集](../../assets/benchmarks/tau-retail-rsi.json)，可在仓库根目录运行下方仅依赖 Python 标准库的脚本。该脚本只读取原始 `measurements` 记录，按 `(task, trial, seed)` 配对 `test-baseline` 与 `test-candidate`，并显式报告重复行、缺失配对、异常 reward 或任务重复次数不完整的情况，而不会静默丢弃或直接计为失败：
+
+```python
+python3 - <<'PY'
+import json
+from collections import Counter, defaultdict
+
+rows = json.load(open("docs/assets/benchmarks/tau-retail-rsi.json", encoding="utf-8"))["measurements"]
+arms = ("test-baseline", "test-candidate")
+cells, problems = defaultdict(dict), []
+for r in rows:
+    key = (str(r["task"]), r["trial"], r["seed"])
+    if r["phase"] not in arms or r["reward"] not in (0, 1):
+        problems.append(f"unexpected row {key}: {r['phase']} reward={r['reward']}")
+    elif r["phase"] in cells[key]:
+        problems.append(f"duplicate {r['phase']} row {key}")
+    else:
+        cells[key][r["phase"]] = r["reward"] == 1
+problems += [f"missing {a} row {k}" for k, c in cells.items() for a in arms if a not in c]
+problems += [f"task {t}: {n} paired trials, expected 4" for t, n in Counter(k[0] for k in cells).items() if n != 4]
+print("problems:", problems or "none")
+
+paired = {k: c for k, c in cells.items() if len(c) == 2}
+for a in arms:
+    ok = sum(c[a] for c in paired.values())
+    tasks = defaultdict(list)
+    for (t, _, _), c in paired.items():
+        tasks[t].append(c[a])
+    every = sum(all(v) for v in tasks.values())
+    print(f"{a}: pass^1 {ok}/{len(paired)} ({ok / len(paired):.3%}), passed every repeat {every}/{len(tasks)}")
+label = {(True, True): "both passed", (False, True): "candidate win",
+         (True, False): "candidate loss", (False, False): "both failed"}
+print("paired trials:", dict(Counter(label[c[arms[0]], c[arms[1]]] for c in paired.values())))
+PY
+```
+
+在当前归档文件上运行会输出 `problems: none`、`test-baseline: pass^1 120/160 (75.000%), passed every repeat 23/40`、`test-candidate: pass^1 133/160 (83.125%), passed every repeat 26/40` 以及 `{'candidate win': 28, 'candidate loss': 15, 'both passed': 105, 'both failed': 12}`。需注意历史报告中单独列出的 `Default gpt-6.1-sol` 参考行并未保存在 `tau-retail-rsi.json` 中，因此无法由该文件重新计算。该检查仅用于审计已保存的历史评测记录，不会重新运行 τ-bench，也不能作为等预算对比或证明 RSI 普遍有效性的依据。
+
 ### 候选提示词、Skill 与工具的职责
 
 Skill 名称应对应实际实现的可复用能力，使用简洁的“小写单词-连字符”形式，并体现动作及对象或领域；不要按优化过程命名为 `rsi-guidance` 等通用容器。新 Skill 的 YAML 头包含 `name`、`description`，描述说明做什么及何时加载，正文定义前置条件、输入、步骤、结果校验和失败处理。目录名、`name`、manifest 绑定和 `load_skill` 引用须一致；重命名时一起更新并移除旧资源。Desktop 不再预置通用候选名，调优角色在已授权范围内选择能力名称。名称是否符合实际流程作为调优 Agent 的编写要求，不额外调用模型裁决；框架检查已声明元数据的名称、描述和绑定一致性，仍兼容没有 YAML 头的旧 Skill。历史已冻结版本保持原样。
