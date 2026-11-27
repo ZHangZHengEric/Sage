@@ -171,6 +171,58 @@ The opt-in [domain benchmark](https://github.com/ZHangZHengEric/Sage/blob/main/e
 
 On 2026-10-12, Skill-only and tool-selection experiments each reached 3/3 final cases. Joint scope also reached 3/3 but changed only a Skill, so simultaneous instruction/Skill modification was not demonstrated. All used four proposal rounds with no new changes after the first accepted version. Skill/tool tests reused old final cases and measure regression; the clarified joint run used newly sealed cases. Preserve failures and review rejections; small samples do not establish general reliability.
 
+### Offline reproducibility
+
+To audit the saved [τ-bench retail dataset](../../assets/benchmarks/tau-retail-rsi.json) from the [historical τ-bench retail report](TAU_BENCH.md) without model calls, API keys, fees, or live logs, run the Python standard-library check below from the repository root. It validates raw `measurements` rows against the fixed 40-task [upstream retail test split](https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/split_tasks.json) (`trial 0–3` mapped to archived `seeds 20261021–20261024`) and exits nonzero before printing totals if any duplicate, missing, malformed, or unexpected entry is found:
+
+```bash
+python3 - <<'PY'
+import json
+from collections import Counter, defaultdict
+
+# Pinned upstream retail test split (40 IDs):
+# https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/split_tasks.json
+TEST_TASKS = (
+    "5", "9", "12", "17", "18", "26", "27", "32", "33", "36",
+    "38", "39", "40", "42", "45", "49", "51", "53", "55", "56",
+    "60", "61", "62", "64", "65", "68", "70", "71", "74", "77",
+    "79", "86", "90", "94", "97", "100", "101", "102", "108", "111",
+)
+TRIAL_SEEDS = {0: 20261021, 1: 20261022, 2: 20261023, 3: 20261024}
+EXPECTED = {(t, tr, s) for t in TEST_TASKS for tr, s in TRIAL_SEEDS.items()}
+ARMS = ("test-baseline", "test-candidate")
+
+rows = json.load(open("docs/assets/benchmarks/tau-retail-rsi.json", encoding="utf-8"))["measurements"]
+cells, problems = defaultdict(dict), []
+for r in rows:
+    trial, seed, reward = r.get("trial"), r.get("seed"), r.get("reward")
+    key = (str(r.get("task")), trial, seed)
+    valid_ids = type(trial) is int and type(seed) is int and key in EXPECTED
+    valid_reward = isinstance(reward, (int, float)) and not isinstance(reward, bool) and reward in (0, 1)
+    if not valid_ids or r.get("phase") not in ARMS or not valid_reward:
+        problems.append(f"unexpected row {key}: {r.get('phase')} reward={reward!r}")
+    elif r["phase"] in cells[key]:
+        problems.append(f"duplicate {r['phase']} row {key}")
+    else:
+        cells[key][r["phase"]] = reward == 1
+problems += [f"missing {a} row {k}" for k in sorted(EXPECTED) for a in ARMS if a not in cells[k]]
+if problems:
+    print("problems:", problems)
+    raise SystemExit(1)
+
+print("problems: none")
+for a in ARMS:
+    ok = sum(cells[k][a] for k in EXPECTED)
+    every = sum(all(cells[(t, tr, s)][a] for tr, s in TRIAL_SEEDS.items()) for t in TEST_TASKS)
+    print(f"{a}: pass^1 {ok}/{len(EXPECTED)} ({ok / len(EXPECTED):.3%}), passed every repeat {every}/{len(TEST_TASKS)}")
+label = {(True, True): "both passed", (False, True): "candidate win",
+         (True, False): "candidate loss", (False, False): "both failed"}
+print("paired trials:", dict(Counter(label[cells[k][ARMS[0]], cells[k][ARMS[1]]] for k in EXPECTED)))
+PY
+```
+
+On the checked-in file, it prints `problems: none`, `test-baseline: pass^1 120/160 (75.000%), passed every repeat 23/40`, `test-candidate: pass^1 133/160 (83.125%), passed every repeat 26/40`, and `{'candidate win': 28, 'candidate loss': 15, 'both passed': 105, 'both failed': 12}`. Note that the separate `Default gpt-6.1-sol` reference row in the historical report is not stored in `tau-retail-rsi.json` and comes from the original experiment artifacts rather than this file. This check audits a saved historical evaluation only: it does not rerun τ-bench, establish an equal-budget comparison, or prove general RSI effectiveness.
+
 ### Responsibilities of prompts, Skills, and tools
 
 Skill names should name the reusable capability actually implemented, in concise lowercase hyphenated form showing the action and its object or domain; avoid optimization-process containers such as `rsi-guidance`. New Skill YAML headers contain `name` and `description`, describing what the Skill does and when to load it; the body defines preconditions, inputs, steps, result checks, and failure handling. Directory name, `name`, manifest bindings, and `load_skill` references must agree; renaming updates them together and removes old resources. Desktop no longer presets generic candidate names; the tuner chooses capability names within its authorized scope. Whether a name fits the actual procedure is a tuner writing requirement, not an extra model judgment; the framework checks consistency of declared metadata names, descriptions, and bindings and still accepts legacy Skills without YAML headers. Frozen historical versions stay unchanged.
