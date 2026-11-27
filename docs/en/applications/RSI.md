@@ -195,10 +195,11 @@ ARMS = ("test-baseline", "test-candidate")
 rows = json.load(open("docs/assets/benchmarks/tau-retail-rsi.json", encoding="utf-8"))["measurements"]
 cells, problems = defaultdict(dict), []
 for r in rows:
-    key = (str(r["task"]), r["trial"], r["seed"])
-    reward = r.get("reward")
+    trial, seed, reward = r.get("trial"), r.get("seed"), r.get("reward")
+    key = (str(r.get("task")), trial, seed)
+    valid_ids = type(trial) is int and type(seed) is int and key in EXPECTED
     valid_reward = isinstance(reward, (int, float)) and not isinstance(reward, bool) and reward in (0, 1)
-    if key not in EXPECTED or r.get("phase") not in ARMS or not valid_reward:
+    if not valid_ids or r.get("phase") not in ARMS or not valid_reward:
         problems.append(f"unexpected row {key}: {r.get('phase')} reward={reward!r}")
     elif r["phase"] in cells[key]:
         problems.append(f"duplicate {r['phase']} row {key}")
