@@ -171,7 +171,7 @@ Desktop 当前支持 simple Agent、原生工具、临时工作区和宿主沙�
 
 ### 离线复现
 
-如需在不调用模型、无需 API Key、无费用且不依赖实时日志的情况下核验[历史 τ-bench retail 报告](TAU_BENCH.md)对应的[已归档数据集](../../assets/benchmarks/tau-retail-rsi.json)，可在仓库根目录运行下方仅依赖 Python 标准库的脚本。它会根据固定的 40 个[上游 retail test 任务列表](https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/split_tasks.json)（以及归档中 `trial 0–3` 对应的 `seeds 20261021–20261024`）校验所有原始 `measurements` 记录；若发现任何重复、缺失、格式异常或预期之外的条目，会在输出汇总前报错并以非零状态码退出：
+如需在不调用模型、无需 API Key、无费用且不依赖实时日志的情况下核验[已归档数据集](../../assets/benchmarks/tau-retail-rsi.json)（对应[历史 τ-bench retail 报告](TAU_BENCH.md)），可在仓库根目录运行下方仅依赖 Python 标准库的脚本。它会根据固定的 40 个[上游 retail test 任务列表](https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/split_tasks.json)（以及归档中 `trial 0–3` 对应的 `seeds 20261021–20261024`）校验所有原始 `measurements` 记录；若发现任何重复、缺失、格式异常或预期之外的条目，会在输出汇总前报错并以非零状态码退出：
 
 ```bash
 python3 - <<'PY'
